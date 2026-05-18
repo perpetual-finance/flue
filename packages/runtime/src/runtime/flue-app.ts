@@ -298,7 +298,7 @@ function runRouteSpec(action: HandleRunRouteOptions['action']) {
 			summary: 'Stream run events',
 			responses: {
 				200: {
-					description: 'Server-sent events stream of run lifecycle and agent events.',
+					description: 'Server-sent events stream of run lifecycle and Flue runtime events.',
 					content: {
 						'text/event-stream': {
 							schema: {

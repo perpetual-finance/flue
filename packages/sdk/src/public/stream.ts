@@ -1,4 +1,4 @@
-import { parseJsonResponse, type HttpClient } from '../http.ts';
+import { FlueApiError, parseJsonResponse, type HttpClient } from '../http.ts';
 import type { StoredFlueEvent } from '../types.ts';
 
 export interface StreamOptions {
@@ -42,11 +42,11 @@ export async function* streamRunEvents(
 			if (!response.body) throw new Error('Stream response has no body.');
 
 			for await (const frame of readSse(response.body)) {
+				const event = parseSseJson<StoredFlueEvent>(frame, 'run stream');
 				if (frame.id !== undefined) {
 					const parsed = Number.parseInt(frame.id, 10);
 					if (Number.isFinite(parsed)) lastEventId = parsed;
 				}
-				const event = JSON.parse(frame.data) as StoredFlueEvent;
 				yield event;
 				if (event.type === 'run') {
 					sawTerminalEvent = true;
@@ -61,7 +61,7 @@ export async function* streamRunEvents(
 			attempt++;
 		} catch (error) {
 			if (options.signal?.aborted) return;
-			if (attempt >= maxRetries) throw error;
+			if (!isRetryableStreamError(error) || attempt >= maxRetries) throw error;
 			await sleep(initialRetryMs * 2 ** attempt, options.signal);
 			attempt++;
 		}
@@ -92,6 +92,21 @@ export async function* readSse(body: ReadableStream<Uint8Array>): AsyncIterable<
 	} finally {
 		reader.releaseLock();
 	}
+}
+
+export function parseSseJson<T>(frame: SseFrame, streamName: string): T {
+	try {
+		return JSON.parse(frame.data) as T;
+	} catch (cause) {
+		const event = frame.event ? ` event="${frame.event}"` : '';
+		const id = frame.id ? ` id="${frame.id}"` : '';
+		throw new Error(`Malformed SSE JSON for ${streamName}.${event}${id}`, { cause });
+	}
+}
+
+function isRetryableStreamError(error: unknown): boolean {
+	if (!(error instanceof FlueApiError)) return !(error instanceof Error && error.message.startsWith('Malformed SSE JSON for '));
+	return error.status === 408 || error.status === 429 || error.status >= 500;
 }
 
 function parseFrame(raw: string): SseFrame | undefined {

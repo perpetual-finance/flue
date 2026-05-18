@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createFlueClient } from '../src/index.ts';
+import { createFlueClient, FlueApiError } from '../src/index.ts';
 import { readSse } from '../src/public/stream.ts';
 
 describe('createFlueClient', () => {
@@ -19,6 +19,69 @@ describe('createFlueClient', () => {
 		expect(seen).toHaveLength(1);
 		expect(new URL(seen[0]?.url ?? '').pathname).toBe('/actions/hello/inst-1');
 		expect(seen[0]?.method).toBe('POST');
+	});
+
+	it('sends webhook invocation requests and returns runId', async () => {
+		let request: Request | undefined;
+		const client = createFlueClient({
+			baseUrl: 'https://flue.test',
+			fetch: async (input, init) => {
+				request = new Request(input, init);
+				return Response.json({ status: 'accepted', runId: 'run_webhook' });
+			},
+		});
+
+		await expect(
+			client.actions.invoke('hello', 'inst-1', { mode: 'webhook', payload: { queued: true } }),
+		).resolves.toEqual({ runId: 'run_webhook' });
+		expect(request?.method).toBe('POST');
+		expect(request?.headers.get('x-webhook')).toBe('true');
+	});
+
+	it('streams action invocation events', async () => {
+		let request: Request | undefined;
+		const client = createFlueClient({
+			baseUrl: 'https://flue.test',
+			fetch: async (input, init) => {
+				request = new Request(input, init);
+				return new Response(sse('event: run\ndata: {"type":"run","isError":false,"durationMs":1}\n\n'), {
+					headers: { 'content-type': 'text/event-stream' },
+				});
+			},
+		});
+
+		const events = [];
+		for await (const event of client.actions.invoke('hello', 'inst-1', { mode: 'stream', payload: { ok: true } })) {
+			events.push(event.type);
+		}
+		expect(events).toEqual(['run']);
+		expect(request?.headers.get('accept')).toBe('text/event-stream');
+		expect(await request?.json()).toEqual({ ok: true });
+	});
+
+	it('throws FlueApiError for stream invocation failures', async () => {
+		const client = createFlueClient({
+			baseUrl: 'https://flue.test',
+			fetch: async () => Response.json({ error: { type: 'unauthorized', message: 'Nope' } }, { status: 401 }),
+		});
+
+		const stream = client.actions.invoke('hello', 'inst-1', { mode: 'stream' });
+		await expect(stream[Symbol.asyncIterator]().next()).rejects.toMatchObject({
+			name: 'FlueApiError',
+			status: 401,
+			body: { error: { type: 'unauthorized', message: 'Nope' } },
+		});
+	});
+
+	it('reports missing run ids with invocation context', async () => {
+		const client = createFlueClient({
+			baseUrl: 'https://flue.test',
+			fetch: async () => Response.json({ result: { ok: true } }),
+		});
+
+		await expect(client.actions.invoke('hello', 'inst-1', { mode: 'sync' })).rejects.toThrow(
+			'Flue invocation response for action "hello" instance "inst-1" did not include a runId.',
+		);
 	});
 
 	it('builds admin list queries', async () => {
@@ -52,6 +115,34 @@ describe('createFlueClient', () => {
 
 		await client.admin.actions.list();
 		expect(new URL(url).pathname).toBe('/internal/admin/actions');
+	});
+
+	it('does not retry terminal API errors from run streams', async () => {
+		let calls = 0;
+		const client = createFlueClient({
+			baseUrl: 'https://flue.test',
+			fetch: async () => {
+				calls++;
+				return Response.json({ error: { type: 'run_not_found', message: 'Missing' } }, { status: 404 });
+			},
+		});
+
+		const stream = client.runs.stream('missing', { maxRetries: 3, initialRetryMs: 1 });
+		await expect(stream[Symbol.asyncIterator]().next()).rejects.toBeInstanceOf(FlueApiError);
+		expect(calls).toBe(1);
+	});
+
+	it('throws contextual errors for malformed run stream JSON', async () => {
+		const client = createFlueClient({
+			baseUrl: 'https://flue.test',
+			fetch: async () =>
+				new Response(sse('event: run\nid: 12\ndata: {bad json}\n\n'), {
+					headers: { 'content-type': 'text/event-stream' },
+				}),
+		});
+
+		const stream = client.runs.stream('run_1', { maxRetries: 3, initialRetryMs: 1 });
+		await expect(stream[Symbol.asyncIterator]().next()).rejects.toThrow('Malformed SSE JSON for run stream. event="run" id="12"');
 	});
 
 	it('reconnects run streams after clean EOF before run', async () => {

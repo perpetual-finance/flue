@@ -584,7 +584,7 @@ export function toSseData(err: unknown): string {
 
 /**
  * Parse a request body as JSON. Returns `{}` for genuinely empty bodies
- * (Content-Length: 0 or missing) so that webhook agents which don't accept
+ * (Content-Length: 0 or missing) so that webhook actions which don't accept
  * a payload can be invoked without one.
  *
  * Throws `UnsupportedMediaTypeError` if a body is present without
@@ -603,14 +603,14 @@ export async function parseJsonBody(request: Request): Promise<unknown> {
 	// Trade-off: if a client sends a body but no Content-Length AND no
 	// Content-Type, we silently treat the request as empty rather than
 	// reading the stream to check. That's intentional — it preserves the
-	// `curl -X POST <url>` "no payload" UX for agents that don't take input,
+	// `curl -X POST <url>` "no payload" UX for actions that don't take input,
 	// and a misconfigured client that sends a body without either header is
 	// already broken in ways we can't recover from cleanly.
 	const looksEmpty = contentLength === 0 || (contentLengthHeader === null && contentType === null);
 	if (looksEmpty) return {};
 
 	// If a body is present, require application/json. This is strict on
-	// purpose — webhook agents have no business receiving form-encoded or
+	// purpose — webhook actions have no business receiving form-encoded or
 	// plain-text payloads, and silently accepting them invites the kind of
 	// drift this whole hardening pass is trying to eliminate.
 	if (!contentType || !contentType.toLowerCase().includes('application/json')) {

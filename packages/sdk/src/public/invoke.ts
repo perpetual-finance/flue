@@ -1,6 +1,6 @@
 import { parseJsonResponse, type HttpClient } from '../http.ts';
 import type { FlueEvent } from '../types.ts';
-import { readSse } from './stream.ts';
+import { parseSseJson, readSse } from './stream.ts';
 
 export type InvokeOptions =
 	| { mode: 'sync'; payload?: unknown; signal?: AbortSignal }
@@ -45,9 +45,11 @@ export function invokeAction(
 			signal: options.signal,
 		})
 		.then((body) => {
-			const runId = body._meta?.runId ?? body.runId;
+			const record = body && typeof body === 'object' ? body : {};
+			const response = record as { result?: unknown; _meta?: { runId?: string }; runId?: string };
+			const runId = response._meta?.runId ?? response.runId;
 			if (!runId) throw new Error(`Flue invocation response for action "${actionName}" instance "${instanceId}" did not include a runId.`);
-			return options.mode === 'webhook' ? { runId } : { result: body.result, runId };
+			return options.mode === 'webhook' ? { runId } : { result: response.result, runId };
 		});
 }
 
@@ -65,6 +67,6 @@ async function* invokeStream(
 	if (!response.ok) await parseJsonResponse(response);
 	if (!response.body) throw new Error('Invocation stream response has no body.');
 	for await (const frame of readSse(response.body)) {
-		yield JSON.parse(frame.data) as FlueEvent;
+		yield parseSseJson<FlueEvent>(frame, 'invocation stream');
 	}
 }

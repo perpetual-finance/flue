@@ -462,7 +462,7 @@ async function createRunLifecycle(options: RunLifecycleOptions): Promise<RunLife
 }
 
 /**
- * Wrap all invocation modes with the same run-start/run-end envelope.
+ * Wrap all invocation modes with the same run-start/terminal-run envelope.
  */
 async function withRunLifecycle<T>(
 	lifecycle: RunLifecycle,
