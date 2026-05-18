@@ -6,6 +6,7 @@ import {
 	handleRegistryRequest,
 	type SqlStorage,
 } from '../src/cloudflare/registry-ops.ts';
+import { createDurableRunStore } from '../src/cloudflare/run-store.ts';
 
 function makeFakeSql(): SqlStorage {
 	const db = new DatabaseSync(':memory:');
@@ -32,6 +33,25 @@ const STARTED_AT_1 = '2026-05-13T10:00:00.000Z';
 const STARTED_AT_2 = '2026-05-13T10:01:00.000Z';
 const STARTED_AT_3 = '2026-05-13T10:02:00.000Z';
 const ENDED_AT = '2026-05-13T10:03:00.000Z';
+
+describe('createDurableRunStore (SQL paths)', () => {
+	it('stores and reads action_name ownership metadata', async () => {
+		const store = createDurableRunStore(makeFakeSql());
+		await store.createRun({
+			runId: 'run_sql',
+			instanceId: 'inst_a',
+			actionName: 'hello',
+			startedAt: STARTED_AT_1,
+			payload: {},
+		});
+
+		expect(await store.getRun('run_sql')).toMatchObject({
+			runId: 'run_sql',
+			instanceId: 'inst_a',
+			actionName: 'hello',
+		});
+	});
+});
 
 describe('createRegistryOps (SQL paths)', () => {
 	it('round-trips a pointer through recordRunStart + lookupRun', () => {
@@ -330,7 +350,7 @@ describe('handleRegistryRequest (REST router)', () => {
 
 		const listFiltered = await handleRegistryRequest(
 			ops,
-			new Request('https://registry/pointers?agent=hello', { method: 'GET' }),
+			new Request('https://registry/pointers?action=hello', { method: 'GET' }),
 		);
 		expect(
 			((await listFiltered.json()) as { runs: { runId: string }[] }).runs.map((r) => r.runId),
@@ -338,7 +358,7 @@ describe('handleRegistryRequest (REST router)', () => {
 
 		const instances = await handleRegistryRequest(
 			ops,
-			new Request('https://registry/instances?agent=hello', { method: 'GET' }),
+			new Request('https://registry/instances?action=hello', { method: 'GET' }),
 		);
 		expect(
 			((await instances.json()) as { instances: unknown[] }).instances,

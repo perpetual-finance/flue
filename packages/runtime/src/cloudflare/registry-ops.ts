@@ -133,7 +133,7 @@ class SqlRegistryOps implements RegistryOps {
 	recordRunStart(input: RecordRunStartInput): void {
 		this.sql.exec(
 			`INSERT OR IGNORE INTO flue_registry_runs
-			 (run_id, agent_name, instance_id, status, started_at, ended_at, duration_ms, is_error)
+			 (run_id, action_name, instance_id, status, started_at, ended_at, duration_ms, is_error)
 			 VALUES (?, ?, ?, 'active', ?, NULL, NULL, NULL)`,
 			input.runId,
 			input.actionName,
@@ -144,7 +144,7 @@ class SqlRegistryOps implements RegistryOps {
 
 	recordRunEnd(input: RecordRunEndInput): void {
 		const existing = this.sql
-			.exec('SELECT agent_name, instance_id FROM flue_registry_runs WHERE run_id = ?', input.runId)
+			.exec('SELECT action_name, instance_id FROM flue_registry_runs WHERE run_id = ?', input.runId)
 			.toArray();
 		if (existing.length === 0) return;
 
@@ -161,7 +161,7 @@ class SqlRegistryOps implements RegistryOps {
 
 		const existingPointer = existing[0];
 		if (!existingPointer) return;
-		const actionName = String(existingPointer.agent_name);
+		const actionName = String(existingPointer.action_name);
 		const instanceId = String(existingPointer.instance_id);
 		this.pruneCompletedRunsForInstance(actionName, instanceId);
 	}
@@ -186,7 +186,7 @@ class SqlRegistryOps implements RegistryOps {
 			bindings.push(opts.status);
 		}
 		if (opts.actionName) {
-			wheres.push('agent_name = ?');
+			wheres.push('action_name = ?');
 			bindings.push(opts.actionName);
 		}
 		if (opts.instanceId) {
@@ -223,19 +223,19 @@ class SqlRegistryOps implements RegistryOps {
 		const wheres: string[] = [];
 		const bindings: unknown[] = [];
 		if (opts.actionName) {
-			wheres.push('agent_name = ?');
+			wheres.push('action_name = ?');
 			bindings.push(opts.actionName);
 		}
 		if (cursorKey !== undefined) {
-			wheres.push(`(agent_name || x'00' || instance_id) > ?`);
+			wheres.push(`(action_name || x'00' || instance_id) > ?`);
 			bindings.push(cursorKey);
 		}
 		const whereClause = wheres.length > 0 ? `WHERE ${wheres.join(' AND ')}` : '';
 
 		const rows = this.sql
 			.exec(
-				`SELECT DISTINCT agent_name, instance_id FROM flue_registry_runs ${whereClause}
-				 ORDER BY agent_name ASC, instance_id ASC
+				`SELECT DISTINCT action_name, instance_id FROM flue_registry_runs ${whereClause}
+				 ORDER BY action_name ASC, instance_id ASC
 				 LIMIT ?`,
 				...bindings,
 				limit + 1,
@@ -244,7 +244,7 @@ class SqlRegistryOps implements RegistryOps {
 
 		const hasMore = rows.length > limit;
 		const page: InstancePointer[] = (hasMore ? rows.slice(0, limit) : rows).map((row) => ({
-			actionName: String(row.agent_name),
+			actionName: String(row.action_name),
 			instanceId: String(row.instance_id),
 		}));
 		const last = page.at(-1);
@@ -257,12 +257,12 @@ class SqlRegistryOps implements RegistryOps {
 	private pruneCompletedRunsForInstance(actionName: string, instanceId: string): void {
 		this.sql.exec(
 			`DELETE FROM flue_registry_runs
-			 WHERE agent_name = ?
+			 WHERE action_name = ?
 			   AND instance_id = ?
 			   AND status != 'active'
 			   AND run_id NOT IN (
 			     SELECT run_id FROM flue_registry_runs
-			     WHERE agent_name = ? AND instance_id = ? AND status != 'active'
+			     WHERE action_name = ? AND instance_id = ? AND status != 'active'
 			     ORDER BY started_at DESC, run_id DESC
 			     LIMIT ?
 			   )`,
@@ -281,7 +281,7 @@ function ensureRegistryTables(sql: SqlStorage): void {
 	sql.exec(
 		`CREATE TABLE IF NOT EXISTS flue_registry_runs (
 		 run_id TEXT PRIMARY KEY,
-		 agent_name TEXT NOT NULL,
+		 action_name TEXT NOT NULL,
 		 instance_id TEXT NOT NULL,
 		 status TEXT NOT NULL,
 		 started_at TEXT NOT NULL,
@@ -294,13 +294,13 @@ function ensureRegistryTables(sql: SqlStorage): void {
 		'CREATE INDEX IF NOT EXISTS flue_registry_status_started_idx ON flue_registry_runs (status, started_at DESC)',
 	);
 	sql.exec(
-		'CREATE INDEX IF NOT EXISTS flue_registry_agent_instance_idx ON flue_registry_runs (agent_name, instance_id)',
+		'CREATE INDEX IF NOT EXISTS flue_registry_action_instance_idx ON flue_registry_runs (action_name, instance_id)',
 	);
 	sql.exec(
-		'CREATE INDEX IF NOT EXISTS flue_registry_instance_started_idx ON flue_registry_runs (agent_name, instance_id, started_at DESC)',
+		'CREATE INDEX IF NOT EXISTS flue_registry_instance_started_idx ON flue_registry_runs (action_name, instance_id, started_at DESC)',
 	);
 	sql.exec(
-		'CREATE INDEX IF NOT EXISTS flue_registry_agent_started_idx ON flue_registry_runs (agent_name, started_at DESC)',
+		'CREATE INDEX IF NOT EXISTS flue_registry_action_started_idx ON flue_registry_runs (action_name, started_at DESC)',
 	);
 }
 
@@ -309,7 +309,7 @@ function ensureRegistryTables(sql: SqlStorage): void {
 function rowToRunPointer(row: SqlRow): RunPointer {
 	return {
 		runId: String(row.run_id),
-		actionName: String(row.agent_name),
+		actionName: String(row.action_name),
 		instanceId: String(row.instance_id),
 		status: String(row.status) as RunStatus,
 		startedAt: String(row.started_at),
@@ -328,7 +328,7 @@ function parseListRunsOpts(params: URLSearchParams): ListRunsOpts {
 	if (status === 'active' || status === 'completed' || status === 'errored') {
 		opts.status = status;
 	}
-	const agent = params.get('agent');
+	const agent = params.get('action');
 	if (agent) opts.actionName = agent;
 	const instance = params.get('instance');
 	if (instance) opts.instanceId = instance;
@@ -341,7 +341,7 @@ function parseListRunsOpts(params: URLSearchParams): ListRunsOpts {
 
 function parseListInstancesOpts(params: URLSearchParams): ListInstancesOpts {
 	const opts: ListInstancesOpts = {};
-	const agent = params.get('agent');
+	const agent = params.get('action');
 	if (agent) opts.actionName = agent;
 	const limit = params.get('limit');
 	if (limit !== null) opts.limit = Number.parseInt(limit, 10);

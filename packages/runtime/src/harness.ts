@@ -213,7 +213,7 @@ function normalizeSessionName(name: string | undefined): string {
 }
 
 function createSessionStorageKey(instanceId: string, harness: string, sessionName: string): string {
-	return `agent-session:${JSON.stringify([instanceId, harness, sessionName])}`;
+	return `action-session:${JSON.stringify([instanceId, harness, sessionName])}`;
 }
 
 function createSessionAffinityKey(instanceId: string, harness: string, sessionName: string): string {

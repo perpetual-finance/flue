@@ -40,7 +40,7 @@ class DurableRunStore implements RunStore {
 	async createRun(input: CreateRunInput): Promise<void> {
 		this.sql.exec(
 			`INSERT OR REPLACE INTO flue_runs
-			 (run_id, instance_id, agent_name, status, started_at, ended_at, is_error, duration_ms, result, error)
+			 (run_id, instance_id, action_name, status, started_at, ended_at, is_error, duration_ms, result, error)
 			 VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)`,
 			input.runId,
 			input.instanceId,
@@ -121,7 +121,7 @@ function ensureRunTables(sql: SqlStorage): void {
 		`CREATE TABLE IF NOT EXISTS flue_runs (
 		 run_id TEXT PRIMARY KEY,
 		 instance_id TEXT NOT NULL,
-		 agent_name TEXT NOT NULL,
+		 action_name TEXT NOT NULL,
 		 status TEXT NOT NULL,
 		 started_at TEXT NOT NULL,
 		 ended_at TEXT,
@@ -151,7 +151,7 @@ function rowToRunRecord(row: SqlRow): RunRecord {
 	return {
 		runId: String(row.run_id),
 		instanceId: String(row.instance_id),
-		actionName: String(row.agent_name),
+		actionName: String(row.action_name),
 		status: row.status as RunRecord['status'],
 		startedAt: String(row.started_at),
 		endedAt: typeof row.ended_at === 'string' ? row.ended_at : undefined,

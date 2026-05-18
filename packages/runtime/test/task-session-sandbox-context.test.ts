@@ -27,6 +27,35 @@ const env: SessionEnv = {
 };
 
 describe('task session sandbox context', () => {
+	it('persists harness sessions under the action session key prefix', async () => {
+		const keys: string[] = [];
+		const store = {
+			load: async () => null,
+			save: async (key: string) => {
+				keys.push(key);
+			},
+			delete: async () => {},
+		};
+		const harness = new Harness(
+			'inst-1',
+			'default',
+			{
+				systemPrompt: '',
+				skills: {},
+				sandboxSkills: {},
+				sandboxSkillDiscoveryHint: false,
+				subagents: {},
+				model: undefined,
+				resolveModel: () => undefined,
+			},
+			env,
+			store,
+		);
+
+		await harness.session();
+		expect(keys[0]).toBe('action-session:["inst-1","default","default"]');
+	});
+
 	it('inherits workspace context and sandbox skills for task agents', async () => {
 		const config: AgentConfig = {
 			systemPrompt: '',
