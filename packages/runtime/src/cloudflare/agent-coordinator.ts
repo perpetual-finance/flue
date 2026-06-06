@@ -360,6 +360,9 @@ class CloudflareAgentCoordinator {
 				}
 			}
 			for (const submission of await this.submissions.listRunnableSubmissions()) {
+				// TODO: pass the agent's resolved DurabilityConfig here once
+				// CreatedAgent exposes a static durability accessor. Currently
+				// defaults to 10 retries / 60-minute timeout (set in claimSubmission).
 				const claimed = await this.submissions.claimSubmission({
 					submissionId: submission.submissionId,
 					attemptId: crypto.randomUUID(),

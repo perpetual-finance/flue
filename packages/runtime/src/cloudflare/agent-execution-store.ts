@@ -562,6 +562,11 @@ function submissionColumnsFor(table: string): string {
 		.join(', ');
 }
 
+// Row parsers are intentionally adapter-specific: each backend has its own
+// column types, coercion rules, and storage representation. Keeping them
+// local avoids a shared abstraction that would need to accommodate every
+// backend's quirks.
+
 function parseTurnJournal(row: SqlRow): AgentTurnJournal {
 	if (
 		typeof row.submission_id !== 'string' ||

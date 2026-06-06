@@ -612,6 +612,7 @@ class PgSubmissionStore implements AgentSubmissionStore {
 		deleteSessionTree: () => Promise<void>,
 	): Promise<void> {
 		// Phase 1: check for active submissions and mark deletion.
+		const deletionStartedAt = Date.now();
 		await this.runner.transaction(async (tx) => {
 			const active = await tx.query(
 				`SELECT 1 FROM flue_agent_submissions
@@ -626,7 +627,7 @@ class PgSubmissionStore implements AgentSubmissionStore {
 			await tx.query(
 				`INSERT INTO flue_agent_session_deletions (session_key, started_at) VALUES ($1, $2)
 				 ON CONFLICT (session_key) DO NOTHING`,
-				[sessionKey, Date.now()],
+				[sessionKey, deletionStartedAt],
 			);
 		});
 
@@ -634,18 +635,22 @@ class PgSubmissionStore implements AgentSubmissionStore {
 		await deleteSessionTree();
 
 		// Phase 3: clean up settled submission rows and deletion marker.
+		// Scope to submissions accepted before deletion started to avoid racing
+		// with submissions admitted and settled during the async phase 2 gap.
 		await this.runner.transaction(async (tx) => {
 			await tx.query(
 				`INSERT INTO flue_agent_dispatch_receipts (dispatch_id, accepted_at, settled_at)
 				 SELECT submission_id, accepted_at, COALESCE(settled_at, accepted_at)
 				 FROM flue_agent_submissions
 				 WHERE session_key = $1 AND kind = 'dispatch' AND status = 'settled'
+				   AND accepted_at <= $2
 				 ON CONFLICT (dispatch_id) DO NOTHING`,
-				[sessionKey],
+				[sessionKey, deletionStartedAt],
 			);
 			await tx.query(
-				`DELETE FROM flue_agent_submissions WHERE session_key = $1 AND status = 'settled'`,
-				[sessionKey],
+				`DELETE FROM flue_agent_submissions
+				 WHERE session_key = $1 AND status = 'settled' AND accepted_at <= $2`,
+				[sessionKey, deletionStartedAt],
 			);
 			await tx.query('DELETE FROM flue_agent_session_deletions WHERE session_key = $1', [sessionKey]);
 		});
@@ -684,6 +689,8 @@ class PgSubmissionStore implements AgentSubmissionStore {
 }
 
 // ─── Row parsers ────────────────────────────────────────────────────────────
+// Intentionally adapter-specific: each backend has its own column types,
+// coercion rules (e.g. Postgres BIGINT → string), and storage representation.
 
 function parseSubmission(row: SqlRow): AgentSubmission {
 	// Postgres returns BIGINT as string; coerce to number.

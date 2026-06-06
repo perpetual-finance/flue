@@ -5,7 +5,7 @@
  * contract. Adapter authors implement {@link AgentExecutionStore}, not this.
  */
 
-export interface SqlResult {
+interface SqlResult {
 	toArray(): Array<Record<string, unknown>>;
 }
 

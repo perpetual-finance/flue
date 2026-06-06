@@ -32,7 +32,6 @@ export { DURABILITY_DEFAULT_MAX_RETRY, DURABILITY_DEFAULT_TIMEOUT_MINUTES } from
 export type { PersistenceAdapter } from './agent-execution-store.ts';
 export {
 	deduplicateSessionDeletion,
-	isDirectPayload,
 	isSubmissionPayload,
 	parseAcceptedAt,
 } from './adapter-helpers.ts';

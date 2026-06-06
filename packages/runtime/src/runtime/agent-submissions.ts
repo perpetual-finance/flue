@@ -214,7 +214,9 @@ export function createAgentSubmissionObserverRegistry(): AgentSubmissionObserver
 		async publish(submissionId, event) {
 			try {
 				await observers.get(submissionId)?.onEvent?.(event);
-			} catch {}
+			} catch (error) {
+				console.warn('[flue:submission-observer] onEvent callback failed:', error);
+			}
 		},
 		complete(submissionId, result) {
 			observers.get(submissionId)?.resolve(result);

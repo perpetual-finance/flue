@@ -101,6 +101,9 @@ export function createNodeAgentCoordinator(options: {
 		while ((runnable = await submissions.listRunnableSubmissions()).length > 0) {
 			let progressed = false;
 			for (const submission of runnable) {
+				// TODO: pass the agent's resolved DurabilityConfig here once
+				// CreatedAgent exposes a static durability accessor. Currently
+				// defaults to 10 retries / 60-minute timeout (set in claimSubmission).
 				const claimed = await submissions.claimSubmission({
 					submissionId: submission.submissionId,
 					attemptId: crypto.randomUUID(),

@@ -130,6 +130,9 @@ let executionStore;
 try {
   if (userPersistenceAdapter.migrate) await userPersistenceAdapter.migrate();
   executionStore = userPersistenceAdapter.connect();
+  if (!executionStore || typeof executionStore.sessions?.save !== 'function' || typeof executionStore.submissions?.getSubmission !== 'function') {
+    throw new Error('connect() must return an AgentExecutionStore with sessions and submissions.');
+  }
 } catch (error) {
   throw new Error('[flue] Failed to initialize persistence from db.ts: ' + (error instanceof Error ? error.message : error), { cause: error });
 }`

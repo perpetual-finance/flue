@@ -2,8 +2,8 @@
  * Shared helpers for persistence adapter implementations.
  *
  * These pure functions are consumed by the built-in SQLite adapter, the
- * Postgres adapter (`@flue/postgres`), the LMDB adapter (`@flue/lmdb`),
- * and any future community adapters via `@flue/runtime/internal`.
+ * Postgres adapter (`@flue/postgres`), and any future community adapters
+ * via `@flue/runtime/internal`.
  *
  * All functions operate on plain values — no database driver types.
  */
@@ -73,10 +73,8 @@ export function isSubmissionPayload(
 	);
 }
 
-/**
- * Validate that a value is a well-formed direct submission payload.
- */
-export function isDirectPayload(value: unknown): boolean {
+/** Validate that a value is a well-formed direct submission payload. */
+function isDirectPayload(value: unknown): boolean {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
 	const payload = value as { message?: unknown; session?: unknown };
 	return (
