@@ -1,4 +1,4 @@
-import { describe, it } from 'vite-plus/test';
+import { describe, it } from 'vitest';
 
 describe('registerProvider()', () => {
 	it.todo(

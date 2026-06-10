@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FlueRuntime } from '../src/internal.ts';
 import {
 	configureFlueRuntime,

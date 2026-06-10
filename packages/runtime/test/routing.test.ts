@@ -1,14 +1,9 @@
 import { Hono } from 'hono';
-import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createFlueContext } from '../src/client.ts';
 import { InMemoryRunStore } from '../src/node/run-store.ts';
-import {
-	configureFlueRuntime,
-	createDefaultFlueApp,
-	flue,
-	resetFlueRuntimeForTests,
-} from '../src/runtime/flue-app.ts';
+import { configureFlueRuntime, createDefaultFlueApp, flue, resetFlueRuntimeForTests } from '../src/runtime/flue-app.ts';
 import { InMemorySessionStore } from '../src/session.ts';
 
 afterEach(() => {

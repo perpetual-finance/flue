@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { beforeAll, describe, expect, it, vi } from 'vite-plus/test';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 // Node-based export-map smoke tests cannot load the Cloudflare virtual module; real Cloudflare runtime behavior is covered by explicit boundary and integration suites.
 vi.mock('cloudflare:workers', () => ({
@@ -9,7 +9,7 @@ vi.mock('cloudflare:workers', () => ({
 
 beforeAll(() => {
 	if (!existsSync('dist/internal.mjs')) {
-		execFileSync('vp', ['run', 'build'], { cwd: process.cwd(), stdio: 'pipe' });
+		execFileSync('pnpm', ['run', 'build'], { cwd: process.cwd(), stdio: 'pipe' });
 	}
 });
 
