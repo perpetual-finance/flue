@@ -16,8 +16,8 @@ const run = await client.workflows.invoke('summarize', {
   payload: { text: 'Summarize this document.' },
 });
 
-console.log(run.runId);     // "workflow:summarize:01JX..."
-console.log(run.streamUrl); // "https://example.com/api/runs/workflow%3Asummarize%3A01JX..."
+console.log(run.runId);     // "run_01JX..."
+console.log(run.streamUrl); // "https://example.com/api/runs/run_01JX..."
 ```
 
 Use the returned `runId` with [`client.runs`](/docs/sdk/runs/) to stream events, fetch all events, or retrieve run metadata.

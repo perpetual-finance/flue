@@ -21,14 +21,14 @@ Agent streams exist after the first admitted prompt for that instance. Workflow-
 A plain `GET` performs a catch-up read and returns a JSON array of event payloads.
 
 ```http
-GET /runs/workflow:summarize:01JX...?offset=-1
+GET /runs/run_01JX...?offset=-1
 ```
 
 Use `?live=long-poll` for one waitable read, or `?live=sse` for a continuous event stream. Live reads require `offset`.
 
 ```http
-GET /runs/workflow:summarize:01JX...?offset=0000000000000000_0000000000000005&live=long-poll
-GET /runs/workflow:summarize:01JX...?offset=0000000000000000_0000000000000005&live=sse
+GET /runs/run_01JX...?offset=0000000000000000_0000000000000005&live=long-poll
+GET /runs/run_01JX...?offset=0000000000000000_0000000000000005&live=sse
 ```
 
 Supported `live` values are `long-poll` and `sse`. Any other value, duplicate `offset` parameter, malformed offset, or live request without `offset` returns `400`.

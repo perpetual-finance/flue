@@ -17,7 +17,7 @@
  *
  * Expected:
  *   - HTTP 500 from Flue with a structured error envelope.
- *   - One issue in Sentry, tagged `flue.workflow=boom`, `flue.run_id=workflow:boom:...`.
+ *   - One issue in Sentry, tagged `flue.workflow=boom`, `flue.run_id=run_01...`.
  *
  * Notice: the handler does not import Sentry. It does not know that
  * error reporting exists. That separation is the whole point — every
