@@ -14,30 +14,6 @@ export interface RunRecord {
 	error?: unknown;
 }
 
-/** Workflow-run summary returned by admin listing routes. */
-export interface RunPointer {
-	runId: string;
-	workflowName: string;
-	status: RunStatus;
-	startedAt: string;
-	endedAt?: string;
-	durationMs?: number;
-	isError?: boolean;
-}
-
-/** Agent discovery metadata returned by the read-only admin route. */
-export interface AgentManifestEntry {
-	name: string;
-	transports: { http?: true };
-	created: boolean;
-}
-
-/** Cursor-paginated list response. */
-export interface ListResponse<T> {
-	items: T[];
-	nextCursor?: string;
-}
-
 interface PromptUsage {
 	input: number;
 	output: number;

@@ -12,26 +12,9 @@ import {
 	type FlueEventStream,
 	type FlueStreamOptions,
 } from './public/stream.ts';
-import type {
-	AgentManifestEntry,
-	AttachedAgentEvent,
-	FlueEvent,
-	ListResponse,
-	RunPointer,
-	RunRecord,
-	RunStatus,
-} from './types.ts';
+import type { AttachedAgentEvent, FlueEvent, RunRecord } from './types.ts';
 
 export type { RequestHeaders };
-
-/** Options for listing workflow-run summaries. */
-export interface ListRunsOptions {
-	cursor?: string;
-	/** Maximum number of runs to return. Accepts `1..1000`. */
-	limit?: number;
-	status?: RunStatus;
-	workflowName?: string;
-}
 
 /** Options for starting a workflow run. */
 export interface WorkflowInvokeOptions {
@@ -49,10 +32,7 @@ export interface WorkflowInvokeResult {
 }
 
 /** Options for creating a client for deployed Flue application routes. */
-export interface CreateFlueClientOptions extends HttpClientOptions {
-	/** Origin-relative mount path for read-only admin routes. Defaults to `/admin`. */
-	adminBasePath?: string;
-}
+export type CreateFlueClientOptions = HttpClientOptions;
 
 /** Client for invoking deployed agents and workflows and inspecting workflow runs. */
 export interface FlueClient {
@@ -66,7 +46,7 @@ export interface FlueClient {
 	};
 	/** Workflow-run inspection and streaming APIs. */
 	runs: {
-		/** Retrieves one workflow-run record. */
+		/** Retrieves one workflow-run record via the `?meta` view of the run route. */
 		get(runId: string): Promise<RunRecord>;
 		/** Stream events from a workflow run via the Durable Streams protocol. */
 		stream(runId: string, options?: FlueStreamOptions): FlueEventStream<FlueEvent>;
@@ -78,28 +58,11 @@ export interface FlueClient {
 		/** Start a workflow run. Returns the run ID and stream URL. */
 		invoke(name: string, options?: WorkflowInvokeOptions): Promise<WorkflowInvokeResult>;
 	};
-	/** Read-only APIs exposed by the configured admin mount path. */
-	admin: {
-		agents: {
-			/** Lists all built agents and their transport metadata. */
-			list(): Promise<{ items: AgentManifestEntry[] }>;
-		};
-		runs: {
-			/** Lists workflow-run summaries. */
-			list(options?: ListRunsOptions): Promise<ListResponse<RunPointer>>;
-		};
-	};
 }
 
-/** Creates a client for the public and read-only admin routes of a deployed Flue application. */
+/** Creates a client for the public routes of a deployed Flue application. */
 export function createFlueClient(options: CreateFlueClientOptions): FlueClient {
 	const http = new HttpClient(options);
-	const adminBasePath = normalizeBasePath(options.adminBasePath ?? '/admin');
-	const adminHttp = new HttpClient({
-		...options,
-		baseUrl: new URL(`${adminBasePath}/`, http.baseUrl).toString(),
-	});
-	const getRun = (runId: string) => adminHttp.json<RunRecord>({ path: `/runs/${encodeURIComponent(runId)}` });
 	return {
 		agents: {
 			prompt: (name, id, opts) => promptAgent(http, name, id, opts),
@@ -111,7 +74,8 @@ export function createFlueClient(options: CreateFlueClientOptions): FlueClient {
 				}),
 		},
 		runs: {
-			get: getRun,
+			get: (runId) =>
+				http.json<RunRecord>({ path: `/runs/${encodeURIComponent(runId)}?meta` }),
 			stream: (runId, opts = {}) =>
 				createFlueEventStream<FlueEvent>(opts, {
 					url: http.url(`/runs/${encodeURIComponent(runId)}`),
@@ -157,14 +121,6 @@ export function createFlueClient(options: CreateFlueClientOptions): FlueClient {
 				};
 			},
 		},
-		admin: {
-			agents: {
-				list: () => adminHttp.json({ path: '/agents' }),
-			},
-			runs: {
-				list: (opts = {}) => adminHttp.json({ path: '/runs', query: runsQuery(opts) }),
-			},
-		},
 	};
 }
 
@@ -174,19 +130,4 @@ async function readJsonWithAbort<T>(response: { json(): Promise<T> }, signal?: A
 		throw signal.reason ?? new DOMException('Aborted', 'AbortError');
 	}
 	return result;
-}
-
-function normalizeBasePath(path: string): string {
-	const trimmed = path.trim();
-	if (!trimmed || trimmed === '/') return '';
-	return `/${trimmed.replace(/^\/+|\/+$/g, '')}`;
-}
-
-function runsQuery(opts: ListRunsOptions): Record<string, string | number | undefined> {
-	return {
-		cursor: opts.cursor,
-		limit: opts.limit,
-		status: opts.status,
-		workflowName: opts.workflowName,
-	};
 }

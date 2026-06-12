@@ -4,8 +4,6 @@ import {
 	type AgentPromptOptions,
 	createFlueClient,
 	FlueApiError,
-	type ListRunsOptions,
-	type RunStatus,
 } from '../src/index.ts';
 
 describe('createFlueClient', () => {
@@ -397,8 +395,34 @@ describe('createFlueClient', () => {
 
 			expect(requests.map(({ url }) => new URL(url).pathname)).toEqual([
 				'/api/agents/hello/inst-1',
-				'/admin/runs/run-1',
+				'/api/runs/run-1',
 			]);
+		});
+	});
+
+	describe('runs.get()', () => {
+		it('requests the public ?meta view of the run route', async () => {
+			let url = '';
+			const client = createFlueClient({
+				baseUrl: 'https://flue.test/api/',
+				fetch: async (input, init) => {
+					url = new Request(input, init).url;
+					return Response.json({
+						runId: 'run-1',
+						workflowName: 'daily-report',
+						status: 'completed',
+						startedAt: '2026-06-01T10:00:00.000Z',
+					});
+				},
+			});
+
+			await expect(client.runs.get('run-1')).resolves.toMatchObject({
+				runId: 'run-1',
+				workflowName: 'daily-report',
+			});
+			const parsed = new URL(url);
+			expect(parsed.pathname).toBe('/api/runs/run-1');
+			expect(parsed.searchParams.has('meta')).toBe(true);
 		});
 	});
 
@@ -442,43 +466,6 @@ describe('createFlueClient', () => {
 		});
 	});
 
-	describe('admin routes', () => {
-		it('builds origin-relative admin list queries independently from the public mount', async () => {
-			let url = '';
-			const client = createFlueClient({
-				baseUrl: 'https://flue.test/api/',
-				fetch: async (input) => {
-					url = new Request(input).url;
-					return Response.json({ items: [] });
-				},
-			});
-
-			const status: RunStatus = 'active';
-			const options: ListRunsOptions = { status, workflowName: 'hello', limit: 10 };
-
-			await client.admin.runs.list(options);
-			const parsed = new URL(url);
-			expect(parsed.pathname).toBe('/admin/runs');
-			expect(parsed.searchParams.get('status')).toBe('active');
-			expect(parsed.searchParams.get('workflowName')).toBe('hello');
-			expect(parsed.searchParams.get('limit')).toBe('10');
-		});
-
-		it('supports admin mounted below a custom path', async () => {
-			let url = '';
-			const client = createFlueClient({
-				baseUrl: 'https://flue.test/api/',
-				adminBasePath: '/internal/admin/',
-				fetch: async (input) => {
-					url = new Request(input).url;
-					return Response.json({ items: [] });
-				},
-			});
-
-			await client.admin.agents.list();
-			expect(new URL(url).pathname).toBe('/internal/admin/agents');
-		});
-	});
 });
 
 // ─── Test helpers ───────────────────────────────────────────────────────────

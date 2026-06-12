@@ -1,7 +1,6 @@
 export type {
 	CreateFlueClientOptions,
 	FlueClient,
-	ListRunsOptions,
 	HttpClientOptions,
 	RequestHeaders,
 	WorkflowInvokeOptions,
@@ -28,12 +27,9 @@ export type {
 	FlueStreamOptions,
 } from './public/stream.ts';
 export type {
-	AgentManifestEntry,
 	AttachedAgentEvent,
-
 	FlueEvent,
 	FluePublicError,
-	ListResponse,
 	LlmAssistantMessage,
 	LlmImageContent,
 	LlmMessage,
@@ -44,7 +40,6 @@ export type {
 	LlmToolResultMessage,
 	LlmTurnPurpose,
 	LlmUserMessage,
-	RunPointer,
 	RunRecord,
 	RunStatus,
 } from './types.ts';
