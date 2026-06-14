@@ -9,8 +9,6 @@ describe('@flue/slack workerd ingress', () => {
 		const events = vi.fn();
 		const slack = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			events,
 		});
 		const app = channelApp(slack);
@@ -48,8 +46,6 @@ describe('@flue/slack workerd ingress', () => {
 		const interactions = vi.fn();
 		const slack = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			commands,
 			interactions,
 		});

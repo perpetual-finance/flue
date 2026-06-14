@@ -20,8 +20,6 @@ Set these application secrets:
 | Variable               | Purpose                                     |
 | ---------------------- | ------------------------------------------- |
 | `SLACK_SIGNING_SECRET` | Verifies inbound request bytes.             |
-| `SLACK_APP_ID`         | Restricts deliveries to one Slack app.      |
-| `SLACK_TEAM_ID`        | Restricts deliveries to one workspace.      |
 | `SLACK_BOT_TOKEN`      | Authenticates outbound Slack Web API calls. |
 
 ## Configure Slack
@@ -55,8 +53,6 @@ export const client = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 export const channel = createSlackChannel({
   signingSecret: process.env.SLACK_SIGNING_SECRET!,
-  appId: process.env.SLACK_APP_ID!,
-  teamId: process.env.SLACK_TEAM_ID!,
 
   // Path: /channels/slack/events
   async events({ payload }) {
@@ -97,6 +93,11 @@ The channel does not filter bot messages, message subtypes, or event families.
 Your handler decides which authenticated events affect the application.
 `app_rate_limited` notifications also reach the callback.
 
+The signing secret authenticates the Slack app. Workspace and enterprise
+identity remain in the provider payload so applications can enforce an
+allowlist when they need one. The channel does not impose a single-workspace
+installation model.
+
 ## Handle interactions and commands
 
 Enable a surface only when the application handles it:
@@ -104,8 +105,6 @@ Enable a surface only when the application handles it:
 ```ts
 export const channel = createSlackChannel({
   signingSecret: process.env.SLACK_SIGNING_SECRET!,
-  appId: process.env.SLACK_APP_ID!,
-  teamId: process.env.SLACK_TEAM_ID!,
 
   // Path: /channels/slack/interactions
   async interactions({ payload }) {
@@ -143,8 +142,9 @@ input, model context, logs, or durable session history.
 
 Returning nothing produces an empty `200`. Return JSON-compatible data for a
 JSON response, or use the Hono context for explicit status, headers, and body.
-Handlers default to a 2.5-second deadline so Slack receives an acknowledgement
-within its three-second window.
+Thrown errors flow through normal Hono error handling. Slack expects prompt
+acknowledgements, so admit durable work quickly instead of performing slow
+operations before returning.
 
 ## Reply with `WebClient`
 
@@ -231,9 +231,8 @@ Slack may retry failed or timed-out Events API deliveries. Read
 Preserve `payload.event_id` for tracing, and claim it in application-owned
 durable storage before dispatch when duplicate admission is unacceptable.
 
-The channel is fixed to one app and workspace and rejects org-wide
-installations. OAuth installation storage, Socket Mode, token rotation, and
-multi-workspace routing remain application concerns.
+OAuth installation storage, workspace authorization, Socket Mode, and token
+rotation remain application concerns.
 
 The Fetch-based Slack Web API v8 release candidate runs in Node and in
 Cloudflare Workers with Flue's required `nodejs_compat` setting.

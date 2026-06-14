@@ -318,6 +318,8 @@ describe('flue add', () => {
 		assert.ok(result.stdout.includes('async commands({ c, payload })'));
 		assert.ok(result.stdout.includes('/channels/slack/commands'));
 		assert.ok(!result.stdout.includes('async events({ event })'));
+		assert.ok(!result.stdout.includes('SLACK_APP_ID'));
+		assert.ok(!result.stdout.includes('SLACK_TEAM_ID'));
 		assert.ok(!result.stdout.startsWith('---'));
 	});
 

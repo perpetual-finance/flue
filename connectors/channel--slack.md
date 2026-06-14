@@ -38,8 +38,6 @@ export const client = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 export const channel = createSlackChannel({
   signingSecret: process.env.SLACK_SIGNING_SECRET!,
-  appId: process.env.SLACK_APP_ID!,
-  teamId: process.env.SLACK_TEAM_ID!,
 
   // Path: /channels/slack/events
   async events({ payload }) {
@@ -137,11 +135,12 @@ inside deferred callbacks and initializers.
 
 ## Credentials and verification
 
-`SLACK_SIGNING_SECRET` verifies exact request bytes. `SLACK_APP_ID` and
-`SLACK_TEAM_ID` constrain trusted inbound identity. `SLACK_BOT_TOKEN`
+`SLACK_SIGNING_SECRET` verifies exact request bytes. `SLACK_BOT_TOKEN`
 authenticates outbound Web API calls. Follow project secret conventions and
 never invent values. Slack URL verification is acknowledged internally after
-signature verification.
+signature verification. Workspace and enterprise identity remain in the
+provider payload; add application-owned authorization only when the project
+requires it.
 
 Configure only required provider URLs:
 
@@ -154,9 +153,9 @@ Configure only required provider URLs:
 Run the project typecheck and configured Node and Cloudflare builds. Generate
 local `X-Slack-Signature` values from original synthetic Events API,
 interaction, and slash-command payloads. Test URL verification, exact-byte
-signature rejection, timestamp rejection, identity mismatch, org-wide-install
-rejection, native payload pass-through, optional route omission, and default
-empty `200`.
+signature rejection, timestamp rejection, multi-workspace and enterprise
+payload pass-through, optional route omission, default empty `200`, and normal
+Hono error handling.
 
 Exercise `WebClient` methods used by the application through fake Fetch
 responses in Node or workerd. Do not contact Slack.

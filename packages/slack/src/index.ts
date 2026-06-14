@@ -24,18 +24,12 @@ export interface ChannelRoute<E extends Env = Env> {
 	readonly handler: Handler<E>;
 }
 
-/** Ingress configuration for one fixed Slack application and workspace. */
+/** Ingress configuration for one Slack application. */
 export interface SlackChannelOptions<E extends Env = Env> {
 	/** Secret used to verify exact Slack request bytes. */
 	signingSecret: string;
-	/** Expected application id. */
-	appId: string;
-	/** Expected workspace id. Org-wide installations are not supported in v1. */
-	teamId: string;
 	/** Maximum request-body size in bytes. Defaults to 1 MiB. */
 	bodyLimit?: number;
-	/** Handler deadline in milliseconds. Defaults to and may not exceed 2500. */
-	handlerTimeoutMs?: number;
 	/** Receives provider-native Events API payloads. Omit it to omit `/events`. */
 	events?(input: SlackEventsHandlerInput<E>): SlackHandlerResult;
 	/** Receives provider-native interactivity payloads. Omit it to omit `/interactions`. */
@@ -206,90 +200,6 @@ export interface SlackBlockSuggestionPayload {
 	[key: string]: unknown;
 }
 
-export interface SlackInteractiveMessagePayload {
-	type: 'interactive_message';
-	callback_id: string;
-	actions: Array<Record<string, unknown> & { type: string; name: string }>;
-	team: SlackTeam | null;
-	user: SlackUser;
-	channel: Record<string, unknown>;
-	action_ts: string;
-	token: string;
-	response_url: string;
-	trigger_id: string;
-	attachment_id?: string;
-	message_ts?: string;
-	original_message?: Record<string, unknown>;
-	is_app_unfurl?: boolean;
-	is_enterprise_install?: boolean;
-	enterprise?: SlackEnterprise;
-	[key: string]: unknown;
-}
-
-export interface SlackInteractiveMessageSuggestionPayload {
-	type: 'interactive_message';
-	name: string;
-	value: string;
-	callback_id: string;
-	action_ts: string;
-	message_ts: string;
-	attachment_id: string;
-	team: SlackTeam | null;
-	user: SlackUser;
-	channel?: Record<string, unknown>;
-	token: string;
-	is_enterprise_install?: boolean;
-	enterprise?: SlackEnterprise;
-	[key: string]: unknown;
-}
-
-export interface SlackDialogSubmissionPayload {
-	type: 'dialog_submission';
-	callback_id: string;
-	submission: Record<string, string>;
-	state: string;
-	team: SlackTeam | null;
-	user: SlackUser;
-	channel: Record<string, unknown>;
-	action_ts: string;
-	token: string;
-	response_url: string;
-	is_enterprise_install?: boolean;
-	enterprise?: SlackEnterprise;
-	[key: string]: unknown;
-}
-
-export interface SlackDialogSuggestionPayload {
-	type: 'dialog_suggestion';
-	name: string;
-	value: string;
-	callback_id: string;
-	action_ts: string;
-	team: SlackTeam | null;
-	user: SlackUser;
-	channel?: Record<string, unknown>;
-	token: string;
-	is_enterprise_install?: boolean;
-	enterprise?: SlackEnterprise;
-	[key: string]: unknown;
-}
-
-/** @deprecated Slack no longer supports Steps from Apps. */
-export interface SlackWorkflowStepEditPayload {
-	type: 'workflow_step_edit';
-	callback_id: string;
-	trigger_id: string;
-	user: SlackUser;
-	team: SlackTeam;
-	channel?: Record<string, unknown>;
-	token: string;
-	action_ts: string;
-	workflow_step: Record<string, unknown>;
-	is_enterprise_install?: boolean;
-	enterprise?: SlackEnterprise;
-	[key: string]: unknown;
-}
-
 /**
  * Provider-native JSON payload delivered to the interactivity callback.
  *
@@ -302,12 +212,7 @@ export type SlackInteractionPayload =
 	| SlackViewClosedPayload
 	| SlackShortcutPayload
 	| SlackMessageActionPayload
-	| SlackBlockSuggestionPayload
-	| SlackInteractiveMessagePayload
-	| SlackInteractiveMessageSuggestionPayload
-	| SlackDialogSubmissionPayload
-	| SlackDialogSuggestionPayload
-	| SlackWorkflowStepEditPayload;
+	| SlackBlockSuggestionPayload;
 
 /** Provider-native URL-encoded slash-command payload. */
 export interface SlackSlashCommandPayload {
@@ -329,13 +234,7 @@ export interface SlackSlashCommandPayload {
 	[key: string]: unknown;
 }
 
-/** Provider-native Slack view validation response. */
-export interface SlackViewValidationResponse {
-	response_action: 'errors';
-	errors: Record<string, string>;
-}
-
-type SlackHandlerValue = undefined | JsonValue | SlackViewValidationResponse | Response;
+type SlackHandlerValue = undefined | JsonValue | Response;
 
 /**
  * Returning nothing produces an empty `200`. JSON-compatible values become
@@ -371,21 +270,18 @@ export interface SlackChannel<E extends Env = Env> {
 }
 
 /**
- * Creates a fixed-workspace Slack channel.
+ * Creates a Slack channel.
  *
  * Signed request timestamps must be within five minutes of the server clock.
- * URL verification is handled internally. Other authenticated deliveries are
- * forwarded with Slack's field names and nesting. Successful acknowledgement
- * waits for the configured handler, and the channel does not deduplicate
- * Events API retries.
+ * URL verification is handled internally. Other authenticated deliveries
+ * are forwarded with Slack's field names and nesting, and the channel does
+ * not deduplicate Events API retries.
  */
 export function createSlackChannel<E extends Env = Env>(
 	options: SlackChannelOptions<E>,
 ): SlackChannel<E> {
 	validateOptions(options);
 	const signingSecret = options.signingSecret;
-	const appId = options.appId;
-	const teamId = options.teamId;
 	const routes: ChannelRoute<E>[] = [];
 
 	if (options.events) {
@@ -394,10 +290,7 @@ export function createSlackChannel<E extends Env = Env>(
 			path: '/events',
 			handler: createSlackEventsHandler({
 				signingSecret,
-				appId,
-				teamId,
 				bodyLimit: options.bodyLimit,
-				handlerTimeoutMs: options.handlerTimeoutMs,
 				events: options.events,
 			}),
 		});
@@ -408,10 +301,7 @@ export function createSlackChannel<E extends Env = Env>(
 			path: '/interactions',
 			handler: createSlackInteractionsHandler({
 				signingSecret,
-				appId,
-				teamId,
 				bodyLimit: options.bodyLimit,
-				handlerTimeoutMs: options.handlerTimeoutMs,
 				interactions: options.interactions,
 			}),
 		});
@@ -422,16 +312,15 @@ export function createSlackChannel<E extends Env = Env>(
 			path: '/commands',
 			handler: createSlackCommandsHandler({
 				signingSecret,
-				appId,
-				teamId,
 				bodyLimit: options.bodyLimit,
-				handlerTimeoutMs: options.handlerTimeoutMs,
 				commands: options.commands,
 			}),
 		});
 	}
 	if (routes.length === 0) {
-		throw new TypeError('createSlackChannel() requires an events, interactions, or commands handler.');
+		throw new TypeError(
+			'createSlackChannel() requires an events, interactions, or commands handler.',
+		);
 	}
 
 	const channel: SlackChannel<E> = {
@@ -470,8 +359,6 @@ function validateOptions<E extends Env>(options: SlackChannelOptions<E>): void {
 		throw new TypeError('createSlackChannel() requires an options object.');
 	}
 	assertOption(options.signingSecret, 'signingSecret');
-	assertOption(options.appId, 'appId');
-	assertOption(options.teamId, 'teamId');
 	if (options.events !== undefined && typeof options.events !== 'function') {
 		throw new TypeError('Slack events handler must be a function.');
 	}

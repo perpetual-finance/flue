@@ -2902,3 +2902,62 @@ Remaining deferrals:
   Telegram polling remain outside first-party HTTP channels.
 - The prioritized continuation roadmap is
   `plans/2026-06-13-channel-followups-roadmap.md`.
+
+## Slack simplification follow-up — 2026-06-13
+
+Status:
+
+- Complete.
+
+Implemented:
+
+- Removed `appId` and `teamId` from `SlackChannelOptions`. Slack's signing
+  secret authenticates the app; workspace and enterprise authorization now
+  remain application policy over the provider-native payload.
+- Removed fixed-workspace and org-install rejection. Authenticated deliveries
+  from multiple workspaces and Enterprise Grid installations reach the
+  configured handler unchanged.
+- Removed `handlerTimeoutMs` and the package-owned timeout/error wrapper.
+  Callbacks are awaited normally, and thrown errors flow through Hono's
+  standard error handling.
+- Removed local types for legacy interactive messages, legacy dialogs, and
+  deprecated workflow-step editing. Runtime forwarding remains
+  forward-compatible; the public union covers current documented HTTP
+  interaction families.
+- Removed the redundant `SlackViewValidationResponse` type and recursive
+  package-owned JSON validator. Handler results now use the channel contract
+  directly: `undefined` becomes an empty `200`, responses pass through, and
+  other typed values use `Response.json()`.
+- Kept `teamId` in `SlackThreadRef` because canonical multi-workspace
+  conversation identity still requires it.
+- Updated the package README, editable example, connector recipe, API
+  reference, ecosystem guide, CLI recipe assertions, and changelog.
+
+Impact:
+
+- The Slack package source and active Node test suite dropped by 435 net lines.
+- The channel now has two ingress credentials instead of four in the editable
+  example: `SLACK_SIGNING_SECRET` for inbound verification and
+  `SLACK_BOT_TOKEN` for project-owned outbound API calls.
+- Slow callbacks are no longer followed by uncancelled package work after an
+  artificial timeout response. Applications remain responsible for admitting
+  durable work promptly within Slack's acknowledgement expectations.
+
+Validation:
+
+- `@flue/slack` strict typecheck, build, 18 Node tests, and 2 workerd tests
+  pass.
+- The Slack example strict typecheck, 3 real-client workerd tests, Node build,
+  and Cloudflare build pass. Cloudflare reports only the existing Durable
+  Object migration warning.
+- The complete 18-test `flue add` suite passes and asserts that the Slack
+  recipe no longer emits `SLACK_APP_ID` or `SLACK_TEAM_ID`.
+- Documentation check and production build pass alongside the concurrent docs
+  work.
+- `scripts/prepare-publish.mjs` passes. The packed package exposes the reduced
+  declarations, and a clean offline strict consumer installs the tarball,
+  typechecks a custom Hono environment, and imports the constructor at runtime.
+- The built Node example starts with only `SLACK_SIGNING_SECRET` and
+  `SLACK_BOT_TOKEN`; a locally signed URL-verification request returns the
+  documented `200` challenge response.
+- Scoped Biome, Prettier, and whitespace checks pass.

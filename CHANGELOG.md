@@ -10,7 +10,7 @@
 - **Cloudflare and sandbox cleanup.** `cloudflareSandbox()` replaces the workerd stub heuristic; `getVirtualSandbox`, `sandbox: false`, and expired sandbox migration shims are removed.
 - **Session and event contracts are tightened.** Public session operations expose `FlueSession`, subagent profiles are self-contained, session errors are typed, and durable events now carry `v: 1` without persisting `turn_request` or raw `assistantMessageEvent` payloads.
 - **Cloudflare extension imports moved.** Generated-entry plumbing now lives under `@flue/runtime/cloudflare/internal`; user-facing Cloudflare imports remain authoring-only.
-- **Slack handlers now receive provider-native payloads.** `events`, `interactions`, and `commands` use `{ c, payload }`; Events API callbacks expose the official `SlackEvent` union, and the normalized event, interaction, retry, and capability wrappers are removed.
+- **Slack handlers now receive provider-native payloads.** `events`, `interactions`, and `commands` use `{ c, payload }`; Events API callbacks expose the official `SlackEvent` union, and normalized wrappers, fixed-workspace filtering, package timeouts, and legacy interaction types are removed.
 
 ### New Features
 
@@ -31,9 +31,8 @@
   metadata, and uses collision-safe phone, BSUID, and group conversation
   identities. Its editable client example sends BSUID messages through the
   SDK's authenticated low-level request path.
-- Channel routing and Slack callback serialization now accept valid Fetch
-  responses across JavaScript realm boundaries while continuing to reject
-  tagged non-response objects.
+- Channel routing now accepts valid Fetch responses across JavaScript realm
+  boundaries while continuing to reject tagged non-response objects.
 - Recovery now resumes shutdown-interrupted turns, settles completed work before budget or timeout checks, repairs partial tool batches without replaying completed tools, and emits durable submission-settlement events for waiters.
 - Cloudflare attempt markers are now Flue-owned rather than querying private Agents SDK tables.
 - `flue logs` treats `--since` as an opaque Durable Streams offset, supports `--format ndjson`, and uses public run metadata.

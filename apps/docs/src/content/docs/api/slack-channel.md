@@ -12,38 +12,31 @@ Import from `@flue/slack`.
 function createSlackChannel<E extends Env = Env>(options: SlackChannelOptions<E>): SlackChannel<E>;
 ```
 
-Creates one stateless Slack channel for a fixed application and workspace. At
-least one handler is required.
+Creates one stateless Slack channel. At least one handler is required.
 
 ## `SlackChannelOptions`
 
 ```ts
 interface SlackChannelOptions<E extends Env = Env> {
   signingSecret: string;
-  appId: string;
-  teamId: string;
   bodyLimit?: number;
-  handlerTimeoutMs?: number;
   events?(input: { c: Context<E>; payload: SlackEventsApiPayload }): SlackHandlerResult;
   interactions?(input: { c: Context<E>; payload: SlackInteractionPayload }): SlackHandlerResult;
   commands?(input: { c: Context<E>; payload: SlackSlashCommandPayload }): SlackHandlerResult;
 }
 ```
 
-| Field              | Description                                                   |
-| ------------------ | ------------------------------------------------------------- |
-| `signingSecret`    | Secret used to verify Slack request signatures.               |
-| `appId`            | Expected Slack application id.                                |
-| `teamId`           | Expected workspace id. Org-wide installs are rejected.        |
-| `bodyLimit`        | Maximum request body in bytes. Defaults to 1 MiB.             |
-| `handlerTimeoutMs` | Handler deadline. Defaults to and may not exceed 2500 ms.     |
-| `events`           | Events API handler. Omission removes `POST /events`.          |
-| `interactions`     | Interactivity handler. Omission removes `POST /interactions`. |
-| `commands`         | Slash-command handler. Omission removes `POST /commands`.     |
+| Field           | Description                                                   |
+| --------------- | ------------------------------------------------------------- |
+| `signingSecret` | Secret used to verify Slack request signatures.               |
+| `bodyLimit`     | Maximum request body in bytes. Defaults to 1 MiB.             |
+| `events`        | Events API handler. Omission removes `POST /events`.          |
+| `interactions`  | Interactivity handler. Omission removes `POST /interactions`. |
+| `commands`      | Slash-command handler. Omission removes `POST /commands`.     |
 
 URL verification is handled internally. Other authenticated deliveries reach
-the configured handler after applicable app, workspace, and installation
-checks.
+the configured handler with their provider identity intact. Workspace and
+enterprise authorization is application policy.
 
 ## Events API types
 
@@ -81,19 +74,14 @@ type SlackInteractionPayload =
   | SlackViewClosedPayload
   | SlackShortcutPayload
   | SlackMessageActionPayload
-  | SlackBlockSuggestionPayload
-  | SlackInteractiveMessagePayload
-  | SlackInteractiveMessageSuggestionPayload
-  | SlackDialogSubmissionPayload
-  | SlackDialogSuggestionPayload
-  | SlackWorkflowStepEditPayload;
+  | SlackBlockSuggestionPayload;
 ```
 
-These local types preserve Slack's JSON field names and nesting, including
-legacy interactive messages, dialogs, suggestions, and the deprecated
-Steps-from-Apps edit payload. Authenticated future interaction types are
-forwarded at runtime even when the installed type version does not yet include
-their discriminant.
+These local types preserve Slack's current HTTP interaction field names and
+nesting. Authenticated future and legacy interaction types are forwarded at
+runtime even when the installed type version does not include their
+discriminant. Applications using a legacy surface can supply a local
+provider-shaped type.
 
 ## `SlackSlashCommandPayload`
 
@@ -122,23 +110,11 @@ interface SlackSlashCommandPayload {
 ## Handler results
 
 ```ts
-type SlackHandlerResult =
-  | void
-  | JsonValue
-  | SlackViewValidationResponse
-  | Response
-  | Promise<void | JsonValue | SlackViewValidationResponse | Response>;
+type SlackHandlerResult = void | JsonValue | Response | Promise<void | JsonValue | Response>;
 ```
 
 Returning nothing produces an empty `200`. JSON-compatible values become JSON
-responses. Hono and Fetch responses pass through unchanged.
-
-```ts
-interface SlackViewValidationResponse {
-  response_action: 'errors';
-  errors: Record<string, string>;
-}
-```
+Thrown errors flow through normal Hono error handling.
 
 ## `SlackChannel`
 

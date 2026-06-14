@@ -33,8 +33,6 @@ export const client = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 export const channel = createSlackChannel({
   signingSecret: process.env.SLACK_SIGNING_SECRET!,
-  appId: process.env.SLACK_APP_ID!,
-  teamId: process.env.SLACK_TEAM_ID!,
 
   // Path: /channels/slack/events
   async events({ payload }) {
@@ -112,7 +110,7 @@ custom URL. See [Routing](/docs/guide/routing/).
 
 Each provider constructor accepts callbacks for its HTTP surfaces. The callback
 runs only after the package has performed the applicable request
-authentication, parsing, and identity checks. Handshakes that do not represent
+authentication, parsing, and protocol handling. Handshakes that do not represent
 application events are handled before the callback:
 
 ```ts title="src/channels/slack.ts"
@@ -122,8 +120,6 @@ import assistant from '../agents/assistant.ts';
 
 export const channel = createSlackChannel({
   signingSecret: process.env.SLACK_SIGNING_SECRET!,
-  appId: process.env.SLACK_APP_ID!,
-  teamId: process.env.SLACK_TEAM_ID!,
 
   // Path: /channels/slack/events
   async events({ payload }) {

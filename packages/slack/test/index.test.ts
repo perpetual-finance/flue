@@ -13,20 +13,14 @@ describe('createSlackChannel()', () => {
 	it('publishes only configured provider surfaces when callbacks are provided', () => {
 		const events = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			events() {},
 		});
 		const interactions = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			interactions() {},
 		});
 		const commands = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			commands() {},
 		});
 
@@ -45,8 +39,6 @@ describe('createSlackChannel()', () => {
 		expect(() =>
 			createSlackChannel({
 				signingSecret: 'secret',
-				appId: 'A123',
-				teamId: 'T123',
 			}),
 		).toThrow('requires an events, interactions, or commands handler');
 	});
@@ -57,8 +49,6 @@ describe('createSlackChannel()', () => {
 		let retryReason: string | undefined;
 		const slack = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			events({ c, payload }) {
 				received = payload;
 				retryNumber = c.req.header('x-slack-retry-num');
@@ -91,8 +81,6 @@ describe('createSlackChannel()', () => {
 		let threadTs: string | undefined;
 		const slack = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			events({ payload }) {
 				if (
 					payload.type === 'event_callback' &&
@@ -127,8 +115,6 @@ describe('createSlackChannel()', () => {
 		const events = vi.fn();
 		const slack = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			events,
 		});
 		const app = channelApp(slack);
@@ -179,12 +165,10 @@ describe('createSlackChannel()', () => {
 		expect(events.mock.calls.map(([input]) => input.payload.event)).toEqual(providerEvents);
 	});
 
-	it('passes app rate-limit notifications when provider identity matches', async () => {
+	it('passes app rate-limit notifications when the request is authenticated', async () => {
 		const events = vi.fn();
 		const slack = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			events,
 		});
 		const payload = {
@@ -201,12 +185,10 @@ describe('createSlackChannel()', () => {
 		expect(events.mock.calls[0]?.[0].payload).toEqual(payload);
 	});
 
-	it('handles URL verification internally when Slack omits app and workspace identity', async () => {
+	it('handles URL verification internally when the request is authenticated', async () => {
 		const events = vi.fn();
 		const slack = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			events,
 		});
 
@@ -222,14 +204,12 @@ describe('createSlackChannel()', () => {
 		expect(events).not.toHaveBeenCalled();
 	});
 
-	it('passes provider-native slash-command fields when fixed-workspace identity matches', async () => {
+	it('passes provider-native slash-command fields when a request is authenticated', async () => {
 		const commands = vi.fn(({ c, payload }) =>
 			c.json({ received: payload.command, text: payload.text }),
 		);
 		const slack = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			commands,
 		});
 		const fields = {
@@ -258,12 +238,10 @@ describe('createSlackChannel()', () => {
 		});
 	});
 
-	it('rejects slash commands when workspace or installation identity does not match', async () => {
+	it('forwards slash commands from different workspaces and enterprise installations', async () => {
 		const commands = vi.fn();
 		const slack = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			commands,
 		});
 		const fields = {
@@ -278,10 +256,10 @@ describe('createSlackChannel()', () => {
 		};
 		const app = channelApp(slack);
 
-		const foreign = await app.request(
+		const otherWorkspace = await app.request(
 			await signedCommandRequest('/commands', { ...fields, team_id: 'T999' }),
 		);
-		const orgWide = await app.request(
+		const enterpriseInstall = await app.request(
 			await signedCommandRequest('/commands', {
 				...fields,
 				enterprise_id: 'E123',
@@ -289,17 +267,15 @@ describe('createSlackChannel()', () => {
 			}),
 		);
 
-		expect(foreign.status).toBe(403);
-		expect(orgWide.status).toBe(403);
-		expect(commands).not.toHaveBeenCalled();
+		expect(otherWorkspace.status).toBe(200);
+		expect(enterpriseInstall.status).toBe(200);
+		expect(commands.mock.calls.map(([input]) => input.payload.team_id)).toEqual(['T999', 'T123']);
 	});
 
 	it('passes provider-native interactions without collapsing multiple actions', async () => {
 		const interactions = vi.fn((_input: { payload: unknown }) => ({ accepted: true }));
 		const slack = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			interactions,
 		});
 		const payload = {
@@ -327,12 +303,10 @@ describe('createSlackChannel()', () => {
 		expect(interactions.mock.calls[0]?.[0].payload).toEqual(payload);
 	});
 
-	it('forwards a future interaction type when its signed identity is valid', async () => {
+	it('forwards a future interaction type when its request is authenticated', async () => {
 		const interactions = vi.fn();
 		const slack = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			interactions,
 		});
 		const payload = {
@@ -351,44 +325,9 @@ describe('createSlackChannel()', () => {
 		expect(interactions.mock.calls[0]?.[0].payload).toEqual(payload);
 	});
 
-	it('narrows and forwards legacy dialog submissions when they are authenticated', async () => {
-		let project = '';
-		const slack = createSlackChannel({
-			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
-			interactions({ payload }) {
-				if (payload.type === 'dialog_submission') {
-					project = payload.submission.project ?? '';
-				}
-			},
-		});
-		const payload = {
-			type: 'dialog_submission',
-			callback_id: 'create_project',
-			submission: { project: 'Flue' },
-			state: 'opaque-state',
-			team: { id: 'T123', domain: 'acme' },
-			user: { id: 'U123', name: 'river' },
-			channel: { id: 'C123', name: 'automation' },
-			action_ts: '1717971234.0012',
-			token: 'verification-token',
-			response_url: 'https://hooks.slack.test/dialogs/response',
-		};
-
-		const response = await channelApp(slack).request(
-			await signedFormRequest('/interactions', payload),
-		);
-
-		expect(response.status).toBe(200);
-		expect(project).toBe('Flue');
-	});
-
 	it('returns provider-native view validation JSON when a view submission is received', async () => {
 		const slack = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			interactions: ({ payload }) => {
 				if (payload.type !== 'view_submission') return;
 				return {
@@ -421,14 +360,10 @@ describe('createSlackChannel()', () => {
 	it('uses an empty 200 when no result is returned and passes Hono responses through', async () => {
 		const defaultChannel = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			events() {},
 		});
 		const responseChannel = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			events: ({ c }) => c.text('accepted', 202),
 		});
 		const payload = eventCallback({
@@ -453,55 +388,10 @@ describe('createSlackChannel()', () => {
 		expect(await response.text()).toBe('accepted');
 	});
 
-	it('passes a Fetch response through when the callback response comes from another realm', async () => {
-		const nativeResponse = new Response('accepted', { status: 202 });
-		const response = new Proxy(nativeResponse, {
-			get(target, property) {
-				const value = Reflect.get(target, property, target);
-				return typeof value === 'function' ? value.bind(target) : value;
-			},
-			getPrototypeOf() {
-				return null;
-			},
-		});
-		expect(response).not.toBeInstanceOf(Response);
-		expect(Object.prototype.toString.call(response)).toBe('[object Response]');
-		const slack = createSlackChannel({
-			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
-			events: () => response,
-		});
-
-		const result = await channelApp(slack).request(
-			await signedJsonRequest('/events', eventCallback({ type: 'future_event_type' })),
-		);
-
-		expect(result.status).toBe(202);
-		expect(await result.text()).toBe('accepted');
-	});
-
-	it('returns 500 when a callback returns a tagged object instead of a Fetch response', async () => {
-		const slack = createSlackChannel({
-			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
-			events: () => ({ [Symbol.toStringTag]: 'Response' }) as unknown as Response,
-		});
-
-		const result = await channelApp(slack).request(
-			await signedJsonRequest('/events', eventCallback({ type: 'future_event_type' })),
-		);
-
-		expect(result.status).toBe(500);
-	});
-
 	it('rejects malformed transport and oversized bodies before callbacks run', async () => {
 		const events = vi.fn();
 		const slack = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			bodyLimit: 32,
 			events,
 		});
@@ -514,9 +404,7 @@ describe('createSlackChannel()', () => {
 				body: 'payload',
 			}),
 		);
-		const malformed = await app.request(
-			await signedRequest('/events', '{', 'application/json'),
-		);
+		const malformed = await app.request(await signedRequest('/events', '{', 'application/json'));
 		const oversized = await app.request(
 			await signedRequest('/events', JSON.stringify({ value: 'x'.repeat(64) }), 'application/json'),
 		);
@@ -527,12 +415,10 @@ describe('createSlackChannel()', () => {
 		expect(events).not.toHaveBeenCalled();
 	});
 
-	it('rejects stale signatures, tampered bytes, and signed identity mismatches', async () => {
+	it('rejects stale signatures and tampered request bytes', async () => {
 		const events = vi.fn();
 		const slack = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			events,
 		});
 		const payload = eventCallback({ type: 'future_event_type' });
@@ -549,23 +435,17 @@ describe('createSlackChannel()', () => {
 				body: `${await signed.text()} `,
 			}),
 		);
-		const mismatch = await app.request(
-			await signedJsonRequest('/events', { ...payload, api_app_id: 'WRONG' }),
-		);
 
 		expect(stale.status).toBe(401);
 		expect(tampered.status).toBe(401);
-		expect(mismatch.status).toBe(403);
 		expect(events).not.toHaveBeenCalled();
 	});
 
-	it('rejects org-wide Events API and interactivity payloads when the channel is fixed-workspace', async () => {
+	it('forwards enterprise Events API and interaction payloads when they are authenticated', async () => {
 		const events = vi.fn();
 		const interactions = vi.fn();
 		const slack = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			events,
 			interactions,
 		});
@@ -597,43 +477,38 @@ describe('createSlackChannel()', () => {
 			}),
 		);
 
-		expect(eventResponse.status).toBe(403);
-		expect(interactionResponse.status).toBe(403);
-		expect(events).not.toHaveBeenCalled();
-		expect(interactions).not.toHaveBeenCalled();
+		expect(eventResponse.status).toBe(200);
+		expect(interactionResponse.status).toBe(200);
+		expect(events).toHaveBeenCalledOnce();
+		expect(interactions).toHaveBeenCalledOnce();
 	});
 
-	it('returns 500 when a callback throws or exceeds its deadline', async () => {
+	it('lets the Hono error handler handle callback failures', async () => {
+		const failure = new Error('failed');
 		const throwing = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			events() {
-				throw new Error('failed');
+				throw failure;
 			},
 		});
-		const timeout = createSlackChannel({
-			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
-			handlerTimeoutMs: 5,
-			events: () => new Promise(() => {}),
+		const app = channelApp(throwing);
+		let received: Error | undefined;
+		app.onError((error, c) => {
+			received = error;
+			return c.text('handled', 503);
 		});
 		const payload = eventCallback({ type: 'future_event_type' });
 
-		expect(
-			(await channelApp(throwing).request(await signedJsonRequest('/events', payload))).status,
-		).toBe(500);
-		expect(
-			(await channelApp(timeout).request(await signedJsonRequest('/events', payload))).status,
-		).toBe(500);
+		const response = await app.request(await signedJsonRequest('/events', payload));
+
+		expect(response.status).toBe(503);
+		expect(await response.text()).toBe('handled');
+		expect(received).toBe(failure);
 	});
 
 	it('round-trips canonical thread references when identifiers contain reserved characters', () => {
 		const slack = createSlackChannel({
 			signingSecret: 'secret',
-			appId: 'A123',
-			teamId: 'T123',
 			events() {},
 		});
 		const ref = { teamId: 'T:123', channelId: 'C/123', threadTs: '1717.00?#' };

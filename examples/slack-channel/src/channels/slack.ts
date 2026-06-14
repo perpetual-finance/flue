@@ -7,8 +7,6 @@ export const client = new WebClient(requiredEnv('SLACK_BOT_TOKEN'));
 
 export const channel = createSlackChannel({
 	signingSecret: requiredEnv('SLACK_SIGNING_SECRET'),
-	appId: requiredEnv('SLACK_APP_ID'),
-	teamId: requiredEnv('SLACK_TEAM_ID'),
 
 	// Path: /channels/slack/events
 	async events({ payload }) {

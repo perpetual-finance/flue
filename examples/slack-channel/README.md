@@ -7,24 +7,22 @@ bound to that thread. The optional `/channels/slack/interactions` and
 `/channels/slack/commands` surfaces are shown commented out in the channel
 module and are not published.
 
-`SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN`, `SLACK_APP_ID`, and `SLACK_TEAM_ID` are required when the built application starts. Builds and type checks do not require live credentials.
+`SLACK_SIGNING_SECRET` and `SLACK_BOT_TOKEN` are required when the built
+application starts. Builds and type checks do not require live credentials.
 
 The routes must receive the unconsumed request body because signatures cover
 the exact bytes sent by Slack. Requests older than five minutes are rejected.
-The configured app and workspace ids are checked before handlers run. This
-fixed-workspace example rejects org-wide installations. Slack's signed URL
-verification request does not include app or workspace ids and is acknowledged
-internally.
+Slack's signed URL verification request is acknowledged internally. Other
+authenticated payloads retain their workspace and enterprise identity so the
+application can apply its own authorization policy.
 
-Handlers complete dispatch admission before Slack is acknowledged. The default
-handler deadline is 2.5 seconds. A timed-out handler cannot be forcibly stopped
-and may still admit work after a failure response; Slack may retry Events API
-deliveries, so applications requiring uniqueness must claim `payload.event_id` in
-durable application storage before dispatch.
+Handlers complete dispatch admission before Slack is acknowledged. Slack may
+retry failed or slow Events API deliveries, so applications requiring
+uniqueness must claim `payload.event_id` in durable application storage before
+dispatch.
 
-The bot token's ownership by the configured app/workspace is a trusted
-configuration assertion in v1. The package does not perform startup `auth.test`
-network calls.
+The package does not compare the bot token with inbound workspace identity or
+perform startup `auth.test` network calls.
 
 The channel module exports both the ingress `channel` and the project-owned
 `WebClient`. The reply tool is deliberately narrow application policy, not a

@@ -1,6 +1,5 @@
 import type { Context, Env, Handler } from 'hono';
 import type {
-	JsonValue,
 	SlackEventsApiPayload,
 	SlackHandlerResult,
 	SlackInteractionPayload,
@@ -8,16 +7,12 @@ import type {
 } from './index.ts';
 
 const DEFAULT_BODY_LIMIT = 1024 * 1024;
-const DEFAULT_HANDLER_TIMEOUT_MS = 2_500;
 const MAX_SIGNATURE_AGE_SECONDS = 5 * 60;
 const encoder = new TextEncoder();
 
 interface SharedRouteOptions {
 	signingSecret: string;
-	appId: string;
-	teamId: string;
 	bodyLimit?: number;
-	handlerTimeoutMs?: number;
 }
 
 interface SlackEventsHandlerOptions<E extends Env> extends SharedRouteOptions {
@@ -45,16 +40,12 @@ export function createSlackEventsHandler<E extends Env>(
 		if (!isRecord(raw)) return response(400);
 
 		const envelopeType = readString(raw, 'type');
+		if (!envelopeType) return response(400);
 		if (envelopeType === 'url_verification') {
 			const challenge = readString(raw, 'challenge');
 			if (challenge === undefined) return response(400);
 			return Response.json({ challenge }, { status: 200 });
 		}
-		const appId = readString(raw, 'api_app_id');
-		const teamId = readString(raw, 'team_id');
-		if (!envelopeType || !appId || !teamId) return response(400);
-		if (appId !== options.appId || teamId !== options.teamId) return response(403);
-		if (isEnterpriseInstall(raw)) return response(403);
 
 		if (envelopeType === 'event_callback') {
 			const eventId = readString(raw, 'event_id');
@@ -62,9 +53,8 @@ export function createSlackEventsHandler<E extends Env>(
 			if (!eventId || !event || !readString(event, 'type')) return response(400);
 		}
 
-		return invokeHandler(
-			() => options.events({ c, payload: raw as unknown as SlackEventsApiPayload }),
-			route.handlerTimeoutMs,
+		return serializeHandlerResult(
+			await options.events({ c, payload: raw as unknown as SlackEventsApiPayload }),
 		);
 	};
 }
@@ -81,19 +71,10 @@ export function createSlackInteractionsHandler<E extends Env>(
 		const raw = parseFormPayload(verified.body);
 		if (!isRecord(raw)) return response(400);
 
-		const payloadAppId = raw.api_app_id;
-		if (payloadAppId !== undefined && typeof payloadAppId !== 'string') return response(400);
-		const team = readRecord(raw, 'team');
-		const teamId = team && readString(team, 'id');
-		const user = readRecord(raw, 'user');
-		const userId = user && readString(user, 'id');
 		const type = readString(raw, 'type');
-		if (!type || !teamId || !userId) return response(400);
-		if (typeof payloadAppId === 'string' && payloadAppId !== options.appId) return response(403);
-		if (teamId !== options.teamId || isEnterpriseInstall(raw)) return response(403);
-		return invokeHandler(
-			() => options.interactions({ c, payload: raw as unknown as SlackInteractionPayload }),
-			route.handlerTimeoutMs,
+		if (!type) return response(400);
+		return serializeHandlerResult(
+			await options.interactions({ c, payload: raw as unknown as SlackInteractionPayload }),
 		);
 	};
 }
@@ -109,72 +90,27 @@ export function createSlackCommandsHandler<E extends Env>(
 		if (verified instanceof Response) return verified;
 		const form = parseForm(verified.body);
 		if (!form) return response(400);
-
-		const appId = readRequiredFormValue(form, 'api_app_id');
-		const teamId = readRequiredFormValue(form, 'team_id');
-		const channelId = readRequiredFormValue(form, 'channel_id');
-		const userId = readRequiredFormValue(form, 'user_id');
-		const commandName = readRequiredFormValue(form, 'command');
-		const text = readRequiredFormValue(form, 'text', true);
-		const triggerId = readRequiredFormValue(form, 'trigger_id');
-		const responseUrl = readRequiredFormValue(form, 'response_url');
-		const enterpriseInstall = readOptionalFormBoolean(form, 'is_enterprise_install');
-		if (
-			!appId ||
-			!teamId ||
-			!channelId ||
-			!userId ||
-			!commandName ||
-			text === undefined ||
-			!triggerId ||
-			!responseUrl ||
-			enterpriseInstall === null
-		) {
-			return response(400);
-		}
-		if (appId !== options.appId || teamId !== options.teamId || enterpriseInstall === true) {
-			return response(403);
-		}
-
-		return invokeHandler(
-			() =>
-				options.commands({
-					c,
-					payload: formToRecord(form) as unknown as SlackSlashCommandPayload,
-				}),
-			route.handlerTimeoutMs,
+		const payload = formToRecord(form);
+		if (typeof payload.command !== 'string') return response(400);
+		return serializeHandlerResult(
+			await options.commands({
+				c,
+				payload: payload as unknown as SlackSlashCommandPayload,
+			}),
 		);
 	};
 }
 
-async function invokeHandler(
-	handler: () => SlackHandlerResult,
-	timeoutMs: number,
-): Promise<Response> {
-	const outcome = await runHandler(handler, timeoutMs);
-	if (outcome.type !== 'success') return response(500);
-	return serializeHandlerResult(outcome.value);
-}
-
 function prepareRoute(options: SharedRouteOptions): {
-	handlerTimeoutMs: number;
 	verify(request: Request, expectedMediaType: string): Promise<{ body: Uint8Array } | Response>;
 } {
 	const bodyLimit = options.bodyLimit ?? DEFAULT_BODY_LIMIT;
-	const handlerTimeoutMs = options.handlerTimeoutMs ?? DEFAULT_HANDLER_TIMEOUT_MS;
 	if (!Number.isSafeInteger(bodyLimit) || bodyLimit <= 0) {
 		throw new TypeError('Slack route bodyLimit must be a positive integer.');
-	}
-	if (!Number.isSafeInteger(handlerTimeoutMs) || handlerTimeoutMs <= 0) {
-		throw new TypeError('Slack route handlerTimeoutMs must be a positive integer.');
-	}
-	if (handlerTimeoutMs > DEFAULT_HANDLER_TIMEOUT_MS) {
-		throw new TypeError('Slack route handlerTimeoutMs must not exceed 2500ms.');
 	}
 	const secret = encoder.encode(options.signingSecret);
 
 	return {
-		handlerTimeoutMs,
 		async verify(request, expectedMediaType) {
 			const mediaType = request.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
 			if (mediaType !== expectedMediaType) return response(415);
@@ -210,84 +146,10 @@ function prepareRoute(options: SharedRouteOptions): {
 	};
 }
 
-function isEnterpriseInstall(raw: Record<string, unknown>): boolean {
-	if (raw.is_enterprise_install === true) return true;
-	if (!Array.isArray(raw.authorizations)) return false;
-	return raw.authorizations.some(
-		(authorization) => isRecord(authorization) && authorization.is_enterprise_install === true,
-	);
-}
-
-type HandlerOutcome<T> = { type: 'success'; value: T } | { type: 'failure' } | { type: 'timeout' };
-
-async function runHandler<T>(
-	handler: () => T | Promise<T>,
-	timeoutMs: number,
-): Promise<HandlerOutcome<T>> {
-	let timeout: ReturnType<typeof setTimeout> | undefined;
-	const handlerPromise = Promise.resolve()
-		.then(handler)
-		.then(
-			(value): HandlerOutcome<T> => ({ type: 'success', value }),
-			(): HandlerOutcome<T> => ({ type: 'failure' }),
-		);
-	const timeoutPromise = new Promise<HandlerOutcome<T>>((resolve) => {
-		timeout = setTimeout(() => resolve({ type: 'timeout' }), timeoutMs);
-	});
-	const outcome = await Promise.race([handlerPromise, timeoutPromise]);
-	if (timeout !== undefined) clearTimeout(timeout);
-	return outcome;
-}
-
 function serializeHandlerResult(value: unknown): Response {
-	const fetchResponse = normalizeFetchResponse(value);
-	if (fetchResponse) return fetchResponse;
-	if (Object.prototype.toString.call(value) === '[object Response]') return response(500);
 	if (value === undefined) return response(200);
-	if (!isJsonValue(value)) return response(500);
+	if (Object.prototype.toString.call(value) === '[object Response]') return value as Response;
 	return Response.json(value);
-}
-
-function normalizeFetchResponse(value: unknown): Response | undefined {
-	if (value instanceof globalThis.Response) return value;
-	if (Object.prototype.toString.call(value) !== '[object Response]') return undefined;
-	if (typeof value !== 'object' || value === null) return undefined;
-	try {
-		const response = value as Response;
-		if (
-			!Number.isInteger(response.status) ||
-			response.status < 200 ||
-			response.status > 599 ||
-			typeof response.statusText !== 'string' ||
-			typeof response.headers?.entries !== 'function' ||
-			(response.body !== null && typeof response.body !== 'object')
-		) {
-			return undefined;
-		}
-		return new globalThis.Response(response.body, {
-			status: response.status,
-			statusText: response.statusText,
-			headers: new globalThis.Headers(response.headers),
-		});
-	} catch {
-		return undefined;
-	}
-}
-
-function isJsonValue(value: unknown, seen = new Set<object>()): value is JsonValue {
-	if (value === null || typeof value === 'boolean' || typeof value === 'string') return true;
-	if (typeof value === 'number') return Number.isFinite(value);
-	if (typeof value !== 'object') return false;
-	if (seen.has(value)) return false;
-	if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype) return false;
-	seen.add(value);
-	try {
-		return Array.isArray(value)
-			? value.every((item) => isJsonValue(item, seen))
-			: Object.values(value).every((item) => isJsonValue(item, seen));
-	} finally {
-		seen.delete(value);
-	}
 }
 
 async function readBody(request: Request, bodyLimit: number): Promise<Uint8Array | undefined> {
@@ -379,30 +241,6 @@ function parseForm(body: Uint8Array): URLSearchParams | undefined {
 	} catch {
 		return undefined;
 	}
-}
-
-function readRequiredFormValue(
-	form: URLSearchParams,
-	key: string,
-	allowEmpty = false,
-): string | undefined {
-	const values = form.getAll(key);
-	if (values.length !== 1) return undefined;
-	const value = values[0];
-	if (value === undefined || (!allowEmpty && value.length === 0)) return undefined;
-	return value;
-}
-
-function readOptionalFormBoolean(
-	form: URLSearchParams,
-	key: string,
-): boolean | undefined | null {
-	const values = form.getAll(key);
-	if (values.length === 0) return undefined;
-	if (values.length !== 1) return null;
-	if (values[0] === 'true') return true;
-	if (values[0] === 'false') return false;
-	return null;
 }
 
 function formToRecord(form: URLSearchParams): Record<string, string | string[]> {
