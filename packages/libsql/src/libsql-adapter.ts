@@ -347,7 +347,6 @@ async function ensureTables(runner: LibsqlRunner): Promise<void> {
 				path TEXT PRIMARY KEY,
 				identity_json TEXT NOT NULL,
 				next_offset INTEGER NOT NULL DEFAULT 0,
-				closed INTEGER NOT NULL DEFAULT 0,
 				producer_id TEXT,
 				producer_epoch INTEGER NOT NULL DEFAULT 0,
 				next_producer_sequence INTEGER NOT NULL DEFAULT 0,

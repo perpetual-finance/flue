@@ -12,7 +12,6 @@ Flue uses Durable Streams offsets for agent conversations and workflow-run event
 | --- | --- |
 | `GET /agents/:name/:id?view=history` | Read one materialized agent conversation snapshot. |
 | `GET /agents/:name/:id?view=updates&offset=...` | Read conversation updates after an offset. |
-| `GET /agents/:name/:id?view=activity&offset=...` | Read raw canonical activity after an offset. |
 | `HEAD /agents/:name/:id` | Read agent stream metadata. |
 | `GET /runs/:runId` | Read workflow-run events. |
 | `HEAD /runs/:runId` | Read workflow-run stream metadata. |
@@ -52,17 +51,17 @@ One agent offset identifies one atomic canonical record batch. SDK stream checkp
 | --- | --- |
 | `Stream-Next-Offset` | Offset to use for the next read. |
 | `Stream-Up-To-Date` | `true` when the read reached the current tail. |
-| `Stream-Closed` | `true` when no more records can arrive. |
+| `Stream-Closed` | Workflow event streams only: `true` when no more events can arrive. |
 | `Stream-Cursor` | Cursor for long-poll continuation. |
 
-Catch-up responses use `Cache-Control: no-store`; SSE uses `Cache-Control: no-cache`.
+Canonical agent conversation streams remain open and do not emit `Stream-Closed`. Catch-up responses use `Cache-Control: no-store`; SSE uses `Cache-Control: no-cache`.
 
 ## SSE framing
 
 SSE responses contain:
 
 - `event: data` frames with a JSON array of updates or events;
-- `event: control` frames with `streamNextOffset` and optional `upToDate` or `streamClosed` fields;
+- `event: control` frames with `streamNextOffset` and optional `upToDate`; workflow event streams may also include `streamClosed`;
 - heartbeat comments on idle connections.
 
 Track `streamNextOffset` from control frames to resume after a disconnect.

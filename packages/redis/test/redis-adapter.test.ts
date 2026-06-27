@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { createAttachmentRef, PersistedSchemaVersionError } from '@flue/runtime/adapter';
+import { PersistedSchemaVersionError } from '@flue/runtime/adapter';
 import {
 	defineAttachmentStoreContractTests,
 	defineConversationStreamStoreContractTests,
@@ -121,46 +121,6 @@ function dispatchInput(dispatchId = 'dispatch-1') {
 		acceptedAt: '2026-06-03T00:00:00.000Z',
 	};
 }
-
-describeRedis('RedisAttachmentStore', () => {
-	it('does not retain an old conversation index when an instance is deleted and recreated', async () => {
-		const stores = await createHarness();
-		const store = stores.attachmentStore;
-		const streamPath = 'agents/assistant/agent-1';
-		const bytes = Uint8Array.from([0, 255, 128, 1]);
-		const attachment = await createAttachmentRef({ id: 'attachment-1', mimeType: 'application/octet-stream', bytes });
-		await store.put({ streamPath, attachment, bytes, owner: { kind: 'conversation', conversationId: 'conversation-1' } });
-
-		await store.deleteForInstance(streamPath);
-		if (!harness) throw new Error('Expected Redis harness.');
-		const encodedPath = Buffer.from(streamPath).toString('base64url');
-		const encodedConversation = Buffer.from('conversation-1').toString('base64url');
-		await expect(harness.client.exists(`${harness.prefix}:conversation-attachments:${encodedPath}:${encodedConversation}`)).resolves.toBe(0);
-		await store.put({ streamPath, attachment, bytes, owner: { kind: 'conversation', conversationId: 'conversation-2' } });
-
-		await expect(store.listForConversation({ streamPath, conversationId: 'conversation-1' })).resolves.toEqual([]);
-		await expect(store.listForConversation({ streamPath, conversationId: 'conversation-2' })).resolves.toEqual([attachment]);
-		await expect(store.get({ streamPath, conversationId: 'conversation-2', attachmentId: attachment.id })).resolves.toEqual({ attachment, bytes });
-		await cleanupHarness();
-	});
-
-	it('does not expose an attachment through a stale conversation index', async () => {
-		const stores = await createHarness();
-		const store = stores.attachmentStore;
-		const streamPath = 'agents/assistant/agent-1';
-		const bytes = Uint8Array.from([7, 0, 255]);
-		const attachment = await createAttachmentRef({ id: 'attachment-1', mimeType: 'application/octet-stream', bytes });
-		await store.put({ streamPath, attachment, bytes, owner: { kind: 'conversation', conversationId: 'conversation-2' } });
-		const encodedPath = Buffer.from(streamPath).toString('base64url');
-		const encodedConversation = Buffer.from('conversation-1').toString('base64url');
-		if (!harness) throw new Error('Expected Redis harness.');
-		await harness.client.sAdd(`${harness.prefix}:conversation-attachments:${encodedPath}:${encodedConversation}`, attachment.id);
-
-		await expect(store.listForConversation({ streamPath, conversationId: 'conversation-1' })).resolves.toEqual([]);
-		await expect(store.listForConversation({ streamPath, conversationId: 'conversation-2' })).resolves.toEqual([attachment]);
-		await cleanupHarness();
-	});
-});
 
 describeRedis('redis() concurrency', () => {
 	it('allows one same-submission claim when independent adapters race', async () => {

@@ -313,7 +313,6 @@ async function ensureTables(runner: PostgresRunner): Promise<void> {
 				path TEXT PRIMARY KEY,
 				identity_json TEXT NOT NULL,
 				next_offset BIGINT NOT NULL DEFAULT 0,
-				closed BOOLEAN NOT NULL DEFAULT FALSE,
 				producer_id TEXT,
 				producer_epoch BIGINT NOT NULL DEFAULT 0,
 				next_producer_sequence BIGINT NOT NULL DEFAULT 0,

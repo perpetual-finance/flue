@@ -205,18 +205,6 @@ export function defineAttachmentStoreContractTests(
 			})).rejects.toBeInstanceOf(AttachmentConflictError);
 		});
 
-		it('lists only one conversation attachments', async () => {
-			const store = await backend.create();
-			const firstBytes = Uint8Array.from([1]);
-			const secondBytes = Uint8Array.from([2]);
-			const first = await createAttachmentRef({ id: 'attachment-1', mimeType: 'image/png', bytes: firstBytes });
-			const second = await createAttachmentRef({ id: 'attachment-2', mimeType: 'image/png', bytes: secondBytes });
-			await store.put({ streamPath: 'agents/assistant/agent-1', attachment: first, bytes: firstBytes, owner: { kind: 'conversation', conversationId: 'conversation-1' } });
-			await store.put({ streamPath: 'agents/assistant/agent-1', attachment: second, bytes: secondBytes, owner: { kind: 'conversation', conversationId: 'conversation-2' } });
-
-			await expect(store.listForConversation({ streamPath: 'agents/assistant/agent-1', conversationId: 'conversation-1' })).resolves.toEqual([first]);
-		});
-
 		it('deletes every attachment when an instance is erased', async () => {
 			const store = await backend.create();
 			const bytes = Uint8Array.from([1]);

@@ -35,9 +35,8 @@ export async function handleAgentConversationRead(options: {
 	const view = url.searchParams.get('view') ?? 'history';
 	if (view === 'history') return historyResponse(options, selectorFrom(url));
 	if (view === 'updates') return updatesResponse(options, selectorFrom(url));
-	if (view === 'activity') return activityResponse(options, selectorFrom(url));
 	return errorResponse(
-		new InvalidRequestError({ reason: 'Invalid agent conversation view. Use history, updates, or activity.' }),
+		new InvalidRequestError({ reason: 'Invalid agent conversation view. Use history or updates.' }),
 	);
 }
 
@@ -53,7 +52,6 @@ export async function handleAgentConversationHead(
 			'cache-control': 'no-store',
 			'Stream-Next-Offset': meta.nextOffset,
 			'Stream-Up-To-Date': 'true',
-			...(meta.closed ? { 'Stream-Closed': 'true' } : {}),
 			...SECURITY_HEADERS,
 		},
 	});
@@ -110,7 +108,7 @@ async function updatesResponse(
 	const meta = await options.store.getMeta(options.path);
 	if (!meta) return errorResponse(new StreamNotFoundError({ path: options.path }));
 	if (live === 'sse') {
-		return sseResponse(options.store, options.path, offset, selector, options.request.signal, false);
+		return sseResponse(options.store, options.path, offset, selector, options.request.signal);
 	}
 	let state = await loadReducedConversationPrefix({
 		store: options.store,
@@ -118,49 +116,13 @@ async function updatesResponse(
 		offset,
 	});
 	let read = await options.store.read(options.path, { offset });
-	if (live === 'long-poll' && read.batches.length === 0 && !read.closed) {
+	if (live === 'long-poll' && read.batches.length === 0) {
 		const waited = await waitForData(options.store, options.path, offset, options.request.signal);
 		if (waited === 'aborted') return new Response(null, { status: 499, headers: SECURITY_HEADERS });
 		read = waited;
 	}
-	const projected = projectRead(state, read, selector, false);
+	const projected = projectRead(state, read, selector);
 	state = projected.state;
-	return dsJsonResponse(projected.items, read, projected.offset);
-}
-
-async function activityResponse(
-	options: {
-		store: ConversationStreamStore;
-		path: string;
-		request: Request;
-	},
-	selector: AgentConversationSelector,
-): Promise<Response> {
-	const url = new URL(options.request.url);
-	if (url.searchParams.has('tail')) {
-		return errorResponse(new InvalidRequestError({ reason: 'Activity streams do not accept tail.' }));
-	}
-	const offset = singleOffset(url);
-	if (offset instanceof Response) return offset;
-	const live = liveMode(url);
-	if (live instanceof Response) return live;
-	const meta = await options.store.getMeta(options.path);
-	if (!meta) return errorResponse(new StreamNotFoundError({ path: options.path }));
-	if (live === 'sse') {
-		return sseResponse(options.store, options.path, offset, selector, options.request.signal, true);
-	}
-	const state = await loadReducedConversationPrefix({
-		store: options.store,
-		path: options.path,
-		offset,
-	});
-	let read = await options.store.read(options.path, { offset });
-	if (live === 'long-poll' && read.batches.length === 0 && !read.closed) {
-		const waited = await waitForData(options.store, options.path, offset, options.request.signal);
-		if (waited === 'aborted') return new Response(null, { status: 499, headers: SECURITY_HEADERS });
-		read = waited;
-	}
-	const projected = projectRead(state, read, selector, true);
 	return dsJsonResponse(projected.items, read, projected.offset);
 }
 
@@ -168,7 +130,6 @@ function projectRead(
 	initialState: Awaited<ReturnType<typeof loadReducedConversationPrefix>>,
 	read: ConversationStreamReadResult,
 	selector: AgentConversationSelector,
-	raw: boolean,
 ) {
 	let state = initialState;
 	const items: unknown[] = [];
@@ -177,21 +138,12 @@ function projectRead(
 		const previousState = state;
 		state = reduceConversationRecords(state, batch.records, batch.offset);
 		items.push(
-			...(raw
-				? batch.records
-						.filter(
-							(record) =>
-								record.conversationId ===
-								(projectAgentConversationSnapshot(state, selector)?.conversationId ??
-									projectAgentConversationSnapshot(previousState, selector)?.conversationId),
-						)
-						.map((record) => ({ v: 1, type: 'conversation_activity', record }))
-				: projectAgentConversationBatch({
-						state,
-						previousState,
-						selector,
-						records: batch.records,
-					})),
+			...projectAgentConversationBatch({
+				state,
+				previousState,
+				selector,
+				records: batch.records,
+			}),
 		);
 		offset = batch.offset;
 	}
@@ -208,7 +160,6 @@ function dsJsonResponse(
 			'cache-control': 'no-store',
 			'Stream-Next-Offset': offset,
 			...(read.upToDate ? { 'Stream-Up-To-Date': 'true' } : {}),
-			...(read.closed && read.upToDate ? { 'Stream-Closed': 'true' } : {}),
 			...SECURITY_HEADERS,
 		},
 	});
@@ -220,7 +171,6 @@ function sseResponse(
 	offset: string,
 	selector: AgentConversationSelector,
 	signal: AbortSignal,
-	raw: boolean,
 ): Response {
 	const encoder = new TextEncoder();
 	let active = true;
@@ -243,7 +193,7 @@ function sseResponse(
 			try {
 				while (active) {
 					const read = await store.read(path, { offset: currentOffset });
-					const projected = projectRead(state, read, selector, raw);
+					const projected = projectRead(state, read, selector);
 					state = projected.state;
 					if (projected.items.length > 0) {
 						controller.enqueue(
@@ -254,10 +204,8 @@ function sseResponse(
 					const control = {
 						streamNextOffset: currentOffset,
 						...(read.upToDate ? { upToDate: true } : {}),
-						...(read.closed && read.upToDate ? { streamClosed: true } : {}),
 					};
 					controller.enqueue(encoder.encode(`event: control\ndata:${JSON.stringify(control)}\n\n`));
-					if (read.closed && read.upToDate) break;
 					if (!read.upToDate) continue;
 					await new Promise<void>((resolve) => {
 						wake = resolve;
@@ -340,7 +288,7 @@ async function waitForData(
 			pending = false;
 			const read = await store.read(path, { offset });
 			if (signal.aborted) return 'aborted';
-			if (read.batches.length > 0 || read.closed || Date.now() >= deadline) return read;
+			if (read.batches.length > 0 || Date.now() >= deadline) return read;
 			if (pending) continue;
 			await new Promise<void>((resolve) => {
 				let timer: ReturnType<typeof setTimeout>;

@@ -50,10 +50,6 @@ export class MongoAttachmentStore implements AttachmentStore {
 		return { attachment: { ...record.attachment }, bytes: copyAttachmentBytes(record.bytes) };
 	}
 
-	async listForConversation(input: { streamPath: string; conversationId: string }): Promise<AttachmentRef[]> {
-		return (await this.collection(this.runner).find({ path: input.streamPath, ownerKind: 'conversation', ownerId: input.conversationId }, { sort: { attachmentId: 1 } })).map((row) => ({ id: String(row.attachmentId), mimeType: String(row.mimeType), size: Number(row.byteSize), digest: String(row.digest) }));
-	}
-
 	async deleteForInstance(streamPath: string): Promise<void> {
 		await this.collection(this.runner).deleteMany({ path: streamPath });
 	}

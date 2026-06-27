@@ -4,8 +4,6 @@ import { HttpClient, type HttpClientOptions, type RequestHeaders } from './http.
 export type { HttpClientOptions } from './http.ts';
 
 import {
-	type AgentConversationActivity,
-	type AgentConversationActivityOptions,
 	type AgentConversationHistoryOptions,
 	type AgentConversationSnapshot,
 	type AgentConversationUpdate,
@@ -91,11 +89,6 @@ export interface FlueClient {
 			id: string,
 			options: AgentConversationUpdateOptions,
 		): FlueEventStream<AgentConversationUpdate>;
-		activity(
-			name: string,
-			id: string,
-			options: AgentConversationActivityOptions,
-		): FlueEventStream<AgentConversationActivity>;
 	};
 	/** Workflow-run inspection and streaming APIs. */
 	runs: {
@@ -148,18 +141,6 @@ export function createFlueClient(options: CreateFlueClientOptions): FlueClient {
 					},
 					assertAgentConversationUpdate,
 				),
-			activity: (name, id, opts) =>
-				createFlueEventStream<AgentConversationActivity>(
-					{ live: opts.live, offset: opts.offset, signal: opts.signal, backoffOptions: opts.backoffOptions },
-					{
-						url: http.url(
-							`/agents/${encodeURIComponent(name)}/${encodeURIComponent(id)}`,
-							conversationQuery('activity', opts),
-						),
-						fetch: http.fetchWithHeaders.bind(http),
-					},
-					assertConversationActivity,
-				),
 		},
 		runs: {
 			get: (runId) => http.json<RunRecord>({ path: `/runs/${encodeURIComponent(runId)}?meta` }),
@@ -209,7 +190,7 @@ export function createFlueClient(options: CreateFlueClientOptions): FlueClient {
 }
 
 function conversationQuery(
-	view: 'history' | 'updates' | 'activity',
+	view: 'history' | 'updates',
 	selector: { conversationId?: string; harness?: string; session?: string },
 ): Record<string, string | undefined> {
 	return {
@@ -218,13 +199,6 @@ function conversationQuery(
 		harness: selector.harness,
 		session: selector.session,
 	};
-}
-
-function assertConversationActivity(value: AgentConversationActivity): AgentConversationActivity {
-	if (!value || typeof value !== 'object' || value.v !== 1 || value.type !== 'conversation_activity') {
-		throw new TypeError('Unsupported agent conversation activity record.');
-	}
-	return value;
 }
 
 async function readJsonWithAbort<T>(

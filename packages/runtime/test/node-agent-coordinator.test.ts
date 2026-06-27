@@ -312,7 +312,6 @@ describe('NodeAgentCoordinator', () => {
 				},
 				read: conversationStreamStore.read.bind(conversationStreamStore),
 				getMeta: conversationStreamStore.getMeta.bind(conversationStreamStore),
-				close: conversationStreamStore.close.bind(conversationStreamStore),
 				delete: conversationStreamStore.delete.bind(conversationStreamStore),
 				subscribe: conversationStreamStore.subscribe.bind(conversationStreamStore),
 			};

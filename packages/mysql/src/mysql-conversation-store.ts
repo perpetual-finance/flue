@@ -51,9 +51,9 @@ export class MysqlConversationStreamStore implements ConversationStreamStore {
 	async acquireProducer(path: string, producerId: string) {
 		assertMysqlConversationStreamPath(path, 'acquire_producer');
 		return this.runner.transaction(async (tx) => {
-			const rows = await tx.query('SELECT next_offset, closed, producer_epoch, incarnation FROM flue_conversation_streams WHERE path = ? FOR UPDATE', [path]);
+			const rows = await tx.query('SELECT next_offset, producer_epoch, incarnation FROM flue_conversation_streams WHERE path = ? FOR UPDATE', [path]);
 			const row = rows[0];
-			if (!row || Number(row.closed) !== 0) throw failure(path, 'Stream does not exist or is closed.', 'acquire_producer');
+			if (!row) throw failure(path, 'Stream does not exist.', 'acquire_producer');
 			const producerEpoch = Number(row.producer_epoch) + 1;
 			await tx.query('UPDATE flue_conversation_streams SET producer_id = ?, producer_epoch = ?, next_producer_sequence = 0 WHERE path = ?', [producerId, producerEpoch, path]);
 			return {
@@ -72,7 +72,6 @@ export class MysqlConversationStreamStore implements ConversationStreamStore {
 		producerEpoch: number;
 		incarnation: string;
 		producerSequence: number;
-		expectedOffset?: string;
 		submission?: { submissionId: string; attemptId: string };
 		records: readonly ConversationRecord[];
 	}): Promise<{ offset: string }> {
@@ -81,12 +80,12 @@ export class MysqlConversationStreamStore implements ConversationStreamStore {
 		const data = JSON.stringify(input.records);
 		const result = await this.runner.transaction(async (tx) => {
 			const rows = await tx.query(
-				`SELECT next_offset, closed, producer_id, producer_epoch, next_producer_sequence, incarnation
+				`SELECT next_offset, producer_id, producer_epoch, next_producer_sequence, incarnation
 				 FROM flue_conversation_streams WHERE path = ? FOR UPDATE`,
 				[input.path],
 			);
 			const meta = rows[0];
-			if (!meta || Number(meta.closed) !== 0) throw failure(input.path, 'Stream does not exist or is closed.');
+			if (!meta) throw failure(input.path, 'Stream does not exist.');
 			if (meta.producer_id !== input.producerId || Number(meta.producer_epoch) !== input.producerEpoch || meta.incarnation !== input.incarnation) throw failure(input.path, 'Producer ownership is stale.');
 			const retries = await tx.query(
 				`SELECT seq, data, submission_id, attempt_id FROM flue_conversation_stream_batches
@@ -99,8 +98,6 @@ export class MysqlConversationStreamStore implements ConversationStreamStore {
 				return { offset: formatOffset(Number(retry.seq)), appended: false };
 			}
 			if (Number(meta.next_producer_sequence) !== input.producerSequence) throw failure(input.path, 'Producer sequence is not the next expected value.');
-			const head = formatOffset(Number(meta.next_offset) - 1);
-			if (input.expectedOffset !== undefined && input.expectedOffset !== head) throw failure(input.path, 'Expected stream head does not match the current head.');
 			await assertSubmissionAuthorization(tx.query, input.path, input.submission, input.records);
 			const seq = Number(meta.next_offset);
 			await tx.query(
@@ -119,38 +116,31 @@ export class MysqlConversationStreamStore implements ConversationStreamStore {
 	async read(path: string, options?: { offset?: string; limit?: number }): Promise<ConversationStreamReadResult> {
 		assertMysqlConversationStreamPath(path, 'read');
 		const meta = await this.getMeta(path);
-		if (!meta) return { batches: [], nextOffset: '-1', upToDate: true, closed: false };
+		if (!meta) return { batches: [], nextOffset: '-1', upToDate: true };
 		const rawOffset = options?.offset ?? '-1';
-		if (rawOffset === 'now') return { batches: [], nextOffset: meta.nextOffset, upToDate: true, closed: meta.closed };
+		if (rawOffset === 'now') return { batches: [], nextOffset: meta.nextOffset, upToDate: true };
 		const startAfter = parseOffset(rawOffset);
 		if (!Number.isSafeInteger(startAfter) || startAfter > parseOffset(meta.nextOffset)) throw failure(path, 'Read offset is beyond the canonical stream head.', 'read');
 		const limit = clampLimit(options?.limit, DEFAULT_READ_LIMIT, MAX_READ_LIMIT);
 		const rows = await this.runner.query(`SELECT seq, data FROM flue_conversation_stream_batches WHERE path = ? AND seq > ? ORDER BY seq ASC LIMIT ${limit + 1}`, [path, startAfter]);
 		const page = rows.slice(0, limit);
 		const batches = page.map((row) => ({ offset: formatOffset(Number(row.seq)), records: JSON.parse(String(row.data)) as ConversationRecord[] }));
-		return { batches, nextOffset: batches.at(-1)?.offset ?? formatOffset(startAfter), upToDate: rows.length <= limit, closed: meta.closed };
+		return { batches, nextOffset: batches.at(-1)?.offset ?? formatOffset(startAfter), upToDate: rows.length <= limit };
 	}
 
 	async getMeta(path: string): Promise<ConversationStreamMeta | null> {
 		assertMysqlConversationStreamPath(path, 'get_meta');
-		const rows = await this.runner.query('SELECT identity_json, next_offset, closed, producer_id, producer_epoch, next_producer_sequence, incarnation FROM flue_conversation_streams WHERE path = ?', [path]);
+		const rows = await this.runner.query('SELECT identity_json, next_offset, producer_id, producer_epoch, next_producer_sequence, incarnation FROM flue_conversation_streams WHERE path = ?', [path]);
 		const row = rows[0];
 		if (!row) return null;
 		return {
 			identity: JSON.parse(String(row.identity_json)) as ConversationStreamIdentity,
 			incarnation: String(row.incarnation),
 			nextOffset: formatOffset(Number(row.next_offset) - 1),
-			closed: Number(row.closed) !== 0,
 			producerId: row.producer_id == null ? null : String(row.producer_id),
 			producerEpoch: Number(row.producer_epoch),
 			nextProducerSequence: Number(row.next_producer_sequence),
 		};
-	}
-
-	async close(path: string): Promise<void> {
-		assertMysqlConversationStreamPath(path, 'close');
-		await this.runner.query('UPDATE flue_conversation_streams SET closed = 1 WHERE path = ?', [path]);
-		this.notify(path);
 	}
 
 	async delete(path: string): Promise<void> {

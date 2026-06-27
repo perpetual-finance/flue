@@ -28,14 +28,12 @@ export interface ConversationStreamReadResult {
 	batches: ConversationStreamBatch[];
 	nextOffset: string;
 	upToDate: boolean;
-	closed: boolean;
 }
 
 export interface ConversationStreamMeta {
 	identity: ConversationStreamIdentity;
 	incarnation: string;
 	nextOffset: string;
-	closed: boolean;
 	producerId: string | null;
 	producerEpoch: number;
 	nextProducerSequence: number;
@@ -50,7 +48,6 @@ export interface ConversationStreamStore {
 		producerEpoch: number;
 		incarnation: string;
 		producerSequence: number;
-		expectedOffset?: string;
 		submission?: { submissionId: string; attemptId: string };
 		records: readonly ConversationRecord[];
 	}): Promise<{ offset: string }>;
@@ -59,7 +56,6 @@ export interface ConversationStreamStore {
 		options?: { offset?: string; limit?: number },
 	): Promise<ConversationStreamReadResult>;
 	getMeta(path: string): Promise<ConversationStreamMeta | null>;
-	close(path: string): Promise<void>;
 	delete(path: string): Promise<void>;
 	subscribe(path: string, listener: () => void): () => void;
 }
@@ -69,7 +65,6 @@ CREATE TABLE IF NOT EXISTS flue_conversation_streams (
   path TEXT PRIMARY KEY,
   identity_json TEXT NOT NULL,
   next_offset INTEGER NOT NULL DEFAULT 0,
-  closed INTEGER NOT NULL DEFAULT 0,
   producer_id TEXT,
   producer_epoch INTEGER NOT NULL DEFAULT 0,
   next_producer_sequence INTEGER NOT NULL DEFAULT 0,
@@ -112,7 +107,6 @@ interface InMemoryConversationBatch extends ConversationStreamBatch {
 interface InMemoryConversationStream {
 	identity: ConversationStreamIdentity;
 	incarnation: string;
-	closed: boolean;
 	producerId: string | null;
 	producerEpoch: number;
 	nextProducerSequence: number;
@@ -137,7 +131,6 @@ export class InMemoryConversationStreamStore implements ConversationStreamStore 
 		this.streams.set(path, {
 			identity: { ...identity },
 			incarnation: crypto.randomUUID(),
-			closed: false,
 			producerId: null,
 			producerEpoch: 0,
 			nextProducerSequence: 0,
@@ -148,7 +141,6 @@ export class InMemoryConversationStreamStore implements ConversationStreamStore 
 	async acquireProducer(path: string, producerId: string): Promise<ConversationProducerClaim> {
 		const stream = this.streams.get(path);
 		if (!stream) this.fail('acquire_producer', path, 'Stream does not exist.');
-		if (stream.closed) this.fail('acquire_producer', path, 'Stream is closed.');
 		stream.producerId = producerId;
 		stream.producerEpoch += 1;
 		stream.nextProducerSequence = 0;
@@ -167,7 +159,6 @@ export class InMemoryConversationStreamStore implements ConversationStreamStore 
 		producerEpoch: number;
 		incarnation: string;
 		producerSequence: number;
-		expectedOffset?: string;
 		submission?: { submissionId: string; attemptId: string };
 		records: readonly ConversationRecord[];
 	}): Promise<{ offset: string }> {
@@ -175,7 +166,6 @@ export class InMemoryConversationStreamStore implements ConversationStreamStore 
 		const data = JSON.stringify(input.records);
 		const stream = this.streams.get(input.path);
 		if (!stream) this.fail('append', input.path, 'Stream does not exist.');
-		if (stream.closed) this.fail('append', input.path, 'Stream is closed.');
 		if (
 			stream.producerId !== input.producerId ||
 			stream.producerEpoch !== input.producerEpoch ||
@@ -202,10 +192,6 @@ export class InMemoryConversationStreamStore implements ConversationStreamStore 
 		if (stream.nextProducerSequence !== input.producerSequence) {
 			this.fail('append', input.path, 'Producer sequence is not the next expected value.');
 		}
-		const head = formatOffset(stream.batches.length - 1);
-		if (input.expectedOffset !== undefined && input.expectedOffset !== head) {
-			this.fail('append', input.path, 'Expected stream head does not match the current head.');
-		}
 		this.assertSubmissionOwnership(input.path, input.submission, input.records);
 		const offset = formatOffset(stream.batches.length);
 		stream.batches.push({
@@ -228,11 +214,11 @@ export class InMemoryConversationStreamStore implements ConversationStreamStore 
 		options?: { offset?: string; limit?: number },
 	): Promise<ConversationStreamReadResult> {
 		const stream = this.streams.get(path);
-		if (!stream) return { batches: [], nextOffset: '-1', upToDate: true, closed: false };
+		if (!stream) return { batches: [], nextOffset: '-1', upToDate: true };
 		const head = stream.batches.length - 1;
 		const rawOffset = options?.offset ?? '-1';
 		if (rawOffset === 'now') {
-			return { batches: [], nextOffset: formatOffset(head), upToDate: true, closed: stream.closed };
+			return { batches: [], nextOffset: formatOffset(head), upToDate: true };
 		}
 		const startAfter = parseOffset(rawOffset);
 		if (!Number.isSafeInteger(startAfter) || startAfter > head) {
@@ -247,7 +233,6 @@ export class InMemoryConversationStreamStore implements ConversationStreamStore 
 			})),
 			nextOffset: page.at(-1)?.offset ?? formatOffset(startAfter),
 			upToDate: startAfter + page.length >= head,
-			closed: stream.closed,
 		};
 	}
 
@@ -258,17 +243,10 @@ export class InMemoryConversationStreamStore implements ConversationStreamStore 
 			identity: { ...stream.identity },
 			incarnation: stream.incarnation,
 			nextOffset: formatOffset(stream.batches.length - 1),
-			closed: stream.closed,
 			producerId: stream.producerId,
 			producerEpoch: stream.producerEpoch,
 			nextProducerSequence: stream.nextProducerSequence,
 		};
-	}
-
-	async close(path: string): Promise<void> {
-		const stream = this.streams.get(path);
-		if (stream) stream.closed = true;
-		this.notify(path);
 	}
 
 	async delete(path: string): Promise<void> {
@@ -359,13 +337,13 @@ export class SqliteConversationStreamStore implements ConversationStreamStore {
 				.exec(
 					`UPDATE flue_conversation_streams
 					 SET producer_id = ?, producer_epoch = producer_epoch + 1, next_producer_sequence = 0
-					 WHERE path = ? AND closed = 0
+					 WHERE path = ?
 					 RETURNING producer_epoch, next_offset, incarnation`,
 					producerId,
 					path,
 				)
 				.toArray()[0];
-			if (!row) this.failForMissingOrClosed('acquire_producer', path);
+			if (!row) this.fail('acquire_producer', path, 'Stream does not exist.');
 			return {
 				producerId,
 				producerEpoch: row.producer_epoch as number,
@@ -382,7 +360,6 @@ export class SqliteConversationStreamStore implements ConversationStreamStore {
 		producerEpoch: number;
 		incarnation: string;
 		producerSequence: number;
-		expectedOffset?: string;
 		submission?: { submissionId: string; attemptId: string };
 		records: readonly ConversationRecord[];
 	}): Promise<{ offset: string }> {
@@ -391,13 +368,12 @@ export class SqliteConversationStreamStore implements ConversationStreamStore {
 		const result = this.runTransaction(() => {
 			const meta = this.sql
 				.exec(
-					`SELECT next_offset, closed, producer_id, producer_epoch, next_producer_sequence, incarnation
+					`SELECT next_offset, producer_id, producer_epoch, next_producer_sequence, incarnation
 					 FROM flue_conversation_streams WHERE path = ?`,
 					input.path,
 				)
 				.toArray()[0];
 			if (!meta) this.fail('append', input.path, 'Stream does not exist.');
-			if (meta.closed === 1) this.fail('append', input.path, 'Stream is closed.');
 			if (
 				meta.producer_id !== input.producerId ||
 				meta.producer_epoch !== input.producerEpoch ||
@@ -427,10 +403,6 @@ export class SqliteConversationStreamStore implements ConversationStreamStore {
 			}
 			if (meta.next_producer_sequence !== input.producerSequence) {
 				this.fail('append', input.path, 'Producer sequence is not the next expected value.');
-			}
-			const head = formatOffset((meta.next_offset as number) - 1);
-			if (input.expectedOffset !== undefined && input.expectedOffset !== head) {
-				this.fail('append', input.path, 'Expected stream head does not match the current head.');
 			}
 			this.assertSubmissionAuthorization(input.path, input.submission, input.records);
 			const seq = meta.next_offset as number;
@@ -464,10 +436,10 @@ export class SqliteConversationStreamStore implements ConversationStreamStore {
 		options?: { offset?: string; limit?: number },
 	): Promise<ConversationStreamReadResult> {
 		const meta = await this.getMeta(path);
-		if (!meta) return { batches: [], nextOffset: '-1', upToDate: true, closed: false };
+		if (!meta) return { batches: [], nextOffset: '-1', upToDate: true };
 		const rawOffset = options?.offset ?? '-1';
 		if (rawOffset === 'now') {
-			return { batches: [], nextOffset: meta.nextOffset, upToDate: true, closed: meta.closed };
+			return { batches: [], nextOffset: meta.nextOffset, upToDate: true };
 		}
 		const startAfter = parseOffset(rawOffset);
 		const head = parseOffset(meta.nextOffset);
@@ -493,14 +465,13 @@ export class SqliteConversationStreamStore implements ConversationStreamStore {
 			batches,
 			nextOffset: batches.at(-1)?.offset ?? formatOffset(startAfter),
 			upToDate: rows.length <= limit,
-			closed: meta.closed,
 		};
 	}
 
 	async getMeta(path: string): Promise<ConversationStreamMeta | null> {
 		const row = this.sql
 			.exec(
-				`SELECT identity_json, next_offset, closed, producer_id, producer_epoch, next_producer_sequence, incarnation
+				`SELECT identity_json, next_offset, producer_id, producer_epoch, next_producer_sequence, incarnation
 				 FROM flue_conversation_streams WHERE path = ?`,
 				path,
 			)
@@ -510,16 +481,10 @@ export class SqliteConversationStreamStore implements ConversationStreamStore {
 			identity: JSON.parse(row.identity_json as string) as ConversationStreamIdentity,
 			incarnation: row.incarnation as string,
 			nextOffset: formatOffset((row.next_offset as number) - 1),
-			closed: row.closed === 1,
 			producerId: (row.producer_id as string | null) ?? null,
 			producerEpoch: row.producer_epoch as number,
 			nextProducerSequence: row.next_producer_sequence as number,
 		};
-	}
-
-	async close(path: string): Promise<void> {
-		this.sql.exec('UPDATE flue_conversation_streams SET closed = 1 WHERE path = ?', path);
-		this.notify(path);
 	}
 
 	async delete(path: string): Promise<void> {
@@ -597,13 +562,6 @@ export class SqliteConversationStreamStore implements ConversationStreamStore {
 		) {
 			this.fail('append', path, 'Submission attempt no longer owns work for this agent instance.');
 		}
-	}
-
-	private failForMissingOrClosed(operation: string, path: string): never {
-		const row = this.sql
-			.exec('SELECT closed FROM flue_conversation_streams WHERE path = ?', path)
-			.toArray()[0];
-		this.fail(operation, path, row ? 'Stream is closed.' : 'Stream does not exist.');
 	}
 
 	private fail(operation: string, path: string, reason: string): never {

@@ -479,7 +479,7 @@ For agents, generated Cloudflare applications store one append-only canonical co
 
 Filesystem durability remains a separate decision. The default lightweight sandbox uses an in-memory filesystem and must not be treated as durable merely because conversation state is stored in a Durable Object. Use a durable workspace or container-backed integration when files or installed artifacts must survive later activity.
 
-Agent clients read materialized history, projected updates, or raw canonical activity at `GET /agents/:name/:id`; see the [Streaming Protocol](/docs/api/streaming-protocol/).
+Agent clients read materialized history or projected updates at `GET /agents/:name/:id`; see the [Streaming Protocol](/docs/api/streaming-protocol/).
 
 ## Interruption and recovery semantics
 

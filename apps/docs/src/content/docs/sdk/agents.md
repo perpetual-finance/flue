@@ -121,11 +121,3 @@ for await (const update of client.agents.updates('support', 'ticket-42', {
   state = reduceAgentConversationUpdate(state, update);
 }
 ```
-
-## `client.agents.activity(...)`
-
-```ts
-activity(name: string, id: string, options: AgentConversationActivityOptions): FlueEventStream<AgentConversationActivity>;
-```
-
-Reads raw canonical activity for diagnostics. Use `history()` and `updates()` for application conversation state.

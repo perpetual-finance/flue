@@ -1,4 +1,3 @@
-import type { AttachmentRef } from './conversation-records.ts';
 import { AttachmentConflictError, AttachmentIntegrityError } from './errors.ts';
 import {
 	type AttachmentOwner,
@@ -115,15 +114,6 @@ export class SqliteAttachmentStore implements AttachmentStore {
 		}
 		await verifyAttachmentBytes(row.attachment, row.bytes);
 		return { attachment: { ...row.attachment }, bytes: copyAttachmentBytes(row.bytes) };
-	}
-
-	async listForConversation(input: { streamPath: string; conversationId: string }): Promise<AttachmentRef[]> {
-		return this.sql.exec(
-			`SELECT attachment_id, mime_type, byte_size, digest FROM flue_attachments
-			 WHERE stream_path = ? AND owner_kind = 'conversation' AND owner_id = ? ORDER BY attachment_id`,
-			input.streamPath,
-			input.conversationId,
-		).toArray().map((row) => ({ id: String(row.attachment_id), mimeType: String(row.mime_type), size: Number(row.byte_size), digest: String(row.digest) }));
 	}
 
 	async deleteForInstance(streamPath: string): Promise<void> {

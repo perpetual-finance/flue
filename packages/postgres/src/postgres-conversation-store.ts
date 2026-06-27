@@ -39,12 +39,12 @@ export class PgConversationStreamStore implements ConversationStreamStore {
 			const rows = await tx.query(
 				`UPDATE flue_conversation_streams
 				 SET producer_id = $1, producer_epoch = producer_epoch + 1, next_producer_sequence = 0
-				 WHERE path = $2 AND closed = FALSE
+				 WHERE path = $2
 				 RETURNING producer_epoch, next_offset, incarnation`,
 				[producerId, path],
 			);
 			const row = rows[0];
-			if (!row) throw failure(path, 'Stream does not exist or is closed.', 'acquire_producer');
+			if (!row) throw failure(path, 'Stream does not exist.', 'acquire_producer');
 			return {
 				producerId,
 				producerEpoch: Number(row.producer_epoch),
@@ -61,7 +61,6 @@ export class PgConversationStreamStore implements ConversationStreamStore {
 		producerEpoch: number;
 		incarnation: string;
 		producerSequence: number;
-		expectedOffset?: string;
 		submission?: { submissionId: string; attemptId: string };
 		records: readonly ConversationRecord[];
 	}): Promise<{ offset: string }> {
@@ -69,12 +68,12 @@ export class PgConversationStreamStore implements ConversationStreamStore {
 		const data = JSON.stringify(input.records);
 		const result = await this.runner.transaction(async (tx) => {
 			const rows = await tx.query(
-				`SELECT next_offset, closed, producer_id, producer_epoch, next_producer_sequence, incarnation
+				`SELECT next_offset, producer_id, producer_epoch, next_producer_sequence, incarnation
 				 FROM flue_conversation_streams WHERE path = $1 FOR UPDATE`,
 				[input.path],
 			);
 			const meta = rows[0];
-			if (!meta || meta.closed) throw failure(input.path, 'Stream does not exist or is closed.');
+			if (!meta) throw failure(input.path, 'Stream does not exist.');
 			if (
 				meta.producer_id !== input.producerId ||
 				Number(meta.producer_epoch) !== input.producerEpoch ||
@@ -100,10 +99,6 @@ export class PgConversationStreamStore implements ConversationStreamStore {
 			}
 			if (Number(meta.next_producer_sequence) !== input.producerSequence) {
 				throw failure(input.path, 'Producer sequence is not the next expected value.');
-			}
-			const head = formatOffset(Number(meta.next_offset) - 1);
-			if (input.expectedOffset !== undefined && input.expectedOffset !== head) {
-				throw failure(input.path, 'Expected stream head does not match the current head.');
 			}
 			await assertSubmissionAuthorization(tx.query, input.path, input.submission, input.records);
 			const seq = Number(meta.next_offset);
@@ -136,9 +131,9 @@ export class PgConversationStreamStore implements ConversationStreamStore {
 
 	async read(path: string, options?: { offset?: string; limit?: number }): Promise<ConversationStreamReadResult> {
 		const meta = await this.getMeta(path);
-		if (!meta) return { batches: [], nextOffset: '-1', upToDate: true, closed: false };
+		if (!meta) return { batches: [], nextOffset: '-1', upToDate: true };
 		const rawOffset = options?.offset ?? '-1';
-		if (rawOffset === 'now') return { batches: [], nextOffset: meta.nextOffset, upToDate: true, closed: meta.closed };
+		if (rawOffset === 'now') return { batches: [], nextOffset: meta.nextOffset, upToDate: true };
 		const startAfter = parseOffset(rawOffset);
 		if (!Number.isSafeInteger(startAfter) || startAfter > parseOffset(meta.nextOffset)) {
 			throw failure(path, 'Read offset is beyond the canonical stream head.', 'read');
@@ -158,13 +153,12 @@ export class PgConversationStreamStore implements ConversationStreamStore {
 			batches,
 			nextOffset: batches.at(-1)?.offset ?? formatOffset(startAfter),
 			upToDate: rows.length <= limit,
-			closed: meta.closed,
 		};
 	}
 
 	async getMeta(path: string): Promise<ConversationStreamMeta | null> {
 		const rows = await this.runner.query(
-			`SELECT identity_json, next_offset, closed, producer_id, producer_epoch, next_producer_sequence, incarnation
+			`SELECT identity_json, next_offset, producer_id, producer_epoch, next_producer_sequence, incarnation
 			 FROM flue_conversation_streams WHERE path = $1`,
 			[path],
 		);
@@ -174,16 +168,10 @@ export class PgConversationStreamStore implements ConversationStreamStore {
 			identity: JSON.parse(String(row.identity_json)) as ConversationStreamIdentity,
 			incarnation: String(row.incarnation),
 			nextOffset: formatOffset(Number(row.next_offset) - 1),
-			closed: Boolean(row.closed),
 			producerId: row.producer_id == null ? null : String(row.producer_id),
 			producerEpoch: Number(row.producer_epoch),
 			nextProducerSequence: Number(row.next_producer_sequence),
 		};
-	}
-
-	async close(path: string): Promise<void> {
-		await this.runner.query('UPDATE flue_conversation_streams SET closed = TRUE WHERE path = $1', [path]);
-		this.notify(path);
 	}
 
 	async delete(path: string): Promise<void> {

@@ -523,10 +523,8 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	private scopeSignal: AbortSignal | undefined;
 	private onClose: (() => void) | undefined;
 	private submissionStore: AgentSubmissionStore | undefined;
-	private agentLoopMessageCheckpointCursor = 0;
 	private activeJournalCallbacks: ProcessAgentSubmissionOptions['journal'] | undefined;
 	private activeTimeoutAt: number | undefined;
-	private activeTurnCanCommitJournal = false;
 	private activeSubmissionId: string | undefined;
 	private activeSubmissionAttemptId: string | undefined;
 	private conversationWriter: ConversationRecordWriter;
@@ -744,7 +742,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			sessionId: this.affinityKey,
 		});
 
-		this.agentLoopMessageCheckpointCursor = this.agentLoop.state.messages.length;
 		this.eventCallback = options.onAgentEvent;
 		this.agentLoop.subscribe(async (event) => {
 			switch (event.type) {
@@ -753,7 +750,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					break;
 				case 'turn_start':
 					this.activeTurnId ??= generateTurnId();
-					this.activeTurnCanCommitJournal = false;
 					this.emit({ type: 'turn_start', turnId: this.activeTurnId, purpose: 'agent' });
 					break;
 				case 'message_start': {
@@ -890,7 +886,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 							(content) => content.type === 'toolCall',
 						);
 						if (toolCalls.length > 0) {
-							await this.checkpointHarnessMessages();
 							await this.activeJournalCallbacks?.toolRequestRecorded?.({
 								operationId: this.activeOperationId ?? generateOperationId(),
 								turnId: this.activeTurnId ?? generateTurnId(),
@@ -899,7 +894,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 							});
 						}
 					}
-					if (event.message.role === 'user') await this.checkpointHarnessMessages();
 					this.emit({ type: 'message_end', message: event.message, turnId });
 					break;
 				}
@@ -984,7 +978,13 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				}
 				case 'turn_end': {
 					const turnId = this.activeTurnId ?? generateTurnId();
-					if (event.toolResults.length > 0 && this.conversationWriter) {
+					const message = event.message;
+					const assistant =
+						message.role === 'assistant' ? (message as AssistantMessage) : undefined;
+					const turnInterrupted =
+						assistant?.stopReason === 'aborted' || assistant?.stopReason === 'error';
+					const committedToolResults = event.toolResults.length > 0;
+					if (committedToolResults) {
 						const parentId = this.canonicalToolResultParentId ?? await this.conversationWriter.getConversationLeaf(this.conversationId);
 						if (!parentId) throw new Error('[flue] Canonical tool results have no assistant parent.');
 						const assistantMessageId = this.canonicalToolRequestMessageId;
@@ -1016,14 +1016,25 @@ export class Session implements FlueSession, AgentSubmissionSession {
 						}
 						this.canonicalToolResultParentId = toolResultEntryId(assistantMessageId, finalToolResult.toolCallId);
 						this.canonicalToolRequestMessageId = undefined;
+						if (!turnInterrupted) {
+							await this.activeJournalCallbacks?.checkpointReady?.({
+								operationId: this.activeOperationId ?? generateOperationId(),
+								turnId,
+								checkpointLeafId: this.canonicalToolResultParentId,
+							});
+						}
+					} else if (assistant && !turnInterrupted) {
+						const committedLeafId = await this.conversationWriter.getConversationLeaf(this.conversationId);
+						if (!committedLeafId) {
+							throw new Error('[flue] Invariant: committed leaf ID is null after completing a turn.');
+						}
+						await this.activeJournalCallbacks?.committed?.({
+							operationId: this.activeOperationId ?? generateOperationId(),
+							turnId,
+							checkpointLeafId: committedLeafId,
+							committedLeafId,
+						});
 					}
-					const message = event.message;
-					const assistant =
-						message.role === 'assistant' ? (message as AssistantMessage) : undefined;
-					const turnInterrupted =
-						assistant?.stopReason === 'aborted' || assistant?.stopReason === 'error';
-					this.activeTurnCanCommitJournal = !turnInterrupted;
-					await this.checkpointHarnessMessages();
 					this.emit({
 						type: 'turn_messages',
 						turnId,
@@ -1035,7 +1046,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					break;
 				}
 				case 'agent_end':
-					await this.checkpointHarnessMessages();
 					this.emit({ type: 'agent_end', messages: event.messages });
 					this.activeTurnId = undefined;
 					break;
@@ -2514,40 +2524,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			},
 		});
 		this.agentLoop.state.messages = messages;
-		this.agentLoopMessageCheckpointCursor = messages.length;
 	}
-
-	private async checkpointHarnessMessages(): Promise<void> {
-		const messages = this.agentLoop.state.messages.slice(
-			this.agentLoopMessageCheckpointCursor,
-		) as AgentMessage[];
-		if (messages.length === 0) return;
-		this.agentLoopMessageCheckpointCursor = this.agentLoop.state.messages.length;
-		if (this.activeTurnCanCommitJournal) {
-			const leafId = await this.conversationWriter.getConversationLeaf(this.conversationId);
-			if (!leafId) {
-				throw new Error('[flue] Invariant: checkpoint leaf ID is null after saving messages.');
-			}
-			const latest = messages.at(-1);
-			const turnEndedWithToolResult = latest?.role === 'toolResult';
-			if (turnEndedWithToolResult) {
-				await this.activeJournalCallbacks?.checkpointReady?.({
-					operationId: this.activeOperationId ?? generateOperationId(),
-					turnId: this.activeTurnId ?? generateTurnId(),
-					checkpointLeafId: leafId,
-				});
-			} else {
-				await this.activeJournalCallbacks?.committed?.({
-					operationId: this.activeOperationId ?? generateOperationId(),
-					turnId: this.activeTurnId ?? generateTurnId(),
-					checkpointLeafId: leafId,
-					committedLeafId: leafId,
-				});
-			}
-			this.activeTurnCanCommitJournal = false;
-		}
-	}
-
 
 	// ─── Model-turn recovery and compaction ───────────────────────────────────
 
@@ -2661,7 +2638,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			try {
 				await start();
 				await this.agentLoop.waitForIdle();
-				await this.checkpointHarnessMessages();
 			} catch (error) {
 				await this.rebuildCanonicalContext();
 				throw error;
@@ -3254,7 +3230,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				if (projectedPrompt?.role !== 'user') {
 					throw new Error('[flue] Canonical prompt projection is missing its user message.');
 				}
-				this.agentLoopMessageCheckpointCursor = this.agentLoop.state.messages.length;
 				const projectedContent = Array.isArray(projectedPrompt.content)
 					? projectedPrompt.content
 					: [{ type: 'text' as const, text: projectedPrompt.content }];

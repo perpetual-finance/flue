@@ -40,11 +40,6 @@ export class MysqlAttachmentStore implements AttachmentStore {
 		return { attachment: { ...record.attachment }, bytes: copyAttachmentBytes(record.bytes) };
 	}
 
-	async listForConversation(input: { streamPath: string; conversationId: string }): Promise<AttachmentRef[]> {
-		assertMysqlConversationStreamPath(input.streamPath, 'list_attachments');
-		return (await this.runner.query(`SELECT attachment_id, mime_type, byte_size, digest FROM flue_attachments WHERE stream_path = ? AND owner_kind = 'conversation' AND owner_id = ? ORDER BY attachment_id`, [input.streamPath, input.conversationId])).map((row) => ({ id: String(row.attachment_id), mimeType: String(row.mime_type), size: Number(row.byte_size), digest: String(row.digest) }));
-	}
-
 	async deleteForInstance(streamPath: string): Promise<void> {
 		assertMysqlConversationStreamPath(streamPath, 'delete_attachments');
 		await this.runner.query('DELETE FROM flue_attachments WHERE stream_path = ?', [streamPath]);

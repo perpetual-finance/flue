@@ -81,7 +81,6 @@ interface ConversationStreamStore {
   append(input: ConversationAppendInput): Promise<{ offset: string }>;
   read(path: string, options?: { offset?: string; limit?: number }): Promise<ConversationStreamReadResult>;
   getMeta(path: string): Promise<ConversationStreamMeta | null>;
-  close(path: string): Promise<void>;
   delete(path: string): Promise<void>;
   subscribe(path: string, listener: () => void): () => void;
 }
@@ -89,7 +88,7 @@ interface ConversationStreamStore {
 
 This append-only, per-agent-instance stream is the sole canonical transcript. It contains records for all sessions in that instance and preserves their history for the instance lifetime. Adapters must not model a second authoritative transcript in session rows, snapshots, or event streams.
 
-Producer claims fence stale writers. Appends preserve producer sequence and expected-offset invariants, and reads return durable resume offsets. `delete(path)` is a low-level whole-instance primitive; its presence does not promise a public retention or deletion workflow.
+Producer claims fence stale writers. Appends preserve producer sequence invariants, and reads return durable resume offsets. `delete(path)` is a low-level whole-instance primitive; its presence does not promise a public retention or deletion workflow.
 
 Canonical state is reconstructed by replaying the conversation stream from its beginning. Replay acceleration and compaction of this persisted log are deferred; adapters should not invent a second transcript or cache contract.
 
@@ -100,7 +99,6 @@ interface AttachmentStore {
   put(input: PutAttachmentInput): Promise<void>;
   get(input: GetAttachmentInput): Promise<StoredAttachment | null>;
   bindSubmissionAttachment(input: BindSubmissionAttachmentInput): Promise<void>;
-  listForConversation(input: { streamPath: string; conversationId: string }): Promise<AttachmentRef[]>;
   deleteForInstance(streamPath: string): Promise<void>;
 }
 ```

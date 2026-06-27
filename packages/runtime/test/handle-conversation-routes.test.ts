@@ -151,7 +151,6 @@ describe('handleAgentConversationRead()', () => {
 			append: base.append.bind(base),
 			read: base.read.bind(base),
 			getMeta: base.getMeta.bind(base),
-			close: base.close.bind(base),
 			delete: base.delete.bind(base),
 			subscribe(streamPath, listener) {
 				const unsubscribe = base.subscribe(streamPath, listener);
@@ -182,56 +181,6 @@ describe('handleAgentConversationRead()', () => {
 		const updates = await response.json();
 
 		expect(updates).toMatchObject([{ type: 'conversation_record', record: { id: 'user-1' } }]);
-		await adapter.close?.();
-	});
-
-	it('filters activity by session while advancing across other conversation records', async () => {
-		const { adapter, stores, path, append } = await setup();
-		const first = await append([
-			{
-				...scope,
-				id: 'created-1',
-				type: 'conversation_created',
-				kind: 'root',
-				affinityKey: 'affinity-1',
-				createdAt: scope.timestamp,
-			},
-		]);
-		await append([
-			{
-				...scope,
-				id: 'created-2',
-				type: 'conversation_created',
-				kind: 'root',
-				conversationId: 'conversation-2',
-				session: 'other',
-				affinityKey: 'affinity-2',
-				createdAt: scope.timestamp,
-			},
-		]);
-		const tail = await append([
-			{
-				...scope,
-				id: 'user-1',
-				type: 'user_message',
-				messageId: 'entry_user',
-				parentId: null,
-				content: [{ type: 'text', text: 'hello' }],
-			},
-		]);
-
-		const response = await handleAgentConversationRead({
-			store: stores.conversationStreamStore,
-			path,
-			request: new Request(
-				`https://flue.test/agents/assistant/instance-1?view=activity&session=default&offset=${encodeURIComponent(first)}`,
-			),
-		});
-
-		expect(await response.json()).toMatchObject([
-			{ type: 'conversation_activity', record: { id: 'user-1' } },
-		]);
-		expect(response.headers.get('Stream-Next-Offset')).toBe(tail);
 		await adapter.close?.();
 	});
 

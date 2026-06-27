@@ -117,14 +117,6 @@ export interface AgentConversationUpdateOptions extends AgentConversationSelecto
 	backoffOptions?: BackoffOptions;
 }
 
-export interface AgentConversationActivity {
-	v: 1;
-	type: 'conversation_activity';
-	record: CanonicalConversationRecord;
-}
-
-export type AgentConversationActivityOptions = AgentConversationUpdateOptions;
-
 export interface AgentConversationState {
 	conversationId: string;
 	messages: AgentConversationMessage[];

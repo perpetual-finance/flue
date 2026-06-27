@@ -54,6 +54,4 @@ export class RedisKeys {
 	conversations = () => this.key('conversations');
 	attachment = (path: string, attachmentId: string) => this.encoded('attachment', path, attachmentId);
 	attachments = (path: string) => this.encoded('attachments', path);
-	conversationAttachmentIndexes = (path: string) => this.encoded('conversation-attachment-indexes', path);
-	conversationAttachments = (path: string, conversationId: string) => this.encoded('conversation-attachments', path, conversationId);
 }

@@ -35,7 +35,6 @@ describe('ConversationRecordWriter', () => {
 			},
 			read: base.read.bind(base),
 			getMeta: base.getMeta.bind(base),
-			close: base.close.bind(base),
 			delete: base.delete.bind(base),
 			subscribe: base.subscribe.bind(base),
 		};
@@ -85,7 +84,6 @@ describe('ConversationRecordWriter', () => {
 			},
 			read: base.read.bind(base),
 			getMeta: base.getMeta.bind(base),
-			close: base.close.bind(base),
 			delete: base.delete.bind(base),
 			subscribe: base.subscribe.bind(base),
 		};
@@ -129,7 +127,6 @@ describe('ConversationRecordWriter', () => {
 			},
 			read: base.read.bind(base),
 			getMeta: base.getMeta.bind(base),
-			close: base.close.bind(base),
 			delete: base.delete.bind(base),
 			subscribe: base.subscribe.bind(base),
 		};

@@ -21,8 +21,6 @@ export type {
 export { createFlueClient } from './client.ts';
 export { FlueApiError } from './http.ts';
 export type {
-	AgentConversationActivity,
-	AgentConversationActivityOptions,
 	AgentConversationDataPart,
 	AgentConversationDeltaState,
 	AgentConversationHistoryOptions,

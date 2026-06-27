@@ -34,7 +34,6 @@ export interface AttachmentStore {
 	put(input: PutAttachmentInput): Promise<void>;
 	get(input: GetAttachmentInput): Promise<StoredAttachment | null>;
 	bindSubmissionAttachment(input: BindSubmissionAttachmentInput): Promise<void>;
-	listForConversation(input: { streamPath: string; conversationId: string }): Promise<AttachmentRef[]>;
 	deleteForInstance(streamPath: string): Promise<void>;
 }
 
@@ -81,15 +80,6 @@ export class InMemoryAttachmentStore implements AttachmentStore {
 			attachment: { ...record.attachment },
 			bytes: copyAttachmentBytes(record.bytes),
 		};
-	}
-
-	async listForConversation(input: { streamPath: string; conversationId: string }): Promise<AttachmentRef[]> {
-		return [...this.records.values()].flatMap((record) =>
-			record.streamPath === input.streamPath &&
-			record.owner.kind === 'conversation' && record.owner.conversationId === input.conversationId
-				? [{ ...record.attachment }]
-				: [],
-		);
 	}
 
 	async deleteForInstance(streamPath: string): Promise<void> {

@@ -16,7 +16,6 @@ import {
 import {
 	acquireConversationProducerScript,
 	appendConversationScript,
-	closeConversationScript,
 	createConversationScript,
 	deleteConversationScript,
 	readConversationScript,
@@ -54,7 +53,7 @@ export class RedisConversationStreamStore implements ConversationStreamStore {
 			[this.keys.conversation(path)],
 			[producerId],
 		));
-		if (result[0] !== 'acquired') throw failure('acquire_producer', path, result[0] === 'closed' ? 'Stream is closed.' : 'Stream does not exist.');
+		if (result[0] !== 'acquired') throw failure('acquire_producer', path, 'Stream does not exist.');
 		return {
 			producerId,
 			producerEpoch: integer(result[1]),
@@ -70,7 +69,6 @@ export class RedisConversationStreamStore implements ConversationStreamStore {
 		producerEpoch: number;
 		incarnation: string;
 		producerSequence: number;
-		expectedOffset?: string;
 		submission?: { submissionId: string; attemptId: string };
 		records: readonly ConversationRecord[];
 	}): Promise<{ offset: string }> {
@@ -85,7 +83,6 @@ export class RedisConversationStreamStore implements ConversationStreamStore {
 		const first = input.records[0];
 		if (!first) throw failure('append', input.path, 'A canonical batch cannot be empty.');
 		const expectedInstanceId = meta.identity.instanceId;
-		const expectedHead = input.expectedOffset === undefined ? '' : String(parseOffset(input.expectedOffset));
 		const submissionKey = input.submission ? this.keys.submission(input.submission.submissionId) : this.keys.meta();
 		const result = strings(await this.runner.eval(
 			appendConversationScript,
@@ -104,7 +101,6 @@ export class RedisConversationStreamStore implements ConversationStreamStore {
 				JSON.stringify(input.records),
 				input.submission?.submissionId ?? '',
 				input.submission?.attemptId ?? '',
-				expectedHead,
 				expectedInstanceId,
 			],
 		));
@@ -117,9 +113,9 @@ export class RedisConversationStreamStore implements ConversationStreamStore {
 
 	async read(path: string, options?: { offset?: string; limit?: number }): Promise<ConversationStreamReadResult> {
 		const meta = await this.getMeta(path);
-		if (!meta) return { batches: [], nextOffset: '-1', upToDate: true, closed: false };
+		if (!meta) return { batches: [], nextOffset: '-1', upToDate: true };
 		const raw = options?.offset ?? '-1';
-		if (raw === 'now') return { batches: [], nextOffset: meta.nextOffset, upToDate: true, closed: meta.closed };
+		if (raw === 'now') return { batches: [], nextOffset: meta.nextOffset, upToDate: true };
 		const start = parseOffset(raw);
 		const limit = clampLimit(options?.limit, DEFAULT_READ_LIMIT, MAX_READ_LIMIT);
 		const result = strings(await this.runner.eval(
@@ -131,10 +127,10 @@ export class RedisConversationStreamStore implements ConversationStreamStore {
 			],
 			[start, limit],
 		));
-		if (result[0] === 'missing') return { batches: [], nextOffset: '-1', upToDate: true, closed: false };
+		if (result[0] === 'missing') return { batches: [], nextOffset: '-1', upToDate: true };
 		if (result[0] === 'offset') throw failure('read', path, 'Read offset is beyond the canonical stream head.');
 		if (result[0] !== 'read') throw failure('read', path, 'Persisted canonical batch is malformed.');
-		const payload = result.slice(4);
+		const payload = result.slice(2);
 		const batches = [];
 		for (let index = 0; index < Math.min(payload.length, limit * 2); index += 2) {
 			const sequence = payload[index];
@@ -146,7 +142,6 @@ export class RedisConversationStreamStore implements ConversationStreamStore {
 			batches,
 			nextOffset: batches.at(-1)?.offset ?? formatOffset(start),
 			upToDate: payload.length / 2 <= limit,
-			closed: result[2] === '1',
 		};
 	}
 
@@ -159,16 +154,10 @@ export class RedisConversationStreamStore implements ConversationStreamStore {
 			identity: JSON.parse(row.identity ?? 'null') as ConversationStreamIdentity,
 			incarnation: row.incarnation ?? '',
 			nextOffset: formatOffset(integer(row.nextOffset) - 1),
-			closed: row.closed === '1',
 			producerId: row.producerId ?? null,
 			producerEpoch: integer(row.producerEpoch),
 			nextProducerSequence: integer(row.nextProducerSequence),
 		};
-	}
-
-	async close(path: string): Promise<void> {
-		await this.runner.eval(closeConversationScript, [this.keys.conversation(path)]);
-		this.notify(path);
 	}
 
 	async delete(path: string): Promise<void> {
@@ -198,11 +187,9 @@ export class RedisConversationStreamStore implements ConversationStreamStore {
 
 function appendReason(code: string | undefined): string {
 	if (code === 'missing') return 'Stream does not exist.';
-	if (code === 'closed') return 'Stream is closed.';
 	if (code === 'stale') return 'Producer ownership is stale.';
 	if (code === 'conflict') return 'Producer sequence has conflicting content.';
 	if (code === 'sequence') return 'Producer sequence is not the next expected value.';
-	if (code === 'head') return 'Expected stream head does not match the current head.';
 	if (code === 'attempt') return 'Submission attempt no longer owns work for this session.';
 	return 'Canonical append failed.';
 }

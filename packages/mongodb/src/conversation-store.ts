@@ -30,7 +30,6 @@ export class MongoConversationStreamStore implements ConversationStreamStore {
 					$setOnInsert: {
 						identity,
 						nextOffset: 0,
-						closed: false,
 						producerId: null,
 						producerEpoch: 0,
 						nextProducerSequence: 0,
@@ -52,11 +51,11 @@ export class MongoConversationStreamStore implements ConversationStreamStore {
 	async acquireProducer(path: string, producerId: string) {
 		return this.runner.transaction(async (tx) => {
 			const row = await tx.collection(collectionName(this.prefix, 'conversation_streams')).findOneAndUpdate(
-				{ _id: path, closed: false },
+				{ _id: path },
 				{ $set: { producerId, nextProducerSequence: 0 }, $inc: { producerEpoch: 1 } },
 				{ returnDocument: 'after' },
 			);
-			if (!row) throw failure(path, 'Stream does not exist or is closed.');
+			if (!row) throw failure(path, 'Stream does not exist.');
 			return { producerId, producerEpoch: Number(row.producerEpoch), incarnation: String(row.incarnation), nextProducerSequence: 0, offset: formatOffset(Number(row.nextOffset) - 1) };
 		});
 	}
@@ -67,7 +66,6 @@ export class MongoConversationStreamStore implements ConversationStreamStore {
 		producerEpoch: number;
 		incarnation: string;
 		producerSequence: number;
-		expectedOffset?: string;
 		submission?: { submissionId: string; attemptId: string };
 		records: readonly ConversationRecord[];
 	}): Promise<{ offset: string }> {
@@ -76,7 +74,7 @@ export class MongoConversationStreamStore implements ConversationStreamStore {
 		const result = await this.runner.transaction(async (tx) => {
 			const streams = tx.collection(collectionName(this.prefix, 'conversation_streams'));
 			const meta = await streams.findOne({ _id: input.path });
-			if (!meta || meta.closed) throw failure(input.path, 'Stream does not exist or is closed.');
+			if (!meta) throw failure(input.path, 'Stream does not exist.');
 			if (meta.producerId !== input.producerId || Number(meta.producerEpoch) !== input.producerEpoch || meta.incarnation !== input.incarnation) throw failure(input.path, 'Producer ownership is stale.');
 			const batches = tx.collection(collectionName(this.prefix, 'conversation_batches'));
 			const retry = await batches.findOne({ path: input.path, producerId: input.producerId, producerEpoch: input.producerEpoch, producerSequence: input.producerSequence });
@@ -85,8 +83,6 @@ export class MongoConversationStreamStore implements ConversationStreamStore {
 				return { offset: formatOffset(Number(retry.offset)), appended: false };
 			}
 			if (Number(meta.nextProducerSequence) !== input.producerSequence) throw failure(input.path, 'Producer sequence is not the next expected value.');
-			const head = formatOffset(Number(meta.nextOffset) - 1);
-			if (input.expectedOffset !== undefined && input.expectedOffset !== head) throw failure(input.path, 'Expected stream head does not match the current head.');
 			await assertSubmissionAuthorization(
 				tx,
 				this.prefix,
@@ -110,27 +106,22 @@ export class MongoConversationStreamStore implements ConversationStreamStore {
 
 	async read(path: string, options?: { offset?: string; limit?: number }): Promise<ConversationStreamReadResult> {
 		const meta = await this.getMeta(path);
-		if (!meta) return { batches: [], nextOffset: '-1', upToDate: true, closed: false };
+		if (!meta) return { batches: [], nextOffset: '-1', upToDate: true };
 		const rawOffset = options?.offset ?? '-1';
-		if (rawOffset === 'now') return { batches: [], nextOffset: meta.nextOffset, upToDate: true, closed: meta.closed };
+		if (rawOffset === 'now') return { batches: [], nextOffset: meta.nextOffset, upToDate: true };
 		const start = parseOffset(rawOffset);
 		if (!Number.isSafeInteger(start) || start > parseOffset(meta.nextOffset)) throw failure(path, 'Read offset is beyond the canonical stream head.');
 		const limit = clampLimit(options?.limit, DEFAULT_READ_LIMIT, MAX_READ_LIMIT);
 		const rows = await this.batches().find({ path, offset: { $gt: start } }, { sort: { offset: 1 }, limit: limit + 1 });
 		const page = rows.slice(0, limit);
 		const batches = page.map((row) => ({ offset: formatOffset(Number(row.offset)), records: JSON.parse(String(row.data)) as ConversationRecord[] }));
-		return { batches, nextOffset: batches.at(-1)?.offset ?? formatOffset(start), upToDate: rows.length <= limit, closed: meta.closed };
+		return { batches, nextOffset: batches.at(-1)?.offset ?? formatOffset(start), upToDate: rows.length <= limit };
 	}
 
 	async getMeta(path: string): Promise<ConversationStreamMeta | null> {
 		const row = await this.streams().findOne({ _id: path });
 		if (!row) return null;
-		return { identity: row.identity as ConversationStreamIdentity, incarnation: String(row.incarnation), nextOffset: formatOffset(Number(row.nextOffset) - 1), closed: Boolean(row.closed), producerId: row.producerId == null ? null : String(row.producerId), producerEpoch: Number(row.producerEpoch), nextProducerSequence: Number(row.nextProducerSequence) };
-	}
-
-	async close(path: string): Promise<void> {
-		await this.streams().updateOne({ _id: path }, { $set: { closed: true } });
-		this.notify(path);
+		return { identity: row.identity as ConversationStreamIdentity, incarnation: String(row.incarnation), nextOffset: formatOffset(Number(row.nextOffset) - 1), producerId: row.producerId == null ? null : String(row.producerId), producerEpoch: Number(row.producerEpoch), nextProducerSequence: Number(row.nextProducerSequence) };
 	}
 
 	async delete(path: string): Promise<void> {
