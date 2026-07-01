@@ -27,7 +27,7 @@ Install `valibot` using the project's existing dependency conventions.
 ## Create the channel
 
 Create `<source-dir>/channels/github.ts`. Adapt the imported agent and dispatched
-input to the application, but preserve this ownership and routing shape:
+message to the application, but preserve this ownership and routing shape:
 
 ```ts
 // flue-blueprint: channel/github@1
@@ -58,13 +58,11 @@ export const channel = createGitHubChannel({
       };
       await dispatch(assistant, {
         id: channel.conversationKey(issueRef),
-        input: {
+        message: {
+          kind: 'signal',
           type: 'github.issue_comment.created',
-          deliveryId: delivery.deliveryId,
-          installationId: delivery.payload.installation?.id,
-          issue: issueRef,
-          sender: delivery.payload.sender,
-          comment: { id: comment.id, body: comment.body },
+          body: comment.body,
+          attributes: { deliveryId: delivery.deliveryId },
         },
       });
       return;
@@ -79,18 +77,21 @@ export const channel = createGitHubChannel({
       };
       await dispatch(assistant, {
         id: channel.conversationKey(issueRef),
-        input: {
+        message: {
+          kind: 'signal',
           type: 'github.pull_request_review_comment.created',
-          deliveryId: delivery.deliveryId,
-          installationId: delivery.payload.installation?.id,
-          issue: issueRef,
-          sender: delivery.payload.sender,
-          comment: {
-            id: comment.id,
-            // Replies attach to the top-level review comment in a thread.
-            threadId: comment.in_reply_to_id ?? comment.id,
-            body: comment.body,
-          },
+          body: JSON.stringify({
+            installationId: delivery.payload.installation?.id,
+            issue: issueRef,
+            sender: delivery.payload.sender,
+            comment: {
+              id: comment.id,
+              // Replies attach to the top-level review comment in a thread.
+              threadId: comment.in_reply_to_id ?? comment.id,
+              body: comment.body,
+            },
+          }),
+          attributes: { deliveryId: delivery.deliveryId },
         },
       });
       return;

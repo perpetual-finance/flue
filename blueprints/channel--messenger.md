@@ -60,7 +60,7 @@ adapt it to the project's actual operations.
 ## Create the channel
 
 Create `<source-dir>/channels/messenger.ts`. Adapt the imported agent,
-dispatched input, and tool:
+dispatched message, and tool:
 
 ```ts
 // flue-blueprint: channel/messenger@1
@@ -95,10 +95,11 @@ export const channel = createMessengerChannel({
         }
         await dispatch(assistant, {
           id: channel.conversationKey(conversation),
-          input: {
+          message: {
+            kind: 'signal',
             type: 'messenger.message',
-            messageId: event.message.mid,
-            text: event.message.text,
+            body: event.message.text,
+            attributes: { messageId: event.message.mid },
           },
         });
       }
@@ -191,7 +192,7 @@ code; do not let the model choose a recipient id.
 
 Opt-in events may contain a `notification_messages_token`. Treat it as a
 short-lived provider capability. Keep tokens and full native payloads out of
-dispatch input, model context, logs, and durable session history.
+the dispatched message, model context, logs, and durable session history.
 
 Returning nothing produces `EVENT_RECEIVED` with status `200`. Return an
 ordinary Hono or Fetch `Response` for explicit status, headers, or body. Meta

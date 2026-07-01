@@ -42,10 +42,11 @@ export const channel = createMessengerChannel({
         if (!conversation || event.message.text === undefined) continue;
         await dispatch(assistant, {
           id: channel.conversationKey(conversation),
-          input: {
+          message: {
+            kind: 'signal',
             type: 'messenger.message',
-            messageId: event.message.mid,
-            text: event.message.text,
+            body: event.message.text,
+            attributes: { messageId: event.message.mid },
           },
         });
       }
@@ -122,12 +123,11 @@ export const channel = createMessengerChannel({
         }
         await dispatch(assistant, {
           id: channel.conversationKey(conversation),
-          input: {
+          message: {
+            kind: 'signal',
             type: 'messenger.message',
-            messageId: event.message.mid,
-            text: event.message.text,
-            attachmentTypes: (event.message.attachments ?? []).map((attachment) => attachment.type),
-            quickReplyPayload: event.message.quick_reply?.payload,
+            body: event.message.text,
+            attributes: { messageId: event.message.mid },
           },
         });
       }
@@ -196,8 +196,8 @@ Messaging-opt-in (`event.optin`) events may expose a
 `notification_messages_token` — the recurring-notification capability that pairs
 with Meta's one-time and recurring notification (OTN) surfaces. Treat it as a
 short-lived provider capability and keep it, along with complete native
-payloads, out of dispatch input, model context, logs, and durable session
-history.
+payloads, out of the dispatched message, model context, logs, and durable
+session history.
 
 ## Outbound behavior
 

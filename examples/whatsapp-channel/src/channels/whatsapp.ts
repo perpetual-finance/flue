@@ -25,12 +25,20 @@ export const channel = createWhatsAppChannel({
 				if (value.metadata.phone_number_id !== expectedPhoneNumberId) continue;
 				for (const message of value.messages ?? []) {
 					if (message.type !== 'text' && message.type !== 'interactive') continue;
+					const body =
+						message.type === 'text'
+							? message.text.body
+							: (message.interactive.button_reply?.title ??
+								message.interactive.list_reply?.title ??
+								message.interactive.nfm_reply?.body ??
+								'');
 					await dispatch(assistant, {
 						id: channel.conversationKey(inboundConversationRef(entry.id, value, message)),
-						input: {
+						message: {
+							kind: 'signal',
 							type: `whatsapp.${message.type}`,
-							messageId: message.id,
-							message,
+							body,
+							attributes: { messageId: message.id },
 						},
 					});
 				}

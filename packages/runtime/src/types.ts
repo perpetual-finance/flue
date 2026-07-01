@@ -36,15 +36,47 @@ export type AgentRouteHandler = MiddlewareHandler;
 export type WorkflowRouteHandler = MiddlewareHandler;
 export type WorkflowRunsHandler = MiddlewareHandler;
 
+/**
+ * One attachment on a `kind: 'user'` {@link DeliveredMessage}. Mirrors pi-ai's
+ * `ImageContent` with an optional uploader-provided `filename` (carried on
+ * the wire and the canonical record, but not part of pi-ai's model image
+ * shape). Today the only supported attachment is an image.
+ */
+export type DeliveredAttachment = PromptImage & { filename?: string };
+
+/**
+ * A message delivered into an agent's session — the single unified input
+ * shape for both `dispatch()` and a direct HTTP prompt.
+ *
+ * `kind: 'user'` is a real, user-attributed chat turn: it produces a
+ * canonical `user_message` record and projects with `purpose: 'user'` in
+ * the conversation (see #404's message classification). Use it for
+ * human-authored messages, optionally carrying attachments.
+ *
+ * `kind: 'signal'` is internal/control activity, not primary chat: it
+ * produces a canonical `signal` record. Use it for structured events —
+ * webhooks, schedules, and other non-chat deliveries. `body` is a plain
+ * string today; JSON-stringify structured payloads yourself. (`body`, not
+ * `text`/`content`, is named for headroom — a future phase may accept a real
+ * JSON value and stringify it internally without a field rename.)
+ */
+export type DeliveredMessage =
+	| { kind: 'user'; body: string; attachments?: DeliveredAttachment[] }
+	| {
+			kind: 'signal';
+			/** Caller-defined event/signal type, e.g. `'slack.message'`. */
+			type: string;
+			body: string;
+			attributes?: Record<string, string>;
+			tagName?: string;
+	  };
+
 /** Input accepted by the agent-definition overload of `dispatch(...)`. */
 export interface AgentDispatchRequest {
 	/** Target agent instance id. Must be a non-empty string. */
 	id: string;
-	/**
-	 * JSON-like input delivered to the session. Required; use `null` for an
-	 * intentional empty payload. Flue snapshots the value at admission time.
-	 */
-	input: unknown;
+	/** The message delivered to the session. Flue snapshots the value at admission time. */
+	message: DeliveredMessage;
 }
 
 /** Input accepted by the named-agent overload of `dispatch(...)`. */

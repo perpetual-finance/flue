@@ -38,10 +38,15 @@ export const channel = createNotionChannel({
 
     await dispatch(assistant, {
       id: `notion-page:${encodeURIComponent(event.entity.id)}`,
-      input: {
+      message: {
+        kind: 'signal',
         type: `notion.${event.type}`,
-        deliveryId: event.id,
-        pageId: event.entity.id,
+        body: JSON.stringify({
+          attemptNumber: event.attempt_number,
+          authors: event.authors,
+          data: event.data,
+        }),
+        attributes: { deliveryId: event.id, pageId: event.entity.id },
       },
     });
   },
@@ -130,13 +135,15 @@ export const channel = createNotionChannel({
       case 'page.unlocked': {
         await dispatch(assistant, {
           id: pageInstanceId(event.entity.id),
-          input: {
+          message: {
+            kind: 'signal',
             type: `notion.${event.type}`,
-            deliveryId: event.id,
-            attemptNumber: event.attempt_number,
-            pageId: event.entity.id,
-            authors: event.authors,
-            data: event.data,
+            body: JSON.stringify({
+              attemptNumber: event.attempt_number,
+              authors: event.authors,
+              data: event.data,
+            }),
+            attributes: { deliveryId: event.id, pageId: event.entity.id },
           },
         });
         return;

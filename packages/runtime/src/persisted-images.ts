@@ -1,4 +1,4 @@
-import type { DirectAgentSubmissionInput } from './runtime/agent-submissions.ts';
+import type { AgentSubmissionInput } from './runtime/agent-submissions.ts';
 import { MAX_IMAGE_DATA_LENGTH } from './runtime/schemas.ts';
 import type { PromptImage } from './types.ts';
 
@@ -35,38 +35,47 @@ export function assertImagesWithinLimit(images: readonly PromptImage[] | undefin
 	}
 }
 
-export function extractDirectSubmissionImages(
-	input: DirectAgentSubmissionInput,
-): ExtractedImages<DirectAgentSubmissionInput> {
-	const extracted = extractImageArray(input.payload.images);
+/**
+ * Attachments are a property of the delivered message, not the transport:
+ * this extracts and chunks a `kind: 'user'` message's attachments for
+ * oversized-row-safe persistence, regardless of whether the submission
+ * arrived as a direct HTTP prompt or a `dispatch()` call. A `kind: 'signal'`
+ * message never carries attachments (deferred — see the phase 2 plan), so
+ * this is a no-op passthrough for it.
+ */
+export function extractSubmissionAttachments(
+	input: AgentSubmissionInput,
+): ExtractedImages<AgentSubmissionInput> {
+	if (input.message.kind !== 'user') return { value: input, chunks: [] };
+	const extracted = extractImageArray(input.message.attachments);
 	return {
 		value: {
 			...input,
-			payload: {
-				...input.payload,
-				...(extracted.value === undefined ? {} : { images: extracted.value }),
+			message: {
+				...input.message,
+				...(extracted.value === undefined ? {} : { attachments: extracted.value }),
 			},
-		},
+		} as AgentSubmissionInput,
 		chunks: extracted.chunks,
 	};
 }
 
-export function hydrateDirectSubmissionImages(
-	input: DirectAgentSubmissionInput,
+export function hydrateSubmissionAttachments(
+	input: AgentSubmissionInput,
 	imageData: ReadonlyMap<string, string>,
-): DirectAgentSubmissionInput {
-	if (input.payload.images === undefined) {
+): AgentSubmissionInput {
+	if (input.message.kind !== 'user' || input.message.attachments === undefined) {
 		assertExactImageGroups([], imageData);
 		return input;
 	}
-	assertExactImageGroups(markerIds(input.payload.images), imageData);
+	assertExactImageGroups(markerIds(input.message.attachments), imageData);
 	return {
 		...input,
-		payload: {
-			...input.payload,
-			images: hydrateImageArray(input.payload.images, imageData),
+		message: {
+			...input.message,
+			attachments: hydrateImageArray(input.message.attachments, imageData),
 		},
-	};
+	} as AgentSubmissionInput;
 }
 
 function extractImageArray(

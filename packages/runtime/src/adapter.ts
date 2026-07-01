@@ -54,6 +54,7 @@ export {
 // ─── Submission input types ─────────────────────────────────────────────────
 
 export type {
+	AgentSubmissionInput,
 	DirectAgentSubmissionInput,
 	DispatchAgentSubmissionInput,
 } from './runtime/agent-submissions.ts';
@@ -93,9 +94,9 @@ export type {
 	PersistedChunkStore,
 } from './persisted-image-placement.ts';
 export {
-	hydratePersistedDirectSubmission,
-	matchesPersistedDirectSubmission,
-	prepareDirectSubmission,
+	hydratePersistedSubmissionAttachments,
+	matchesPersistedSubmissionAttachments,
+	prepareSubmissionAttachments,
 	samePersistedChunks,
 	submissionChunkOwner,
 } from './persisted-image-placement.ts';

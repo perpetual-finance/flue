@@ -5,7 +5,7 @@ import {
 } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
-import { OperationFailedError } from '../src/errors.ts';
+import { InvalidRequestError, OperationFailedError } from '../src/errors.ts';
 import { dispatch } from '../src/index.ts';
 import {
 	configureFlueRuntime,
@@ -18,6 +18,7 @@ import {
 	type DirectAgentSubmissionInput,
 } from '../src/runtime/agent-submissions.ts';
 import { resetFlueRuntimeForTests } from '../src/runtime/flue-app.ts';
+import { MAX_IMAGE_DATA_LENGTH } from '../src/persisted-images.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
 import { agentRecord, nodeRuntime } from './helpers/runtime-config.ts';
 
@@ -46,7 +47,11 @@ function createProvider(): FauxProviderRegistration {
 describe('dispatch()', () => {
 	it('rejects calls when the runtime has not been configured', async () => {
 		await expect(
-			dispatch({ agent: 'moderator', id: 'guild:unconfigured', input: { type: 'flagged' } }),
+			dispatch({
+				agent: 'moderator',
+				id: 'guild:unconfigured',
+				message: { kind: 'signal', type: 'flagged', body: 'report' },
+			}),
 		).rejects.toThrow('dispatch() called before runtime was configured');
 	});
 
@@ -60,7 +65,7 @@ describe('dispatch()', () => {
 		const receipt = await dispatch({
 			agent: 'moderator',
 			id: 'guild:admission',
-			input: { type: 'flagged', reportId: 'report:admission' },
+			message: { kind: 'signal', type: 'flagged', body: 'report:admission' },
 		});
 
 		expect(receipt).toEqual({
@@ -85,14 +90,14 @@ describe('dispatch()', () => {
 
 		await dispatch(moderator, {
 			id: 'guild:created',
-			input: { type: 'flagged', reportId: 'report:created' },
+			message: { kind: 'signal', type: 'flagged', body: 'report:created' },
 		});
 
 		expect(admitted).toMatchObject([
 			{
 				agent: 'moderator',
 				id: 'guild:created',
-				input: { type: 'flagged', reportId: 'report:created' },
+				message: { kind: 'signal', type: 'flagged', body: 'report:created' },
 			},
 		]);
 	});
@@ -108,14 +113,14 @@ describe('dispatch()', () => {
 		await expect(
 			dispatch(localModerator, {
 				id: 'guild:local',
-				input: { type: 'flagged', reportId: 'report:local' },
+				message: { kind: 'signal', type: 'flagged', body: 'report:local' },
 			}),
 		).rejects.toThrow('not a discovered default-exported agent');
 	});
 
-	it('snapshots JSON-like input when dispatch() admits a payload', async () => {
+	it('snapshots the delivered message when dispatch() admits a payload', async () => {
 		const admitted: DispatchInput[] = [];
-		const payload = { type: 'flagged', report: { id: 'report:snapshot', count: 1 } };
+		const attributes: Record<string, string> = { reportId: 'report:snapshot' };
 		configureFlueRuntime({
 			...nodeRuntime(),
 			dispatchQueue: {
@@ -127,73 +132,122 @@ describe('dispatch()', () => {
 			agents: [agentRecord('moderator')],
 		});
 
-		await dispatch({ agent: 'moderator', id: 'guild:snapshot', input: payload });
-		payload.report.count = 2;
+		await dispatch({
+			agent: 'moderator',
+			id: 'guild:snapshot',
+			message: { kind: 'signal', type: 'flagged', body: 'report', attributes },
+		});
+		attributes.reportId = 'mutated-after-dispatch';
 
-		expect(admitted[0]?.input).toEqual({
+		expect(admitted[0]?.message).toEqual({
+			kind: 'signal',
 			type: 'flagged',
-			report: { id: 'report:snapshot', count: 1 },
+			body: 'report',
+			attributes: { reportId: 'report:snapshot' },
 		});
 	});
 
-	it('rejects missing input when dispatch() receives an undefined payload', async () => {
+	it('resolves a dispatched user message with attachments through the same validated path', async () => {
+		const admitted: DispatchInput[] = [];
+		configureFlueRuntime({
+			...nodeRuntime(),
+			dispatchQueue: {
+				async enqueue(input) {
+					admitted.push(input);
+					return { dispatchId: input.dispatchId, acceptedAt: input.acceptedAt };
+				},
+			},
+			agents: [agentRecord('moderator')],
+		});
+
+		await dispatch({
+			agent: 'moderator',
+			id: 'guild:attachment',
+			message: {
+				kind: 'user',
+				body: 'Here is the screenshot.',
+				attachments: [{ type: 'image', data: 'YWJj', mimeType: 'image/png' }],
+			},
+		});
+
+		expect(admitted[0]?.message).toEqual({
+			kind: 'user',
+			body: 'Here is the screenshot.',
+			attachments: [{ type: 'image', data: 'YWJj', mimeType: 'image/png' }],
+		});
+	});
+
+	it('rejects a missing message when dispatch() receives no message field', async () => {
 		configureFlueRuntime({
 			...nodeRuntime(),
 			dispatchQueue: noopDispatchQueue(),
 			agents: [agentRecord('moderator')],
 		});
 
-		await expect(
-			dispatch({ agent: 'moderator', id: 'guild:undefined-input', input: undefined }),
-		).rejects.toThrow('requires an "input" payload');
+		const error = await dispatch({
+			agent: 'moderator',
+			id: 'guild:undefined-message',
+			message: undefined as any,
+		}).catch((caught: unknown) => caught);
+
+		expect(error).toBeInstanceOf(InvalidRequestError);
 	});
 
-	it('rejects non-JSON-like input when dispatch() receives a function value', async () => {
+	it('rejects a message with an unrecognized kind', async () => {
 		configureFlueRuntime({
 			...nodeRuntime(),
 			dispatchQueue: noopDispatchQueue(),
 			agents: [agentRecord('moderator')],
 		});
 
-		await expect(
-			dispatch({
-				agent: 'moderator',
-				id: 'guild:function-input',
-				input: { type: 'flagged', callback: () => 'unsupported' },
-			}),
-		).rejects.toThrow('must not contain function values');
+		const error = await dispatch({
+			agent: 'moderator',
+			id: 'guild:bad-kind',
+			message: { kind: 'bogus', body: 'x' } as any,
+		}).catch((caught: unknown) => caught);
+
+		expect(error).toBeInstanceOf(InvalidRequestError);
 	});
 
-	it('rejects non-JSON-like input when dispatch() receives a bigint value', async () => {
+	it('rejects a signal message missing its type', async () => {
 		configureFlueRuntime({
 			...nodeRuntime(),
 			dispatchQueue: noopDispatchQueue(),
 			agents: [agentRecord('moderator')],
 		});
 
-		await expect(
-			dispatch({
-				agent: 'moderator',
-				id: 'guild:bigint-input',
-				input: { type: 'flagged', reportId: 1n },
-			}),
-		).rejects.toThrow('must not contain bigint values');
+		const error = await dispatch({
+			agent: 'moderator',
+			id: 'guild:missing-type',
+			message: { kind: 'signal', body: 'x' } as any,
+		}).catch((caught: unknown) => caught);
+
+		expect(error).toBeInstanceOf(InvalidRequestError);
 	});
 
-	it('rejects non-JSON-like input when dispatch() receives a non-plain object', async () => {
+	it('rejects a user message attachment above the encoded length limit', async () => {
 		configureFlueRuntime({
 			...nodeRuntime(),
 			dispatchQueue: noopDispatchQueue(),
 			agents: [agentRecord('moderator')],
 		});
 
-		await expect(
-			dispatch({
-				agent: 'moderator',
-				id: 'guild:date-input',
-				input: { type: 'flagged', acceptedAt: new Date('2026-06-01T00:00:00.000Z') },
-			}),
-		).rejects.toThrow('must contain only plain JSON objects');
+		const error = await dispatch({
+			agent: 'moderator',
+			id: 'guild:oversized-attachment',
+			message: {
+				kind: 'user',
+				body: 'Here is the screenshot.',
+				attachments: [
+					{ type: 'image', data: 'a'.repeat(MAX_IMAGE_DATA_LENGTH + 1), mimeType: 'image/png' },
+				],
+			},
+		}).catch((caught: unknown) => caught);
+
+		expect(error).toBeInstanceOf(InvalidRequestError);
+		expect((error as InvalidRequestError).details).toBe(
+			`Image data exceeds the ${MAX_IMAGE_DATA_LENGTH} character limit.`,
+		);
 	});
 
 	it('rejects an unknown agent when dispatch() targets an unregistered name', async () => {
@@ -204,7 +258,11 @@ describe('dispatch()', () => {
 		});
 
 		await expect(
-			dispatch({ agent: 'missing', id: 'guild:unknown-agent', input: { type: 'flagged' } }),
+			dispatch({
+				agent: 'missing',
+				id: 'guild:unknown-agent',
+				message: { kind: 'signal', type: 'flagged', body: 'report' },
+			}),
 		).rejects.toThrow('target agent "missing" is not registered');
 	});
 
@@ -216,7 +274,11 @@ describe('dispatch()', () => {
 		});
 
 		await expect(
-			dispatch({ agent: 'moderator', id: '  ', input: { type: 'flagged' } }),
+			dispatch({
+				agent: 'moderator',
+				id: '  ',
+				message: { kind: 'signal', type: 'flagged', body: 'report' },
+			}),
 		).rejects.toThrow('requires a non-empty "id" target agent instance id');
 	});
 });
@@ -238,7 +300,7 @@ describe('dispatched session processing', () => {
 			submissionId: 'direct:aborted-turn',
 			agent: 'moderator',
 			id: 'guild:aborted-turn',
-			payload: { message: 'Hello directly' },
+			message: { kind: 'user', body: 'Hello directly' },
 			acceptedAt: '2026-06-01T00:00:00.000Z',
 		};
 		const ctx = createFlueContext({
@@ -276,7 +338,7 @@ describe('dispatched session processing', () => {
 			submissionId: 'direct:error-turn',
 			agent: 'moderator',
 			id: 'guild:error-turn',
-			payload: { message: 'Hello directly' },
+			message: { kind: 'user', body: 'Hello directly' },
 			acceptedAt: '2026-06-01T00:00:00.000Z',
 		};
 		const ctx = createFlueContext({

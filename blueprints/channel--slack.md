@@ -29,7 +29,7 @@ Install `valibot` using the project's existing dependency conventions.
 ## Create the channel
 
 Create `<source-dir>/channels/slack.ts`. Adapt the imported agent and dispatched
-input to the application:
+message to the application:
 
 ```ts
 // flue-blueprint: channel/slack@1
@@ -58,10 +58,11 @@ export const channel = createSlackChannel({
         };
         await dispatch(assistant, {
           id: channel.conversationKey(thread),
-          input: {
+          message: {
+            kind: 'signal',
             type: 'slack.app_mention',
-            eventId: payload.event_id,
-            text: event.text,
+            body: event.text,
+            attributes: { eventId: payload.event_id },
           },
         });
         return;
@@ -120,7 +121,7 @@ Slack API methods out of tool arguments unless explicitly authorized.
 
 `trigger_id`, `response_url`, and view `response_urls` are short-lived provider
 capabilities. Use them only in immediate trusted request handling. Never copy
-them into dispatch input, model context, logs, or durable session data.
+them into a dispatched message, model context, logs, or durable session data.
 
 ## Wire the agent
 

@@ -52,7 +52,7 @@ URL supplied directly by a model or unauthenticated caller.
 ## Create the channel
 
 Create `<source-dir>/channels/teams.ts`. Adapt the imported agent, dispatched
-input, event policy, and tool:
+message, event policy, and tool:
 
 ```ts
 // flue-blueprint: channel/teams@1
@@ -80,12 +80,11 @@ export const channel = createTeamsChannel({
     if (activity.type !== 'message' || !activity.text) return;
     await dispatch(assistant, {
       id: channel.conversationKey(channel.destination(activity)),
-      input: {
+      message: {
+        kind: 'signal',
         type: 'teams.message',
-        activityId: activity.id,
-        sender: activity.from,
-        text: activity.text,
-        entities: activity.entities,
+        body: activity.text,
+        ...(activity.id === undefined ? {} : { attributes: { activityId: activity.id } }),
       },
     });
   },

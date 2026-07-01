@@ -56,7 +56,7 @@ Install `valibot` using the project's existing dependency conventions.
 ## Create the channel
 
 Create `<source-dir>/channels/twilio.ts`. Adapt the imported agent, dispatched
-input, destination mode, and tool:
+message, destination mode, and tool:
 
 ```ts
 // flue-blueprint: channel/twilio@1
@@ -86,18 +86,13 @@ export const channel = createTwilioChannel({
   // Path: /channels/twilio/webhook
   async webhook({ payload, conversation }) {
     if (payload.OptOutType === 'STOP') return;
-    const numMedia = Number(payload.NumMedia ?? '0');
     await dispatch(assistant, {
       id: channel.conversationKey(conversation),
-      input: {
+      message: {
+        kind: 'signal',
         type: 'twilio.message',
-        messageSid: payload.MessageSid,
-        from: payload.From,
-        text: payload.Body,
-        media: Array.from({ length: numMedia }, (_, index) => ({
-          index,
-          contentType: payload[`MediaContentType${index}`],
-        })),
+        body: payload.Body,
+        attributes: { messageSid: payload.MessageSid, from: payload.From },
       },
     });
   },

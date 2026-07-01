@@ -649,7 +649,7 @@ describe('reduceConversationRecords()', () => {
 				parentId: null,
 				submissionId: 'submission_01',
 				turnId: 'turn_07',
-				signalType: 'dispatch_input',
+				signalType: 'slack.message',
 				tagName: 'dispatch',
 				content: '{"input":"go"}',
 				attributes: { agent: 'planner', dispatchId: 'dispatch_01' },

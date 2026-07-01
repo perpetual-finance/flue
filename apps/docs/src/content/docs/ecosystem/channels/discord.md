@@ -51,7 +51,12 @@ export const channel = createDiscordChannel({
 
     await dispatch(assistant, {
       id: channel.conversationKey(destination),
-      input: { type: 'discord.command.ask', interactionId: interaction.id },
+      message: {
+        kind: 'signal',
+        type: 'discord.command.ask',
+        body: JSON.stringify({ data: interaction.data }),
+        attributes: { interactionId: interaction.id },
+      },
     });
     return {
       type: 4,
@@ -166,7 +171,7 @@ webhook API. Interaction tokens remain valid for follow-up operations for up to
 15 minutes.
 
 `interaction.token` is a short-lived response capability. Use it only in
-immediate trusted application code. Keep it out of dispatched input, model
+immediate trusted application code. Keep it out of the dispatched message, model
 context, logs, and durable session history.
 
 See Discord's [interaction callback documentation](https://docs.discord.com/developers/interactions/receiving-and-responding#interaction-callback)

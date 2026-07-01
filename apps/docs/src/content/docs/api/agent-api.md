@@ -256,7 +256,7 @@ function dispatch(request: NamedAgentDispatchRequest): Promise<DispatchReceipt>;
 
 interface AgentDispatchRequest {
   id: string;
-  input: unknown;
+  message: DeliveredMessage;
 }
 
 interface NamedAgentDispatchRequest extends AgentDispatchRequest {
@@ -269,17 +269,58 @@ interface DispatchReceipt {
 }
 ```
 
-Accepts input for asynchronous delivery to a continuing agent instance. The agent-definition overload requires a value default-exported by one discovered `agents/<name>.ts` module. The named overload selects a discovered agent module by name.
+Delivers a message for asynchronous processing by a continuing agent instance. The agent-definition overload requires a value default-exported by one discovered `agents/<name>.ts` module. The named overload selects a discovered agent module by name.
 
-| Field        | Description                                                                                           |
-| ------------ | ----------------------------------------------------------------------------------------------------- |
-| `agent`      | Discovered agent module name for the named overload.                                                  |
-| `id`         | Target agent instance id.                                                                             |
-| `input`      | Required JSON-like input. Use `null` for an intentional empty value. Flue snapshots it when accepted. |
-| `dispatchId` | Generated delivery identifier returned in the receipt. This is not a workflow `runId`.                |
-| `acceptedAt` | ISO timestamp assigned when dispatch admission begins.                                                |
+| Field        | Description                                                                             |
+| ------------ | ----------------------------------------------------------------------------------------- |
+| `agent`      | Discovered agent module name for the named overload.                                      |
+| `id`         | Target agent instance id.                                                                 |
+| `message`    | The message delivered to the session. Flue snapshots it when accepted.                    |
+| `dispatchId` | Generated delivery identifier returned in the receipt. This is not a workflow `runId`.     |
+| `acceptedAt` | ISO timestamp assigned when dispatch admission begins.                                    |
 
-`await dispatch(...)` resolves when the current runtime accepts and queues the input. It does not wait for model processing, tool calls, or an agent reply. Dispatched activity belongs to the continuing agent instance: it does not create workflow-run history and does not appear in SDK `client.runs` or raw `/runs` APIs.
+`await dispatch(...)` resolves when the current runtime accepts and queues the message. It does not wait for model processing, tool calls, or an agent reply. Dispatched activity belongs to the continuing agent instance: it does not create workflow-run history and does not appear in SDK `client.runs` or raw `/runs` APIs.
+
+#### `DeliveredMessage`
+
+```ts
+type DeliveredMessage =
+  | { kind: 'user'; body: string; attachments?: DeliveredAttachment[] }
+  | {
+      kind: 'signal';
+      type: string;
+      body: string;
+      attributes?: Record<string, string>;
+      tagName?: string;
+    };
+```
+
+The single unified message shape delivered into an agent's session, whether it arrives through `dispatch(...)` or a direct HTTP prompt.
+
+`kind: 'user'` is a real, user-attributed chat turn. It produces a canonical `user_message` record and projects into the model conversation like any other user message. Use it for human-authored messages, optionally carrying image attachments.
+
+`kind: 'signal'` is a structured, non-conversational event — a webhook payload, a scheduled trigger, an internal system notification. It produces a canonical `signal` record and renders into the model conversation as an XML-tagged block rather than a chat turn.
+
+| Field         | Applies to | Description                                                                                          |
+| ------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
+| `body`        | both       | The message content. Always a string today; JSON-stringify structured payloads yourself.               |
+| `attachments` | `user`     | Images attached to the message. See `DeliveredAttachment`.                                             |
+| `type`        | `signal`   | Caller-defined event/signal type, e.g. `'slack.message'`.                                              |
+| `attributes`  | `signal`   | Flat, scalar-valued metadata for correlation — analogous to HTTP headers. Rendered alongside the body.  |
+| `tagName`     | `signal`   | Overrides the XML tag name used when rendering the signal into the model prompt. Defaults to `signal`. |
+
+#### `DeliveredAttachment`
+
+```ts
+type DeliveredAttachment = {
+  type: 'image';
+  data: string;
+  mimeType: string;
+  filename?: string;
+};
+```
+
+One image attachment on a `kind: 'user'` `DeliveredMessage`. Today the only supported attachment is an image; the selected model must support image input.
 
 Delivery durability depends on the generated target. Node uses a process-lifetime in-memory queue by default; with a durable `db.ts` adapter, dispatches survive restarts and are reconciled on the replacement process. Cloudflare durably admits delivery to the target agent Durable Object, orders it with direct prompts, and reconciles interruptions conservatively. Both targets retry only when replay safety is provable; external effects still require application-level idempotency. See [Durable Agents](/docs/concepts/durable-execution/) for recovery details, and [Deploy Agents on Node.js](/docs/ecosystem/deploy/node/) and [Deploy Agents on Cloudflare](/docs/ecosystem/deploy/cloudflare/) for target-specific setup.
 

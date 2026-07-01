@@ -122,7 +122,7 @@ Thrown when an agent cannot produce a required structured result, either because
 
 Aborted prompt, skill, task, and shell operations reject with a standard `AbortError` (`DOMException`) carrying the abort reason as `cause` when the runtime permits it. Cancellation is deliberately not part of the `FlueError` vocabulary.
 
-Authoring and definition-time validation failures, such as invalid agent profiles, tool definitions, dispatch payloads, or model ids, reject with human-readable `Error` messages. Those messages are not stable machine-readable categories.
+Authoring and definition-time validation failures, such as invalid agent profiles, tool definitions, or model ids, reject with human-readable `Error` messages. Those messages are not stable machine-readable categories. A `dispatch()` call with a missing `agent` or `id` also rejects this way; a malformed `message` instead throws the stable `invalid_request` `InvalidRequestError` below, the same validation a direct HTTP prompt's body goes through.
 
 ## CLI, build, and development diagnostics
 

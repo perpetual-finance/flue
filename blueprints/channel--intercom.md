@@ -83,7 +83,7 @@ Choose the US, EU, or AU environment in trusted application configuration.
 ## Create the channel
 
 Create `<source-dir>/channels/intercom.ts`. Adapt the imported agent,
-conversation parser, dispatched input, and tool to the application:
+conversation parser, dispatched message, and tool to the application:
 
 ```ts
 // flue-blueprint: channel/intercom@1
@@ -120,12 +120,15 @@ export const channel = createIntercomChannel({
         };
         await dispatch(assistant, {
           id: channel.conversationKey(conversation),
-          input: {
+          message: {
+            kind: 'signal',
             type: `intercom.${notification.topic}`,
-            notificationId: notification.id,
-            createdAt: notification.created_at,
-            deliveryAttempts: notification.delivery_attempts,
-            conversation: notification.data.item,
+            body: JSON.stringify({
+              createdAt: notification.created_at,
+              deliveryAttempts: notification.delivery_attempts,
+              conversation: notification.data.item,
+            }),
+            ...(notification.id === null ? {} : { attributes: { notificationId: notification.id } }),
           },
         });
         return;

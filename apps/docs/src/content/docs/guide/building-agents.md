@@ -211,10 +211,11 @@ app.post('/webhooks/support-comments', async (c) => {
   const event = await verifySupportWebhook(c.req.raw);
   const receipt = await dispatch(supportAssistant, {
     id: event.ticketId,
-    input: {
+    message: {
+      kind: 'signal',
       type: 'support.comment.created',
-      commentId: event.commentId,
-      text: event.text,
+      body: event.text,
+      attributes: { commentId: event.commentId },
     },
   });
 

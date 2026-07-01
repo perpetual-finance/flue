@@ -62,10 +62,11 @@ app.post('/webhooks/support-comments', async (c) => {
   const event = await parseVerifiedSupportComment(c.req.raw);
   const receipt = await dispatch(supportAssistant, {
     id: event.ticketId,
-    input: {
+    message: {
+      kind: 'signal',
       type: 'support.comment.created',
-      commentId: event.commentId,
-      text: event.text,
+      body: event.text,
+      attributes: { commentId: event.commentId },
     },
   });
 
@@ -77,7 +78,7 @@ app.route('/', flue());
 export default app;
 ```
 
-Here, the webhook route belongs to your application: it determines which requests are valid and which agent instance receives the accepted input. `dispatch(...)` delivers that input asynchronously to the continuing agent session. See [Agents](/docs/guide/building-agents/) for agent interaction patterns and [Channels](/docs/guide/channels/) for provider integrations.
+Here, the webhook route belongs to your application: it determines which requests are valid and which agent instance receives the accepted message. `dispatch(...)` delivers that message asynchronously to the continuing agent session. See [Agents](/docs/guide/building-agents/) for agent interaction patterns and [Channels](/docs/guide/channels/) for provider integrations.
 
 ## Customized routing
 

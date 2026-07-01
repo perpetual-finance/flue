@@ -33,7 +33,7 @@ outbound email, replies, and every model tool.
 ## Create the channel
 
 Create `<source-dir>/channels/resend.ts`. Adapt the imported agent, dispatched
-input, local message identity, and retrieval tool to the application:
+message, local message identity, and retrieval tool to the application:
 
 ```ts
 // flue-blueprint: channel/resend@1
@@ -56,16 +56,21 @@ export const channel = createResendChannel({
       case 'email.received': {
         await dispatch(assistant, {
           id: emailInstanceId(event.data.email_id),
-          input: {
+          message: {
+            kind: 'signal',
             type: 'resend.email.received',
-            deliveryId: delivery.id,
-            emailId: event.data.email_id,
-            messageId: event.data.message_id,
-            from: event.data.from,
-            to: event.data.to,
-            cc: event.data.cc,
-            subject: event.data.subject,
-            attachments: event.data.attachments,
+            body: JSON.stringify({
+              from: event.data.from,
+              to: event.data.to,
+              cc: event.data.cc,
+              subject: event.data.subject,
+              attachments: event.data.attachments,
+            }),
+            attributes: {
+              deliveryId: delivery.id,
+              emailId: event.data.email_id,
+              messageId: event.data.message_id,
+            },
           },
         });
         return;

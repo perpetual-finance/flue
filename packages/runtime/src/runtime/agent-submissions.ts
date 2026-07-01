@@ -20,7 +20,7 @@ import type {
 	AgentDefinition,
 	AttachedAgentEvent,
 	CallHandle,
-	DirectAgentPayload,
+	DeliveredMessage,
 } from '../types.ts';
 import { type AttachmentStore, createAttachmentRef } from './attachment-store.ts';
 import type { DispatchInput } from './dispatch-queue.ts';
@@ -38,7 +38,7 @@ export interface DirectAgentSubmissionInput {
 	readonly submissionId: string;
 	readonly agent: string;
 	readonly id: string;
-	readonly payload: DirectAgentPayload;
+	readonly message: DeliveredMessage;
 	readonly acceptedAt: string;
 	readonly traceCarrier?: FlueTraceCarrier;
 }
@@ -97,7 +97,7 @@ interface AttachedAgentSubmissionReceipt {
 }
 
 export type AttachedAgentSubmissionAdmission = (
-	payload: DirectAgentPayload,
+	message: DeliveredMessage,
 	traceCarrier?: FlueTraceCarrier,
 ) => Promise<AttachedAgentSubmissionReceipt>;
 
@@ -110,7 +110,7 @@ export function createDispatchAgentSubmissionInput(
 export function createDirectAgentSubmissionInput(options: {
 	agent: string;
 	id: string;
-	payload: DirectAgentPayload;
+	message: DeliveredMessage;
 	traceCarrier?: FlueTraceCarrier;
 }): DirectAgentSubmissionInput {
 	return {
@@ -118,12 +118,17 @@ export function createDirectAgentSubmissionInput(options: {
 		submissionId: crypto.randomUUID(),
 		agent: options.agent,
 		id: options.id,
-		payload: options.payload,
+		message: options.message,
 		acceptedAt: new Date().toISOString(),
 		...(options.traceCarrier ? { traceCarrier: options.traceCarrier } : {}),
 	};
 }
 
+/**
+ * Attachments are a property of the delivered message, not of the transport:
+ * this materializes them for a `kind: 'user'` message regardless of whether
+ * the submission arrived as a direct HTTP prompt or a `dispatch()` call.
+ */
 export async function materializeAgentSubmissionSession(
 	ctx: FlueContextInternal,
 	agent: AgentDefinition,
@@ -132,19 +137,20 @@ export async function materializeAgentSubmissionSession(
 ): Promise<void> {
 	if (input.kind === 'direct') ctx.setSubmissionId?.(input.submissionId);
 	const session = await openAgentSubmissionSession(ctx, agent, input);
-	if (input.kind === 'direct' && attachmentStore) {
-		for (const [index, image] of (input.payload.images ?? []).entries()) {
-			const bytes = decodeBase64(image.data);
-			const attachment = await createAttachmentRef({
-				id: `att_direct_${input.submissionId}_${index}`,
-				mimeType: image.mimeType,
+	const message = input.message;
+	if (message.kind === 'user' && attachmentStore) {
+		for (const [index, attachment] of (message.attachments ?? []).entries()) {
+			const bytes = decodeBase64(attachment.data);
+			const ref = await createAttachmentRef({
+				id: `att_${input.kind}_${input.submissionId}_${index}`,
+				mimeType: attachment.mimeType,
 				bytes,
-				...(image.filename ? { filename: image.filename } : {}),
+				...(attachment.filename ? { filename: attachment.filename } : {}),
 			});
 			const streamPath = agentStreamPath(input.agent, input.id);
 			await attachmentStore.put({
 				streamPath,
-				attachment,
+				attachment: ref,
 				bytes,
 				conversationId: session.conversationId,
 			});
@@ -165,11 +171,6 @@ export function createAgentSubmissionSessionHandler(
 
 function agentSubmissionDispatchId(input: AgentSubmissionInput): string | undefined {
 	return input.kind === 'dispatch' ? input.dispatchId : undefined;
-}
-
-export function agentSubmissionDispatchInput(input: DispatchAgentSubmissionInput): DispatchInput {
-	const { kind: _kind, submissionId: _submissionId, ...dispatch } = input;
-	return dispatch;
 }
 
 /**

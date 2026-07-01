@@ -16,7 +16,7 @@ const input = mode === 'settlement'
 			submissionId,
 			agent: 'assistant',
 			id: 'instance-1',
-			payload: { message: mode },
+			message: { kind: 'user', body: mode },
 			acceptedAt: timestamp,
 		}
 	: {
@@ -25,7 +25,7 @@ const input = mode === 'settlement'
 			dispatchId: submissionId,
 			agent: 'assistant',
 			id: 'instance-1',
-			input: { message: mode },
+			message: { kind: 'signal', type: 'test.event', body: mode },
 			acceptedAt: timestamp,
 		};
 
@@ -63,7 +63,26 @@ const scope = {
 	submissionId,
 	attemptId,
 };
-const inputEntryId = `entry_dispatch_${Buffer.from(submissionId).toString('base64url')}`;
+const inputEntryId = `entry_${input.kind}_${Buffer.from(submissionId).toString('base64url')}`;
+const inputRecord = input.kind === 'direct'
+	? {
+			...scope,
+			id: `record_direct_input_${submissionId}`,
+			type: 'user_message',
+			messageId: inputEntryId,
+			parentId: null,
+			content: [{ type: 'text', text: input.message.body }],
+		}
+	: {
+			...scope,
+			id: `record_dispatch_input_${submissionId}`,
+			type: 'signal',
+			dispatchId: submissionId,
+			messageId: inputEntryId,
+			parentId: null,
+			signalType: input.message.type,
+			content: input.message.body,
+		};
 await append([
 	{
 		v: 1,
@@ -77,24 +96,7 @@ await append([
 		affinityKey: `affinity-${mode}`,
 		createdAt: timestamp,
 	},
-	{
-		...scope,
-		id: `record_dispatch_input_${submissionId}`,
-		type: 'signal',
-		dispatchId: submissionId,
-		messageId: inputEntryId,
-		parentId: null,
-		signalType: 'dispatch_input',
-		tagName: 'dispatch',
-		content: JSON.stringify({ message: mode }, null, 2),
-		attributes: {
-			agent: input.agent,
-			id: input.id,
-			session: 'default',
-			dispatchId: input.dispatchId,
-			acceptedAt: input.acceptedAt,
-		},
-	},
+	inputRecord,
 ]);
 
 if (mode === 'input-marker') {

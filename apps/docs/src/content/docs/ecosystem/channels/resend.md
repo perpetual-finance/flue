@@ -33,13 +33,18 @@ export const channel = createResendChannel({
     if (event.type !== 'email.received') return;
     await dispatch(assistant, {
       id: emailInstanceId(event.data.email_id),
-      input: {
+      message: {
+        kind: 'signal',
         type: 'resend.email.received',
-        deliveryId: delivery.id,
-        emailId: event.data.email_id,
-        from: event.data.from,
-        to: event.data.to,
-        subject: event.data.subject,
+        body: JSON.stringify({
+          from: event.data.from,
+          to: event.data.to,
+          subject: event.data.subject,
+        }),
+        attributes: {
+          deliveryId: delivery.id,
+          emailId: event.data.email_id,
+        },
       },
     });
   },
@@ -94,16 +99,21 @@ export const channel = createResendChannel({
       case 'email.received': {
         await dispatch(assistant, {
           id: emailInstanceId(event.data.email_id),
-          input: {
+          message: {
+            kind: 'signal',
             type: 'resend.email.received',
-            deliveryId: delivery.id,
-            emailId: event.data.email_id,
-            messageId: event.data.message_id,
-            from: event.data.from,
-            to: event.data.to,
-            cc: event.data.cc,
-            subject: event.data.subject,
-            attachments: event.data.attachments,
+            body: JSON.stringify({
+              from: event.data.from,
+              to: event.data.to,
+              cc: event.data.cc,
+              subject: event.data.subject,
+              attachments: event.data.attachments,
+            }),
+            attributes: {
+              deliveryId: delivery.id,
+              emailId: event.data.email_id,
+              messageId: event.data.message_id,
+            },
           },
         });
         return;

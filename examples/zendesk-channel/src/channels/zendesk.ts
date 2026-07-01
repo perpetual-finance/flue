@@ -32,13 +32,15 @@ export const channel = createZendeskChannel({
 				};
 				await dispatch(assistant, {
 					id: channel.ticketKey(ticket),
-					input: {
+					message: {
+						kind: 'signal',
 						type: `zendesk.${payload.type}`,
-						eventId: payload.id,
-						invocationId: delivery.invocationId,
-						occurredAt: payload.time,
-						ticketId,
-						change: payload.event,
+						body: JSON.stringify({
+							invocationId: delivery.invocationId,
+							occurredAt: payload.time,
+							change: payload.event,
+						}),
+						attributes: { eventId: payload.id, ticketId },
 					},
 				});
 				return;

@@ -38,14 +38,23 @@ export const client = createZendeskClient({
 export const channel = createZendeskChannel({
   signingSecret: process.env.ZENDESK_WEBHOOK_SIGNING_SECRET!,
   accountId: process.env.ZENDESK_ACCOUNT_ID!,
-  async webhook({ payload }) {
+  async webhook({ payload, delivery }) {
     if (payload.type !== 'zen:event-type:ticket.created') return;
     const ticketId = ticketIdFromEvent(payload.subject, payload.detail);
     if (!ticketId) return;
 
     await dispatch(assistant, {
       id: channel.ticketKey({ accountId: payload.account_id, ticketId }),
-      input: { type: `zendesk.${payload.type}`, eventId: payload.id, ticketId },
+      message: {
+        kind: 'signal',
+        type: `zendesk.${payload.type}`,
+        body: JSON.stringify({
+          invocationId: delivery.invocationId,
+          occurredAt: payload.time,
+          change: payload.event,
+        }),
+        attributes: { eventId: payload.id, ticketId },
+      },
     });
   },
 });
@@ -122,13 +131,15 @@ export const channel = createZendeskChannel({
         };
         await dispatch(assistant, {
           id: channel.ticketKey(ticket),
-          input: {
+          message: {
+            kind: 'signal',
             type: `zendesk.${payload.type}`,
-            eventId: payload.id,
-            invocationId: delivery.invocationId,
-            occurredAt: payload.time,
-            ticketId,
-            change: payload.event,
+            body: JSON.stringify({
+              invocationId: delivery.invocationId,
+              occurredAt: payload.time,
+              change: payload.event,
+            }),
+            attributes: { eventId: payload.id, ticketId },
           },
         });
         return;

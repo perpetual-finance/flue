@@ -87,7 +87,7 @@ function dispatchInput() {
 		dispatchId: 'dispatch-1',
 		agent: 'assistant',
 		id: 'agent-1',
-		input: { text: 'Hello' },
+		message: { kind: 'signal' as const, type: 'test.event', body: 'Hello' },
 		acceptedAt: '2026-06-03T00:00:00.000Z',
 	};
 }

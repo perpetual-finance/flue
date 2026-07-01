@@ -50,7 +50,7 @@ async function claimContractSubmission(
 		submissionId,
 		agent: 'echo',
 		id: 'contract',
-		payload: { message: 'Hello' },
+		message: { kind: 'user', body: 'Hello' },
 		acceptedAt: '2026-06-25T00:00:00.000Z',
 	});
 	await executionStore.submissions.markSubmissionCanonicalReady(submissionId);
@@ -260,7 +260,7 @@ export function defineConversationStreamStoreContractTests(
 				submissionId: 'direct-1',
 				agent: 'echo',
 				id: 'contract',
-				payload: { message: 'Hello' },
+				message: { kind: 'user', body: 'Hello' },
 				acceptedAt: '2026-06-25T00:00:00.000Z',
 			});
 			await executionStore.submissions.markSubmissionCanonicalReady('direct-1');

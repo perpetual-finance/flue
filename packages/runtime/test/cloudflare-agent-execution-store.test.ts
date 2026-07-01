@@ -49,7 +49,7 @@ function dispatchInput(overrides: Partial<DispatchInput> = {}): DispatchInput {
 		dispatchId: 'dispatch-1',
 		agent: 'assistant',
 		id: 'agent-1',
-		input: { text: 'Hello' },
+		message: { kind: 'signal', type: 'test.event', body: 'Hello' },
 		acceptedAt: '2026-06-03T00:00:00.000Z',
 		...overrides,
 	};
@@ -143,9 +143,10 @@ describe('createSqlAgentExecutionStore()', () => {
 			agent: 'assistant',
 			id: 'agent-1',
 			acceptedAt: '2026-06-03T00:00:00.000Z',
-			payload: {
-				message: 'hello',
-				images: [{ type: 'image' as const, data: imageData, mimeType: 'image/png' }],
+			message: {
+				kind: 'user' as const,
+				body: 'hello',
+				attachments: [{ type: 'image' as const, data: imageData, mimeType: 'image/png' }],
 			},
 		};
 		const submission = await store.submissions.admitDirect(input);
@@ -154,7 +155,7 @@ describe('createSqlAgentExecutionStore()', () => {
 			.prepare('SELECT payload FROM flue_agent_submissions WHERE submission_id = ?')
 			.get('direct-1') as { payload: string };
 		expect(row.payload).not.toContain(imageData);
-		expect(submission.input).toMatchObject({ payload: { images: [{ data: imageData }] } });
+		expect(submission.input).toMatchObject({ message: { attachments: [{ data: imageData }] } });
 		expect(replay.input).toEqual(submission.input);
 		expect(
 			db
@@ -164,9 +165,9 @@ describe('createSqlAgentExecutionStore()', () => {
 		await expect(
 			store.submissions.admitDirect({
 				...input,
-				payload: {
-					...input.payload,
-					images: [{ type: 'image', data: `b${imageData.slice(1)}`, mimeType: 'image/png' }],
+				message: {
+					...input.message,
+					attachments: [{ type: 'image', data: `b${imageData.slice(1)}`, mimeType: 'image/png' }],
 				},
 			}),
 		).rejects.toThrow('unexpected result');
@@ -181,9 +182,10 @@ describe('createSqlAgentExecutionStore()', () => {
 			agent: 'assistant',
 			id: 'agent-1',
 			acceptedAt: '2026-06-03T00:00:00.000Z',
-			payload: {
-				message: 'hello',
-				images: Array.from({ length: 12 }, (_, index) => ({
+			message: {
+				kind: 'user' as const,
+				body: 'hello',
+				attachments: Array.from({ length: 12 }, (_, index) => ({
 					type: 'image' as const,
 					data: `image-${index}`,
 					mimeType: 'image/png',

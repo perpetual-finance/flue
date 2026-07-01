@@ -48,7 +48,11 @@ export const channel = createGoogleChatChannel({
 
       await dispatch(assistant, {
         id: channel.conversationKey(ref),
-        input: { type: `google-chat.${payload.type}`, payload },
+        message: {
+          kind: 'signal',
+          type: `google-chat.${payload.type}`,
+          body: payload.message?.argumentText ?? payload.message?.text ?? '',
+        },
       });
       return c.body(null, 200);
     },
@@ -135,10 +139,10 @@ export const channel = createGoogleChatChannel({
 
           await dispatch(assistant, {
             id: channel.conversationKey(ref),
-            input: {
+            message: {
+              kind: 'signal',
               type: `google-chat.${payload.type}`,
-              user: payload.user,
-              payload,
+              body: payload.message?.argumentText ?? payload.message?.text ?? '',
             },
           });
           return c.body(null, 200);

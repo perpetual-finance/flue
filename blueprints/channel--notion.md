@@ -33,7 +33,7 @@ ordering, resource-fetching policy, and every outbound tool.
 ## Create the channel
 
 Create `<source-dir>/channels/notion.ts`. Adapt the imported agent, dispatched
-input, page identity, and tool to the application:
+message, page identity, and tool to the application:
 
 ```ts
 // flue-blueprint: channel/notion@1
@@ -82,13 +82,15 @@ export const channel = createNotionChannel({
       case 'page.unlocked': {
         await dispatch(assistant, {
           id: pageInstanceId(event.entity.id),
-          input: {
+          message: {
+            kind: 'signal',
             type: `notion.${event.type}`,
-            deliveryId: event.id,
-            attemptNumber: event.attempt_number,
-            pageId: event.entity.id,
-            authors: event.authors,
-            data: event.data,
+            body: JSON.stringify({
+              attemptNumber: event.attempt_number,
+              authors: event.authors,
+              data: event.data,
+            }),
+            attributes: { deliveryId: event.id, pageId: event.entity.id },
           },
         });
         return;

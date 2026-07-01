@@ -49,15 +49,15 @@ import {
 	encodeRunCursor,
 	FLUE_SCHEMA_VERSION,
 	formatOffset,
-	hydratePersistedDirectSubmission,
+	hydratePersistedSubmissionAttachments,
 	isSubmissionPayload,
 	LEASE_DURATION_MS,
 	MAX_LIST_LIMIT,
 	MAX_READ_LIMIT,
-	matchesPersistedDirectSubmission,
+	matchesPersistedSubmissionAttachments,
 	parseAcceptedAt,
 	parseOffset,
-	prepareDirectSubmission,
+	prepareSubmissionAttachments,
 	SUBMISSION_HARNESS_NAME,
 	SUBMISSION_SESSION_NAME,
 	samePersistedChunks,
@@ -813,8 +813,7 @@ class PgSubmissionStore implements AgentSubmissionStore {
 		input: DispatchAgentSubmissionInput | DirectAgentSubmissionInput,
 	): Promise<AgentDispatchAdmission> {
 		const { kind, submissionId } = input;
-		const prepared =
-			kind === 'direct' ? prepareDirectSubmission(input) : { value: input, chunks: [] };
+		const prepared = prepareSubmissionAttachments(input);
 		const payload = JSON.stringify(prepared.value);
 		const acceptedAt = parseAcceptedAt(input.acceptedAt, `${kind} admission`);
 		const sessionKey = createSessionStorageKey(
@@ -856,11 +855,10 @@ class PgSubmissionStore implements AgentSubmissionStore {
 			if (row.payload !== payload) {
 				const persistedChunks = await chunkStore.read(owner);
 				if (
-					kind !== 'direct' ||
 					typeof row.payload !== 'string' ||
-					!matchesPersistedDirectSubmission(
+					!matchesPersistedSubmissionAttachments(
 						input,
-						JSON.parse(row.payload) as DirectAgentSubmissionInput,
+						JSON.parse(row.payload) as DirectAgentSubmissionInput | DispatchAgentSubmissionInput,
 						persistedChunks,
 					)
 				)
@@ -974,11 +972,8 @@ function parseSubmission(row: SqlRow, chunks: readonly PersistedChunkRow[]): Age
 		throw new Error('[flue] Persisted agent submission row is malformed.');
 	}
 
-	const parsedInput = JSON.parse(row.payload) as unknown;
-	const input =
-		row.kind === 'direct'
-			? hydratePersistedDirectSubmission(parsedInput as DirectAgentSubmissionInput, chunks)
-			: parsedInput;
+	const parsedInput = JSON.parse(row.payload) as DirectAgentSubmissionInput | DispatchAgentSubmissionInput;
+	const input = hydratePersistedSubmissionAttachments(parsedInput, chunks);
 	if (
 		!isSubmissionPayload(input, {
 			kind: row.kind as string,

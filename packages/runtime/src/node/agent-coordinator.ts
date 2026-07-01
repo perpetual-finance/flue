@@ -27,7 +27,7 @@ import type { CreateAgentContextFn } from '../runtime/handle-agent.ts';
 import type { RuntimeActivityGate, RuntimeActivityLease } from '../runtime/runtime-activity-gate.ts';
 import type {
 	AgentDefinition,
-	DirectAgentPayload,
+	DeliveredMessage,
 	DispatchReceipt,
 } from '../types.ts';
 
@@ -628,7 +628,7 @@ export function createNodeAgentCoordinator(options: {
 
 		createAdmission(agentName: string, instanceId: string): AttachedAgentSubmissionAdmission {
 			return async (
-				payload: DirectAgentPayload,
+				message: DeliveredMessage,
 				traceCarrier?: import('../execution-interceptor.ts').FlueTraceCarrier,
 			) => {
 				if (stopping) throw new Error('[flue] Coordinator is shutting down.');
@@ -642,7 +642,7 @@ export function createNodeAgentCoordinator(options: {
 				const input = createDirectAgentSubmissionInput({
 					agent: agentName,
 					id: instanceId,
-					payload,
+					message,
 					traceCarrier,
 				});
 

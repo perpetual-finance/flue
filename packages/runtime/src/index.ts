@@ -93,6 +93,8 @@ export type {
 	BashLike,
 	CallHandle,
 	CompactionConfig,
+	DeliveredAttachment,
+	DeliveredMessage,
 	DispatchReceipt,
 	DurabilityConfig,
 	FileStat,

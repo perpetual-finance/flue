@@ -152,10 +152,11 @@ export const channel = createSlackChannel({
             channelId: event.channel,
             threadTs: event.thread_ts ?? event.ts,
           }),
-          input: {
+          message: {
+            kind: 'signal',
             type: 'slack.app_mention',
-            eventId: payload.event_id,
-            text: event.text,
+            body: event.text,
+            attributes: { eventId: payload.event_id },
           },
         });
         return;
@@ -202,10 +203,11 @@ a continuing agent:
 if (payload.type === 'event_callback' && payload.event.type === 'app_mention') {
   await dispatch(assistant, {
     id: channel.conversationKey(thread),
-    input: {
+    message: {
+      kind: 'signal',
       type: 'slack.app_mention',
-      eventId: payload.event_id,
-      text: payload.event.text,
+      body: payload.event.text,
+      attributes: { eventId: payload.event_id },
     },
   });
 }
@@ -290,7 +292,7 @@ Keep credentials, raw request bodies, webhook response URLs, interaction
 tokens, and other short-lived provider capabilities out of:
 
 - model context;
-- dispatched input;
+- dispatched messages;
 - logs;
 - durable agent session history.
 

@@ -16,6 +16,7 @@ import {
 } from '../execution-interceptor.ts';
 import { assertProductEventV3 } from '../product-event.ts';
 import type {
+	DeliveredMessage,
 	DirectAgentPayload,
 	FlueEvent,
 	FlueEventCallback,
@@ -28,7 +29,7 @@ import { type EventStreamStore, runStreamPath } from './event-stream-store.ts';
 import { generateWorkflowRunId } from './ids.ts';
 import { isBufferedRunEvent, isStreamExcludedEvent, type RunStore } from './run-store.ts';
 import type { RuntimeActivityGate, RuntimeActivityLease } from './runtime-activity-gate.ts';
-import { DirectAgentPayloadSchema } from './schemas.ts';
+import { DirectAgentPayloadSchema, parseDeliveredMessage } from './schemas.ts';
 
 export function assertWorkflowDefinition(value: unknown, name: string): asserts value is WorkflowDefinition {
 	if (!isWorkflowDefinition(value)) {
@@ -51,20 +52,37 @@ function isDispatchInput(value: unknown): value is DispatchInput {
 		input.agent.trim() !== '' &&
 		typeof input.id === 'string' &&
 		input.id.trim() !== '' &&
-		input.input !== undefined &&
+		!!input.message &&
+		typeof input.message === 'object' &&
 		typeof input.acceptedAt === 'string' &&
 		input.acceptedAt.trim() !== ''
 	);
 }
 
-function parseDirectAgentPayload(payload: unknown): DirectAgentPayload {
+/**
+ * Parse the wire body for `POST /agents/:name/:id` and map it onto a
+ * {@link DeliveredMessage}. The wire shape itself is unchanged (the SDK's
+ * `AgentPromptOptions`/`client.agents.send()` contract) — this just
+ * constructs the same `kind: 'user'` message a `dispatch()` call would
+ * build, then runs it through the identical {@link parseDeliveredMessage}
+ * validation so both transports produce the same structured
+ * {@link InvalidRequestError} on bad input.
+ */
+function parseDirectAgentMessage(payload: unknown): DeliveredMessage {
 	const parsed = v.safeParse(DirectAgentPayloadSchema, payload);
-	if (parsed.success) return parsed.output;
-	const oversizedImageIssue = parsed.issues.find((issue) => issue.type === 'max_length');
-	throw new InvalidRequestError({
-		reason:
-			oversizedImageIssue?.message ??
-			'Direct agent requests must use JSON object body { "message": string, "images"?: image[] }.',
+	if (!parsed.success) {
+		const oversizedImageIssue = parsed.issues.find((issue) => issue.type === 'max_length');
+		throw new InvalidRequestError({
+			reason:
+				oversizedImageIssue?.message ??
+				'Direct agent requests must use JSON object body { "message": string, "images"?: image[] }.',
+		});
+	}
+	const payloadValue: DirectAgentPayload = parsed.output;
+	return parseDeliveredMessage({
+		kind: 'user',
+		body: payloadValue.message,
+		...(payloadValue.images ? { attachments: payloadValue.images } : {}),
 	});
 }
 
@@ -178,10 +196,10 @@ export async function handleAgentRequest(opts: HandleAgentOptions): Promise<Resp
 			});
 		}
 		const rawPayload = await parseJsonBody(request);
-		const payload = parseDirectAgentPayload(rawPayload);
+		const message = parseDirectAgentMessage(rawPayload);
 		const traceCarrier = extractTraceCarrier(request.headers);
 		const streamUrl = invocationStreamUrl(request);
-		const receipt = await opts.admitAttachedSubmission(payload, traceCarrier);
+		const receipt = await opts.admitAttachedSubmission(message, traceCarrier);
 		const offset = receipt.offset ?? '-1';
 		return admissionResponse(
 			{ streamUrl, offset, submissionId: receipt.submissionId },

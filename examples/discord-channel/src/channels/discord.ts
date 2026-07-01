@@ -33,10 +33,11 @@ export const channel = createDiscordChannel({
 
 		await dispatch(assistant, {
 			id: channel.conversationKey(destination),
-			input: {
+			message: {
+				kind: 'signal',
 				type: 'discord.command.ask',
-				interactionId: interaction.id,
-				data: interaction.data,
+				body: JSON.stringify({ data: interaction.data }),
+				attributes: { interactionId: interaction.id },
 			},
 		});
 		return {

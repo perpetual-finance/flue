@@ -81,9 +81,11 @@ import dailySummary from './agents/daily-summary.ts';
 
 await dispatch(dailySummary, {
   id: 'daily-summary',
-  input: {
+  message: {
+    kind: 'signal',
     type: 'schedule',
-    scheduledAt: new Date().toISOString(),
+    body: 'Review recent activity and prepare the daily summary.',
+    attributes: { scheduledAt: new Date().toISOString() },
   },
 });
 ```

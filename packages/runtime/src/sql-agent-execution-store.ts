@@ -45,9 +45,9 @@ import type { SqlStorage } from './sql-storage.ts';
 type SqlRow = Record<string, unknown>;
 
 import {
-	hydratePersistedDirectSubmission,
-	matchesPersistedDirectSubmission,
-	prepareDirectSubmission,
+	hydratePersistedSubmissionAttachments,
+	matchesPersistedSubmissionAttachments,
+	prepareSubmissionAttachments,
 	samePersistedChunks,
 	submissionChunkOwner,
 } from './persisted-image-placement.ts';
@@ -490,8 +490,7 @@ class AgentSubmissionStoreImpl implements AgentSubmissionStore {
 
 	private admitSubmission(input: AgentSubmissionInput): AgentDispatchAdmission {
 		const { kind, submissionId } = input;
-		const prepared =
-			kind === 'direct' ? prepareDirectSubmission(input) : { value: input, chunks: [] };
+		const prepared = prepareSubmissionAttachments(input);
 		const payload = JSON.stringify(prepared.value);
 		const acceptedAt = parseAcceptedAt(input.acceptedAt, `${kind} admission`);
 		const sessionKey = createSessionStorageKey(
@@ -522,11 +521,10 @@ class AgentSubmissionStoreImpl implements AgentSubmissionStore {
 			const owner = submissionChunkOwner(submissionId);
 			if (row.payload !== payload) {
 				if (
-					kind !== 'direct' ||
 					typeof row.payload !== 'string' ||
-					!matchesPersistedDirectSubmission(
+					!matchesPersistedSubmissionAttachments(
 						input,
-						JSON.parse(row.payload) as DirectAgentSubmissionInput,
+						JSON.parse(row.payload) as AgentSubmissionInput,
 						chunkStore.read(owner),
 					)
 				)
@@ -636,7 +634,7 @@ function parseSettlementObligation(row: SqlRow): SubmissionSettlementObligation 
 
 function parseSubmission(
 	row: SqlRow,
-	chunks: Parameters<typeof hydratePersistedDirectSubmission>[1],
+	chunks: Parameters<typeof hydratePersistedSubmissionAttachments>[1],
 ): AgentSubmission {
 	if (
 		typeof row.sequence !== 'number' ||
@@ -681,10 +679,7 @@ function parseSubmission(
 		throw new Error('[flue] Persisted agent submission row is malformed.');
 	}
 	const parsedPayload = JSON.parse(row.payload);
-	const input =
-		row.kind === 'direct'
-			? hydratePersistedDirectSubmission(parsedPayload as DirectAgentSubmissionInput, chunks)
-			: parsedPayload;
+	const input = hydratePersistedSubmissionAttachments(parsedPayload as AgentSubmissionInput, chunks);
 	if (
 		!isSubmissionPayload(input, {
 			kind: row.kind as string,

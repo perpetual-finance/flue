@@ -27,7 +27,7 @@ import {
 	handleAgentConversationHead,
 	handleAgentConversationRead,
 } from '../runtime/handle-conversation-routes.ts';
-import type { DirectAgentPayload } from '../types.ts';
+import type { DeliveredMessage } from '../types.ts';
 import {
 	createSqlAgentExecutionStore,
 	createSqlConversationStores,
@@ -696,13 +696,13 @@ class CloudflareAgentCoordinator {
 	}
 
 	private async admitAttachedSubmission(
-		payload: DirectAgentPayload,
+		message: DeliveredMessage,
 		traceCarrier?: FlueTraceCarrier,
 	) {
 		const input = createDirectAgentSubmissionInput({
 			agent: this.agentName,
 			id: this.instance.name,
-			payload,
+			message,
 			traceCarrier,
 		});
 		const agent = this.options.agents.find((record) => record.name === this.agentName)?.definition;

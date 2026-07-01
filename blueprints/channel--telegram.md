@@ -31,7 +31,7 @@ Install `valibot` using the project's existing dependency conventions.
 ## Create the channel
 
 Create `<source-dir>/channels/telegram.ts`. Adapt the imported agent,
-dispatched input, handled update kinds, and tool:
+dispatched message, handled update kinds, and tool:
 
 The callback receives one verified provider-native Telegram `Update` (the
 official `@grammyjs/types` shape, re-exported by `@flue/telegram` and by
@@ -62,10 +62,11 @@ export const channel = createTelegramChannel({
     if (incoming) {
       await dispatch(assistant, {
         id: channel.conversationKey(conversationFromMessage(incoming)),
-        input: {
+        message: {
+          kind: 'signal',
           type: 'telegram.message',
-          updateId: update.update_id,
-          message: incoming,
+          body: incoming.text ?? incoming.caption ?? '',
+          attributes: { updateId: String(update.update_id) },
         },
       });
       return;
@@ -77,11 +78,11 @@ export const channel = createTelegramChannel({
       if (!query.message) return;
       await dispatch(assistant, {
         id: channel.conversationKey(conversationFromMessage(query.message)),
-        input: {
+        message: {
+          kind: 'signal',
           type: 'telegram.callback_query',
-          updateId: update.update_id,
-          data: query.data,
-          from: query.from,
+          body: query.data ?? '',
+          attributes: { updateId: String(update.update_id) },
         },
       });
       return;

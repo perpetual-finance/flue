@@ -29,10 +29,10 @@ export const channel = createGoogleChatChannel({
 					if (!ref) return;
 					await dispatch(assistant, {
 						id: channel.conversationKey(ref),
-						input: {
+						message: {
+							kind: 'signal',
 							type: `google-chat.${payload.type}`,
-							user: payload.user,
-							payload,
+							body: payload.message?.argumentText ?? payload.message?.text ?? '',
 						},
 					});
 					return c.body(null, 200);

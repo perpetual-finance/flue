@@ -1,10 +1,10 @@
 import {
 	type ExtractedImages,
-	extractDirectSubmissionImages,
-	hydrateDirectSubmissionImages,
+	extractSubmissionAttachments,
+	hydrateSubmissionAttachments,
 	type PersistedImageChunk,
 } from './persisted-images.ts';
-import type { DirectAgentSubmissionInput } from './runtime/agent-submissions.ts';
+import type { AgentSubmissionInput } from './runtime/agent-submissions.ts';
 
 export interface PersistedChunkOwner {
 	kind: 'submission';
@@ -33,27 +33,33 @@ export function submissionChunkOwner(submissionId: string): PersistedChunkOwner 
 	return { kind: 'submission', id: submissionId, part: '' };
 }
 
-export function prepareDirectSubmission(
-	input: DirectAgentSubmissionInput,
-): ExtractedImages<DirectAgentSubmissionInput> {
-	return extractDirectSubmissionImages(input);
+/**
+ * Extract and chunk a submission's attachments (present only on a `kind:
+ * 'user'` message) for oversized-row-safe storage. Applies to both direct
+ * and dispatch submissions — attachments are a property of the message, not
+ * the transport.
+ */
+export function prepareSubmissionAttachments(
+	input: AgentSubmissionInput,
+): ExtractedImages<AgentSubmissionInput> {
+	return extractSubmissionAttachments(input);
 }
 
-export function hydratePersistedDirectSubmission(
-	input: DirectAgentSubmissionInput,
+export function hydratePersistedSubmissionAttachments(
+	input: AgentSubmissionInput,
 	rows: readonly PersistedChunkRow[],
-): DirectAgentSubmissionInput {
-	return hydrateDirectSubmissionImages(input, reassemblePersistedChunks(rows));
+): AgentSubmissionInput {
+	return hydrateSubmissionAttachments(input, reassemblePersistedChunks(rows));
 }
 
-export function matchesPersistedDirectSubmission(
-	input: DirectAgentSubmissionInput,
-	persistedInput: DirectAgentSubmissionInput,
+export function matchesPersistedSubmissionAttachments(
+	input: AgentSubmissionInput,
+	persistedInput: AgentSubmissionInput,
 	rows: readonly PersistedChunkRow[],
 ): boolean {
 	try {
 		return (
-			JSON.stringify(hydratePersistedDirectSubmission(persistedInput, rows)) ===
+			JSON.stringify(hydratePersistedSubmissionAttachments(persistedInput, rows)) ===
 			JSON.stringify(input)
 		);
 	} catch {

@@ -22,14 +22,11 @@ export const channel = createGitHubChannel({
 			};
 			await dispatch(assistant, {
 				id: channel.conversationKey(issueRef),
-				input: {
+				message: {
+					kind: 'signal',
 					type: 'github.issue_comment.created',
-					deliveryId: delivery.deliveryId,
-					installationId: delivery.payload.installation?.id,
-					issue: issueRef,
-					sender: delivery.payload.sender,
-					title: issue.title,
-					comment: { id: comment.id, body: comment.body },
+					body: comment.body,
+					attributes: { deliveryId: delivery.deliveryId },
 				},
 			});
 			return;
@@ -44,21 +41,24 @@ export const channel = createGitHubChannel({
 			};
 			await dispatch(assistant, {
 				id: channel.conversationKey(issueRef),
-				input: {
+				message: {
+					kind: 'signal',
 					type: 'github.pull_request_review_comment.created',
-					deliveryId: delivery.deliveryId,
-					installationId: delivery.payload.installation?.id,
-					issue: issueRef,
-					sender: delivery.payload.sender,
-					title: pull_request.title,
-					comment: {
-						id: comment.id,
-						// GitHub replies attach to the top-level review comment in a thread.
-						threadId: comment.in_reply_to_id ?? comment.id,
-						body: comment.body,
-						path: comment.path,
-						line: comment.line ?? null,
-					},
+					body: JSON.stringify({
+						installationId: delivery.payload.installation?.id,
+						issue: issueRef,
+						sender: delivery.payload.sender,
+						title: pull_request.title,
+						comment: {
+							id: comment.id,
+							// GitHub replies attach to the top-level review comment in a thread.
+							threadId: comment.in_reply_to_id ?? comment.id,
+							body: comment.body,
+							path: comment.path,
+							line: comment.line ?? null,
+						},
+					}),
+					attributes: { deliveryId: delivery.deliveryId },
 				},
 			});
 			return;

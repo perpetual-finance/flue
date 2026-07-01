@@ -280,7 +280,7 @@ describeMongo('mongodb() integration', () => {
 			dispatchId: 'd',
 			agent: 'a',
 			id: 'i',
-			input: {},
+			message: { kind: 'signal', type: 'test.event', body: 'go' },
 			acceptedAt: new Date().toISOString(),
 		});
 		const claims = await Promise.all([

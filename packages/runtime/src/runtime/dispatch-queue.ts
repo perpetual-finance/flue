@@ -1,10 +1,10 @@
-import type { DispatchReceipt } from '../types.ts';
+import type { DeliveredMessage, DispatchReceipt } from '../types.ts';
 
 export interface DispatchInput {
 	dispatchId: string;
 	agent: string;
 	id: string;
-	input: unknown;
+	message: DeliveredMessage;
 	acceptedAt: string;
 }
 

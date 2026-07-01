@@ -36,15 +36,15 @@ import {
 	encodeRunCursor,
 	FLUE_SCHEMA_VERSION,
 	formatOffset,
-	hydratePersistedDirectSubmission,
+	hydratePersistedSubmissionAttachments,
 	isSubmissionPayload,
 	LEASE_DURATION_MS,
 	MAX_LIST_LIMIT,
 	MAX_READ_LIMIT,
-	matchesPersistedDirectSubmission,
+	matchesPersistedSubmissionAttachments,
 	parseAcceptedAt,
 	parseOffset,
-	prepareDirectSubmission,
+	prepareSubmissionAttachments,
 	SUBMISSION_HARNESS_NAME,
 	SUBMISSION_SESSION_NAME,
 } from '@flue/runtime/adapter';
@@ -550,8 +550,7 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 	private async admitSubmission(
 		input: DispatchAgentSubmissionInput | DirectAgentSubmissionInput,
 	): Promise<AgentDispatchAdmission> {
-		const prepared =
-			input.kind === 'direct' ? prepareDirectSubmission(input) : { value: input, chunks: [] };
+		const prepared = prepareSubmissionAttachments(input);
 		const generation = randomUUID();
 		const generationKey = this.backend.keys.submissionGeneration(input.submissionId, generation);
 		const sessionKey = createSessionStorageKey(
@@ -660,22 +659,20 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 			return { kind: 'conflict' };
 		const existing = await this.getSubmission(input.submissionId);
 		if (!existing || existing.kind !== input.kind) return { kind: 'conflict' };
-		if (input.kind === 'direct') {
-			const row = await this.backend.hgetall(this.backend.keys.submission(input.submissionId));
-			const generation = required(
-				row.generation,
-				'Persisted Redis submission generation is missing.',
-			);
-			const persisted = await this.readSubmissionGeneration(input.submissionId, generation);
-			if (
-				!matchesPersistedDirectSubmission(
-					input,
-					JSON.parse(persisted.payload) as DirectAgentSubmissionInput,
-					persisted.chunks,
-				)
+		const row = await this.backend.hgetall(this.backend.keys.submission(input.submissionId));
+		const persistedGeneration = required(
+			row.generation,
+			'Persisted Redis submission generation is missing.',
+		);
+		const persisted = await this.readSubmissionGeneration(input.submissionId, persistedGeneration);
+		if (
+			!matchesPersistedSubmissionAttachments(
+				input,
+				JSON.parse(persisted.payload) as DirectAgentSubmissionInput | DispatchAgentSubmissionInput,
+				persisted.chunks,
 			)
-				return { kind: 'conflict' };
-		} else if (json(existing.input) !== json(input)) return { kind: 'conflict' };
+		)
+			return { kind: 'conflict' };
 		return { kind: 'submission', submission: existing };
 	}
 
@@ -810,9 +807,8 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 		const kind = required(row.kind, malformed) as 'dispatch' | 'direct';
 		const persisted = await this.readSubmissionGeneration(submissionId);
 		const acceptedAt = integer(row.acceptedAt);
-		const parsed = JSON.parse(persisted.payload);
-		const input =
-			kind === 'direct' ? hydratePersistedDirectSubmission(parsed, persisted.chunks) : parsed;
+		const parsed = JSON.parse(persisted.payload) as DirectAgentSubmissionInput | DispatchAgentSubmissionInput;
+		const input = hydratePersistedSubmissionAttachments(parsed, persisted.chunks);
 		if (!isSubmissionPayload(input, { kind, submissionId, sessionKey, acceptedAt }))
 			throw new TypeError(malformed);
 		return {

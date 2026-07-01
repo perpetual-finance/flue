@@ -41,11 +41,11 @@ export const channel = createTwilioChannel({
     if (payload.OptOutType === 'STOP') return;
     await dispatch(assistant, {
       id: channel.conversationKey(conversation),
-      input: {
+      message: {
+        kind: 'signal',
         type: 'twilio.message',
-        messageSid: payload.MessageSid,
-        from: payload.From,
-        text: payload.Body,
+        body: payload.Body,
+        attributes: { messageSid: payload.MessageSid, from: payload.From },
       },
     });
   },
@@ -132,15 +132,17 @@ export const channel = createTwilioChannel({
     const numMedia = Number(payload.NumMedia ?? '0');
     await dispatch(assistant, {
       id: channel.conversationKey(conversation),
-      input: {
+      message: {
+        kind: 'signal',
         type: 'twilio.message',
-        messageSid: payload.MessageSid,
-        from: payload.From,
-        text: payload.Body,
-        media: Array.from({ length: numMedia }, (_, index) => ({
-          index,
-          contentType: payload[`MediaContentType${index}`],
-        })),
+        body: JSON.stringify({
+          text: payload.Body,
+          media: Array.from({ length: numMedia }, (_, index) => ({
+            index,
+            contentType: payload[`MediaContentType${index}`],
+          })),
+        }),
+        attributes: { messageSid: payload.MessageSid, from: payload.From },
       },
     });
   },

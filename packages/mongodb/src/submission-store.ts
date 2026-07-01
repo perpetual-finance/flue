@@ -14,12 +14,12 @@ import {
 	createSessionStorageKey,
 	DURABILITY_DEFAULT_MAX_ATTEMPTS,
 	DURABILITY_DEFAULT_TIMEOUT_MS,
-	hydratePersistedDirectSubmission,
+	hydratePersistedSubmissionAttachments,
 	isSubmissionPayload,
 	LEASE_DURATION_MS,
-	matchesPersistedDirectSubmission,
+	matchesPersistedSubmissionAttachments,
 	parseAcceptedAt,
-	prepareDirectSubmission,
+	prepareSubmissionAttachments,
 	SUBMISSION_HARNESS_NAME,
 	SUBMISSION_SESSION_NAME,
 } from '@flue/runtime/adapter';
@@ -295,8 +295,7 @@ export class MongoSubmissionStore implements AgentSubmissionStore {
 	private async admit(
 		input: DispatchAgentSubmissionInput | DirectAgentSubmissionInput,
 	): Promise<AgentDispatchAdmission> {
-		const prepared =
-			input.kind === 'direct' ? prepareDirectSubmission(input) : { value: input, chunks: [] };
+		const prepared = prepareSubmissionAttachments(input);
 		const pointer = await this.values.stage(`submission:${input.submissionId}`, prepared.value);
 		const owner = { kind: 'submission' as const, id: input.submissionId, part: '' as const };
 		const stagedChunks = await stageChunks(this.runner, this.prefix, owner, prepared.chunks);
@@ -349,17 +348,15 @@ export class MongoSubmissionStore implements AgentSubmissionStore {
 				const persisted = await this.values.read(row.payload as unknown as StoredValue);
 				const chunks = row.chunks
 					? ((await this.values.read(row.chunks as unknown as StoredValue)) as Parameters<
-							typeof matchesPersistedDirectSubmission
+							typeof matchesPersistedSubmissionAttachments
 						>[2])
 					: [];
 				if (
-					input.kind === 'direct'
-						? !matchesPersistedDirectSubmission(
-								input,
-								persisted as DirectAgentSubmissionInput,
-								chunks,
-							)
-						: JSON.stringify(persisted) !== JSON.stringify(input)
+					!matchesPersistedSubmissionAttachments(
+						input,
+						persisted as DirectAgentSubmissionInput | DispatchAgentSubmissionInput,
+						chunks,
+					)
 				)
 					return { kind: 'conflict' };
 			}
@@ -394,16 +391,15 @@ export class MongoSubmissionStore implements AgentSubmissionStore {
 	}
 	private async parseSubmission(row: MongoDocument): Promise<AgentSubmission> {
 		const persisted = await this.values.read(row.payload as unknown as StoredValue);
-		const chunks =
-			row.kind === 'direct' && row.chunks
-				? ((await this.values.read(row.chunks as unknown as StoredValue)) as Parameters<
-						typeof hydratePersistedDirectSubmission
-					>[1])
-				: [];
-		const input =
-			row.kind === 'direct'
-				? hydratePersistedDirectSubmission(persisted as DirectAgentSubmissionInput, chunks)
-				: persisted;
+		const chunks = row.chunks
+			? ((await this.values.read(row.chunks as unknown as StoredValue)) as Parameters<
+					typeof hydratePersistedSubmissionAttachments
+				>[1])
+			: [];
+		const input = hydratePersistedSubmissionAttachments(
+			persisted as DirectAgentSubmissionInput | DispatchAgentSubmissionInput,
+			chunks,
+		);
 		if (
 			!isSubmissionPayload(input, {
 				kind: String(row.kind),

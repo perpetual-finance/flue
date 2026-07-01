@@ -34,7 +34,7 @@ function dispatchInput(overrides: Partial<DispatchInput> = {}): DispatchInput {
 		dispatchId: 'dispatch-1',
 		agent: 'assistant',
 		id: 'agent-1',
-		input: { text: 'Hello' },
+		message: { kind: 'signal', type: 'test.event', body: 'Hello' },
 		acceptedAt: '2026-06-03T00:00:00.000Z',
 		...overrides,
 	};
@@ -48,7 +48,7 @@ function directInput(
 		submissionId: 'direct-1',
 		agent: 'assistant',
 		id: 'agent-1',
-		payload: { message: 'Hello' },
+		message: { kind: 'user', body: 'Hello' },
 		acceptedAt: '2026-06-03T00:00:00.000Z',
 		...overrides,
 	};
@@ -125,9 +125,32 @@ export function defineStoreContractTests(label: string, backend: StoreContractTe
 				const store = await create();
 				await store.submissions.admitDispatch(dispatchInput());
 				expect(
-					await store.submissions.admitDispatch(dispatchInput({ input: { text: 'Different' } })),
+					await store.submissions.admitDispatch(
+						dispatchInput({
+							message: { kind: 'signal', type: 'test.event', body: 'Different' },
+						}),
+					),
 				).toEqual({
 					kind: 'conflict',
+				});
+			});
+
+			it('round-trips a dispatched user message with attachments', async () => {
+				const store = await create();
+				const input = dispatchInput({
+					message: {
+						kind: 'user',
+						body: 'Here is the screenshot.',
+						attachments: [{ type: 'image', data: 'image-data', mimeType: 'image/png' }],
+					},
+				});
+				const admitted = await admitDispatchReady(store, input);
+				expect(admitted).toMatchObject({
+					kind: 'submission',
+					submission: { submissionId: input.dispatchId, input: { message: input.message } },
+				});
+				expect((await store.submissions.getSubmission(input.dispatchId))?.input).toMatchObject({
+					message: input.message,
 				});
 			});
 		});
@@ -138,9 +161,10 @@ export function defineStoreContractTests(label: string, backend: StoreContractTe
 			it('round-trips direct submission images', async () => {
 				const store = await create();
 				const input = directInput({
-					payload: {
-						message: 'Hello',
-						images: [{ type: 'image', data: 'image-data', mimeType: 'image/png' }],
+					message: {
+						kind: 'user',
+						body: 'Hello',
+						attachments: [{ type: 'image', data: 'image-data', mimeType: 'image/png' }],
 					},
 				});
 				const admitted = await admitDirectReady(store,input);
@@ -152,18 +176,20 @@ export function defineStoreContractTests(label: string, backend: StoreContractTe
 				const store = await create();
 				await admitDirectReady(store,
 					directInput({
-						payload: {
-							message: 'Hello',
-							images: [{ type: 'image', data: 'first-image', mimeType: 'image/png' }],
+						message: {
+							kind: 'user',
+							body: 'Hello',
+							attachments: [{ type: 'image', data: 'first-image', mimeType: 'image/png' }],
 						},
 					}),
 				);
 				await expect(
 					admitDirectReady(store,
 						directInput({
-							payload: {
-								message: 'Hello',
-								images: [{ type: 'image', data: 'second-image', mimeType: 'image/png' }],
+							message: {
+								kind: 'user',
+								body: 'Hello',
+								attachments: [{ type: 'image', data: 'second-image', mimeType: 'image/png' }],
 							},
 						}),
 					),

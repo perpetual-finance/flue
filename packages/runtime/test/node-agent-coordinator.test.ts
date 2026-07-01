@@ -147,7 +147,7 @@ function makeDispatchInput(overrides: Partial<DispatchInput> = {}): DispatchInpu
 		dispatchId: `dispatch-${crypto.randomUUID()}`,
 		agent: 'assistant',
 		id: 'instance-1',
-		input: { message: 'Hello' },
+		message: { kind: 'signal', type: 'test.event', body: 'Hello' },
 		acceptedAt: new Date().toISOString(),
 		...overrides,
 	};
@@ -215,7 +215,12 @@ describe('NodeAgentCoordinator', () => {
 		const { coordinator } = await createFauxCoordinator(dbPath, provider);
 		const input = makeDispatchInput({
 			dispatchId: 'dispatch-semantic-input',
-			input: { z: '<later>', a: { value: '&first' } },
+			message: {
+				kind: 'signal',
+				type: 'custom.event',
+				body: '<value>&first</value>',
+				attributes: { source: 'test' },
+			},
 			acceptedAt: '2026-06-26T12:00:00.000Z',
 		});
 
@@ -239,19 +244,12 @@ describe('NodeAgentCoordinator', () => {
 		const assistantRecord = records.find((record) => record.type === 'assistant_message_started');
 		expect(inputRecord).toMatchObject({
 			dispatchId: input.dispatchId,
-			signalType: 'dispatch_input',
-			tagName: 'dispatch',
-			content: '{\n  "a": {\n    "value": "&first"\n  },\n  "z": "<later>"\n}',
-			attributes: {
-				agent: 'assistant',
-				id: 'instance-1',
-				session: 'default',
-				dispatchId: 'dispatch-semantic-input',
-				acceptedAt: '2026-06-26T12:00:00.000Z',
-			},
+			signalType: 'custom.event',
+			content: '<value>&first</value>',
+			attributes: { source: 'test' },
 		});
 		expect(providerMessages).toEqual([[
-			'<dispatch type="dispatch_input" agent="assistant" id="instance-1" session="default" dispatchId="dispatch-semantic-input" acceptedAt="2026-06-26T12:00:00.000Z">\n{\n  "a": {\n    "value": "&amp;first"\n  },\n  "z": "&lt;later&gt;"\n}\n</dispatch>',
+			'<signal type="custom.event" source="test">\n&lt;value&gt;&amp;first&lt;/value&gt;\n</signal>',
 		]]);
 		expect(assistantRecord).toMatchObject({ parentId: inputRecord?.type === 'signal' ? inputRecord.messageId : undefined });
 
@@ -777,16 +775,8 @@ describe('NodeAgentCoordinator', () => {
 						dispatchId: input.dispatchId,
 						messageId: 'entry_dispatch_ZGlzcGF0Y2gtaW5wdXQtbWFya2Vy',
 						parentId: null,
-						signalType: 'dispatch_input',
-						tagName: 'dispatch',
-						content: '{\n  "message": "Hello"\n}',
-						attributes: {
-							agent: input.agent,
-							id: input.id,
-							session: 'default',
-							dispatchId: input.dispatchId,
-							acceptedAt: input.acceptedAt,
-						},
+						signalType: 'test.event',
+						content: 'Hello',
 					},
 				],
 			});
@@ -1089,7 +1079,10 @@ describe('NodeAgentCoordinator', () => {
 
 			await expect(
 				queue.enqueue(
-					makeDispatchInput({ dispatchId: 'dispatch-conflict', input: { message: 'Different' } }),
+					makeDispatchInput({
+						dispatchId: 'dispatch-conflict',
+						message: { kind: 'signal', type: 'test.event', body: 'Different' },
+					}),
 				),
 			).rejects.toThrow();
 			await coordinator.waitForIdle();
@@ -1106,7 +1099,7 @@ describe('NodeAgentCoordinator', () => {
 			const { coordinator } = await createFauxCoordinator(dbPath, provider);
 
 			const receipt = await coordinator
-				.createAdmission('assistant', 'instance-1')({ message: 'Hello' });
+				.createAdmission('assistant', 'instance-1')({ kind: 'user', body: 'Hello' });
 			const adapter = sqlite(dbPath);
 			await adapter.migrate?.();
 			const { conversationStreamStore } = await adapter.connect();
@@ -1130,7 +1123,7 @@ describe('NodeAgentCoordinator', () => {
 			const { coordinator, executionStore } = await createFauxCoordinator(dbPath, provider);
 
 			const admit = coordinator.createAdmission('assistant', 'instance-1');
-			const receipt = await admit({ message: 'Hello from direct prompt' });
+			const receipt = await admit({ kind: 'user', body: 'Hello from direct prompt' });
 
 			expect(receipt.submissionId).toEqual(expect.any(String));
 			// Admission is fire-and-forget; wait for the durable lifecycle to settle.
@@ -1149,7 +1142,7 @@ describe('NodeAgentCoordinator', () => {
 			const { coordinator } = await createFauxCoordinator(dbPath, provider);
 
 			const admit = coordinator.createAdmission('assistant', 'instance-1');
-			await admit({ message: 'Hello persisted' });
+			await admit({ kind: 'user', body: 'Hello persisted' });
 			// Admission is fire-and-forget; wait for the durable lifecycle to settle.
 			await coordinator.waitForIdle();
 
@@ -1169,7 +1162,8 @@ describe('NodeAgentCoordinator', () => {
 			const { coordinator } = await createFauxCoordinator(dbPath, provider);
 
 			const receipt = await coordinator.createAdmission('assistant', 'instance-1')({
-				message: 'Hello from direct prompt',
+				kind: 'user',
+				body: 'Hello from direct prompt',
 			});
 			// Admission is fire-and-forget; the user message is persisted during
 			// processing, so wait for the durable lifecycle to settle before reading.
@@ -1208,8 +1202,8 @@ describe('NodeAgentCoordinator', () => {
 			const admit = coordinator.createAdmission('assistant', 'instance-1');
 			// Fire both concurrently to the same session.
 			const [result1, result2] = await Promise.all([
-				admit({ message: 'First' }),
-				admit({ message: 'Second' }),
+				admit({ kind: 'user', body: 'First' }),
+				admit({ kind: 'user', body: 'Second' }),
 			]);
 
 			// Both should resolve (not reject).
@@ -1234,7 +1228,7 @@ describe('NodeAgentCoordinator', () => {
 				submissionId: 'direct-interrupted',
 				agent: 'assistant',
 				id: 'instance-1',
-				payload: { message: 'Hello interrupted' },
+				message: { kind: 'user', body: 'Hello interrupted' },
 				acceptedAt: new Date().toISOString(),
 			});
 			await store.submissions.markSubmissionCanonicalReady('direct-interrupted');
@@ -1267,7 +1261,7 @@ describe('NodeAgentCoordinator', () => {
 				submissionId: 'direct-terminalized',
 				agent: 'assistant',
 				id: 'instance-1',
-				payload: { message: 'Hello terminalized' },
+				message: { kind: 'user', body: 'Hello terminalized' },
 				acceptedAt: new Date().toISOString(),
 			});
 			await store.submissions.markSubmissionCanonicalReady('direct-terminalized');
@@ -1329,7 +1323,7 @@ describe('NodeAgentCoordinator', () => {
 				submissionId: 'direct-head',
 				agent: 'assistant',
 				id: 'instance-1',
-				payload: { message: 'Direct first' },
+				message: { kind: 'user', body: 'Direct first' },
 				acceptedAt: new Date().toISOString(),
 			});
 			await store.submissions.markSubmissionCanonicalReady('direct-head');

@@ -32,14 +32,17 @@ export const channel = createStripeChannel({
 				};
 				await dispatch(assistant, {
 					id: stripeCustomerInstanceId(customer),
-					input: {
+					message: {
+						kind: 'signal',
 						type: `stripe.${event.type}`,
-						eventId: event.id,
-						customerId,
-						sessionId: session.id,
-						paymentStatus: session.payment_status,
-						amountTotal: session.amount_total,
-						currency: session.currency,
+						body: JSON.stringify({
+							customerId,
+							sessionId: session.id,
+							paymentStatus: session.payment_status,
+							amountTotal: session.amount_total,
+							currency: session.currency,
+						}),
+						attributes: { eventId: event.id },
 					},
 				});
 				return;

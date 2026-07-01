@@ -34,13 +34,15 @@ export const channel = createNotionChannel({
 			case 'page.undeleted': {
 				await dispatch(assistant, {
 					id: pageInstanceId(event.entity.id),
-					input: {
+					message: {
+						kind: 'signal',
 						type: `notion.${event.type}`,
-						eventId: event.id,
-						attemptNumber: event.attempt_number,
-						pageId: event.entity.id,
-						authors: event.authors,
-						data: event.data,
+						body: JSON.stringify({
+							attemptNumber: event.attempt_number,
+							authors: event.authors,
+							data: event.data,
+						}),
+						attributes: { eventId: event.id, pageId: event.entity.id },
 					},
 				});
 				return;

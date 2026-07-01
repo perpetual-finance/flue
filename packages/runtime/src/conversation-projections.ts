@@ -105,21 +105,28 @@ export interface ConversationUiMessage {
  * Map an internal signal type to its stable public classification. Keeps the
  * canonical signal vocabulary off the wire: only the derived `purpose`/`display`
  * cross the contract, so internal signal types can evolve without changing it.
- * Unknown/future signal types default to a diagnostic advisory rather than
- * leaking as visible chat.
+ *
+ * The runtime itself only ever writes the handful of internal signal types
+ * enumerated below (recovery advisories and terminal-outcome markers) — every
+ * other signal type is caller-defined, written only by a `dispatch()` call
+ * delivering a `kind: 'signal'` message (see the phase 2 unified-delivery
+ * plan). That's why `default` classifies as `purpose: 'dispatch'` rather than
+ * `'advisory'`: by construction, anything reaching `default` arrived through
+ * dispatch, not from the runtime's own internal bookkeeping.
  */
 export function classifySignal(signalType: string): {
 	purpose: ConversationMessagePurpose;
 	display: ConversationMessageDisplay;
 } {
 	switch (signalType) {
-		case 'dispatch_input':
-			return { purpose: 'dispatch', display: 'diagnostic' };
 		case 'stream_interrupted':
 		case 'stream_continued':
 			return { purpose: 'advisory', display: 'hidden' };
-		default:
+		case 'submission_aborted':
+		case 'submission_interrupted':
 			return { purpose: 'advisory', display: 'diagnostic' };
+		default:
+			return { purpose: 'dispatch', display: 'diagnostic' };
 	}
 }
 

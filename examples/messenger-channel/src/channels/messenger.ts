@@ -28,12 +28,11 @@ export const channel = createMessengerChannel({
 				}
 				await dispatch(assistant, {
 					id: channel.conversationKey(conversation),
-					input: {
+					message: {
+						kind: 'signal',
 						type: 'messenger.message',
-						messageId: event.message.mid,
-						text: event.message.text,
-						attachmentTypes: (event.message.attachments ?? []).map((attachment) => attachment.type),
-						quickReplyPayload: event.message.quick_reply?.payload,
+						body: event.message.text,
+						attributes: { messageId: event.message.mid },
 					},
 				});
 			}

@@ -23,10 +23,11 @@ export const channel = createSlackChannel({
 				};
 				await dispatch(assistant, {
 					id: channel.conversationKey(thread),
-					input: {
+					message: {
+						kind: 'signal',
 						type: 'slack.app_mention',
-						eventId: payload.event_id,
-						text: event.text,
+						body: event.text,
+						attributes: { eventId: payload.event_id },
 					},
 				});
 				return;

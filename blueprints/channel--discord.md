@@ -28,7 +28,7 @@ Install `valibot` using the project's existing dependency conventions.
 ## Create the channel
 
 Create `<source-dir>/channels/discord.ts`. Adapt the imported agent, command
-name, dispatched input, immediate response, and application-owned destination
+name, dispatched message, immediate response, and application-owned destination
 derivation:
 
 ```ts
@@ -68,10 +68,11 @@ export const channel = createDiscordChannel({
 
     await dispatch(assistant, {
       id: channel.conversationKey(destination),
-      input: {
+      message: {
+        kind: 'signal',
         type: 'discord.command.ask',
-        interactionId: interaction.id,
-        data: interaction.data,
+        body: JSON.stringify({ data: interaction.data }),
+        attributes: { interactionId: interaction.id },
       },
     });
     return {
@@ -116,10 +117,10 @@ This application-owned helper derives `DiscordDestinationRef` from native
 `guild_id`, `channel.id`, deprecated `channel_id`, `channel.type`, and `context`
 fields. Discord interactions require a provider
 response; do not rely on an empty acknowledgement. PING/PONG is handled by
-`@flue/discord`. Keep the native `interaction.token` out of dispatched input,
-tools, model context, logs, and durable history. Some valid interactions have no
-durable destination, and private-channel interactions cannot be used as
-arbitrary bot-token message destinations.
+`@flue/discord`. Keep the native `interaction.token` out of the dispatched
+message, tools, model context, logs, and durable history. Some valid
+interactions have no durable destination, and private-channel interactions
+cannot be used as arbitrary bot-token message destinations.
 
 The package-root `@discordjs/rest` import selects its Fetch-based web export in
 Cloudflare Workers. Follow the project's Worker secret binding convention and

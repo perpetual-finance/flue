@@ -18,10 +18,11 @@ new Cron(
 	async () => {
 		await dispatch(scheduledAgent, {
 			id: 'daily-summary',
-			input: {
+			message: {
+				kind: 'signal',
 				type: 'schedule',
-				prompt: 'Review recent activity and prepare the daily summary.',
-				scheduledAt: new Date().toISOString(),
+				body: 'Review recent activity and prepare the daily summary.',
+				attributes: { scheduledAt: new Date().toISOString() },
 			},
 		});
 	},

@@ -34,11 +34,11 @@ export const channel = createLinearChannel({
 					issueId: comment.issueId,
 					...(comment.parentId ? { threadCommentId: comment.parentId } : {}),
 				}),
-				input: {
+				message: {
+					kind: 'signal',
 					type: 'linear.comment.created',
-					deliveryId,
-					actor: payload.actor,
-					comment,
+					body: comment.body,
+					attributes: { deliveryId },
 				},
 			});
 			return;
@@ -51,12 +51,15 @@ export const channel = createLinearChannel({
 					organizationId: payload.organizationId,
 					agentSessionId: payload.agentSession.id,
 				}),
-				input: {
+				message: {
+					kind: 'signal',
 					type: `linear.agent_session.${payload.action}`,
-					deliveryId,
-					promptContext: payload.promptContext,
-					activity: payload.agentActivity,
-					session: payload.agentSession,
+					body: JSON.stringify({
+						promptContext: payload.promptContext,
+						activity: payload.agentActivity,
+						session: payload.agentSession,
+					}),
+					attributes: { deliveryId },
 				},
 			});
 		}

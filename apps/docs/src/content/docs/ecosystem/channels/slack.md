@@ -40,10 +40,11 @@ export const channel = createSlackChannel({
         channelId: event.channel,
         threadTs: event.thread_ts ?? event.ts,
       }),
-      input: {
+      message: {
+        kind: 'signal',
         type: 'slack.app_mention',
-        eventId: payload.event_id,
-        text: event.text,
+        body: event.text,
+        attributes: { eventId: payload.event_id },
       },
     });
   },
@@ -101,10 +102,11 @@ export const channel = createSlackChannel({
         };
         await dispatch(assistant, {
           id: channel.conversationKey(thread),
-          input: {
+          message: {
+            kind: 'signal',
             type: 'slack.app_mention',
-            eventId: payload.event_id,
-            text: event.text,
+            body: event.text,
+            attributes: { eventId: payload.event_id },
           },
         });
         return;
@@ -159,8 +161,8 @@ export const channel = createSlackChannel({
 
 Interaction payloads preserve Slack's snake_case wire fields. `trigger_id`,
 `response_url`, and view `response_urls` are short-lived capabilities. Keep
-them in immediate trusted request handling, not dispatch input, model context,
-logs, or durable session history.
+them in immediate trusted request handling, not a dispatched message, model
+context, logs, or durable session history.
 
 ### Commands
 

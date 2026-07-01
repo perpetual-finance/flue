@@ -10,7 +10,7 @@
 
 import * as v from 'valibot';
 import type { AgentSubmission } from './agent-execution-store.ts';
-import { DirectAgentPayloadSchema } from './runtime/schemas.ts';
+import { DeliveredMessageSchema } from './runtime/schemas.ts';
 import { createSessionStorageKey } from './session-identity.ts';
 
 /**
@@ -51,7 +51,9 @@ export interface SubmissionPayloadContext {
  *
  * Used after `JSON.parse(payload)` to verify the deserialized object is a
  * well-formed `AgentSubmissionInput` that is consistent with the stored
- * submission metadata.
+ * submission metadata. Both dispatch and direct payloads carry the same
+ * `message: DeliveredMessage` field — validated identically here regardless
+ * of transport `kind`.
  */
 export function isSubmissionPayload(
 	input: unknown,
@@ -60,6 +62,7 @@ export function isSubmissionPayload(
 	if (!input || typeof input !== 'object') return false;
 	const value = input as Record<string, unknown>;
 	if (value.kind !== ctx.kind || value.submissionId !== ctx.submissionId) return false;
+	if (!v.safeParse(DeliveredMessageSchema, value.message).success) return false;
 	if (value.kind === 'dispatch') {
 		return (
 			typeof value.dispatchId === 'string' &&
@@ -72,9 +75,7 @@ export function isSubmissionPayload(
 				SUBMISSION_SESSION_NAME,
 			) === ctx.sessionKey &&
 			typeof value.acceptedAt === 'string' &&
-			Date.parse(value.acceptedAt as string) === ctx.acceptedAt &&
-			'input' in value &&
-			value.input !== undefined
+			Date.parse(value.acceptedAt as string) === ctx.acceptedAt
 		);
 	}
 	return (
@@ -86,8 +87,7 @@ export function isSubmissionPayload(
 			SUBMISSION_SESSION_NAME,
 		) === ctx.sessionKey &&
 		typeof value.acceptedAt === 'string' &&
-		Date.parse(value.acceptedAt as string) === ctx.acceptedAt &&
-		v.safeParse(DirectAgentPayloadSchema, value.payload).success
+		Date.parse(value.acceptedAt as string) === ctx.acceptedAt
 	);
 }
 

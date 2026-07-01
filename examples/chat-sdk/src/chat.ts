@@ -29,11 +29,11 @@ export function registerChatHandlers(agent: AgentDefinition): void {
 	bot.onNewMention(async (thread, message) => {
 		await dispatch(agent, {
 			id: thread.id,
-			input: {
+			message: {
+				kind: 'signal',
 				type: 'chat.github.mention',
-				threadId: thread.id,
-				messageId: message.id,
-				text: message.text,
+				body: message.text,
+				attributes: { threadId: thread.id, messageId: message.id },
 			},
 		});
 	});

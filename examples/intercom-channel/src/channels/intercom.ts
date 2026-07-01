@@ -29,12 +29,15 @@ export const channel = createIntercomChannel({
 				};
 				await dispatch(assistant, {
 					id: channel.conversationKey(conversation),
-					input: {
+					message: {
+						kind: 'signal',
 						type: `intercom.${notification.topic}`,
-						notificationId: notification.id,
-						createdAt: notification.created_at,
-						deliveryAttempts: notification.delivery_attempts,
-						conversation: notification.data.item,
+						body: JSON.stringify({
+							createdAt: notification.created_at,
+							deliveryAttempts: notification.delivery_attempts,
+							conversation: notification.data.item,
+						}),
+						...(notification.id === null ? {} : { attributes: { notificationId: notification.id } }),
 					},
 				});
 				return;

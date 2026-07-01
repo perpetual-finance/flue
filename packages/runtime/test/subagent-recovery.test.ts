@@ -94,7 +94,7 @@ function directInput(submissionId: string, message: string) {
 		submissionId,
 		agent: 'assistant',
 		id: INSTANCE,
-		payload: { message },
+		message: { kind: 'user' as const, body: message },
 		acceptedAt: new Date().toISOString(),
 	};
 }

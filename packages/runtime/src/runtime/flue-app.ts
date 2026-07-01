@@ -224,7 +224,7 @@ function resolveAgentDefinitionDispatchRequest(
 			'[flue] dispatch() target agent definition is not a discovered default-exported agent in this built application.',
 		);
 	}
-	return { agent: name, id: request.id, input: request.input };
+	return { agent: name, id: request.id, message: request.message };
 }
 
 let runtimeConfig: FlueRuntime | undefined;

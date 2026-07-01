@@ -19,7 +19,7 @@ flue add channel github
 The blueprint installs `@flue/github` and the official `@octokit/rest` SDK. It
 creates `<source-root>/channels/github.ts` with a named `channel`, a
 project-owned Octokit `client`, and an issue-comment tool, then wires that tool
-into an agent. Adapt the subscribed events, dispatched input, and tool to the
+into an agent. Adapt the subscribed events, dispatched message, and tool to the
 application.
 
 ```ts title="src/channels/github.ts (abridged)"
@@ -43,10 +43,11 @@ export const channel = createGitHubChannel({
 
     await dispatch(assistant, {
       id: channel.conversationKey(issueRef),
-      input: {
+      message: {
+        kind: 'signal',
         type: 'github.issue_comment.created',
-        deliveryId: delivery.deliveryId,
-        comment: { id: comment.id, body: comment.body },
+        body: comment.body,
+        attributes: { deliveryId: delivery.deliveryId },
       },
     });
   },
@@ -114,13 +115,11 @@ export const channel = createGitHubChannel({
       };
       await dispatch(assistant, {
         id: channel.conversationKey(issueRef),
-        input: {
+        message: {
+          kind: 'signal',
           type: 'github.issue_comment.created',
-          deliveryId: delivery.deliveryId,
-          installationId: delivery.payload.installation?.id,
-          issue: issueRef,
-          sender: delivery.payload.sender,
-          comment: { id: comment.id, body: comment.body },
+          body: comment.body,
+          attributes: { deliveryId: delivery.deliveryId },
         },
       });
       return;
@@ -135,18 +134,21 @@ export const channel = createGitHubChannel({
       };
       await dispatch(assistant, {
         id: channel.conversationKey(issueRef),
-        input: {
+        message: {
+          kind: 'signal',
           type: 'github.pull_request_review_comment.created',
-          deliveryId: delivery.deliveryId,
-          installationId: delivery.payload.installation?.id,
-          issue: issueRef,
-          sender: delivery.payload.sender,
-          comment: {
-            id: comment.id,
-            // Replies attach to the top-level review comment in a thread.
-            threadId: comment.in_reply_to_id ?? comment.id,
-            body: comment.body,
-          },
+          body: JSON.stringify({
+            installationId: delivery.payload.installation?.id,
+            issue: issueRef,
+            sender: delivery.payload.sender,
+            comment: {
+              id: comment.id,
+              // Replies attach to the top-level review comment in a thread.
+              threadId: comment.in_reply_to_id ?? comment.id,
+              body: comment.body,
+            },
+          }),
+          attributes: { deliveryId: delivery.deliveryId },
         },
       });
       return;

@@ -108,12 +108,9 @@ import type {
 	AgentSubmissionInspection,
 	AgentSubmissionInterruption,
 	AgentSubmissionSession,
-	DirectAgentSubmissionInput,
 	ProcessAgentSubmissionOptions,
 } from './runtime/agent-submissions.ts';
-import { agentSubmissionDispatchInput } from './runtime/agent-submissions.ts';
 import { type AttachmentStore, createAttachmentRef } from './runtime/attachment-store.ts';
-import type { DispatchInput } from './runtime/dispatch-queue.ts';
 import { generateOperationId, generateTurnId } from './runtime/ids.ts';
 import {
 	getProviderTelemetry,
@@ -385,37 +382,6 @@ function getRegisteredPackagedSkills(
 		if (packaged) registered[skill.id] = packaged;
 	}
 	return registered;
-}
-
-function createDispatchInputSignal(input: DispatchInput): SignalMessage {
-	return {
-		role: 'signal',
-		type: 'dispatch_input',
-		tagName: 'dispatch',
-		content: stableStringify(input.input),
-		attributes: {
-			agent: input.agent,
-			id: input.id,
-			session: 'default',
-			dispatchId: input.dispatchId,
-			acceptedAt: input.acceptedAt,
-		},
-		timestamp: Date.now(),
-	};
-}
-
-function stableStringify(value: unknown): string {
-	return JSON.stringify(sortJsonLike(value), null, 2);
-}
-
-function sortJsonLike(value: unknown): unknown {
-	if (Array.isArray(value)) return value.map(sortJsonLike);
-	if (!value || typeof value !== 'object') return value;
-	const sorted: Record<string, unknown> = {};
-	for (const key of Object.keys(value).sort()) {
-		sorted[key] = sortJsonLike((value as Record<string, unknown>)[key]);
-	}
-	return sorted;
 }
 
 function wrapProviderStream<T extends AsyncIterable<unknown> & { result(): Promise<unknown> }>(
@@ -1081,9 +1047,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	): CallHandle<PromptResponse> {
 		return createCallHandle(undefined, (signal) =>
 			this.runOperation('prompt', signal, () =>
-				input.kind === 'dispatch'
-					? this.runPersistedDispatchInput(agentSubmissionDispatchInput(input), signal, options)
-					: this.runPersistedDirectSubmissionInput(input, signal, options),
+				this.runPersistedSubmissionInput(input, signal, options),
 			),
 		);
 	}
@@ -3029,29 +2993,77 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	}
 
 
-	private async runPersistedDispatchInput(
-		input: DispatchInput,
+	/**
+	 * Build the canonical `user_message` or `signal` record for a delivered
+	 * message and drive the conversation from it — the single input path for
+	 * both a direct HTTP prompt and a `dispatch()` call. Which kind of
+	 * canonical record gets written depends only on `input.message.kind`, not
+	 * on whether the submission is `input.kind === 'direct'` or `'dispatch'`
+	 * (that distinction remains relevant only for record-id namespacing and
+	 * the `dispatchId` annotation below).
+	 */
+	private async runPersistedSubmissionInput(
+		input: AgentSubmissionInput,
 		signal: AbortSignal,
 		options?: ProcessAgentSubmissionOptions,
 	): Promise<PromptResponse> {
-		this.activeAgentInput = { text: renderSignalMessage(createDispatchInputSignal(input)) };
+		const message = input.message;
+		this.activeAgentInput =
+			message.kind === 'user'
+				? {
+						text: message.body,
+						...(message.attachments?.length
+							? { images: message.attachments.map((attachment) => ({ mimeType: attachment.mimeType })) }
+							: {}),
+					}
+				: {
+						text: renderSignalMessage({
+							role: 'signal',
+							type: message.type,
+							tagName: message.tagName,
+							content: message.body,
+							attributes: message.attributes,
+							timestamp: Date.now(),
+						}),
+					};
 		return this.runPersistedContextInput({
-			inputEntryId: submissionEntryId('dispatch', input.dispatchId),
-			createCanonicalInput: (parentId) => {
-				const signal = createDispatchInputSignal(input);
+			inputEntryId: submissionEntryId(input.kind, input.submissionId),
+			createCanonicalInput: async (parentId) => {
+				const messageId = submissionEntryId(input.kind, input.submissionId);
+				const recordId = `record_${input.kind}_input_${input.submissionId}`;
+				if (message.kind === 'user') {
+					const refs = await this.persistCanonicalAttachments(
+						(message.attachments ?? []).map((attachment, index) => ({
+							id: `att_${input.kind}_${input.submissionId}_${index}`,
+							mimeType: attachment.mimeType,
+							data: attachment.data,
+							...(attachment.filename ? { filename: attachment.filename } : {}),
+						})),
+					);
+					return {
+						...this.canonicalEnvelope('user_message', recordId),
+						type: 'user_message',
+						messageId,
+						parentId,
+						content: [
+							{ type: 'text', text: message.body },
+							...refs.map((attachment) => ({ type: 'attachment' as const, attachment })),
+						],
+					};
+				}
 				return {
-					...this.canonicalEnvelope('signal', `record_dispatch_input_${input.dispatchId}`),
+					...this.canonicalEnvelope('signal', recordId),
 					type: 'signal',
-					messageId: submissionEntryId('dispatch', input.dispatchId),
+					messageId,
 					parentId,
-					dispatchId: input.dispatchId,
-					signalType: signal.type,
-					tagName: signal.tagName,
-					content: signal.content,
-					attributes: signal.attributes,
+					...(input.kind === 'dispatch' ? { dispatchId: input.dispatchId } : {}),
+					signalType: message.type,
+					...(message.tagName ? { tagName: message.tagName } : {}),
+					content: message.body,
+					...(message.attributes ? { attributes: message.attributes } : {}),
 				};
 			},
-			errorLabel: `dispatch(${input.dispatchId})`,
+			errorLabel: `${input.kind}(${input.submissionId})`,
 			onInputApplied: options?.onInputApplied,
 			submissionAttempt: options?.submissionAttempt,
 			startedAt: options?.startedAt,
@@ -3203,48 +3215,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				}
 			}),
 		);
-	}
-
-	private async runPersistedDirectSubmissionInput(
-		input: DirectAgentSubmissionInput,
-		signal: AbortSignal,
-		options?: ProcessAgentSubmissionOptions,
-	): Promise<PromptResponse> {
-		this.activeAgentInput = {
-			text: input.payload.message,
-			...(input.payload.images?.length
-				? { images: input.payload.images.map((image) => ({ mimeType: image.mimeType })) }
-				: {}),
-		};
-		return this.runPersistedContextInput({
-			inputEntryId: submissionEntryId('direct', input.submissionId),
-			createCanonicalInput: async (parentId) => {
-				const refs = await this.persistCanonicalAttachments(
-					(input.payload.images ?? []).map((image, index) => ({
-						id: `att_direct_${input.submissionId}_${index}`,
-						mimeType: image.mimeType,
-						data: image.data,
-						...(image.filename ? { filename: image.filename } : {}),
-					})),
-				);
-				return {
-					...this.canonicalEnvelope('user_message', `record_direct_input_${input.submissionId}`),
-					type: 'user_message',
-					messageId: submissionEntryId('direct', input.submissionId),
-					parentId,
-					content: [
-						{ type: 'text', text: input.payload.message },
-						...refs.map((attachment) => ({ type: 'attachment' as const, attachment })),
-					],
-				};
-			},
-			errorLabel: `direct(${input.submissionId})`,
-			onInputApplied: options?.onInputApplied,
-			submissionAttempt: options?.submissionAttempt,
-			startedAt: options?.startedAt,
-			timeoutAt: options?.timeoutAt,
-			signal,
-		});
 	}
 
 	private resolveSubmissionDurability(

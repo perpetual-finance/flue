@@ -151,7 +151,7 @@ function directInput(
 		submissionId: 'direct-1',
 		agent: 'assistant',
 		id: 'agent-1',
-		payload: { message: 'Hello' },
+		message: { kind: 'user', body: 'Hello' },
 		acceptedAt: '2026-06-03T00:00:00.000Z',
 		...overrides,
 	};
@@ -162,7 +162,7 @@ function dispatchInput() {
 		dispatchId: 'dispatch-1',
 		agent: 'assistant',
 		id: 'agent-1',
-		input: { message: 'Hello' },
+		message: { kind: 'signal' as const, type: 'test.event', body: 'Hello' },
 		acceptedAt: '2026-06-03T00:00:00.000Z',
 	};
 }

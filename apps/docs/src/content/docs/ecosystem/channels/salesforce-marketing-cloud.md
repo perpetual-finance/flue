@@ -51,7 +51,23 @@ export const channel = createSalesforceMarketingCloudChannel({
     for (const { event, ref } of usefulEvents) {
       await dispatch(assistant, {
         id: emailEventInstanceId(ref),
-        input: { type: `salesforce-marketing-cloud.${event.eventCategoryType}` },
+        message: {
+          kind: 'signal',
+          type: `salesforce-marketing-cloud.${event.eventCategoryType}`,
+          body: JSON.stringify({
+            occurredAt: event.timestampUTC,
+            callbackId: ref.callbackId,
+            mid: ref.mid,
+            eid: ref.eid,
+            tracking: {
+              jobId: ref.jobId,
+              batchId: ref.batchId,
+              listId: ref.listId,
+              subscriberId: ref.subscriberId,
+            },
+            details: event.info ?? {},
+          }),
+        },
       });
     }
     return c.body(null, 204);
@@ -146,19 +162,22 @@ export const channel = createSalesforceMarketingCloudChannel({
     for (const { event, ref } of usefulEvents) {
       await dispatch(assistant, {
         id: emailEventInstanceId(ref),
-        input: {
+        message: {
+          kind: 'signal',
           type: `salesforce-marketing-cloud.${event.eventCategoryType}`,
-          occurredAt: event.timestampUTC,
-          callbackId: ref.callbackId,
-          mid: ref.mid,
-          eid: ref.eid,
-          tracking: {
-            jobId: ref.jobId,
-            batchId: ref.batchId,
-            listId: ref.listId,
-            subscriberId: ref.subscriberId,
-          },
-          details: event.info ?? {},
+          body: JSON.stringify({
+            occurredAt: event.timestampUTC,
+            callbackId: ref.callbackId,
+            mid: ref.mid,
+            eid: ref.eid,
+            tracking: {
+              jobId: ref.jobId,
+              batchId: ref.batchId,
+              listId: ref.listId,
+              subscriberId: ref.subscriberId,
+            },
+            details: event.info ?? {},
+          }),
         },
       });
     }

@@ -34,12 +34,11 @@ export const channel = createTeamsChannel({
     if (activity.type !== 'message' || !activity.text) return;
     await dispatch(assistant, {
       id: channel.conversationKey(channel.destination(activity)),
-      input: {
+      message: {
+        kind: 'signal',
         type: 'teams.message',
-        activityId: activity.id,
-        sender: activity.from,
-        text: activity.text,
-        entities: activity.entities,
+        body: activity.text,
+        ...(activity.id === undefined ? {} : { attributes: { activityId: activity.id } }),
       },
     });
   },
@@ -106,12 +105,11 @@ export const channel = createTeamsChannel({
         if (!activity.text) return;
         await dispatch(assistant, {
           id: channel.conversationKey(channel.destination(activity)),
-          input: {
+          message: {
+            kind: 'signal',
             type: 'teams.message',
-            activityId: activity.id,
-            sender: activity.from,
-            text: activity.text,
-            entities: activity.entities,
+            body: activity.text,
+            ...(activity.id === undefined ? {} : { attributes: { activityId: activity.id } }),
           },
         });
         return;

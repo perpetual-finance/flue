@@ -42,15 +42,21 @@ export const channel = createShopifyChannel({
 					orderId: order.id,
 				};
 				const eventId = c.req.header('x-shopify-event-id');
+				const webhookId = c.req.header('x-shopify-webhook-id');
 				await dispatch(assistant, {
 					id: shopifyOrderInstanceId(ref),
-					input: {
+					message: {
+						kind: 'signal',
 						type: 'shopify.orders/create',
-						webhookId: c.req.header('x-shopify-webhook-id'),
-						...(eventId === undefined ? {} : { eventId }),
-						shopDomain: deliveredShopDomain,
-						orderId: order.id,
-						orderName: order.name,
+						body: JSON.stringify({
+							shopDomain: deliveredShopDomain,
+							orderName: order.name,
+						}),
+						attributes: {
+							orderId: order.id,
+							...(webhookId === undefined ? {} : { webhookId }),
+							...(eventId === undefined ? {} : { eventId }),
+						},
 					},
 				});
 				return;

@@ -35,7 +35,7 @@ Install `valibot` using the project's existing dependency conventions.
 ## Create the channel
 
 Create `<source-dir>/channels/whatsapp.ts`. Adapt the imported agent,
-dispatched input, handled events, and tool:
+dispatched message, handled events, and tool:
 
 ```ts
 // flue-blueprint: channel/whatsapp@1
@@ -74,14 +74,22 @@ export const channel = createWhatsAppChannel({
           if (message.type !== 'text' && message.type !== 'interactive') {
             continue;
           }
+          const body =
+            message.type === 'text'
+              ? message.text.body
+              : (message.interactive.button_reply?.title ??
+                message.interactive.list_reply?.title ??
+                message.interactive.nfm_reply?.body ??
+                '');
           await dispatch(assistant, {
             id: channel.conversationKey(
               conversationRef(entry.id, change.value, message),
             ),
-            input: {
+            message: {
+              kind: 'signal',
               type: `whatsapp.${message.type}`,
-              messageId: message.id,
-              message,
+              body,
+              attributes: { messageId: message.id },
             },
           });
         }

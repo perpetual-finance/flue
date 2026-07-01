@@ -244,13 +244,13 @@ describe('flue()', () => {
 		expect(response.headers.get('stream-next-offset')).toBe('-1');
 	});
 
-	it('accepts direct agent images and delivers them unchanged', async () => {
+	it('accepts direct agent images and maps them onto a DeliveredMessage', async () => {
 		let delivered: unknown;
 		configureFlueRuntime(nodeRuntime({
 			target: 'node',
 			agents: [agentRecord('assistant', { route: async (_c, next) => next() })],
-			createAgentAdmission: (_agentName, ) => async (payload) => {
-				delivered = payload;
+			createAgentAdmission: (_agentName, ) => async (message) => {
+				delivered = message;
 				return { submissionId: 'submission-1' };
 			},
 			createWorkflowContext: createTestContext,
@@ -271,8 +271,9 @@ describe('flue()', () => {
 		);
 		expect(response.status).toBe(202);
 		expect(delivered).toMatchObject({
-			message: 'hello',
-			images: [{ type: 'image', data: 'YWJj', mimeType: 'image/png' }],
+			kind: 'user',
+			body: 'hello',
+			attachments: [{ type: 'image', data: 'YWJj', mimeType: 'image/png' }],
 		});
 	});
 

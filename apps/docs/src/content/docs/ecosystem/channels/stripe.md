@@ -45,7 +45,15 @@ export const channel = createStripeChannel({
 
     await dispatch(billing, {
       id: customerId,
-      input: { type: `stripe.${event.type}`, eventId: event.id },
+      message: {
+        kind: 'signal',
+        type: `stripe.${event.type}`,
+        body: JSON.stringify({
+          checkoutSessionId: session.id,
+          customerId,
+        }),
+        attributes: { eventId: event.id },
+      },
     });
   },
 });
@@ -109,10 +117,14 @@ export const channel = createStripeChannel({
 
         await dispatch(billing, {
           id: customerId,
-          input: {
+          message: {
+            kind: 'signal',
             type: `stripe.${event.type}`,
-            eventId: event.id,
-            checkoutSessionId: session.id,
+            body: JSON.stringify({
+              checkoutSessionId: session.id,
+              customerId,
+            }),
+            attributes: { eventId: event.id },
           },
         });
         return;

@@ -51,7 +51,12 @@ export const channel = createShopifyChannel({
     if (!order) return c.json({ error: 'Unsupported orders/create payload.' }, 400);
     await dispatch(orders, {
       id: orderInstanceId(shopDomain, order.id),
-      input: { type: 'shopify.orders.create', orderId: order.id, orderName: order.name },
+      message: {
+        kind: 'signal',
+        type: 'shopify.orders.create',
+        body: JSON.stringify({ shopDomain, orderName: order.name }),
+        attributes: { orderId: order.id },
+      },
     });
   },
 });
@@ -135,17 +140,24 @@ export const channel = createShopifyChannel({
           return c.json({ error: 'Unsupported orders/create payload.' }, 400);
         }
 
+        const deliveryId = c.req.header('x-shopify-webhook-id');
+        const eventId = c.req.header('x-shopify-event-id');
         await dispatch(orders, {
           id: orderInstanceId(shopDomain, order.id),
-          input: {
+          message: {
+            kind: 'signal',
             type: 'shopify.orders.create',
-            deliveryId: c.req.header('x-shopify-webhook-id'),
-            eventId: c.req.header('x-shopify-event-id'),
-            shopDomain,
-            apiVersion: c.req.header('x-shopify-api-version'),
-            orderId: order.id,
-            orderName: order.name,
-            triggeredAt: c.req.header('x-shopify-triggered-at'),
+            body: JSON.stringify({
+              shopDomain,
+              apiVersion: c.req.header('x-shopify-api-version'),
+              orderName: order.name,
+              triggeredAt: c.req.header('x-shopify-triggered-at'),
+            }),
+            attributes: {
+              orderId: order.id,
+              ...(deliveryId === undefined ? {} : { deliveryId }),
+              ...(eventId === undefined ? {} : { eventId }),
+            },
           },
         });
         return;

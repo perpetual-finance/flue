@@ -32,7 +32,7 @@ event destination is explicitly configured to send thin event notifications.
 ## Create the channel
 
 Create `<source-dir>/channels/stripe.ts`. Adapt the imported agent, dispatched
-input, and customer policy to the application, but preserve the project-owned
+message, and customer policy to the application, but preserve the project-owned
 client and fixed route:
 
 ```ts
@@ -64,11 +64,14 @@ export const channel = createStripeChannel({
 
         await dispatch(billing, {
           id: customerId,
-          input: {
+          message: {
+            kind: 'signal',
             type: `stripe.${event.type}`,
-            eventId: event.id,
-            checkoutSessionId: session.id,
-            customerId,
+            body: JSON.stringify({
+              checkoutSessionId: session.id,
+              customerId,
+            }),
+            attributes: { eventId: event.id },
           },
         });
         return;

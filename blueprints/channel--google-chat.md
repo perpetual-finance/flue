@@ -56,7 +56,7 @@ model.
 ## Create the channel
 
 Create `<source-dir>/channels/google-chat.ts`. Adapt the imported agent,
-dispatched input, event policy, and tool:
+dispatched message, event policy, and tool:
 
 ```ts
 // flue-blueprint: channel/google-chat@1
@@ -89,10 +89,10 @@ export const channel = createGoogleChatChannel({
           if (!ref) return;
           await dispatch(assistant, {
             id: channel.conversationKey(ref),
-            input: {
+            message: {
+              kind: 'signal',
               type: `google-chat.${payload.type}`,
-              user: payload.user,
-              payload,
+              body: payload.message?.argumentText ?? payload.message?.text ?? '',
             },
           });
           return c.body(null, 200);

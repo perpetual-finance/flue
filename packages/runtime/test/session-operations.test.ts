@@ -456,7 +456,7 @@ describe('session.task()', () => {
 			dispatchId: 'job/a',
 			agent: 'assistant',
 			id: 'agent-1',
-			input: { value: 'first' },
+			message: { kind: 'signal', type: 'test.event', body: 'first' },
 			acceptedAt: new Date().toISOString(),
 		});
 		const second = await internal.processSubmissionInput({
@@ -465,7 +465,7 @@ describe('session.task()', () => {
 			dispatchId: 'job?a',
 			agent: 'assistant',
 			id: 'agent-1',
-			input: { value: 'second' },
+			message: { kind: 'signal', type: 'test.event', body: 'second' },
 			acceptedAt: new Date().toISOString(),
 		});
 
@@ -748,9 +748,10 @@ describe('session.task()', () => {
 			submissionId: 'direct-image',
 			agent: 'assistant',
 			id: 'direct-replay-instance',
-			payload: {
-				message: 'Inspect direct image.',
-				images: [{ type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' }],
+			message: {
+				kind: 'user',
+				body: 'Inspect direct image.',
+				attachments: [{ type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' }],
 			},
 			acceptedAt: new Date().toISOString(),
 		});
@@ -760,6 +761,48 @@ describe('session.task()', () => {
 		await (await secondHarness.session()).prompt('Continue after restart.');
 
 		expect(contexts[1]).toEqual(contexts[0]);
+	});
+
+	it('materializes an attachment on a dispatched user message the same way as a direct one', async () => {
+		const provider = createProvider([{ id: 'reviewer' }]);
+		const attachments = new InMemoryAttachmentStore();
+		const ctx = createFlueContext({
+			id: 'dispatch-image-instance',
+			env: {},
+			agentConfig: { resolveModel: () => provider.getModel('reviewer') },
+			createDefaultEnv: async () => createNoopSessionEnv(),
+			attachmentStore: attachments,
+		});
+		let promptContext: unknown;
+		provider.setResponses([
+			(context) => {
+				promptContext = context.messages[0];
+				return fauxAssistantMessage('Inspected the dispatched image.');
+			},
+		]);
+		const harness = await ctx.initializeRootHarness(
+			defineAgent(() => ({ model: `${provider.getModel().provider}/reviewer` })),
+		);
+		const internal = getInternalSession(await harness.session());
+		if (!internal) throw new Error('Expected internal session.');
+
+		const response = await internal.processSubmissionInput({
+			kind: 'dispatch',
+			submissionId: 'dispatch-image',
+			dispatchId: 'dispatch-image',
+			agent: 'assistant',
+			id: 'dispatch-image-instance',
+			message: {
+				kind: 'user',
+				body: 'Inspect the dispatched image.',
+				attachments: [{ type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' }],
+			},
+			acceptedAt: new Date().toISOString(),
+		});
+
+		expect(response.text).toBe('Inspected the dispatched image.');
+		const content = promptContext as { content: Array<{ type: string }> };
+		expect(content.content.some((block) => block.type === 'image')).toBe(true);
 	});
 
 	it('passes a visible parent image to the child when the task tool receives its attachment ID', async () => {
