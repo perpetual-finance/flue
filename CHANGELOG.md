@@ -23,6 +23,7 @@
 ### New Features
 
 - Public conversation messages now expose typed `purpose` (`user`, `assistant`, `dispatch`, or `advisory`) and `display` (`visible`, `hidden`, or `diagnostic`), plus optional `turnId` grouping and a `signal` descriptor, so clients can distinguish public chat from internal, control, and advisory activity without parsing message text, timestamps, or ordering. The classification is applied identically across conversation `history()` snapshots and live updates, and `@flue/sdk` / `@flue/react` shapes are updated in lockstep (#404).
+- `flue init` now scaffolds the full project skeleton for the new surface instead of only `flue.config.ts`: it also writes a `vite.config.ts` with the `flue()` plugin (plus `cloudflare()` on the Cloudflare target), a starter `src/app.ts` route map, and — on the Cloudflare target — a `wrangler.jsonc` with `nodejs_compat` and commented migration guidance. `--force` still applies only to `flue.config.*`; the other files are created only when absent and never overwritten.
 - `@flue/react`'s `useFlueAgent()` now exposes `refresh()`, so apps observing an agent conversation that may be created out-of-band (a server-side wakeup, queue worker, or webhook) can re-check on their own schedule instead of faking an empty history snapshot. Retry policy stays in userland (#403).
 
 ### Fixes & Other Changes

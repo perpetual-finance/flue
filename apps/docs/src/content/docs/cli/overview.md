@@ -48,7 +48,7 @@ Pass `--id` to continue the same conversation across invocations. See [`flue run
 | Command                            | Description                                                                     |
 | ---------------------------------- | ------------------------------------------------------------------------------- |
 | [`flue run`](/docs/cli/run/)       | Run one agent module locally (transport-free), print its reply, then exit.      |
-| [`flue init`](/docs/cli/init/)     | Create an initial `flue.config.ts`.                                             |
+| [`flue init`](/docs/cli/init/)     | Scaffold a starter project skeleton (config files and `src/app.ts`).            |
 | [`flue add`](/docs/cli/add/)       | Fetch sandbox, channel, database, or tooling blueprints for a coding agent.     |
 | [`flue update`](/docs/cli/update/) | Fetch a current blueprint so a coding agent can apply its newer upgrade guides. |
 | [`flue docs`](/docs/cli/docs/)     | List, read, and search the bundled Flue documentation.                          |

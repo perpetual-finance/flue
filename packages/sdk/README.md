@@ -33,25 +33,6 @@ export default defineAgent(() => ({
 }));
 ```
 
-Talk to a deployed agent with `@flue/sdk`. Your application's route map decides where each agent lives (`app.route('/agents/triage', triage.route())`); a client addresses one conversation by URL — the mount URL plus a caller-chosen conversation id:
-
-```ts
-import { createFlueClient } from '@flue/sdk';
-
-const conversation = createFlueClient({
-  url: 'https://api.example.com/agents/triage/123456',
-});
-
-const admission = await conversation.send({
-  message: { kind: 'user', body: 'New bug report: checkout 500s on submit.' },
-});
-await conversation.wait(admission);           // resolves when the submission settles
-const { messages } = await conversation.history();
-
-conversation.observe();                       // history catch-up + live updates
-await conversation.abort();                   // abort in-flight/queued work
-```
-
 ## The framework for building the next generation of agents.
 
 The first agents were built with raw LLM API calls. This worked for simple chatbots and scripted tasks, but not much else.
@@ -86,10 +67,11 @@ Build agents that can safely take action, maintain continuity, and connect to th
 
 ## Packages
 
-| Package                                         | Description                                            |
-| ----------------------------------------------- | ------------------------------------------------------ |
-| [`@flue/runtime`](packages/runtime)             | Runtime: harness, sessions, tools, sandbox             |
-| [`@flue/cli`](packages/cli)                     | CLI and build/dev tooling (`flue` binary)              |
-| [`@flue/sdk`](packages/sdk)                     | Client SDK for consuming deployed agent conversations  |
-| [`@flue/opentelemetry`](packages/opentelemetry) | OpenTelemetry tracing adapter                          |
-| [`@flue/postgres`](packages/postgres)           | Postgres persistence adapter                           |
+| Package                                         | Description                                                    |
+| ----------------------------------------------- | -------------------------------------------------------------- |
+| [`@flue/runtime`](packages/runtime)             | Runtime: harness, sessions, tools, sandbox                     |
+| [`@flue/vite`](packages/vite)                   | Vite plugin: `vite dev` / `vite build` for Node and Cloudflare |
+| [`@flue/cli`](packages/cli)                     | CLI (`flue` binary): local runs, blueprints, offline docs      |
+| [`@flue/sdk`](packages/sdk)                     | Client SDK for consuming deployed agent conversations          |
+| [`@flue/opentelemetry`](packages/opentelemetry) | OpenTelemetry tracing adapter                                  |
+| [`@flue/postgres`](packages/postgres)           | Postgres persistence adapter                                   |

@@ -27,33 +27,27 @@ api/events-reference -- Events Reference
 api/provider-api -- Provider API
   Register custom model providers and override built-in provider transport.
 api/routing-api -- Routing API
-  Compose Flue routes in an authored application entrypoint.
+  Mount agent and channel routes in the authored app.ts route map.
 api/sandbox-api -- Sandbox Adapter API
   Adapt a provider sandbox SDK into Flue's public sandbox contract.
 api/streaming-protocol -- Streaming Protocol
-  Reference for reading Flue agent conversations and workflow events over Durable Streams.
-api/workflow-api -- Workflow API
-  Reference for creating and invoking workflows with @flue/runtime.
+  Reference for reading Flue agent conversations over Durable Streams.
 cli/add -- flue add
   Reference for discovering and applying Flue implementation blueprints.
-cli/build -- flue build
-  Reference for creating deployable Flue application artifacts.
-cli/dev -- flue dev
-  Reference for starting a watch-mode local Flue development server.
 cli/docs -- flue docs
   Reference for listing, reading, and searching the bundled Flue documentation.
 cli/init -- flue init
-  Reference for creating an initial Flue project configuration file.
+  Reference for scaffolding a starter Flue project skeleton.
 cli/overview -- CLI
-  Use the Flue CLI to configure, develop, exercise, inspect, and build an application.
+  Use the Flue CLI to configure a project, exercise agents locally, and fetch blueprints and documentation.
 cli/run -- flue run
-  Reference for executing one agent prompt or workflow invocation from the command line.
+  Reference for running one agent module locally from the command line, without a server.
 cli/update -- flue update
   Reference for updating integrations from newer Flue blueprint upgrade guides.
 concepts/agents -- What is an agent?
   What an AI agent actually is, why a model alone isn't one, and what makes a Flue agent different.
 concepts/durable-execution -- Durable Agents
-  Understand how Flue agents and workflows handle server restarts, interrupted connections, and other disruptions.
+  Understand how Flue agents handle server restarts, interrupted connections, and other disruptions.
 ecosystem/channels/discord -- Discord
 ecosystem/channels/github -- GitHub
 ecosystem/channels/google-chat -- Google Chat
@@ -106,29 +100,31 @@ ecosystem/tooling/vitest-evals -- Vitest Evals
 getting-started/quickstart -- Getting Started
   Set up a Flue project automatically or create your first agent manually.
 guide/actions -- Actions
-  Define finite agent-backed operations that can be reused by workflows and agents.
+  Define finite agent-backed operations the model can run reliably.
 guide/building-agents -- Agents
   Create an agent, configure its capabilities, and send it messages over time.
 guide/channels -- Channels
   Receive verified provider events and connect them to Flue applications.
 guide/database -- Database
-  Configure database-backed state for Flue agents and workflow runs.
+  Configure database-backed state for Flue agent conversations.
 guide/evals -- Evals
   Evaluate Flue agents with repeatable Vitest suites using vitest-evals.
+guide/migration -- Migration Guide
+  Move a pre-redesign Flue project to the Vite plugin, explicit routing, and conversation-URL clients.
 guide/models -- LLM (Models & Providers)
   Select models, configure providers, and tune reasoning behavior in Flue agents.
 guide/observability -- Observability
-  Inspect workflow runs, monitor agent activity, and export telemetry from your application.
+  Monitor agent activity and export telemetry from your application.
 guide/project-layout -- Project Layout
   Understand the source files and generated output in a Flue project.
 guide/react -- React
-  Build React interfaces for live agent conversations and workflow runs.
+  Build React interfaces for live agent conversations.
 guide/routing -- Routing
-  Compose Flue with application routes, middleware, and custom HTTP ingress.
+  Mount agents, channels, and custom routes explicitly in app.ts.
 guide/sandboxes -- Sandboxes
   Give agents a workspace for files and command-driven work.
 guide/schedules -- Schedules
-  Invoke Flue workflows or dispatch agent input on a schedule with Cloudflare or Node.js.
+  Dispatch agent input on a schedule with Cloudflare or Node.js.
 guide/skills -- Skills
   Add Agent Skills to Flue agents and invoke them from sessions.
 guide/subagents -- Subagents
@@ -139,26 +135,22 @@ guide/targets/node -- Node.js
   Understand the Node.js-specific runtime behavior and APIs for Flue applications.
 guide/tools -- Tools
   Give agents application capabilities through custom tools and MCP servers.
-guide/workflows -- Workflows
-  Create, invoke, and expose finite agent-backed operations.
+guide/use-agent -- 'use agent'
+  The module directive that gives an agent its identity and registers it with the application.
+guide/vite-plugin -- Vite plugin
+  Build, develop, and deploy Flue applications with the flue() Vite plugin.
 introduction/why-flue -- Why Flue?
-  Build autonomous AI agents and powerful workflows with a programmable TypeScript harness, and run them anywhere.
+  Build autonomous AI agents with a programmable TypeScript harness, and run them anywhere.
 reference/configuration -- Configuration
   Reference for flue.config.ts options.
-sdk/agents -- client.agents
-  Invoke persistent agent instances and read their conversations.
 sdk/client -- createFlueClient(...)
-  Configure an SDK client for a deployed Flue application.
+  Create a client for one agent conversation of a deployed Flue application.
 sdk/errors -- Errors
   SDK HTTP and stream error types.
 sdk/events -- Events and records
-  SDK event, workflow-run record, and normalized model-turn types.
+  SDK event and normalized model-turn types.
 sdk/overview -- SDK overview
-  Reference for consuming deployed Flue agents and workflows with @flue/sdk.
-sdk/runs -- client.runs
-  Inspect and stream HTTP-exposed workflow runs.
-sdk/workflows -- client.workflows
-  Start workflow runs and receive their run ID.
+  Reference for consuming deployed Flue agent conversations with @flue/sdk.
 ```
 
 <!-- flue-docs-catalog:end -->

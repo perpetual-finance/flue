@@ -31,7 +31,7 @@ function printUsage(log: (message: string) => void = console.error) {
 			'\n' +
 			'Commands:\n' +
 			'  run    Run one agent module locally (transport-free, no HTTP), print its reply, then exit.\n' +
-			'  init   Scaffold a starter flue.config.ts in the target directory.\n' +
+			'  init   Scaffold a starter project skeleton (flue.config.ts, vite.config.ts, src/app.ts) in the target directory.\n' +
 			'  add    Fetch a blueprint implementation guide for an AI coding agent to follow.\n' +
 			'  update Fetch an updated blueprint implementation guide for an AI coding agent to follow.\n' +
 			'  docs   Browse the Flue docs. No args lists pages; `read` prints a page as markdown; `search` prints JSON results.\n' +
@@ -49,6 +49,7 @@ function printUsage(log: (message: string) => void = console.error) {
 			'  --target <t>         (flue init) Project target: node or cloudflare. Required.\n' +
 			'  --root <path>        (flue init) Directory to scaffold into. Default: current working directory.\n' +
 			'  --force              (flue init) Overwrite an existing flue.config.* in the target directory.\n' +
+			'                       Other scaffolded files are only created when absent, never overwritten.\n' +
 			'\n' +
 			'Examples:\n' +
 			'  flue run src/agents/hello.ts --message "Hi there"\n' +
@@ -567,6 +568,61 @@ function renderConfigTemplate(target: 'node' | 'cloudflare'): string {
 	);
 }
 
+function renderViteConfigTemplate(target: 'node' | 'cloudflare'): string {
+	if (target === 'cloudflare') {
+		return (
+			`import { cloudflare } from '@cloudflare/vite-plugin';\n` +
+			`import { flue } from '@flue/vite';\n` +
+			`import { defineConfig } from 'vite';\n` +
+			`\n` +
+			`export default defineConfig({\n` +
+			`\tplugins: [flue(), cloudflare()],\n` +
+			`});\n`
+		);
+	}
+	return (
+		`import { flue } from '@flue/vite';\n` +
+		`import { defineConfig } from 'vite';\n` +
+		`\n` +
+		`export default defineConfig({\n` +
+		`\tplugins: [flue()],\n` +
+		`});\n`
+	);
+}
+
+function renderAppTemplate(): string {
+	return (
+		`import { Hono } from 'hono';\n` +
+		`\n` +
+		`const app = new Hono();\n` +
+		`\n` +
+		`// Mount every route explicitly. An agent module starts with the\n` +
+		`// 'use agent' directive; create one and mount it here:\n` +
+		`//\n` +
+		`//   import assistant from './agents/assistant.ts';\n` +
+		`//   app.route('/agents/assistant', assistant.route());\n` +
+		`\n` +
+		`export default app;\n`
+	);
+}
+
+function renderWranglerTemplate(): string {
+	return (
+		`{\n` +
+		`\t"$schema": "./node_modules/wrangler/config-schema.json",\n` +
+		`\t"name": "my-flue-worker",\n` +
+		`\t"compatibility_date": "2026-06-01",\n` +
+		`\t"compatibility_flags": ["nodejs_compat"],\n` +
+		`\t// Every 'use agent' file generates a Durable Object class named after\n` +
+		`\t// its basename (assistant.ts -> FlueAssistantAgent). Cloudflare requires\n` +
+		`\t// a migration entry for each generated class, so when you add your\n` +
+		`\t// first agent, declare it here:\n` +
+		`\t//\n` +
+		`\t//   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FlueAssistantAgent"] }]\n` +
+		`}\n`
+	);
+}
+
 function initCommand(args: InitArgs) {
 	const targetDir = args.explicitRoot ?? process.cwd();
 
@@ -592,18 +648,45 @@ function initCommand(args: InitArgs) {
 		process.exit(1);
 	}
 
-	const outPath = path.join(targetDir, 'flue.config.ts');
-	const content = renderConfigTemplate(args.target);
-
-	try {
-		fs.writeFileSync(outPath, content);
-	} catch (err) {
-		cliError(`Failed to write ${outPath}: ${err instanceof Error ? err.message : String(err)}`);
-		process.exit(1);
+	// The project skeleton. flue.config.ts honors --force (checked above);
+	// every other file is created only when absent — init never overwrites
+	// user-authored files.
+	const files: Array<{ relPath: string; content: string; overwritable: boolean }> = [
+		{ relPath: 'flue.config.ts', content: renderConfigTemplate(args.target), overwritable: true },
+		{
+			relPath: 'vite.config.ts',
+			content: renderViteConfigTemplate(args.target),
+			overwritable: false,
+		},
+		{ relPath: path.join('src', 'app.ts'), content: renderAppTemplate(), overwritable: false },
+	];
+	if (args.target === 'cloudflare') {
+		files.push({ relPath: 'wrangler.jsonc', content: renderWranglerTemplate(), overwritable: false });
 	}
 
-	const relOut = path.relative(process.cwd(), outPath) || outPath;
-	console.error(brand(['flue init', `target ${args.target}`, `wrote ${relOut}`]));
+	const wrote: string[] = [];
+	const skipped: string[] = [];
+	for (const file of files) {
+		const outPath = path.join(targetDir, file.relPath);
+		const relOut = path.relative(process.cwd(), outPath) || outPath;
+		if (!file.overwritable && fs.existsSync(outPath)) {
+			skipped.push(relOut);
+			continue;
+		}
+		try {
+			fs.mkdirSync(path.dirname(outPath), { recursive: true });
+			fs.writeFileSync(outPath, file.content);
+		} catch (err) {
+			cliError(`Failed to write ${outPath}: ${err instanceof Error ? err.message : String(err)}`);
+			process.exit(1);
+		}
+		wrote.push(relOut);
+	}
+
+	console.error(brand(['flue init', `target ${args.target}`, `wrote ${wrote.join(', ')}`]));
+	if (skipped.length > 0) {
+		note(`kept existing ${skipped.join(', ')}`);
+	}
 
 	// If --force overwrote a non-`.ts` variant, the new flue.config.ts will
 	// take precedence (FLUE_CONFIG_BASENAMES priority), but the old file still
@@ -616,7 +699,7 @@ function initCommand(args: InitArgs) {
 	}
 
 	console.error('');
-	note('next: fetch https://flueframework.com/start.md to create a new agent');
+	note('next: fetch https://flueframework.com/start.md to create your first agent');
 }
 
 // ─── `flue add` ─────────────────────────────────────────────────────────────
