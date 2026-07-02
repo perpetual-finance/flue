@@ -61,7 +61,7 @@ When `target` is unset, `flue()` inspects the resolved Vite plugin array: if `@c
 
 ### Build and run
 
-`vite build` bundles the application into a single Node entry:
+`vite build` bundles the application into two Node entries: the self-starting `dist/server.mjs`, and the non-listening `dist/app.mjs` application chunk it imports (for artifact-based consumers such as `vite preview` or a custom host):
 
 ```bash
 vite build
@@ -70,7 +70,9 @@ node dist/server.mjs
 
 The built server listens on port `3000` by default; set `PORT` to change it. It does not load `.env` — supply the environment when you start it. Application dependencies that cannot be bundled are externalized; deploy the artifact alongside its `node_modules` or a container that installs them.
 
-`vite preview` is not supported on the Node target yet — the plugin fails with exactly this guidance: run `vite build && node dist/server.mjs`.
+### Preview
+
+`vite preview` serves the built artifact: it imports `dist/app.mjs` natively — no Vite transformation — so what preview serves is exactly what `node dist/server.mjs` would serve, including production persistence defaults and the real process environment. Run `vite build` first; preview fails with that guidance when no artifact exists.
 
 ## The Cloudflare target
 

@@ -64,8 +64,10 @@ import {
 	getUserExternals,
 } from './dependency-resolver.ts';
 import { applyDevEnv } from './dev-env.ts';
+import { stackless } from './diagnostics.ts';
 import { importAttributePlugin } from './import-attribute-plugin.ts';
 import { createNodeDevController } from './node-dev.ts';
+import { configureNodePreview } from './node-preview.ts';
 import { transformUseAgentModule } from './use-agent-transform.ts';
 
 /** The resolved Flue project, exposed on the core plugin's `api` field. */
@@ -123,7 +125,9 @@ const ENFORCED_BUILD_CONFIG_PATHS = [
 	'appType',
 	'build.ssr',
 	'build.target',
+	'build.rolldownOptions.input',
 	'build.rolldownOptions.output.entryFileNames',
+	'build.rolldownOptions.output.chunkFileNames',
 	'build.rolldownOptions.output.format',
 ];
 const ENFORCED_DEV_CONFIG_PATHS = ['appType'];
@@ -271,10 +275,11 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 			state.target = preliminaryTarget;
 
 			// Preview is artifact-based (Cloudflare: the sibling plugin serves the
-			// built Worker output; Node: unsupported, diagnosed in
-			// configurePreviewServer). Require no source state and generate
-			// nothing.
-			if (state.isPreview) return undefined;
+			// built Worker output; Node: configurePreviewServer imports the built
+			// app chunk). Require no source state and generate nothing — but keep
+			// appType 'custom' so Vite's SPA fallback doesn't answer requests
+			// before the application middleware.
+			if (state.isPreview) return { appType: 'custom' } satisfies UserConfig;
 
 			if (!project.app) throw missingAppEntryError(project);
 			updateAgents(await scanAgents({ sourceRoot: project.sourceRoot, agents: project.agents }));
@@ -327,19 +332,31 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 					appType: 'custom',
 					resolve: { dedupe: RUNTIME_DEDUPE },
 					build: {
-						ssr: bootstrap.entry,
+						ssr: true,
 						outDir: userConfig.build?.outDir ?? 'dist',
 						emptyOutDir: userConfig.build?.emptyOutDir ?? true,
 						sourcemap: userConfig.build?.sourcemap ?? true,
 						target: 'node22',
 						rolldownOptions: {
+							// Two entries: the self-starting server.mjs, and the
+							// non-listening application chunk app.mjs it imports —
+							// which artifact-based consumers (`vite preview`, custom
+							// hosts) load without binding a port.
+							input: { server: bootstrap.entry, app: bootstrap.server },
 							external: [
 								...NODE_TARGET_EXTERNALS,
 								...getUserExternals(root),
 								...builtinModules,
 								...builtinModules.map((name) => `node:${name}`),
 							],
-							output: { entryFileNames: 'server.mjs', format: 'es' },
+							output: {
+								entryFileNames: '[name].mjs',
+								// Shared chunks must keep the .mjs extension: the dist
+								// directory has no package.json, so Node treats .js as
+								// CommonJS and the import graph would break.
+								chunkFileNames: '[name]-[hash].mjs',
+								format: 'es',
+							},
 						},
 					},
 				} satisfies UserConfig;
@@ -589,14 +606,11 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 			};
 		},
 
-		configurePreviewServer() {
+		configurePreviewServer(server) {
 			// Cloudflare preview is fully owned by the sibling plugin (it runs
 			// workerd over the built Worker output); flue contributes nothing.
 			if (state.target === 'cloudflare') return;
-			throw new Error(
-				'[flue] Node preview is not supported yet — run the built server directly:\n\n' +
-					'  vite build && node dist/server.mjs\n',
-			);
+			return configureNodePreview(server);
 		},
 	};
 
@@ -747,15 +761,6 @@ function cloudflareOrderingError(): Error {
 				'  plugins: [flue(), cloudflare()]\n',
 		),
 	);
-}
-
-/**
- * Strip the stack from an expected-user-mistake diagnostic. The message is
- * the whole story; a framework stack under it buries the fix.
- */
-function stackless(error: Error): Error {
-	error.stack = error.message;
-	return error;
 }
 
 /**

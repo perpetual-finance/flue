@@ -59,7 +59,8 @@ function generatedWranglerPath(root: string): string {
 /** Whether a (posix-normalized) watched path is one of Flue's generated Cloudflare outputs. */
 export function isGeneratedCloudflarePath(filePath: string, normalizedRoot: string): boolean {
 	return (
-		filePath === `${normalizedRoot}/${GENERATED_WRANGLER_BASENAME}` ||
+		// Prefix (not equality) so the atomic-write temp sibling is covered too.
+		filePath.startsWith(`${normalizedRoot}/${GENERATED_WRANGLER_BASENAME}`) ||
 		filePath.startsWith(`${normalizedRoot}/.flue-vite/`) ||
 		filePath.startsWith(`${normalizedRoot}/.wrangler/`)
 	);
@@ -154,13 +155,21 @@ export async function prepareCloudflareInputs(
 }
 
 /**
- * Content-aware write: only touch the file when the content differs, so
- * watchers (notably the sibling plugin's config watcher, which restarts the
- * dev server on change) never see spurious mtime updates.
+ * Content-aware, atomic write: only touch the file when the content differs,
+ * so watchers (notably the sibling plugin's config watcher, which restarts
+ * the dev server on change) never see spurious mtime updates — and write via
+ * temp-file + rename, because both generated files have live readers (the
+ * sibling's config watcher, workerd's module graph) that must never observe
+ * a half-written file.
  */
 function writeFileIfChanged(filePath: string, content: string): boolean {
 	if (fs.existsSync(filePath) && fs.readFileSync(filePath, 'utf8') === content) return false;
 	fs.mkdirSync(path.dirname(filePath), { recursive: true });
-	fs.writeFileSync(filePath, content, 'utf8');
+	// Deterministic temp name in the same directory (rename is only atomic
+	// within one filesystem); concurrent writers are already serialized by
+	// the plugin's watch queue.
+	const tempPath = `${filePath}.tmp`;
+	fs.writeFileSync(tempPath, content, 'utf8');
+	fs.renameSync(tempPath, filePath);
 	return true;
 }

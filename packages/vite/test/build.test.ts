@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { build } from 'vite';
+import { build, preview } from 'vite';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { FlueVitePluginApi } from '../src/index.ts';
 import { flue } from '../src/index.ts';
@@ -57,6 +57,9 @@ describe('vite build (node target)', () => {
 		const serverPath = path.join(fixture.root, 'dist', 'server.mjs');
 		expect(fs.existsSync(serverPath)).toBe(true);
 		expect(fs.existsSync(`${serverPath}.map`)).toBe(true);
+		// The non-listening application chunk, for artifact-based consumers
+		// (`vite preview`, custom hosts).
+		expect(fs.existsSync(path.join(fixture.root, 'dist', 'app.mjs'))).toBe(true);
 
 		// The plugin api exposes the resolved project + scan results.
 		const core = plugins.find((plugin) => plugin.name === 'flue');
@@ -173,6 +176,50 @@ export default defineConfig({ app: './src/server-main.ts' });
 		const inlineApi = inline.find((plugin) => plugin.name === 'flue')?.api as FlueVitePluginApi;
 		expect(inlineApi.resolved?.project.app).toBe(path.join(fixture2.root, 'src', 'server-main.ts'));
 	}, 120_000);
+
+	it('serves the built application under vite preview and stops it on close', async () => {
+		const fixture = fixtureOf(basicNodeProjectFiles());
+		await buildFixture(fixture);
+
+		const port = await getAvailablePort();
+		const previewServer = await preview({
+			root: fixture.root,
+			configFile: false,
+			logLevel: 'error',
+			plugins: flue(),
+			preview: { port, strictPort: true, host: '127.0.0.1' },
+		});
+		try {
+			const baseUrl = `http://127.0.0.1:${port}`;
+			const ping = await fetch(`${baseUrl}/api/ping`);
+			expect(await ping.text()).toBe('pong');
+
+			// The full durable admission path works against the artifact.
+			const admitted = await fetch(`${baseUrl}/agents/echo/preview-1`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ kind: 'user', body: 'hi preview' }),
+			});
+			expect(admitted.status).toBe(202);
+			await waitFor(
+				async () => {
+					const stream = await fetch(`${baseUrl}/agents/echo/preview-1`);
+					if (stream.status !== 200) return false;
+					return readStreamUntil(stream, (text) => text.includes('Hello from the fake model.'));
+				},
+				{ description: 'the assistant reply in the preview conversation stream' },
+			);
+		} finally {
+			await previewServer.close();
+		}
+	}, 120_000);
+
+	it('fails preview with build guidance when no artifact exists', async () => {
+		const fixture = fixtureOf(basicNodeProjectFiles());
+		await expect(
+			preview({ root: fixture.root, configFile: false, logLevel: 'silent', plugins: flue() }),
+		).rejects.toThrow(/Run `vite build` first/);
+	});
 
 	it('fails with the missing-sibling diagnostic when the target is cloudflare without the plugin', async () => {
 		const fixture = fixtureOf(basicNodeProjectFiles());

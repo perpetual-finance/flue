@@ -10,7 +10,7 @@ For a deployment walkthrough, see [Deploy Agents on Node.js](/docs/ecosystem/dep
 
 ## The built server
 
-The [Vite plugin](/docs/guide/vite-plugin/) builds your application — the `app.ts` route map plus every scanned [`'use agent'`](/docs/guide/use-agent/) module — into a single server entry at `dist/server.mjs`:
+The [Vite plugin](/docs/guide/vite-plugin/) builds your application — the `app.ts` route map plus every scanned [`'use agent'`](/docs/guide/use-agent/) module — into a self-starting server entry at `dist/server.mjs` (plus the non-listening `dist/app.mjs` chunk it imports, which `vite preview` serves):
 
 ```bash
 vite build
@@ -19,7 +19,7 @@ node dist/server.mjs
 
 The server owns HTTP for whatever `app.ts` mounts, agent dispatch, and durable conversation streaming. It listens on port `3000` by default; set `PORT` to change it.
 
-During development, `vite dev` serves the same application on Vite's dev server (default port `5173`) with reload on changes. `vite preview` is not supported on the Node target — run the built server directly.
+During development, `vite dev` serves the same application on Vite's dev server (default port `5173`) with reload on changes. `vite preview` serves the built artifact with production behavior.
 
 The build externalizes your application dependencies rather than bundling them. Deploy the built artifact alongside its `node_modules`, or package it inside a container that installs dependencies first.
 

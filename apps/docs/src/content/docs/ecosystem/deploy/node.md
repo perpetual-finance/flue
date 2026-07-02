@@ -131,7 +131,7 @@ node dist/server.mjs
 
 `vite build` compiles your project into `./dist/server.mjs` without packaging `.env` credentials into the server; the built server reads only the environment supplied when you start it. It uses [Hono](https://hono.dev/) under the hood and listens on port 3000 by default (configurable via `PORT`). Your project's `node_modules` are still needed at runtime — the build externalizes your dependencies rather than bundling them.
 
-`vite preview` is not supported for the Node target yet — run the artifact directly with `node dist/server.mjs`.
+To verify the artifact before deploying, `vite preview` serves the built application (it imports `dist/app.mjs` directly, with production behavior), or run it for real with `node dist/server.mjs`.
 
 ## Deterministic jobs with actions
 

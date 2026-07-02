@@ -1,8 +1,7 @@
-import { build, createServer, preview, type ViteDevServer } from 'vite';
+import { build, createServer, type ViteDevServer } from 'vite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { flue } from '../src/index.ts';
 import {
-	basicNodeProjectFiles,
 	createFixture,
 	type Fixture,
 	getAvailablePort,
@@ -90,19 +89,3 @@ describe('import attributes through the outer Vite graph', () => {
 	}, 120_000);
 });
 
-describe('vite preview (node target)', () => {
-	it('is deferred: preview fails with node dist/server.mjs guidance', async () => {
-		const fixture = createFixture(basicNodeProjectFiles());
-		fixtures.push(fixture);
-		await build({ root: fixture.root, configFile: false, logLevel: 'error', plugins: flue() });
-		await expect(
-			preview({
-				root: fixture.root,
-				configFile: false,
-				logLevel: 'silent',
-				plugins: flue(),
-				preview: { port: await getAvailablePort(), strictPort: true },
-			}),
-		).rejects.toThrow(/Node preview is not supported yet[\s\S]*node dist\/server\.mjs/);
-	}, 120_000);
-});
