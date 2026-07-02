@@ -188,6 +188,41 @@ describe('vite dev (node target)', () => {
 		expect(body.error.dev).toContain('boom at load time');
 	}, 60_000);
 
+	it('explains a cloudflare:* import with the chain from the entry to the module', async () => {
+		const files = basicNodeProjectFiles();
+		const fixture = fixtureOf({
+			...files,
+			// Indirect wrong-environment import: app.ts → lib → cloudflare:workers.
+			'src/lib/platform.ts': `import 'cloudflare:workers';\nexport const onCloudflare = true;\n`,
+			'src/app.ts': `import './lib/platform.ts';\n${BASIC_APP_MODULE}`,
+		});
+		const port = await getAvailablePort();
+		const server = await createServer({
+			root: fixture.root,
+			configFile: false,
+			logLevel: 'silent',
+			plugins: flue(),
+			server: { port, strictPort: true, host: '127.0.0.1' },
+		});
+		await server.listen();
+		servers.push(server);
+		const baseUrl = `http://127.0.0.1:${port}`;
+		const body = await waitFor(
+			async () => {
+				const result = await fetch(`${baseUrl}/api/ping`);
+				if (result.status !== 503) return false;
+				const parsed = (await result.json()) as { error: { dev?: string } };
+				return parsed.error.dev !== undefined ? parsed : false;
+			},
+			{ description: 'the failed unavailable envelope with the import chain' },
+		);
+		expect(body.error.dev).toContain(`'cloudflare:workers' does not exist on the Node target`);
+		expect(body.error.dev).toContain('Import chain:');
+		expect(body.error.dev).toContain('src/app.ts imports');
+		expect(body.error.dev).toContain('src/lib/platform.ts imports');
+		expect(body.error.dev).toContain('import type');
+	}, 60_000);
+
 	it('loads project .env files into the dev application (shell values win)', async () => {
 		process.env.FLUE_TEST_SHELL_WINS = 'from-shell';
 		try {

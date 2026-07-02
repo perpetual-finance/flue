@@ -9,3 +9,5 @@
 export type { DependencyResolverState } from './dependency-resolver.ts';
 export { flueDependencyResolverPlugin } from './dependency-resolver.ts';
 export { importAttributePlugin } from './import-attribute-plugin.ts';
+export type { ImportTrace } from './import-trace.ts';
+export { createImportTrace, findCloudflareSpecifier } from './import-trace.ts';

@@ -50,6 +50,12 @@ export function createNodeDevController(options: {
 	server: ViteDevServer;
 	/** Absolute project root (for the dev SQLite cache location). */
 	root: string;
+	/**
+	 * Supplementary diagnostic for a load failure (e.g. the import chain of a
+	 * wrong-environment module), appended to the logged error and the 503
+	 * envelope's dev field.
+	 */
+	explainLoadError?: (error: unknown) => string | undefined;
 }): NodeDevController {
 	const { server, root } = options;
 	const logger = server.config.logger;
@@ -123,10 +129,14 @@ export function createNodeDevController(options: {
 			// one); the next successful edit recovers. Remap SSR stack frames to
 			// authored sources before the error is logged or rendered.
 			fixLoadErrorStack(server, error);
-			lastLoadError = error instanceof Error ? error.message : String(error);
-			logger.error(`[flue] Application load failed: ${formatError(error)}`, {
-				error: asError(error),
-			});
+			const explanation = options.explainLoadError?.(error);
+			lastLoadError = [error instanceof Error ? error.message : String(error), explanation]
+				.filter(Boolean)
+				.join('\n');
+			logger.error(
+				`[flue] Application load failed: ${formatError(error)}${explanation ? `\n${explanation}` : ''}`,
+				{ error: asError(error) },
+			);
 			if (!application) status = 'failed';
 		}
 	}

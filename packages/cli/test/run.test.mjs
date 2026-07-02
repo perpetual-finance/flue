@@ -298,11 +298,20 @@ test('a module without a defineAgent default export fails clearly', async () => 
 	assert.match(result.stderr, /Agent "bad" must default-export defineAgent\(\.\.\.\)/);
 });
 
-test('a module importing cloudflare:* APIs points at vite dev', async () => {
+test('a module importing cloudflare:* APIs points at vite dev with the import chain', async () => {
 	const root = createFixtureRoot();
+	// Indirect import: the diagnostic must name the route to the offending
+	// module, not just the module.
+	fs.mkdirSync(path.join(root, 'src', 'lib'), { recursive: true });
+	fs.writeFileSync(
+		path.join(root, 'src', 'lib', 'platform.mjs'),
+		`import 'cloudflare:workers';
+export const onCloudflare = true;
+`,
+	);
 	fs.writeFileSync(
 		path.join(root, 'src', 'agents', 'cf.mjs'),
-		`import 'cloudflare:workers';
+		`import '../lib/platform.mjs';
 import { defineAgent } from '@flue/runtime';
 export default defineAgent(() => ({ model: 'faux/faux-model' }));
 `,
@@ -310,7 +319,12 @@ export default defineAgent(() => ({ model: 'faux/faux-model' }));
 
 	const result = await runCli(root, ['src/agents/cf.mjs', '--message', 'hi']);
 	assert.equal(result.code, 1);
+	assert.match(result.stderr, /depends on 'cloudflare:workers'/);
 	assert.match(result.stderr, /`flue run` is Node-local; platform behavior belongs to `vite dev`/);
+	assert.match(result.stderr, /Import chain:/);
+	assert.match(result.stderr, /src\/agents\/cf\.mjs imports/);
+	assert.match(result.stderr, /src\/lib\/platform\.mjs imports/);
+	assert.match(result.stderr, /cloudflare:workers$/m);
 });
 
 test('missing --message is rejected', async () => {

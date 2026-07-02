@@ -22,7 +22,13 @@ import {
 	resolveFlueConfigPath,
 	resolveFlueProject,
 } from '@flue/runtime/config';
-import { flueDependencyResolverPlugin, importAttributePlugin } from '@flue/vite/internal';
+import {
+	createImportTrace,
+	findCloudflareSpecifier,
+	flueDependencyResolverPlugin,
+	type ImportTrace,
+	importAttributePlugin,
+} from '@flue/vite/internal';
 import { ulid } from 'ulidx';
 import type {
 	FlueRunOutcome,
@@ -137,12 +143,14 @@ export function createLocalAgentRun(options: LocalAgentRunOptions): LocalAgentRu
 		}
 
 		throwIfAborted(controller.signal);
-		viteServer = await createRunModuleServer(project.root);
+		const importTrace = createImportTrace({ enabled: () => true });
+		viteServer = await createRunModuleServer(project.root, importTrace);
 		const server = viteServer;
+		const loadContext: RunModuleLoadContext = { cwd, root: project.root, importTrace };
 
 		const restoreConsole = redirectStdoutConsole(options.onRuntimeOutput);
 		try {
-			const bootstrap = (await loadRunModule(server, resolveBootstrapModulePath(), cwd)) as {
+			const bootstrap = (await loadRunModule(server, resolveBootstrapModulePath(), loadContext)) as {
 				createFlueRunSession(sessionOptions: FlueRunSessionOptions): Promise<FlueRunSession>;
 			};
 			throwIfAborted(controller.signal);
@@ -157,7 +165,7 @@ export function createLocalAgentRun(options: LocalAgentRunOptions): LocalAgentRu
 					: {}),
 				defaultSqlitePath,
 				env: process.env,
-				loadModule: (modulePath) => loadRunModule(server, modulePath, cwd),
+				loadModule: (modulePath) => loadRunModule(server, modulePath, loadContext),
 			});
 			throwIfAborted(controller.signal);
 
@@ -267,7 +275,10 @@ interface ViteDevServerLike {
  * module-scoped-registry reason (Vite would otherwise inline a symlinked
  * copy, splitting the provider registry the runtime shares with it).
  */
-async function createRunModuleServer(root: string): Promise<ViteDevServerLike> {
+async function createRunModuleServer(
+	root: string,
+	importTrace: ImportTrace,
+): Promise<ViteDevServerLike> {
 	const { createServer } = await import('vite');
 	return await createServer({
 		configFile: false,
@@ -288,38 +299,40 @@ async function createRunModuleServer(root: string): Promise<ViteDevServerLike> {
 		},
 		plugins: [
 			importAttributePlugin(),
+			importTrace.plugin,
 			flueDependencyResolverPlugin({ root, external: true, importers: [] }),
 		],
 	});
 }
 
+interface RunModuleLoadContext {
+	cwd: string;
+	root: string;
+	importTrace: ImportTrace;
+}
+
 async function loadRunModule(
 	server: ViteDevServerLike,
 	modulePath: string,
-	cwd: string,
+	context: RunModuleLoadContext,
 ): Promise<Record<string, unknown>> {
 	try {
 		return await server.ssrLoadModule(modulePath);
 	} catch (error) {
-		if (mentionsCloudflareModule(error)) {
+		const specifier = findCloudflareSpecifier(error);
+		if (specifier !== undefined) {
+			const chain = context.importTrace.explain(specifier, context.root);
 			throw new Error(
-				`[flue] Failed to load ${displayPath(cwd, modulePath)}: it (or a module it imports) ` +
-					`depends on 'cloudflare:*' modules. \`flue run\` is Node-local; ` +
-					`platform behavior belongs to \`vite dev\`.`,
+				`[flue] Failed to load ${displayPath(context.cwd, modulePath)}: it (or a module it imports) ` +
+					`depends on '${specifier}'. \`flue run\` is Node-local; ` +
+					`platform behavior belongs to \`vite dev\`. If the import is only used for types, ` +
+					`change it to \`import type\` so it is erased at build time.` +
+					(chain ? `\n\nImport chain:\n${chain}` : ''),
 				{ cause: error },
 			);
 		}
 		throw error;
 	}
-}
-
-function mentionsCloudflareModule(error: unknown): boolean {
-	let current: unknown = error;
-	for (let depth = 0; depth < 8 && current instanceof Error; depth += 1) {
-		if (current.message.includes('cloudflare:')) return true;
-		current = current.cause;
-	}
-	return false;
 }
 
 /**

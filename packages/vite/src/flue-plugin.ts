@@ -66,9 +66,11 @@ import {
 import { applyDevEnv } from './dev-env.ts';
 import { stackless } from './diagnostics.ts';
 import { importAttributePlugin } from './import-attribute-plugin.ts';
+import { createImportTrace, explainCloudflareImport } from './import-trace.ts';
 import { createNodeDevController } from './node-dev.ts';
 import { configureNodePreview } from './node-preview.ts';
 import { transformUseAgentModule } from './use-agent-transform.ts';
+import { createWatchQueue, type WatchQueue } from './watch-queue.ts';
 
 /** The resolved Flue project, exposed on the core plugin's `api` field. */
 export interface FlueResolvedProjectInfo {
@@ -170,8 +172,8 @@ interface FluePluginState {
 	 * server's generated file into unrelated, later config resolutions.
 	 */
 	wranglerEnvRestore: { value: string | undefined } | undefined;
-	/** Serializes watcher-driven re-scans. */
-	watchQueue: Promise<void>;
+	/** Serializes and coalesces watcher-driven re-scans. */
+	watchQueue: WatchQueue;
 	resolved: FlueResolvedProjectInfo | undefined;
 	/** Warnings collected during the `config` hook, logged in `configResolved`. */
 	pendingWarnings: string[];
@@ -193,7 +195,7 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 		isPreview: false,
 		cloudflarePrepared: false,
 		wranglerEnvRestore: undefined,
-		watchQueue: Promise.resolve(),
+		watchQueue: createWatchQueue(),
 		resolved: undefined,
 		pendingWarnings: [],
 	};
@@ -202,6 +204,14 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 		external: false,
 		importers: undefined,
 	};
+
+	// Records import edges on the Node target so wrong-environment failures
+	// (a `cloudflare:*` import reaching the Node graph) can print the chain
+	// from the user's entry to the offending module. Inert on Cloudflare,
+	// where those imports are legitimate and the sibling owns the graph.
+	const importTrace = createImportTrace({
+		enabled: () => state.target === 'node' && !state.isPreview,
+	});
 
 	const updateAgents = (agents: AgentScanResult[]): void => {
 		state.agents = agents;
@@ -507,7 +517,7 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 				server.close = async () => {
 					closedServers.add(server);
 					supervision.stop();
-					await state.watchQueue.catch(() => undefined);
+					await state.watchQueue.settled();
 					await originalClose();
 				};
 				return;
@@ -525,7 +535,11 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 				);
 			}
 
-			const controller = createNodeDevController({ server, root: state.root });
+			const controller = createNodeDevController({
+				server,
+				root: state.root,
+				explainLoadError: (error) => explainCloudflareImport(error, importTrace, state.root),
+			});
 
 			// Stop the loaded application when THIS server closes so no listeners
 			// or store handles leak. Bound per server instance (not a plugin-level
@@ -535,12 +549,12 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 			server.close = async () => {
 				closedServers.add(server);
 				await controller.close();
-				await state.watchQueue.catch(() => undefined);
+				await state.watchQueue.settled();
 				await originalClose();
 			};
 
-			const rescan = (): Promise<void> => {
-				const run = async () => {
+			const rescan = (): Promise<void> =>
+				state.watchQueue.schedule(async () => {
 					let agents: AgentScanResult[];
 					try {
 						agents = await scanAgents({
@@ -559,10 +573,7 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 					updateAgents(agents);
 					invalidateAgentsModule(server);
 					controller.scheduleReload();
-				};
-				state.watchQueue = state.watchQueue.then(run, run);
-				return state.watchQueue;
-			};
+				});
 
 			server.watcher.on('all', (event, file) => {
 				const filePath = normalizePath(file);
@@ -606,6 +617,16 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 			};
 		},
 
+		buildEnd(error) {
+			// A failed Node build gets the import-chain diagnostic appended:
+			// rolldown's own error names the offending specifier, not the route
+			// to it. (The build error itself already propagates; this is
+			// supplementary context on stderr.)
+			if (!error || state.target !== 'node') return;
+			const explanation = explainCloudflareImport(error, importTrace, state.root);
+			if (explanation) console.error(`[flue] ${explanation}`);
+		},
+
 		configurePreviewServer(server) {
 			// Cloudflare preview is fully owned by the sibling plugin (it runs
 			// workerd over the built Worker output); flue contributes nothing.
@@ -614,7 +635,12 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 		},
 	};
 
-	return [corePlugin, importAttributePlugin(), flueDependencyResolverPlugin(resolverState)];
+	return [
+		corePlugin,
+		importAttributePlugin(),
+		importTrace.plugin,
+		flueDependencyResolverPlugin(resolverState),
+	];
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -648,8 +674,8 @@ function setupCloudflareDevSupervision(options: {
 
 	let stopped = false;
 
-	const refresh = (): Promise<void> => {
-		const run = async () => {
+	const refresh = (): Promise<void> =>
+		state.watchQueue.schedule(async () => {
 			if (stopped) return;
 			// The project root itself is gone (deleted out from under the dev
 			// server, or torn down while watcher events were still queued).
@@ -691,10 +717,7 @@ function setupCloudflareDevSupervision(options: {
 			} catch (error) {
 				logger.error(`[flue] Regenerating Cloudflare inputs failed: ${formatWatchError(error)}`);
 			}
-		};
-		state.watchQueue = state.watchQueue.then(run, run);
-		return state.watchQueue;
-	};
+		});
 
 	const normalizedRoot = normalizePath(state.root);
 	const onWatchEvent = (event: string, file: string): void => {
