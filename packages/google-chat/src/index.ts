@@ -1,4 +1,5 @@
-import type { Context, Env, Handler } from 'hono';
+import { createChannelRouter } from '@flue/runtime';
+import type { Context, Env, Handler, Hono } from 'hono';
 import type {
 	GoogleChatInteractionAuthentication,
 	GoogleChatPubSubAuthentication,
@@ -190,6 +191,11 @@ export interface GoogleChatWorkspaceEventHandlerInput<E extends Env = Env> {
 
 export interface GoogleChatChannel<E extends Env = Env> {
 	readonly routes: readonly ChannelRoute<E>[];
+	/**
+	 * Build a mountable Hono sub-app serving the channel's routes relative
+	 * to the mount point: `app.route('/channels/google-chat', channel.route())`.
+	 */
+	route(): Hono<E>;
 	/** Serializes a canonical namespaced identifier. It is not an authorization capability. */
 	conversationKey(ref: GoogleChatConversationRef): string;
 	/** Parses only canonical keys produced by `conversationKey()`. */
@@ -233,6 +239,7 @@ export function createGoogleChatChannel<E extends Env = Env>(
 
 	const channel: GoogleChatChannel<E> = {
 		routes,
+		route: () => createChannelRouter(routes),
 		conversationKey(ref) {
 			assertConversationRef(ref);
 			return [

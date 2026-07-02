@@ -119,6 +119,15 @@ export {
 export { handleStreamHead, handleStreamRead } from './runtime/handle-stream-routes.ts';
 export { generateWorkflowRunId } from './runtime/ids.ts';
 export { hasRegisteredProvider, resetProviderRuntime } from './runtime/providers.ts';
+// Identity registry consumed by the new generated bootstraps (the scanned
+// `'use agent'` set) and by unit tests mounting `AgentDefinition.route()`.
+export type { FlueAgentRegistration } from './runtime/registration.ts';
+export {
+	getRegisteredFlueAgents,
+	registerFlueAgents,
+	resetFlueAgentRegistrationForTests,
+	resolveAgentModuleBinding,
+} from './runtime/registration.ts';
 export type {
 	ListRunsOpts,
 	ListRunsResponse,

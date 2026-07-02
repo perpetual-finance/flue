@@ -1,4 +1,5 @@
-import type { Context, Env, Handler } from 'hono';
+import { createChannelRouter } from '@flue/runtime';
+import type { Context, Env, Handler, Hono } from 'hono';
 import { InvalidTwilioConversationKeyError, InvalidTwilioInputError } from './errors.ts';
 import { createTwilioStatusCallbackHandler, createTwilioWebhookHandler } from './webhook.ts';
 
@@ -145,6 +146,11 @@ export interface TwilioStatusHandlerInput<E extends Env = Env> {
 /** Verified Twilio Messaging ingress and canonical identity helpers. */
 export interface TwilioChannel<E extends Env = Env> {
 	readonly routes: readonly ChannelRoute<E>[];
+	/**
+	 * Build a mountable Hono sub-app serving the channel's routes relative
+	 * to the mount point: `app.route('/channels/twilio', channel.route())`.
+	 */
+	route(): Hono<E>;
 	/** Serializes a canonical namespaced identifier. It is not an authorization capability. */
 	conversationKey(ref: TwilioConversationRef): string;
 	/** Parses only canonical keys produced by `conversationKey()`. */
@@ -180,6 +186,7 @@ export function createTwilioChannel<E extends Env = Env>(
 
 	const channel: TwilioChannel<E> = {
 		routes,
+		route: () => createChannelRouter(routes),
 		conversationKey(ref) {
 			assertConversationRef(ref);
 			const base = ['twilio', 'v1', 'account', encodeURIComponent(ref.accountSid)];

@@ -22,6 +22,10 @@
 			"types": "./dist/routing.d.mts",
 			"import": "./dist/routing.mjs"
 		},
+		"./config": {
+			"types": "./dist/config.d.mts",
+			"import": "./dist/config.mjs"
+		},
 		"./tool": {
 			"types": "./dist/tool-entrypoint.d.mts",
 			"import": "./dist/tool-entrypoint.mjs"

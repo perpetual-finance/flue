@@ -1,5 +1,6 @@
+import { createChannelRouter } from '@flue/runtime';
 import type { Activity } from 'botframework-schema';
-import type { Context, Env, Handler } from 'hono';
+import type { Context, Env, Handler, Hono } from 'hono';
 import { defaultBotFrameworkOpenIdMetadataUrl, defaultBotFrameworkTokenIssuer } from './auth.ts';
 import { InvalidTeamsConversationKeyError, InvalidTeamsInputError } from './errors.ts';
 import { createTeamsActivitiesHandler, deriveDestination } from './routes.ts';
@@ -83,6 +84,11 @@ export interface TeamsActivitiesHandlerInput<E extends Env = Env> {
 export interface TeamsChannel<E extends Env = Env> {
 	readonly routes: readonly ChannelRoute<E>[];
 	/**
+	 * Build a mountable Hono sub-app serving the channel's routes relative
+	 * to the mount point: `app.route('/channels/teams', channel.route())`.
+	 */
+	route(): Hono<E>;
+	/**
 	 * Derives the canonical routing identity from a verified activity. Verified
 	 * activities delivered to the `activities` callback always derive a
 	 * destination; throws `InvalidTeamsInputError` for an activity that lacks the
@@ -116,8 +122,10 @@ export function createTeamsChannel<E extends Env = Env>(
 		activities: options.activities,
 	});
 
+	const routes: readonly ChannelRoute<E>[] = [{ method: 'POST', path: '/activities', handler }];
 	const channel: TeamsChannel<E> = {
-		routes: [{ method: 'POST', path: '/activities', handler }],
+		routes,
+		route: () => createChannelRouter(routes),
 		destination(activity) {
 			if (!activity || typeof activity !== 'object') throw new InvalidTeamsInputError('activity');
 			const ref = deriveDestination(

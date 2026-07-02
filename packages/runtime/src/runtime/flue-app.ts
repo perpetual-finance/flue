@@ -1,10 +1,8 @@
 import type { Context, MiddlewareHandler } from 'hono';
 import { Hono } from 'hono';
-import { validator } from 'hono-openapi';
 import {
 	AttachmentsNotExposedError,
 	configureErrorRendering,
-	InvalidRequestError,
 	MethodNotAllowedError,
 	RouteNotFoundError,
 	RunNotFoundError,
@@ -22,22 +20,22 @@ import type {
 	WorkflowRunsHandler,
 } from '../types.ts';
 import type { WorkflowDefinition } from '../workflow-definition.ts';
+import {
+	executeAgentAbort,
+	executeAgentAttachmentRead,
+	executeAgentConversationRead,
+	executeAgentPrompt,
+	runAttachedMiddleware,
+	validated,
+} from './agent-routes.ts';
 import type { AttachedAgentSubmissionAdmission } from './agent-submissions.ts';
 import type { AttachmentStore } from './attachment-store.ts';
+import { dispatchChannelRequest } from './channel-routes.ts';
 import type { ConversationStreamStore } from './conversation-stream-store.ts';
 import { enqueueDispatch } from './dispatch.ts';
 import type { DispatchQueue } from './dispatch-queue.ts';
-import { agentStreamPath, type EventStreamStore, runStreamPath } from './event-stream-store.ts';
-import {
-	type CreateWorkflowContextFn,
-	handleAgentRequest,
-	handleWorkflowRequest,
-} from './handle-agent.ts';
-import {
-	handleAgentAttachmentRead,
-	handleAgentConversationHead,
-	handleAgentConversationRead,
-} from './handle-conversation-routes.ts';
+import { type EventStreamStore, runStreamPath } from './event-stream-store.ts';
+import { type CreateWorkflowContextFn, handleWorkflowRequest } from './handle-agent.ts';
 import { handleStreamHead, handleStreamRead } from './handle-stream-routes.ts';
 import { generateWorkflowRunId } from './ids.ts';
 import { invokeWorkflow, type WorkflowInvocationReceipt, type WorkflowInvokeRequest } from './invoke.ts';
@@ -73,6 +71,15 @@ export interface WorkflowRecord {
 
 interface RuntimeBase {
 	devMode?: boolean;
+	/**
+	 * @deprecated Phase 6 deletion. The exposure concept is gone from the new
+	 * mounting surface (registration comes from the `'use agent'` scan; HTTP
+	 * exposure comes from mounting `.route()` in `app.ts`). This flag remains
+	 * functional only because the legacy CLI local runtime (`flue run <name>`
+	 * via `startLocalHttpRuntime`) still depends on it to reach route-free
+	 * agents and workflows over the legacy `flue()` router. Delete together
+	 * with that path.
+	 */
 	temporaryLocalExposure?: boolean;
 	agents: AgentRecord[];
 	workflows: WorkflowRecord[];
@@ -322,42 +329,6 @@ export function createDefaultFlueApp(): Hono {
 	return app;
 }
 
-function validated(
-	target: 'param' | 'query',
-	schema: Parameters<typeof validator>[1],
-): MiddlewareHandler {
-	return validator(target, schema, (result) => {
-		if (result.success) return;
-		throw new InvalidRequestError({
-			reason: `Invalid ${target} parameters: ${describeValidationIssues(result.error)}`,
-		});
-	}) as MiddlewareHandler;
-}
-
-/**
- * Flatten standard-schema validation issues into a caller-safe sentence.
- * The raw issue objects are a validation-library-internal shape and must not
- * reach the wire — clients would freeze that shape into their error handling.
- */
-function describeValidationIssues(issues: unknown): string {
-	if (!Array.isArray(issues) || issues.length === 0) return 'request validation failed.';
-	return issues
-		.map((issue: { message?: unknown; path?: unknown }) => {
-			const message = typeof issue.message === 'string' ? issue.message : 'Invalid value.';
-			const path = Array.isArray(issue.path)
-				? issue.path
-						.map((segment) =>
-							typeof segment === 'object' && segment !== null && 'key' in segment
-								? String((segment as { key: unknown }).key)
-								: String(segment),
-						)
-						.join('.')
-				: '';
-			return path ? `${path}: ${message}` : message;
-		})
-		.join(' ');
-}
-
 const workflowRouteHandler: MiddlewareHandler = async (c) => {
 	const rt = runtimeConfig;
 	if (!rt) {
@@ -432,49 +403,21 @@ const agentRouteHandler: MiddlewareHandler = async (c) => {
 	const record = rt.agents.find((agent) => agent.name === name);
 	return runAttachedMiddleware(c, record?.route, async () => {
 		if (c.req.method === 'GET' || c.req.method === 'HEAD') {
-			const streamPath = agentStreamPath(name, id);
-			if (rt.target === 'node') {
-				if (c.req.method === 'HEAD') {
-					return handleAgentConversationHead(rt.conversationStreamStore, streamPath);
-				}
-				return handleAgentConversationRead({
-					store: rt.conversationStreamStore,
-					path: agentStreamPath(name, id),
-					request: c.req.raw,
-				});
-			}
-
-			// Cloudflare: forward to the agent DO.
-			const response = await rt.routeAgentRequest(request, c.env, {
+			return executeAgentConversationRead(rt, {
 				agentName: name,
 				instanceId: id,
-			});
-			if (response) return response;
-			throw new RouteNotFoundError({ method: c.req.method, path: new URL(c.req.url).pathname });
-		}
-
-		if (rt.target === 'node') {
-			const admitAttachedSubmission = rt.createAgentAdmission(name, id);
-			if (!admitAttachedSubmission) {
-				throw new Error('[flue] Node runtime is missing agent admission configuration.');
-			}
-			return handleAgentRequest({
-				request,
-				id,
-				agentName: name,
-				admitAttachedSubmission,
+				// The Node DS read path uses the live request (abort signal wiring
+				// for long-poll/SSE); Cloudflare forwards it to the agent DO.
+				request: rt.target === 'node' ? c.req.raw : request,
+				env: c.env,
 			});
 		}
 
-		const response = await rt.routeAgentRequest(request, c.env, {
+		return executeAgentPrompt(rt, {
 			agentName: name,
 			instanceId: id,
-		});
-		if (response) return response;
-
-		throw new RouteNotFoundError({
-			method: c.req.method,
-			path: new URL(c.req.url).pathname,
+			request,
+			env: c.env,
 		});
 	});
 };
@@ -504,20 +447,9 @@ const abortRouteHandler: MiddlewareHandler = async (c) => {
 	const request = c.req.raw.clone();
 
 	const record = rt.agents.find((agent) => agent.name === name);
-	return runAttachedMiddleware(c, record?.route, async () => {
-		if (rt.target === 'node') {
-			const aborted = await rt.abortAgentInstance(name, id);
-			return Response.json({ aborted });
-		}
-		// Cloudflare: forward to the owning agent DO, which recognizes the
-		// abort path and settles via its coordinator.
-		const response = await rt.routeAgentRequest(request, c.env, {
-			agentName: name,
-			instanceId: id,
-		});
-		if (response) return response;
-		throw new RouteNotFoundError({ method: c.req.method, path: new URL(c.req.url).pathname });
-	});
+	return runAttachedMiddleware(c, record?.route, () =>
+		executeAgentAbort(rt, { agentName: name, instanceId: id, request, env: c.env }),
+	);
 };
 
 const attachmentsRouteHandler: MiddlewareHandler = async (c) => {
@@ -542,23 +474,15 @@ const attachmentsRouteHandler: MiddlewareHandler = async (c) => {
 	}
 
 	const request = c.req.raw.clone();
-	return runAttachedMiddleware(c, record.attachments, async () => {
-		if (rt.target === 'node') {
-			return handleAgentAttachmentRead({
-				conversationStore: rt.conversationStreamStore,
-				attachmentStore: rt.attachmentStore,
-				path: agentStreamPath(name, id),
-				attachmentId,
-			});
-		}
-		// Cloudflare: forward to the agent DO, which owns the attachment bytes.
-		const response = await rt.routeAgentRequest(request, c.env, {
+	return runAttachedMiddleware(c, record.attachments, () =>
+		executeAgentAttachmentRead(rt, {
 			agentName: name,
 			instanceId: id,
-		});
-		if (response) return response;
-		throw new RouteNotFoundError({ method: c.req.method, path: new URL(c.req.url).pathname });
-	});
+			attachmentId,
+			request,
+			env: c.env,
+		}),
+	);
 };
 
 const channelRouteHandler: MiddlewareHandler = async (c) => {
@@ -573,109 +497,14 @@ const channelRouteHandler: MiddlewareHandler = async (c) => {
 	const name = c.req.param('name') ?? '';
 	const remainder = c.req.param('suffix') ?? '';
 	const suffix = remainder.length > 0 ? `/${remainder}` : '';
-	const routes = rt.channelHandlers?.[name];
-	if (!routes || suffix.length === 0) {
-		throw new RouteNotFoundError({
-			method: c.req.method,
-			path: new URL(c.req.url).pathname,
-		});
-	}
-
-	const handler = routes[`${c.req.method} ${suffix}`];
-	if (!handler) {
-		const allowed = Object.keys(routes)
-			.filter((key) => key.endsWith(` ${suffix}`))
-			.map((key) => key.slice(0, key.indexOf(' ')));
-		if (allowed.length > 0) {
-			throw new MethodNotAllowedError({ method: c.req.method, allowed });
-		}
-		throw new RouteNotFoundError({
-			method: c.req.method,
-			path: new URL(c.req.url).pathname,
-		});
-	}
-
-	const lease = rt.activityGate?.enter();
-	let response: Response | undefined;
-	try {
-		response = normalizeFetchResponse(await handler(c));
-		if (response?.body && lease) response = retainActivityLease(response, lease);
-		else lease?.release();
-	} catch (error) {
-		lease?.release();
-		throw error;
-	}
-	if (!response) {
-		throw new TypeError(
-			`[flue] Channel "${name}" handler for ${c.req.method} ${suffix} must return a Response.`,
-		);
-	}
-	return response;
+	return dispatchChannelRequest({
+		c,
+		suffix,
+		handlers: rt.channelHandlers?.[name],
+		activityGate: rt.activityGate,
+		label: name,
+	});
 };
-
-function retainActivityLease(
-	response: Response,
-	lease: { release(): void },
-): Response {
-	const body = response.body;
-	if (!body) {
-		lease.release();
-		return response;
-	}
-	const reader = body.getReader();
-	return new Response(
-		new ReadableStream<Uint8Array>({
-			async pull(controller) {
-				try {
-					const result = await reader.read();
-					if (result.done) {
-						lease.release();
-						controller.close();
-						return;
-					}
-					controller.enqueue(result.value);
-				} catch (error) {
-					lease.release();
-					controller.error(error);
-				}
-			},
-			async cancel(reason) {
-				try {
-					await reader.cancel(reason);
-				} finally {
-					lease.release();
-				}
-			},
-		}),
-		{ status: response.status, statusText: response.statusText, headers: response.headers },
-	);
-}
-
-function normalizeFetchResponse(value: unknown): Response | undefined {
-	if (value instanceof globalThis.Response) return value;
-	if (Object.prototype.toString.call(value) !== '[object Response]') return undefined;
-	if (typeof value !== 'object' || value === null) return undefined;
-	try {
-		const response = value as Response;
-		if (
-			!Number.isInteger(response.status) ||
-			response.status < 200 ||
-			response.status > 599 ||
-			typeof response.statusText !== 'string' ||
-			typeof response.headers?.entries !== 'function' ||
-			(response.body !== null && typeof response.body !== 'object')
-		) {
-			return undefined;
-		}
-		return new globalThis.Response(response.body, {
-			status: response.status,
-			statusText: response.statusText,
-			headers: new Headers(response.headers),
-		});
-	} catch {
-		return undefined;
-	}
-}
 
 const runStreamReadHandler: MiddlewareHandler = async (c) => {
 	const rt = requiredRuntime();
@@ -774,28 +603,6 @@ function requiredRuntime(): FlueRuntime {
 		);
 	}
 	return runtimeConfig;
-}
-
-async function runAttachedMiddleware(
-	c: Parameters<MiddlewareHandler>[0],
-	middleware: MiddlewareHandler | undefined,
-	handle: () => Promise<Response | undefined>,
-): Promise<Response | undefined> {
-	if (!middleware) return handle();
-	const finalizedBefore = c.finalized;
-	const responseBefore = finalizedBefore ? c.res : undefined;
-	let continued = false;
-	const response = await middleware(c, async () => {
-		if (continued) throw new Error('next() called multiple times');
-		continued = true;
-		const handled = await handle();
-		if (handled) c.res = handled;
-	});
-	if (response) return response;
-	if (continued || (c.finalized && (!finalizedBefore || c.res !== responseBefore))) return c.res;
-	throw new Error(
-		'Context is not finalized. Did you forget to return a Response object or await next()?',
-	);
 }
 
 function registeredAgentsForTransport(rt: FlueRuntime): readonly string[] {

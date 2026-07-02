@@ -1,5 +1,6 @@
 import * as v from 'valibot';
 import { isActionDefinition } from './action.ts';
+import { createAgentRouter } from './runtime/registration.ts';
 import { assertToolDefinition } from './tool.ts';
 import type {
 	AgentDefinition,
@@ -81,7 +82,14 @@ export function defineAgent<TEnv = Record<string, any>>(
 	if (typeof initialize !== 'function') {
 		throw new Error('[flue] defineAgent() requires an initializer function.');
 	}
-	const agent = Object.freeze({ __flueAgentDefinition: true as const, initialize });
+	const agent: AgentDefinition<TEnv> = {
+		__flueAgentDefinition: true as const,
+		initialize,
+		// Pure router factory over the module's bound identity/metadata — see
+		// createAgentRouter for the served routes and resolution rules.
+		route: () => createAgentRouter(agent as AgentDefinition),
+	};
+	Object.freeze(agent);
 	agentDefinitions.add(agent);
 	return agent;
 }

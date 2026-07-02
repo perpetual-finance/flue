@@ -1,4 +1,5 @@
-import type { Context, Env, Handler } from 'hono';
+import { createChannelRouter } from '@flue/runtime';
+import type { Context, Env, Handler, Hono } from 'hono';
 import type Stripe from 'stripe';
 import { createStripeWebhookHandler } from './webhook.ts';
 
@@ -66,6 +67,11 @@ export type StripeHandlerResult = StripeHandlerValue | Promise<StripeHandlerValu
 /** Verified Stripe ingress. */
 export interface StripeChannel<E extends Env = Env> {
 	readonly routes: readonly ChannelRoute<E>[];
+	/**
+	 * Build a mountable Hono sub-app serving the channel's routes relative
+	 * to the mount point: `app.route('/channels/stripe', channel.route())`.
+	 */
+	route(): Hono<E>;
 }
 
 /**
@@ -86,14 +92,16 @@ export function createStripeChannel<E extends Env = Env>(
 	options: StripeChannelOptions<E>,
 ): StripeChannel<E> {
 	validateOptions(options);
+	const routes: readonly ChannelRoute<E>[] = [
+		{
+			method: 'POST',
+			path: '/webhook',
+			handler: createStripeWebhookHandler(options),
+		},
+	];
 	return {
-		routes: [
-			{
-				method: 'POST',
-				path: '/webhook',
-				handler: createStripeWebhookHandler(options),
-			},
-		],
+		routes,
+		route: () => createChannelRouter(routes),
 	};
 }
 

@@ -1,4 +1,5 @@
-import type { Context, Env, Handler } from 'hono';
+import { createChannelRouter } from '@flue/runtime';
+import type { Context, Env, Handler, Hono } from 'hono';
 import { createSalesforceMarketingCloudEventsHandler } from './webhook.ts';
 
 /** JSON-compatible provider value. */
@@ -129,6 +130,11 @@ export interface SalesforceMarketingCloudChannelOptions<E extends Env = Env> {
 export interface SalesforceMarketingCloudChannel<E extends Env = Env> {
 	/** Fixed route declarations published beneath the discovered channel path. */
 	readonly routes: readonly ChannelRoute<E>[];
+	/**
+	 * Build a mountable Hono sub-app serving the channel's routes relative
+	 * to the mount point: `app.route('/channels/sfmc', channel.route())`.
+	 */
+	route(): Hono<E>;
 }
 
 /**
@@ -144,14 +150,16 @@ export function createSalesforceMarketingCloudChannel<E extends Env = Env>(
 	options: SalesforceMarketingCloudChannelOptions<E>,
 ): SalesforceMarketingCloudChannel<E> {
 	validateOptions(options);
+	const routes: readonly ChannelRoute<E>[] = [
+		{
+			method: 'POST',
+			path: '/events',
+			handler: createSalesforceMarketingCloudEventsHandler(options),
+		},
+	];
 	return {
-		routes: [
-			{
-				method: 'POST',
-				path: '/events',
-				handler: createSalesforceMarketingCloudEventsHandler(options),
-			},
-		],
+		routes,
+		route: () => createChannelRouter(routes),
 	};
 }
 

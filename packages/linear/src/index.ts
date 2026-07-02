@@ -1,5 +1,6 @@
+import { createChannelRouter } from '@flue/runtime';
 import type { LinearWebhookPayload } from '@linear/sdk/webhooks';
-import type { Context, Env, Handler } from 'hono';
+import type { Context, Env, Handler, Hono } from 'hono';
 import { InvalidLinearConversationKeyError, InvalidLinearInputError } from './errors.ts';
 import { createLinearWebhookHandler } from './webhook.ts';
 
@@ -85,6 +86,11 @@ export interface LinearWebhookHandlerInput<E extends Env = Env> {
 /** Verified Linear ingress and canonical identity helpers. */
 export interface LinearChannel<E extends Env = Env> {
 	readonly routes: readonly ChannelRoute<E>[];
+	/**
+	 * Build a mountable Hono sub-app serving the channel's routes relative
+	 * to the mount point: `app.route('/channels/linear', channel.route())`.
+	 */
+	route(): Hono<E>;
 	/** Serializes a canonical namespaced identifier. It is not an authorization capability. */
 	conversationKey(ref: LinearConversationRef): string;
 	/** Parses only canonical keys produced by `conversationKey()`. */
@@ -103,14 +109,16 @@ export function createLinearChannel<E extends Env = Env>(
 	options: LinearChannelOptions<E>,
 ): LinearChannel<E> {
 	validateOptions(options);
+	const routes: readonly ChannelRoute<E>[] = [
+		{
+			method: 'POST',
+			path: '/webhook',
+			handler: createLinearWebhookHandler(options),
+		},
+	];
 	const channel: LinearChannel<E> = {
-		routes: [
-			{
-				method: 'POST',
-				path: '/webhook',
-				handler: createLinearWebhookHandler(options),
-			},
-		],
+		routes,
+		route: () => createChannelRouter(routes),
 		conversationKey(ref) {
 			assertConversationRef(ref);
 			if (ref.type === 'agent-session') {

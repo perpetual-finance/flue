@@ -39,6 +39,8 @@ describe('package entrypoints', () => {
 			observe: expect.any(Function),
 			registerApiProvider: expect.any(Function),
 			registerProvider: expect.any(Function),
+			createChannelRouter: expect.any(Function),
+			__flueBindAgentModule: expect.any(Function),
 		});
 		expect(runtime).not.toHaveProperty('Type');
 		expect(runtime).not.toHaveProperty('interceptExecution');
@@ -70,6 +72,18 @@ describe('package entrypoints', () => {
 
 		expect(routing.flue).toEqual(expect.any(Function));
 		expect(routing).not.toHaveProperty('admin');
+	});
+
+	it('exposes the project config authoring API from @flue/runtime/config', async () => {
+		const config = await import('@flue/runtime/config');
+
+		expect(config).toMatchObject({
+			defineConfig: expect.any(Function),
+			loadFlueConfig: expect.any(Function),
+			parseFlueConfig: expect.any(Function),
+			resolveFlueProject: expect.any(Function),
+			resolveSourceRoot: expect.any(Function),
+		});
 	});
 
 	it('exposes the portable tool authoring API from @flue/runtime/tool', async () => {

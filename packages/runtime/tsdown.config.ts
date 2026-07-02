@@ -5,6 +5,7 @@ export default defineConfig({
 		'src/index.ts',
 		'src/adapter.ts',
 		'src/routing.ts',
+		'src/config.ts',
 		'src/tool-entrypoint.ts',
 		'src/internal.ts',
 		'src/cloudflare/index.ts',

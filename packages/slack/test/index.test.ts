@@ -43,6 +43,42 @@ describe('createSlackChannel()', () => {
 		).toThrow('requires an events, interactions, or commands handler');
 	});
 
+	it('serves its routes beneath an application mount via route()', async () => {
+		let received: SlackEventsApiPayload | undefined;
+		const slack = createSlackChannel({
+			signingSecret: 'secret',
+			events({ payload }) {
+				received = payload;
+			},
+		});
+		const app = new Hono();
+		app.route('/channels/slack', slack.route());
+		const payload = eventCallback({
+			type: 'app_mention',
+			channel: 'C123',
+			ts: '1717971234.0012',
+			event_ts: '1717971234.0012',
+			text: '<@U1> hello',
+			user: 'U2',
+		});
+
+		const response = await app.request(await signedJsonRequest('/channels/slack/events', payload));
+		expect(response.status).toBe(200);
+		expect(received).toEqual(payload);
+
+		const wrongMethod = await app.request('https://example.test/channels/slack/events');
+		expect(wrongMethod.status).toBe(405);
+		expect(wrongMethod.headers.get('allow')).toBe('POST');
+
+		const unknown = await app.request('https://example.test/channels/slack/unknown', {
+			method: 'POST',
+		});
+		expect(unknown.status).toBe(404);
+		expect(((await unknown.json()) as { error: { type: string } }).error.type).toBe(
+			'route_not_found',
+		);
+	});
+
 	it('passes the provider-native Events API envelope and Hono context when a request is valid', async () => {
 		let received: SlackEventsApiPayload | undefined;
 		let retryNumber: string | undefined;

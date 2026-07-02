@@ -80,3 +80,5 @@ export const InvocationQuerySchema = v.object({
 	wait: v.optional(v.literal('result')),
 });
 export const AgentRouteParamSchema = v.object({ name: v.string(), id: v.string() });
+/** Param contract for the mounted `AgentDefinition.route()` sub-app (`/:id`). */
+export const AgentMountRouteParamSchema = v.object({ id: v.string() });

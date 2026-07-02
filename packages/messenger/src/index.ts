@@ -1,4 +1,5 @@
-import type { Context, Env, Handler } from 'hono';
+import { createChannelRouter } from '@flue/runtime';
+import type { Context, Env, Handler, Hono } from 'hono';
 import { InvalidMessengerConversationKeyError, InvalidMessengerInputError } from './errors.ts';
 import { createMessengerVerificationHandler, createMessengerWebhookHandler } from './webhook.ts';
 
@@ -246,6 +247,11 @@ export interface MessengerWebhookHandlerInput<E extends Env = Env> {
 /** Verified Facebook Messenger Page ingress and canonical identity helpers. */
 export interface MessengerChannel<E extends Env = Env> {
 	readonly routes: readonly ChannelRoute<E>[];
+	/**
+	 * Build a mountable Hono sub-app serving the channel's routes relative
+	 * to the mount point: `app.route('/channels/messenger', channel.route())`.
+	 */
+	route(): Hono<E>;
 	/** Serializes a canonical namespaced identifier. It is not an authorization capability. */
 	conversationKey(ref: MessengerConversationRef): string;
 	/** Parses only canonical keys produced by `conversationKey()`. */
@@ -274,19 +280,21 @@ export function createMessengerChannel<E extends Env = Env>(
 ): MessengerChannel<E> {
 	validateOptions(options);
 	const pageId = options.pageId;
+	const routes: readonly ChannelRoute<E>[] = [
+		{
+			method: 'GET',
+			path: '/webhook',
+			handler: createMessengerVerificationHandler(options),
+		},
+		{
+			method: 'POST',
+			path: '/webhook',
+			handler: createMessengerWebhookHandler(options),
+		},
+	];
 	const channel: MessengerChannel<E> = {
-		routes: [
-			{
-				method: 'GET',
-				path: '/webhook',
-				handler: createMessengerVerificationHandler(options),
-			},
-			{
-				method: 'POST',
-				path: '/webhook',
-				handler: createMessengerWebhookHandler(options),
-			},
-		],
+		routes,
+		route: () => createChannelRouter(routes),
 		conversationKey(ref) {
 			assertConversationRef(ref);
 			return [

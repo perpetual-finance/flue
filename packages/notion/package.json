@@ -33,11 +33,13 @@
 		"hono": "4.12.22"
 	},
 	"peerDependencies": {
-		"@types/node": ">=18",
-		"@notionhq/client": "^5.22.0"
+		"@flue/runtime": "workspace:^",
+		"@notionhq/client": "^5.22.0",
+		"@types/node": ">=18"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "0.16.15",
+		"@flue/runtime": "workspace:*",
 		"@notionhq/client": "5.22.0",
 		"@types/node": "^22.10.10",
 		"tsdown": "^0.22.0",

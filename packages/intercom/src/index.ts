@@ -1,4 +1,5 @@
-import type { Context, Env, Handler } from 'hono';
+import { createChannelRouter } from '@flue/runtime';
+import type { Context, Env, Handler, Hono } from 'hono';
 import { InvalidIntercomConversationKeyError, InvalidIntercomInputError } from './errors.ts';
 import { createIntercomValidationHandler, createIntercomWebhookHandler } from './webhook.ts';
 
@@ -92,6 +93,11 @@ export type IntercomHandlerResult = IntercomHandlerValue | Promise<IntercomHandl
 /** Verified Intercom ingress and canonical conversation identity helpers. */
 export interface IntercomChannel<E extends Env = Env> {
 	readonly routes: readonly ChannelRoute<E>[];
+	/**
+	 * Build a mountable Hono sub-app serving the channel's routes relative
+	 * to the mount point: `app.route('/channels/intercom', channel.route())`.
+	 */
+	route(): Hono<E>;
 	/** Serializes a canonical identifier. It is not an authorization capability. */
 	conversationKey(ref: IntercomConversationRef): string;
 	/** Parses only canonical keys produced by `conversationKey()`. */
@@ -111,19 +117,21 @@ export function createIntercomChannel<E extends Env = Env>(
 	options: IntercomChannelOptions<E>,
 ): IntercomChannel<E> {
 	validateOptions(options);
+	const routes: readonly ChannelRoute<E>[] = [
+		{
+			method: 'HEAD',
+			path: '/webhook',
+			handler: createIntercomValidationHandler(),
+		},
+		{
+			method: 'POST',
+			path: '/webhook',
+			handler: createIntercomWebhookHandler(options),
+		},
+	];
 	const channel: IntercomChannel<E> = {
-		routes: [
-			{
-				method: 'HEAD',
-				path: '/webhook',
-				handler: createIntercomValidationHandler(),
-			},
-			{
-				method: 'POST',
-				path: '/webhook',
-				handler: createIntercomWebhookHandler(options),
-			},
-		],
+		routes,
+		route: () => createChannelRouter(routes),
 		conversationKey(ref) {
 			assertConversationRef(ref);
 			return [

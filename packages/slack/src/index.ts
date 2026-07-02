@@ -1,5 +1,6 @@
+import { createChannelRouter } from '@flue/runtime';
 import type { SlackEvent } from '@slack/types';
-import type { Context, Env, Handler } from 'hono';
+import type { Context, Env, Handler, Hono } from 'hono';
 import { InvalidSlackConversationKeyError, InvalidSlackInputError } from './errors.ts';
 import {
 	createSlackCommandsHandler,
@@ -263,6 +264,11 @@ export interface SlackCommandsHandlerInput<E extends Env = Env> {
 /** Verified ingress and canonical identity helpers. */
 export interface SlackChannel<E extends Env = Env> {
 	readonly routes: readonly ChannelRoute<E>[];
+	/**
+	 * Build a mountable Hono sub-app serving the channel's routes relative
+	 * to the mount point: `app.route('/channels/slack', channel.route())`.
+	 */
+	route(): Hono<E>;
 	/** Serializes a canonical namespaced identifier. It is not an authorization capability. */
 	conversationKey(ref: SlackThreadRef): string;
 	/** Parses only canonical keys produced by `conversationKey()`. */
@@ -325,6 +331,7 @@ export function createSlackChannel<E extends Env = Env>(
 
 	const channel: SlackChannel<E> = {
 		routes,
+		route: () => createChannelRouter(routes),
 		conversationKey(ref) {
 			assertThreadRef(ref);
 			return `slack:v1:${encodeURIComponent(ref.teamId)}:${encodeURIComponent(ref.channelId)}:${encodeURIComponent(ref.threadTs)}`;

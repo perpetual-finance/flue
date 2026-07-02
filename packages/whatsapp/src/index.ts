@@ -1,3 +1,4 @@
+import { createChannelRouter } from '@flue/runtime';
 import type {
 	WebhookChange,
 	WebhookContact,
@@ -13,7 +14,7 @@ import type {
 	WebhookStatus,
 	WebhookValue,
 } from '@whatsapp-cloudapi/types/webhook';
-import type { Context, Env, Handler } from 'hono';
+import type { Context, Env, Handler, Hono } from 'hono';
 import { InvalidWhatsAppConversationKeyError, InvalidWhatsAppInputError } from './errors.ts';
 import { createWhatsAppVerificationHandler, createWhatsAppWebhookHandler } from './webhook.ts';
 
@@ -110,6 +111,11 @@ export interface WhatsAppWebhookHandlerInput<E extends Env = Env> {
 /** Verified WhatsApp ingress and canonical destination identity helpers. */
 export interface WhatsAppChannel<E extends Env = Env> {
 	readonly routes: readonly ChannelRoute<E>[];
+	/**
+	 * Build a mountable Hono sub-app serving the channel's routes relative
+	 * to the mount point: `app.route('/channels/whatsapp', channel.route())`.
+	 */
+	route(): Hono<E>;
 	/** Serializes a canonical namespaced identifier. It is not an authorization capability. */
 	conversationKey(ref: WhatsAppConversationRef): string;
 	/** Parses only canonical keys produced by `conversationKey()`. */
@@ -131,19 +137,21 @@ export function createWhatsAppChannel<E extends Env = Env>(
 	options: WhatsAppChannelOptions<E>,
 ): WhatsAppChannel<E> {
 	validateOptions(options);
+	const routes: readonly ChannelRoute<E>[] = [
+		{
+			method: 'GET',
+			path: '/webhook',
+			handler: createWhatsAppVerificationHandler(options),
+		},
+		{
+			method: 'POST',
+			path: '/webhook',
+			handler: createWhatsAppWebhookHandler(options),
+		},
+	];
 	const channel: WhatsAppChannel<E> = {
-		routes: [
-			{
-				method: 'GET',
-				path: '/webhook',
-				handler: createWhatsAppVerificationHandler(options),
-			},
-			{
-				method: 'POST',
-				path: '/webhook',
-				handler: createWhatsAppWebhookHandler(options),
-			},
-		],
+		routes,
+		route: () => createChannelRouter(routes),
 		conversationKey(ref) {
 			assertConversationRef(ref);
 			const base = [

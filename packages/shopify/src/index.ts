@@ -1,4 +1,5 @@
-import type { Context, Env, Handler } from 'hono';
+import { createChannelRouter } from '@flue/runtime';
+import type { Context, Env, Handler, Hono } from 'hono';
 import { createShopifyWebhookHandler } from './webhook.ts';
 
 export type JsonValue =
@@ -64,6 +65,11 @@ export type ShopifyHandlerResult = ShopifyHandlerValue | Promise<ShopifyHandlerV
 /** Verified Shopify ingress. */
 export interface ShopifyChannel<E extends Env = Env> {
 	readonly routes: readonly ChannelRoute<E>[];
+	/**
+	 * Build a mountable Hono sub-app serving the channel's routes relative
+	 * to the mount point: `app.route('/channels/shopify', channel.route())`.
+	 */
+	route(): Hono<E>;
 }
 
 /**
@@ -78,14 +84,16 @@ export function createShopifyChannel<E extends Env = Env>(
 	options: ShopifyChannelOptions<E>,
 ): ShopifyChannel<E> {
 	validateOptions(options);
+	const routes: readonly ChannelRoute<E>[] = [
+		{
+			method: 'POST',
+			path: '/webhook',
+			handler: createShopifyWebhookHandler(options),
+		},
+	];
 	return {
-		routes: [
-			{
-				method: 'POST',
-				path: '/webhook',
-				handler: createShopifyWebhookHandler(options),
-			},
-		],
+		routes,
+		route: () => createChannelRouter(routes),
 	};
 }
 

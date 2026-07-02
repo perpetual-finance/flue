@@ -1,3 +1,4 @@
+import { createChannelRouter } from '@flue/runtime';
 import type {
 	CommentCreatedWebhookPayload,
 	CommentDeletedWebhookPayload,
@@ -31,7 +32,7 @@ import type {
 	ViewDeletedWebhookPayload,
 	ViewUpdatedWebhookPayload,
 } from '@notionhq/client';
-import type { Context, Env, Handler } from 'hono';
+import type { Context, Env, Handler, Hono } from 'hono';
 import { createNotionWebhookHandler } from './webhook.ts';
 
 export type JsonValue =
@@ -155,6 +156,11 @@ export type NotionHandlerResult = NotionHandlerValue | Promise<NotionHandlerValu
 /** Verified Notion ingress. */
 export interface NotionChannel<E extends Env = Env> {
 	readonly routes: readonly ChannelRoute<E>[];
+	/**
+	 * Build a mountable Hono sub-app serving the channel's routes relative
+	 * to the mount point: `app.route('/channels/notion', channel.route())`.
+	 */
+	route(): Hono<E>;
 }
 
 /**
@@ -166,14 +172,16 @@ export function createNotionChannel<E extends Env = Env>(
 	options: NotionChannelOptions<E>,
 ): NotionChannel<E> {
 	validateOptions(options);
+	const routes: readonly ChannelRoute<E>[] = [
+		{
+			method: 'POST',
+			path: '/webhook',
+			handler: createNotionWebhookHandler(options),
+		},
+	];
 	return {
-		routes: [
-			{
-				method: 'POST',
-				path: '/webhook',
-				handler: createNotionWebhookHandler(options),
-			},
-		],
+		routes,
+		route: () => createChannelRouter(routes),
 	};
 }
 

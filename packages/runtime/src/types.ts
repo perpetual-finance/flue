@@ -16,7 +16,7 @@ declare module '@earendil-works/pi-agent-core' {
 	}
 }
 
-import type { MiddlewareHandler } from 'hono';
+import type { Hono, MiddlewareHandler } from 'hono';
 import type * as v from 'valibot';
 import type { ActionDefinition } from './action.ts';
 import type { ToolDefinition } from './tool-types.ts';
@@ -438,6 +438,26 @@ export interface AgentRuntimeConfig {
 export interface AgentDefinition<TEnv = Record<string, any>> {
 	readonly __flueAgentDefinition: true;
 	initialize(context: AgentInitializerContext<TEnv>): AgentRuntimeConfig | Promise<AgentRuntimeConfig>;
+	/**
+	 * Build a mountable Hono sub-app serving this agent's HTTP routes,
+	 * relative to wherever the application mounts it:
+	 *
+	 * ```ts
+	 * app.route('/agents/triage', triage.route());
+	 * ```
+	 *
+	 * Routes: `POST /:id` (prompt; 202 admission), `GET|HEAD /:id` (DS
+	 * conversation stream), `POST /:id/abort`, and
+	 * `/:id/attachments/:attachmentId` when the module exports `attachments`.
+	 * The module's `route` named export (middleware) is applied to all of
+	 * them.
+	 *
+	 * Pure factory — no registration side effects; safe to call any number of
+	 * times, including mounting the same agent at two paths (same identity,
+	 * same conversations). Requires the module to carry the `'use agent'`
+	 * directive (which binds the agent's identity); throws otherwise.
+	 */
+	route(): Hono;
 }
 
 // ─── Flue Event Context ────────────────────────────────────────────────────

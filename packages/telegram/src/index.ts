@@ -1,5 +1,6 @@
+import { createChannelRouter } from '@flue/runtime';
 import type { Update } from '@grammyjs/types';
-import type { Context, Env, Handler } from 'hono';
+import type { Context, Env, Handler, Hono } from 'hono';
 import { InvalidTelegramConversationKeyError, InvalidTelegramInputError } from './errors.ts';
 import { createTelegramWebhookHandler } from './webhook.ts';
 
@@ -83,6 +84,11 @@ export interface TelegramWebhookHandlerInput<E extends Env = Env> {
 /** Verified Telegram webhook ingress and canonical identity helpers. */
 export interface TelegramChannel<E extends Env = Env> {
 	readonly routes: readonly ChannelRoute<E>[];
+	/**
+	 * Build a mountable Hono sub-app serving the channel's routes relative
+	 * to the mount point: `app.route('/channels/telegram', channel.route())`.
+	 */
+	route(): Hono<E>;
 	/** Serializes a canonical namespaced identifier. It is not an authorization capability. */
 	conversationKey(ref: TelegramConversationRef): string;
 	/** Parses only canonical keys produced by `conversationKey()`. */
@@ -100,14 +106,16 @@ export function createTelegramChannel<E extends Env = Env>(
 	options: TelegramChannelOptions<E>,
 ): TelegramChannel<E> {
 	validateOptions(options);
+	const routes: readonly ChannelRoute<E>[] = [
+		{
+			method: 'POST',
+			path: '/webhook',
+			handler: createTelegramWebhookHandler(options),
+		},
+	];
 	const channel: TelegramChannel<E> = {
-		routes: [
-			{
-				method: 'POST',
-				path: '/webhook',
-				handler: createTelegramWebhookHandler(options),
-			},
-		],
+		routes,
+		route: () => createChannelRouter(routes),
 		conversationKey(ref) {
 			assertConversationRef(ref);
 			const common = [

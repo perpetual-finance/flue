@@ -1,4 +1,5 @@
-import type { Context, Env, Handler } from 'hono';
+import { createChannelRouter } from '@flue/runtime';
+import type { Context, Env, Handler, Hono } from 'hono';
 import { InvalidZendeskInputError, InvalidZendeskTicketKeyError } from './errors.ts';
 import { createZendeskWebhookHandler } from './webhook.ts';
 
@@ -131,6 +132,11 @@ export type ZendeskHandlerResult = ZendeskHandlerValue | Promise<ZendeskHandlerV
 export interface ZendeskChannel<E extends Env = Env> {
 	/** Fixed route declarations published beneath the discovered channel path. */
 	readonly routes: readonly ChannelRoute<E>[];
+	/**
+	 * Build a mountable Hono sub-app serving the channel's routes relative
+	 * to the mount point: `app.route('/channels/zendesk', channel.route())`.
+	 */
+	route(): Hono<E>;
 	/** Serializes a canonical identifier. It is not an authorization capability. */
 	ticketKey(ref: ZendeskTicketRef): string;
 	/** Parses only canonical keys produced by `ticketKey()`. */
@@ -152,14 +158,16 @@ export function createZendeskChannel<E extends Env = Env>(
 	options: ZendeskChannelOptions<E>,
 ): ZendeskChannel<E> {
 	validateOptions(options);
+	const routes: readonly ChannelRoute<E>[] = [
+		{
+			method: 'POST',
+			path: '/webhook',
+			handler: createZendeskWebhookHandler(options),
+		},
+	];
 	const channel: ZendeskChannel<E> = {
-		routes: [
-			{
-				method: 'POST',
-				path: '/webhook',
-				handler: createZendeskWebhookHandler(options),
-			},
-		],
+		routes,
+		route: () => createChannelRouter(routes),
 		ticketKey(ref) {
 			assertTicketRef(ref);
 			return [

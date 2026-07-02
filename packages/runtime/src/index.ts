@@ -60,8 +60,15 @@ export { connectMcpServer } from './mcp.ts';
 export type { FlueObservationSubscriber } from './observation.ts';
 export { ResultUnavailableError } from './result.ts';
 export { type FlueEventSubscriber, observe } from './runtime/events.ts';
+export type {
+	ChannelRouteDefinition,
+	MountableChannel,
+} from './runtime/channel-routes.ts';
+export { createChannelRouter } from './runtime/channel-routes.ts';
 export type { AgentManifestEntry } from './runtime/flue-app.ts';
 export { dispatch, invoke } from './runtime/flue-app.ts';
+export type { AgentModuleBinding } from './runtime/registration.ts';
+export { __flueBindAgentModule } from './runtime/registration.ts';
 export { getRun, listAgents, listRuns } from './runtime/inspect.ts';
 export type { WorkflowInvocationReceipt, WorkflowInvokeRequest } from './runtime/invoke.ts';
 export {

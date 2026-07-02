@@ -1,5 +1,6 @@
+import { createChannelRouter } from '@flue/runtime';
 import type { APIInteraction, APIInteractionResponse } from 'discord-api-types/v10';
-import type { Context, Env, Handler } from 'hono';
+import type { Context, Env, Handler, Hono } from 'hono';
 import { InvalidDiscordConversationKeyError, InvalidDiscordInputError } from './errors.ts';
 import { createDiscordInteractionsHandler } from './routes.ts';
 
@@ -39,6 +40,11 @@ export interface DiscordInteractionsHandlerInput<E extends Env = Env> {
 
 export interface DiscordChannel<E extends Env = Env> {
 	readonly routes: readonly ChannelRoute<E>[];
+	/**
+	 * Build a mountable Hono sub-app serving the channel's routes relative
+	 * to the mount point: `app.route('/channels/discord', channel.route())`.
+	 */
+	route(): Hono<E>;
 	conversationKey(ref: DiscordDestinationRef): string;
 	parseConversationKey(id: string): DiscordDestinationRef;
 }
@@ -60,8 +66,10 @@ export function createDiscordChannel<E extends Env = Env>(
 		interactions: options.interactions,
 	});
 
+	const routes: readonly ChannelRoute<E>[] = [{ method: 'POST', path: '/interactions', handler }];
 	const channel: DiscordChannel<E> = {
-		routes: [{ method: 'POST', path: '/interactions', handler }],
+		routes,
+		route: () => createChannelRouter(routes),
 		conversationKey(ref) {
 			assertDestinationRef(ref);
 			if (ref.type === 'guild') {

@@ -1,5 +1,6 @@
+import { createChannelRouter } from '@flue/runtime';
 import type { EventPayloadMap, WebhookEventName } from '@octokit/webhooks-types';
-import type { Context, Env, Handler } from 'hono';
+import type { Context, Env, Handler, Hono } from 'hono';
 import { InvalidGitHubConversationKeyError, InvalidGitHubInputError } from './errors.ts';
 import { createGitHubWebhookHandler } from './webhook.ts';
 
@@ -78,6 +79,11 @@ export type GitHubWebhookHandlerResult =
 /** Verified ingress and canonical identity helpers. */
 export interface GitHubChannel<E extends Env = Env> {
 	readonly routes: readonly ChannelRoute<E>[];
+	/**
+	 * Build a mountable Hono sub-app serving the channel's routes relative
+	 * to the mount point: `app.route('/channels/github', channel.route())`.
+	 */
+	route(): Hono<E>;
 	/** Serializes a canonical namespaced identifier. It is not an authorization capability. */
 	conversationKey(ref: GitHubIssueRef): string;
 	/** Parses only canonical keys produced by `conversationKey()`. */
@@ -103,8 +109,10 @@ export function createGitHubChannel<E extends Env = Env>(
 		webhook: options.webhook,
 	});
 
+	const routes: readonly ChannelRoute<E>[] = [{ method: 'POST', path: '/webhook', handler: webhookHandler }];
 	const channel: GitHubChannel<E> = {
-		routes: [{ method: 'POST', path: '/webhook', handler: webhookHandler }],
+		routes,
+		route: () => createChannelRouter(routes),
 		conversationKey(ref) {
 			assertIssueRef(ref);
 			return `github:v1:owner:${encodeURIComponent(ref.owner)}:repo:${encodeURIComponent(ref.repo)}:issue:${ref.issueNumber}`;
