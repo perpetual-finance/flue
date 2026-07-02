@@ -39,6 +39,9 @@ pnpm-debug.log*
 *.tsbuildinfo
 vitest-results.json
 
+# temporary test fixtures (@flue/vite integration tests)
+packages/vite/test/.tmp/
+
 # wrangler generated types
 worker-configuration.d.ts
 

@@ -1,9 +1,15 @@
 /**
  * `@flue/vite` — the Vite plugin that makes a Vite project a Flue app.
  *
- * Phase 2 of the redesign ships only the shared "use agent" scanner; the
- * plugin itself lands in Phase 3
- * (plans/2026-07-02-vite-plugin-explicit-routing-redesign.md).
+ * ```ts
+ * // vite.config.ts
+ * import { defineConfig } from 'vite';
+ * import { flue } from '@flue/vite';
+ * export default defineConfig({ plugins: [flue()] });
+ * ```
+ *
+ * See plans/2026-07-02-vite-plugin-explicit-routing-redesign.md. Phase 3
+ * ships the Node target; the Cloudflare adapter lands in Phase 4.
  */
 export type { AgentScanResult, ScanAgentsOptions } from './agent-scan.ts';
 export {
@@ -13,7 +19,12 @@ export {
 	AgentScanError,
 	agentBindingName,
 	agentClassName,
+	codeHasAgentDirective,
 	DuplicateAgentIdentityError,
 	InvalidAgentIdentityError,
+	isAgentModulePath,
+	programBodyHasAgentDirective,
 	scanAgents,
 } from './agent-scan.ts';
+export type { FlueResolvedProjectInfo, FlueVitePluginApi } from './flue-plugin.ts';
+export { flue } from './flue-plugin.ts';

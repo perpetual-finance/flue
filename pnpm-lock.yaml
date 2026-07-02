@@ -1668,10 +1668,22 @@ importers:
 
   packages/vite:
     dependencies:
+      '@flue/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@hono/node-server':
+        specifier: ^2.0.3
+        version: 2.0.3(hono@4.12.22)
+      magic-string:
+        specifier: ^0.30.21
+        version: 0.30.21
       tinyglobby:
         specifier: ^0.2.15
         version: 0.2.17
     devDependencies:
+      hono:
+        specifier: 4.12.22
+        version: 4.12.22
       tsdown:
         specifier: ^0.22.0
         version: 0.22.0(oxc-resolver@11.19.1(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1))(tsx@4.22.3)(typescript@6.0.3)

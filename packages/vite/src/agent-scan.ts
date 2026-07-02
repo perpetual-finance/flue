@@ -179,6 +179,11 @@ export async function scanAgents(options: ScanAgentsOptions): Promise<AgentScanR
 	return results;
 }
 
+/** Whether `filePath` has an extension that can carry the agent directive. */
+export function isAgentModulePath(filePath: string): boolean {
+	return AGENT_MODULE_EXTENSIONS.has(path.extname(filePath));
+}
+
 /** `Flue<PascalCase>Agent` — matches the CLI Cloudflare codegen exactly. */
 export function agentClassName(identity: string): string {
 	return `Flue${pascalCaseName(identity)}Agent`;
@@ -201,10 +206,6 @@ function agentIdentity(filePath: string): string {
 	return basename.slice(0, -path.extname(basename).length);
 }
 
-function isAgentModulePath(filePath: string): boolean {
-	return AGENT_MODULE_EXTENSIONS.has(path.extname(filePath));
-}
-
 function comparePaths(a: string, b: string): number {
 	return a < b ? -1 : a > b ? 1 : 0;
 }
@@ -221,23 +222,15 @@ interface ParsedStatement {
 	readonly directive?: string;
 }
 
-async function hasAgentDirective(filePath: string): Promise<boolean> {
-	const code = await fs.promises.readFile(filePath, 'utf8');
-	// Cheap candidate pre-filter: the raw directive text must appear somewhere
-	// in the file for the prologue to contain it (raw-text matching, so this
-	// can never produce a false negative). Only candidates are parsed.
-	if (!code.includes(AGENT_DIRECTIVE)) return false;
-	let body: readonly ParsedStatement[];
-	try {
-		// The parser derives the dialect (ts/js) from the file extension.
-		const program = await parseAstAsync(code, null, filePath);
-		body = program.body as readonly ParsedStatement[];
-	} catch (error) {
-		// Fail loud: silently skipping a broken candidate would let a build
-		// succeed without the agent the file declares.
-		throw new AgentModuleParseError(filePath, error);
-	}
-	for (const statement of body) {
+/**
+ * Whether a parsed program body opens with the `'use agent'` directive in its
+ * directive prologue. Shared by the scanner and the `@flue/vite` build
+ * transform so the two can never disagree about what counts as an agent
+ * module.
+ */
+export function programBodyHasAgentDirective(body: readonly unknown[]): boolean {
+	for (const entry of body) {
+		const statement = entry as ParsedStatement;
 		// The directive prologue ends at the first non-directive statement.
 		if (statement.type !== 'ExpressionStatement' || typeof statement.directive !== 'string') {
 			break;
@@ -245,6 +238,33 @@ async function hasAgentDirective(filePath: string): Promise<boolean> {
 		if (statement.directive === AGENT_DIRECTIVE) return true;
 	}
 	return false;
+}
+
+/**
+ * Whether `code` (an on-disk module's source) declares the `'use agent'`
+ * directive. Parse failures throw {@link AgentModuleParseError}: silently
+ * skipping a broken candidate would let a build succeed without the agent the
+ * file declares.
+ */
+export async function codeHasAgentDirective(code: string, filePath: string): Promise<boolean> {
+	// Cheap candidate pre-filter: the raw directive text must appear somewhere
+	// in the file for the prologue to contain it (raw-text matching, so this
+	// can never produce a false negative). Only candidates are parsed.
+	if (!code.includes(AGENT_DIRECTIVE)) return false;
+	let body: readonly unknown[];
+	try {
+		// The parser derives the dialect (ts/js) from the file extension.
+		const program = await parseAstAsync(code, null, filePath);
+		body = program.body as readonly unknown[];
+	} catch (error) {
+		throw new AgentModuleParseError(filePath, error);
+	}
+	return programBodyHasAgentDirective(body);
+}
+
+async function hasAgentDirective(filePath: string): Promise<boolean> {
+	const code = await fs.promises.readFile(filePath, 'utf8');
+	return codeHasAgentDirective(code, filePath);
 }
 
 function assertValidIdentities(results: readonly AgentScanResult[]): void {
