@@ -15,6 +15,8 @@ export { cfSandboxToSessionEnv } from './cf-sandbox.ts';
 export { runWithCloudflareContext } from './context.ts';
 export type { ResolvedCloudflareExtension } from './extension.ts';
 export { resolveCloudflareExtension } from './extension.ts';
+export type { CreateFlueAgentClassOptions } from './flue-agent-class.ts';
+export { createFlueAgentClass } from './flue-agent-class.ts';
 export { FlueRegistry } from './registry-do.ts';
 export type { CloudflareRunIndex } from './run-store.ts';
 export { createCloudflareRunIndex, createCloudflareRunStore } from './run-store.ts';
