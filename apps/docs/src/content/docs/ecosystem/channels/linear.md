@@ -66,6 +66,18 @@ the bound SDK tool posts replies to the same Linear conversation. The official
 SDK also supports the generated agent-session path and runs with Flue's
 `nodejs_compat` setting on Cloudflare Workers.
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the module's named `channel` export:
+
+```ts title="src/app.ts"
+import { channel as linear } from './channels/linear.ts';
+
+app.route('/channels/linear', linear.route());
+```
+
+`channel.route()` is a pure router factory serving the channel's declared routes relative to the mount path. The webhook paths in this guide assume the conventional `/channels/linear` mount; a different mount path shifts them accordingly. The dispatch-target agent module carries the `'use agent'` directive — the directive registers it, so a dispatch-only agent needs no HTTP mount of its own.
+
 ## Configure
 
 | Variable                 | Purpose                                                                 |
@@ -207,6 +219,7 @@ application concerns.
 ## Bind the tool
 
 ```ts title="src/agents/assistant.ts"
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, postMessage } from '../channels/linear.ts';
 

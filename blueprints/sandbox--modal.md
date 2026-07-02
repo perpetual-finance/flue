@@ -58,18 +58,18 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  *
  * @example
  * ```typescript
+ * 'use agent';
  * import { ModalClient } from 'modal';
+ * import { defineAgent } from '@flue/runtime';
  * import { modal } from './sandboxes/modal';
  *
- * const client = new ModalClient();
- * const app = await client.apps.fromName('my-app', { createIfMissing: true });
- * const image = client.images.fromRegistry('python:3.13-slim');
- * const sandbox = await client.sandboxes.create(app, image);
- *
- * const agent = defineAgent(() => ({ sandbox: modal(sandbox), model: 'anthropic/claude-sonnet-4-6' }));
- * export default defineWorkflow({ agent, async run({ harness }) {
- *   return await (await harness.session()).prompt('Inspect the workspace.');
- * }});
+ * export default defineAgent(async () => {
+ *   const client = new ModalClient();
+ *   const app = await client.apps.fromName('my-app', { createIfMissing: true });
+ *   const image = client.images.fromRegistry('python:3.13-slim');
+ *   const sandbox = await client.sandboxes.create(app, image);
+ *   return { sandbox: modal(sandbox), model: 'anthropic/claude-sonnet-4-6' };
+ * });
  * ```
  */
 import { createSandboxSessionEnv } from '@flue/runtime';
@@ -317,8 +317,9 @@ Their conventions, an `AGENTS.md`, or an existing setup (`.env`,
 right answer. If nothing in the project gives you a clear signal, ask the
 user instead of guessing.
 
-For reference: `flue dev --env <file>` and `flue run --env <file>` load
-any `.env`-format file the user points them at.
+For reference: `flue run` loads the project's `.env` by default, and
+`--env <file>` selects one alternate `.env`-format file. `vite dev` and the
+built server read the shell environment (`process.env`).
 
 ## Wiring it into an agent
 
@@ -328,13 +329,12 @@ into, you can finish that work by wiring the adapter into it. Otherwise,
 share this snippet so they can wire it up themselves.
 
 ```ts
-import { defineAgent, defineWorkflow, type WorkflowRouteHandler } from '@flue/runtime';
+'use agent';
 import { ModalClient } from 'modal';
+import { defineAgent } from '@flue/runtime';
 import { modal } from '../sandboxes/modal'; // adjust path to match the user's layout
 
-export const route: WorkflowRouteHandler = async (_c, next) => next();
-
-const agent = defineAgent(async () => {
+export default defineAgent(async () => {
   // ModalClient reads MODAL_TOKEN_ID / MODAL_TOKEN_SECRET (or ~/.modal.toml)
   // automatically.
   const client = new ModalClient();
@@ -346,15 +346,11 @@ const agent = defineAgent(async () => {
     model: 'anthropic/claude-sonnet-4-6',
   };
 });
-
-export default defineWorkflow({
-  agent,
-  run: async ({ harness }) => {
-    const session = await harness.session();
-    return await session.shell('uname -a');
-  },
-});
 ```
+
+The `'use agent'` directive at the top is what registers the module with
+the application. Mount `agent.route()` in `app.ts` only if the agent needs
+an HTTP endpoint — `flue run` and `dispatch()` work without a mount.
 
 Tip: if the user wants a faster start, prebuild a custom image with their
 tooling baked in (see Modal's `image-building.ts` example) instead of
@@ -368,8 +364,9 @@ installing packages on every cold start.
    actually wrote the file.
 3. Tell the user the next steps: install `modal` (if you didn't), make sure
    `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` are available at runtime (per
-   the Authentication section above), and run `flue dev` (or
-   `flue run <workflow>`) to try it.
+   the Authentication section above), and run
+   `flue run <path-to-the-agent-module> --message "..."` (or `vite dev`
+   for the full application) to try it.
 
 When updating an existing integration, inspect and compare it against this complete current blueprint, apply every relevant change while preserving customizations, and then add or update the marker in the primary marked file. This comparison is required when the marker is missing.
 

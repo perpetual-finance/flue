@@ -99,7 +99,7 @@ export interface DispatchReceipt {
 
 /** Context passed to a {@link defineAgent} initializer. */
 export interface AgentInitializerContext<TEnv = Record<string, any>> {
-	/** Agent instance id or workflow run id. */
+	/** Agent instance id. */
 	readonly id: string;
 	/** Platform environment bindings supplied by the runtime. */
 	readonly env: TEnv;
@@ -460,7 +460,7 @@ export interface AgentDefinition<TEnv = Record<string, any>> {
 
 // ─── Flue Event Context ────────────────────────────────────────────────────
 
-/** Event context for the agent interaction or workflow run that emitted an event. */
+/** Event context for the agent interaction that emitted an event. */
 export interface FlueEventContext<TEnv = Record<string, any>> {
 	/** Workflow run/instance id, or stable agent instance id during agent processing. */
 	readonly id: string;
@@ -490,7 +490,7 @@ export interface FlueEventContext<TEnv = Record<string, any>> {
 	 * trusted proxy on Node. Don't trust headers you don't control.
 	 */
 	readonly req: Request | undefined;
-	/** Emit observable structured log events, persisted in a run stream only during a workflow run. */
+	/** Emit observable structured log events into the conversation activity stream. */
 	readonly log: FlueLogger;
 }
 
@@ -766,8 +766,7 @@ export interface SandboxFactory {
 	 * Called once per initialized harness — one call per `init()` — and every
 	 * session and task session of that harness shares the returned env.
 	 *
-	 * `id` is the context id (`ctx.id`): the agent instance id for direct
-	 * agent requests, or the workflow run id inside a workflow. Multiple
+	 * `id` is the context id (`ctx.id`): the agent instance id. Multiple
 	 * harnesses initialized in the same context receive the same `id`, so a
 	 * sandbox adapter that keys provider resources on `id` must tolerate repeated
 	 * calls with the same value.
@@ -1062,9 +1061,8 @@ export type FlueEventInput = FlueEventVariant & {
  *
  * Recognized image content blocks in framework event payloads never carry raw
  * image bytes: their `data` is replaced with the exported
- * `IMAGE_DATA_OMITTED` sentinel. Application-authored `data` event payloads
- * are persisted verbatim and must not include raw image bytes, secrets, or
- * unsanitized PII. Session history retains real image bytes for model context.
+ * `IMAGE_DATA_OMITTED` sentinel. Session history retains real image bytes for
+ * model context.
  */
 export type FlueEvent = FlueEventInput & {
 	/** Durable event-format version. Readers branch on this when the format changes. */

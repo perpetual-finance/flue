@@ -15,8 +15,9 @@ activities and project-owned outbound messaging to a Flue project.
 
 Read local instructions, detect the package manager and target, and select the
 first existing source root: `<root>/.flue/`, then `<root>/src/`, then
-`<root>/`. Inspect existing agents, environment types, secret conventions, and
-the activity families the application needs.
+`<root>/`. Inspect existing agents, `app.ts` (the application's route map),
+environment types, secret conventions, and the activity families the
+application needs.
 
 Install `@flue/teams`. Do not install `@microsoft/agents-hosting` or
 `@microsoft/teams.apps` as the canonical client: their current packages declare
@@ -29,10 +30,9 @@ Install `valibot` using the project's existing dependency conventions.
 
 ## Create the Fetch client
 
-Create `<source-dir>/lib/teams-client.ts`. Keep helpers outside the immediate
-`channels/` directory because every file there is discovered as a channel
-module. Implement and export a narrow
-`createTeamsClient(...)` that:
+Create `<source-dir>/lib/teams-client.ts`. Keep helpers outside the
+`channels/` directory so channel modules stay focused on ingress. Implement
+and export a narrow `createTeamsClient(...)` that:
 
 - exchanges `TEAMS_APP_ID`, `TEAMS_APP_PASSWORD`, and `TEAMS_TENANT_ID` at
   `https://login.microsoftonline.com/<tenant>/oauth2/v2.0/token`;
@@ -108,6 +108,27 @@ export function postMessage(ref: TeamsConversationRef) {
 }
 ```
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the
+channel's router explicitly:
+
+```ts
+// app.ts
+import { Hono } from 'hono';
+import { channel } from './channels/teams.ts';
+
+const app = new Hono();
+app.route('/channels/teams', channel.route());
+
+export default app;
+```
+
+`channel.route()` is a pure router factory serving the channel's routes
+relative to the mount path. The `// Path:` comment in this guide assumes the
+conventional `/channels/teams` mount; a different mount path shifts every
+provider URL accordingly.
+
 The callback receives the provider-native Bot Framework `Activity` (typed by
 `botframework-schema`). Derive the canonical routing identity with
 `channel.destination(activity)` when you need to address a reply. Switch on
@@ -119,6 +140,7 @@ body or use the Hono context for explicit status and response control.
 ## Wire the agent
 
 ```ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, postMessage } from '../channels/teams.ts';
 
@@ -127,6 +149,12 @@ export default defineAgent(({ id }) => ({
   tools: [postMessage(channel.parseConversationKey(id))],
 }));
 ```
+
+The `'use agent'` directive (the module's first statement) is what registers
+the agent with the application — `dispatch(...)` from the channel callback
+needs no `app.ts` mounting. Add
+`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+should also be reachable over HTTP directly.
 
 The channel-agent import cycle is supported only because imported bindings are
 read inside deferred callbacks and initializers.
@@ -143,19 +171,21 @@ issuer to `createTeamsChannel(...)` and configure the matching OAuth authority
 in the project-owned client. Follow the project's secret conventions and never
 invent values.
 
-Set the Azure Bot messaging endpoint to:
+Set the Azure Bot messaging endpoint to the channel's mount path in `app.ts`
+plus the route suffix — with the conventional
+`app.route('/channels/teams', ...)` mount:
 
 ```txt
 https://example.com/channels/teams/activities
 ```
 
-If `flue()` has an outer mount prefix, include it in the configured URL.
+A different mount path changes the configured URL accordingly.
 Bots receive channel messages when mentioned by default. Add the appropriate
 Teams resource-specific consent permissions only when the application needs all
 channel or group-chat messages.
 
-Run the project's typecheck and both Node and Cloudflare builds. Generate a
-local RSA key pair, OpenID metadata, JWKS, and signed Bot Connector JWTs. Test
+Run the project typecheck and `vite build` for the configured target. Generate
+a local RSA key pair, OpenID metadata, JWKS, and signed Bot Connector JWTs. Test
 valid and invalid audience, issuer, expiry, endorsement, service URL, tenant,
 and activity payloads. Exercise OAuth and one outbound message against an
 injected local Fetch transport. Do not contact Microsoft services.

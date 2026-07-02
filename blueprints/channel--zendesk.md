@@ -15,9 +15,9 @@ and application-owned Ticketing API behavior to a Flue project.
 
 Read local instructions, detect the package manager and deployment target, and
 select the first existing source root: `<root>/.flue/`, then `<root>/src/`,
-then `<root>/`. Inspect existing agents, environment types, secret
-conventions, Zendesk account configuration, and the event families the
-application needs.
+then `<root>/`. Inspect existing agents, `app.ts` (the application's route
+map), environment types, secret conventions, Zendesk account configuration,
+and the event families the application needs.
 
 Install `@flue/zendesk` and `lossless-json@^4.3.0`. Do not install
 `node-zendesk` for this blueprint: Zendesk lists it as community maintained rather
@@ -284,6 +284,27 @@ function optionalEnv(name: string): string | undefined {
 }
 ```
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the
+channel's router explicitly:
+
+```ts
+// app.ts
+import { Hono } from 'hono';
+import { channel } from './channels/zendesk.ts';
+
+const app = new Hono();
+app.route('/channels/zendesk', channel.route());
+
+export default app;
+```
+
+`channel.route()` is a pure router factory serving the channel's routes
+relative to the mount path. The `// Path:` comment in this guide assumes the
+conventional `/channels/zendesk` mount; a different mount path shifts every
+provider URL accordingly.
+
 The callback receives the provider-native common event envelope as `payload`
 with Zendesk's own field names (`account_id`, `id`, `type`, `subject`, `time`,
 `zendesk_event_version`, `event`, `detail`), plus unsigned `delivery` metadata
@@ -312,6 +333,7 @@ than independent authorization capabilities.
 Bind the account and ticket selected by verified application code:
 
 ```ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, retrieveTicket } from '../channels/zendesk.ts';
 
@@ -324,6 +346,12 @@ export default defineAgent(({ id }) => {
 });
 ```
 
+The `'use agent'` directive (the module's first statement) is what registers
+the agent with the application — `dispatch(...)` from the channel callback
+needs no `app.ts` mounting. Add
+`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+should also be reachable over HTTP directly.
+
 The tool accepts no account, ticket id, subdomain, token, or API host from the
 model. The canonical key is an identifier, not an authorization capability;
 apply the project's normal policy to direct agent routes.
@@ -333,14 +361,16 @@ inside deferred callbacks and initializers.
 
 ## Configure the endpoint
 
-Create a Zendesk webhook event subscription with:
+Create a Zendesk webhook event subscription with the channel's mount path in
+`app.ts` plus the route suffix — with the conventional
+`app.route('/channels/zendesk', ...)` mount:
 
 ```txt
 https://example.com/channels/zendesk/webhook
 ```
 
-If `flue()` has an outer mount prefix, include it. Configure JSON delivery and
-use the webhook's signing secret as `ZENDESK_WEBHOOK_SIGNING_SECRET`.
+A different mount path changes the URL accordingly. Configure JSON delivery
+and use the webhook's signing secret as `ZENDESK_WEBHOOK_SIGNING_SECRET`.
 
 Zendesk sends:
 
@@ -409,8 +439,8 @@ define support workflow policy.
 
 ## Test without Zendesk
 
-Run the project's strict typecheck, Node build, Cloudflare build, and actual
-workerd tests. Flue projects already enable `nodejs_compat`.
+Run the project's strict typecheck, `vite build` for the configured target,
+and actual workerd tests. Flue projects already enable `nodejs_compat`.
 
 Create an original synthetic common event envelope and local signing secret.
 Serialize the body once, prepend the exact signature timestamp, HMAC-SHA256

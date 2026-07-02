@@ -15,8 +15,9 @@ application-owned Discord REST behavior to a Flue project.
 
 Read local instructions, detect the package manager and target, and select the
 first existing source root: `<root>/.flue/`, then `<root>/src/`, then
-`<root>/`. Inspect existing agents, environment types, secret conventions, and
-the interaction commands the application supports.
+`<root>/`. Inspect existing agents, `app.ts` (the application's route map),
+environment types, secret conventions, and the interaction commands the
+application supports.
 
 Install `@flue/discord` and `@discordjs/rest@^2.6.1`. Discord does not publish an
 official JavaScript REST SDK; `@discordjs/rest` is the
@@ -118,6 +119,27 @@ function destinationFromInteraction(interaction: APIInteraction): DiscordDestina
 }
 ```
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the
+channel's router explicitly:
+
+```ts
+// app.ts
+import { Hono } from 'hono';
+import { channel } from './channels/discord.ts';
+
+const app = new Hono();
+app.route('/channels/discord', channel.route());
+
+export default app;
+```
+
+`channel.route()` is a pure router factory serving the channel's routes
+relative to the mount path. The `// Path:` comments in this guide assume the
+conventional `/channels/discord` mount; a different mount path shifts every
+provider URL accordingly.
+
 This application-owned helper derives `DiscordDestinationRef` from native
 `guild_id`, `channel.id`, deprecated `channel_id`, `channel.type`, and `context`
 fields. Discord interactions require a provider
@@ -135,6 +157,7 @@ bot tokens to the model.
 ## Wire the agent
 
 ```ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, postMessage } from '../channels/discord.ts';
 
@@ -143,6 +166,12 @@ export default defineAgent(({ id }) => ({
   tools: [postMessage(channel.parseConversationKey(id))],
 }));
 ```
+
+The `'use agent'` directive (the module's first statement) is what registers
+the agent with the application — `dispatch(...)` from the channel callback
+needs no `app.ts` mounting. Add
+`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+should also be reachable over HTTP directly.
 
 The channel-agent import cycle is supported only because imported bindings are
 read inside deferred callbacks and initializers.
@@ -154,12 +183,14 @@ read inside deferred callbacks and initializers.
 conventions and never invent values.
 
 After deployment, configure the Discord application's Interactions Endpoint URL
-to the full public HTTPS `/channels/discord/interactions` route. Registering
+to the full public HTTPS interactions route — the channel's mount path in
+`app.ts` plus the route suffix, so `/channels/discord/interactions` with the
+conventional `app.route('/channels/discord', ...)` mount. Registering
 application commands is also application-owned; add only the commands this
 project handles.
 
-Run the project's typecheck and configured Flue builds. Generate a local Ed25519
-key pair and signed PING and command payloads. Test changed bytes, malformed
+Run the project typecheck and `vite build` for the configured target. Generate
+a local Ed25519 key pair and signed PING and command payloads. Test changed bytes, malformed
 authentication, PING/PONG, `/channels/discord/interactions`, provider-native
 payload pass-through, and the deferred channel-agent import cycle. Exercise the
 real `@discordjs/rest` client against a fail-closed fake Fetch transport in Node

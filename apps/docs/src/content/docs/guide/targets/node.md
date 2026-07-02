@@ -1,38 +1,37 @@
 ---
 title: Node.js
 description: Understand the Node.js-specific runtime behavior and APIs for Flue applications.
+lastReviewedAt: 2026-07-02
 ---
 
-The Node.js target builds your agents and workflows as a standard Node.js server. The generated server runs anywhere Node runs: a local machine, a container, a VM, a CI runner, or a managed hosting service. Node is also the target where agents can operate directly on the host filesystem and shell through `local()`.
+The Node.js target builds your agents as a standard Node.js server. The built server runs anywhere Node runs: a local machine, a container, a VM, a CI runner, or a managed hosting service. Node is also the target where agents can operate directly on the host filesystem and shell through `local()`.
 
-For a deployment walkthrough, see [Deploy Agents on Node.js](/docs/ecosystem/deploy/node/). To run agents or workflows on a cron schedule, see [Schedules](/docs/guide/schedules/).
+For a deployment walkthrough, see [Deploy Agents on Node.js](/docs/ecosystem/deploy/node/). To run agents on a cron schedule, see [Schedules](/docs/guide/schedules/).
 
-## Generated server
+## The built server
 
-Flue discovers agents from `src/agents/` and workflows from `src/workflows/` and generates a single server entry at `dist/server.mjs`. See [Project Layout](/docs/guide/project-layout/) for supported source directories.
-
-The server owns HTTP, agent dispatch, workflow admission, and event streaming routes. Build and start it with:
+The [Vite plugin](/docs/guide/vite-plugin/) builds your application — the `app.ts` route map plus every scanned [`'use agent'`](/docs/guide/use-agent/) module — into a single server entry at `dist/server.mjs`:
 
 ```bash
-npx flue build --target node
+vite build
 node dist/server.mjs
 ```
 
-The server listens on port `3000` by default. Set `PORT` to change it. `flue dev --target node` uses port `3583` and reloads on changes.
+The server owns HTTP for whatever `app.ts` mounts, agent dispatch, and durable conversation streaming. It listens on port `3000` by default; set `PORT` to change it.
+
+During development, `vite dev` serves the same application on Vite's dev server (default port `5173`) with reload on changes. `vite preview` is not supported on the Node target — run the built server directly.
 
 The build externalizes your application dependencies rather than bundling them. Deploy the built artifact alongside its `node_modules`, or package it inside a container that installs dependencies first.
 
 ## State and durability
 
-Without `db.ts`, the generated Node server uses process-local in-memory SQLite for canonical agent conversations, accepted submissions, and workflow-run records and indexing. This gives one running process ordered state handling, but a restart loses that state.
+Without `db.ts`, the Node server uses process-local in-memory SQLite for canonical agent conversations and accepted submissions. This gives one running process ordered state handling, but a restart loses that state.
 
-With a durable adapter, direct prompts and `dispatch(...)` inputs enter the same persisted per-instance queue. Inputs for one agent instance are processed in accepted order, and a replacement process can recover canonical conversation progress and interrupted submissions.
+With a durable adapter, direct prompts and `dispatch(...)` inputs enter the same persisted per-conversation queue. Inputs for one agent conversation are processed in accepted order, and a replacement process can recover canonical conversation progress and interrupted submissions.
 
-Node requires one live process to own a given agent instance. A shared database supports process or host replacement, but does not make active-active ownership or round-robin routing for the same instance safe. Multi-replica deployments must route each instance to one owner and avoid overlapping owners during replacement.
+Node requires one live process to own a given agent conversation. A shared database supports process or host replacement, but does not make active-active ownership or round-robin routing for the same conversation safe. Multi-replica deployments must route each conversation to one owner and avoid overlapping owners during replacement.
 
 Node does not get Cloudflare's automatic Durable Object wake or Fiber recovery. A replacement process must start successfully before startup reconciliation runs, and the coordinator periodically scans expired leases so work stranded by a fast restart is eventually reclaimed.
-
-That reconciliation covers agent submissions only. Node currently has no recovery path that terminalizes a workflow run interrupted by a crash or closes its event stream. With a durable adapter the run record and its events survive the restart, but the interrupted run remains listed as `active` and the orphaned `runs/<id>` stream persists in an open state, so live Durable Streams readers — long-poll, SSE, or `client.runs.stream()` — wait indefinitely for events that will never arrive. Use `client.runs.events()` or a raw catch-up read to inspect events persisted before the crash. On Cloudflare, Fiber recovery terminalizes interrupted runs and closes their streams.
 
 See [Database](/docs/guide/database/) for `db.ts`, SQLite, Postgres, and custom adapters. See [Durable Agents](/docs/concepts/durable-execution/) for recovery behavior.
 
@@ -41,6 +40,7 @@ See [Database](/docs/guide/database/) for `db.ts`, SQLite, Postgres, and custom 
 Node is the only target with the built-in `local()` sandbox factory. It gives an agent direct access to the host filesystem and shell, making it useful for development tools, CI tasks, coding agents, and self-hosted automation where the host environment already provides isolation.
 
 ```ts title="src/agents/repository-reviewer.ts"
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
@@ -73,13 +73,14 @@ See the Ecosystem [Sandboxes](/docs/ecosystem/#sandboxes) catalog for available 
 
 ## Environment and secrets
 
-Flue CLI commands load project-root `.env` values before configuration. Use `--env <path>` to select one alternate file.
+[`flue run`](/docs/cli/run/) loads project-root `.env` values before executing; use `--env <path>` to select one alternate file.
 
-The built server itself does not load `.env`. It reads only the environment supplied when it starts:
+The Vite dev server and the built server do not load `.env`. They read only the environment supplied when they start:
 
 ```bash
 # Development
-npx flue dev --target node
+set -a; source .env; set +a
+vite dev
 
 # Production
 set -a; source .env; set +a

@@ -1,7 +1,7 @@
 ---
 title: Sandboxes
 description: Give agents a workspace for files and command-driven work.
-lastReviewedAt: 2026-05-30
+lastReviewedAt: 2026-07-02
 ---
 
 Sandboxes give an agent a workspace to read, write, and run commands in while it works. Use them when an agent needs to operate on files or run commands, rather than only respond to prompts or call application-defined [tools](/docs/guide/tools/).
@@ -12,19 +12,15 @@ Flue provides a lightweight virtual sandbox by default. Use a local sandbox when
 
 By default, an initialized agent works in a virtual sandbox unless you configure another environment. The virtual sandbox is a lightweight, in-memory workspace powered by [just-bash](https://justbash.dev/). It is the right starting point when your application can provide the files the agent needs.
 
-For example, a workflow can stage an input document, let an agent work on it, and retrieve an output file:
+For example, an [Action](/docs/guide/actions/) can stage an input document, let the agent work on it, and retrieve an output file:
 
-```ts title="src/workflows/review-document.ts"
-import { defineAgent, defineWorkflow } from '@flue/runtime';
+```ts title="src/actions/review-document.ts"
+import { defineAction } from '@flue/runtime';
 import * as v from 'valibot';
 
-const reviewer = defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-  cwd: '/workspace',
-}));
-
-export default defineWorkflow({
-  agent: reviewer,
+export const reviewDocument = defineAction({
+  name: 'review_document',
+  description: 'Review one supplied document and report findings.',
   input: v.object({ document: v.string() }),
 
   async run({ harness, input }) {
@@ -37,7 +33,7 @@ export default defineWorkflow({
 });
 ```
 
-No `sandbox` field is needed here: omitting it selects the virtual sandbox. `cwd` sets the working directory, so these relative file paths resolve below `/workspace`. The agent can use built-in file and command capabilities in that workspace, while application code uses `harness.fs` to provide inputs and retrieve results.
+Configure the agent that exposes this Action with `cwd: '/workspace'` and no `sandbox` field: omitting it selects the virtual sandbox, and `cwd` sets the working directory, so these relative file paths resolve below `/workspace`. The agent can use built-in file and command capabilities in that workspace, while application code uses `harness.fs` to provide inputs and retrieve results.
 
 The virtual sandbox starts without your application files or host filesystem, and its files do not persist beyond its in-memory lifetime. Its command environment is suitable for lightweight workspace work, not an arbitrary Linux toolchain. It is also not a network isolation boundary: current generated runtimes permit network access from the virtual sandbox.
 
@@ -46,6 +42,7 @@ The virtual sandbox starts without your application files or host filesystem, an
 On the Node.js target, use `local()` when an agent should operate directly on the host filesystem and shell. This is useful for trusted development tools or disposable CI runners working against an existing checkout:
 
 ```ts title="src/agents/repository-reviewer.ts"
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
@@ -67,7 +64,7 @@ Use `local()` only where the host and input are already trusted for this level o
 
 Use a remote sandbox when agent work needs an environment that should not run on the application host: for example, untrusted or tenant-specific tasks, coding work that requires a Linux toolchain, or workspaces that need provider-managed lifetime and storage.
 
-A remote sandbox is supplied through an integration appropriate to the provider or platform. Your application is responsible for deciding which workspace belongs to which agent instance or workflow, what credentials and network access it receives, whether it may be reused, and when it is deleted or expired.
+A remote sandbox is supplied through an integration appropriate to the provider or platform. Your application is responsible for deciding which workspace belongs to which agent conversation, what credentials and network access it receives, whether it may be reused, and when it is deleted or expired.
 
 See the Ecosystem **Sandboxes** integrations, such as [Daytona](/docs/ecosystem/sandboxes/daytona/), to connect a provider-managed remote sandbox. If you need to implement an integration, see the [Sandbox Adapter API](/docs/api/sandbox-api/).
 
@@ -92,7 +89,7 @@ Choose the narrowest sandbox that supports the task. Expanding the environment e
 ## Next steps
 
 - [Agents](/docs/guide/building-agents/) — configure continuing agents that work inside a sandbox.
-- [Workflows](/docs/guide/workflows/) — stage files and collect artifacts during finite work.
+- [Actions](/docs/guide/actions/) — stage files and collect artifacts during finite work.
 - [Tools](/docs/guide/tools/) — expose bounded application actions separately from workspace access.
 - [Skills](/docs/guide/skills/) — bundle procedures or provide workspace-discovered skills.
 - [Sandbox Adapter API](/docs/api/sandbox-api/) — implement a provider-backed sandbox integration.

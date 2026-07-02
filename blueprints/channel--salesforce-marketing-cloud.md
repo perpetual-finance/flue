@@ -16,9 +16,9 @@ to a Flue project. This is not a generic Salesforce integration.
 
 Read local instructions, detect the package manager and deployment target, and
 select the first existing source root: `<root>/.flue/`, then `<root>/src/`,
-then `<root>/`. Inspect existing agents, environment types, secret
-conventions, Marketing Cloud tenant configuration, and the ENS event families
-the application subscribes to.
+then `<root>/`. Inspect existing agents, `app.ts` (the application's route
+map), environment types, secret conventions, Marketing Cloud tenant
+configuration, and the ENS event families the application subscribes to.
 
 Install `@flue/salesforce`. Do not install
 `@salesforce/core`: ingress and the narrow REST operation in this blueprint use
@@ -293,6 +293,27 @@ function requiredEnv(name: string): string {
 }
 ```
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the
+channel's router explicitly:
+
+```ts
+// app.ts
+import { Hono } from 'hono';
+import { channel } from './channels/salesforce-marketing-cloud.ts';
+
+const app = new Hono();
+app.route('/channels/salesforce-marketing-cloud', channel.route());
+
+export default app;
+```
+
+`channel.route()` is a pure router factory serving the channel's routes
+relative to the mount path. The `// Path:` comment in this guide assumes the
+conventional `/channels/salesforce-marketing-cloud` mount; a different mount
+path shifts every provider URL accordingly.
+
 For each family, validate every provider-specific field before using it for
 routing, authorization, persistence, or tool binding.
 
@@ -349,6 +370,7 @@ ENS identity. Do not use deprecated `compositeId` for transactional email.
 Create an agent module such as `<source-dir>/agents/assistant.ts`:
 
 ```ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { retrieveCallback } from '../channels/salesforce-marketing-cloud.ts';
 import { parseEmailEventInstanceId } from '../salesforce-marketing-cloud-email.ts';
@@ -362,6 +384,12 @@ export default defineAgent(({ id }) => {
 });
 ```
 
+The `'use agent'` directive (the module's first statement) is what registers
+the agent with the application — `dispatch(...)` from the channel callback
+needs no `app.ts` mounting. Add
+`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+should also be reachable over HTTP directly.
+
 The tool accepts no tenant origin, callback id, or access token from the
 model. ENS does not provide a universal delivery id or conversation id. The
 application-defined email id is valid only after the selected family fields
@@ -369,13 +397,15 @@ have been checked and remains an identifier rather than authorization.
 
 ## Configure the endpoint
 
-Register the complete HTTPS callback URL in Marketing Cloud Engagement:
+Register the complete HTTPS callback URL in Marketing Cloud Engagement — the
+channel's mount path in `app.ts` plus the route suffix, with the conventional
+`app.route('/channels/salesforce-marketing-cloud', ...)` mount:
 
 ```txt
 https://example.com/channels/salesforce-marketing-cloud/events
 ```
 
-If `flue()` has an outer mount prefix, include it.
+A different mount path changes the URL accordingly.
 
 Marketing Cloud sends signed notification batches with:
 
@@ -421,8 +451,8 @@ before performing non-idempotent work.
 
 ## Test without Salesforce
 
-Run the project's strict typecheck, Node build, Cloudflare build, and actual
-workerd tests. Flue's canonical Cloudflare environment enables
+Run the project's strict typecheck, `vite build` for the configured target,
+and actual workerd tests. Flue's canonical Cloudflare environment enables
 `nodejs_compat`, while this ingress and client use standard Fetch, URL, and Web
 Crypto APIs.
 

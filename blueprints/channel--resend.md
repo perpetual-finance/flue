@@ -15,9 +15,9 @@ application-owned email behavior to a Flue project.
 
 Read local instructions, detect the package manager and target, and select the
 first existing source root: `<root>/.flue/`, then `<root>/src/`, then
-`<root>/`. Inspect existing agents, environment types, secret conventions,
-receiving-domain setup, and which Resend email, contact, or domain events the
-application needs.
+`<root>/`. Inspect existing agents, `app.ts` (the application's route map),
+environment types, secret conventions, receiving-domain setup, and which
+Resend email, contact, or domain events the application needs.
 
 Install `@flue/resend` and the official `resend@^6.12.4` SDK with the project's
 package manager. Add compatible `@types/node` and `@types/react` development
@@ -110,6 +110,27 @@ export function emailIdFromInstanceId(id: string): string {
 }
 ```
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the
+channel's router explicitly:
+
+```ts
+// app.ts
+import { Hono } from 'hono';
+import { channel } from './channels/resend.ts';
+
+const app = new Hono();
+app.route('/channels/resend', channel.route());
+
+export default app;
+```
+
+`channel.route()` is a pure router factory serving the channel's routes
+relative to the mount path. The `// Path:` comments in this guide assume the
+conventional `/channels/resend` mount; a different mount path shifts every
+provider URL accordingly.
+
 The webhook contains message metadata and attachment descriptors, not all body
 content. Retrieve the full message later with
 `client.emails.receiving.get(emailId)`. When attachment content is needed, use
@@ -128,6 +149,7 @@ the model.
 Bind the trusted inbound email id inside the agent initializer:
 
 ```ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import {
   emailIdFromInstanceId,
@@ -143,6 +165,12 @@ export default defineAgent(({ id }) => {
 });
 ```
 
+The `'use agent'` directive (the module's first statement) is what registers
+the agent with the application — `dispatch(...)` from the channel callback
+needs no `app.ts` mounting. Add
+`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+should also be reachable over HTTP directly.
+
 This is an application-defined message-scoped agent instance. `@flue/resend`
 does not expose a conversation helper: Resend's `message_id` identifies one
 email message, not a stable thread root. If the application groups replies or
@@ -153,13 +181,15 @@ inside deferred callbacks and initializers.
 
 ## Credentials and endpoint
 
-Configure the webhook URL as:
+Configure the webhook URL as the channel's mount path in `app.ts` plus the
+route suffix — with the conventional
+`app.route('/channels/resend', ...)` mount:
 
 ```txt
 https://example.com/channels/resend/webhook
 ```
 
-If `flue()` is mounted beneath an outer prefix, include it. Subscribe only to
+A different mount path changes the URL accordingly. Subscribe only to
 events the application handles.
 
 `RESEND_WEBHOOK_SECRET` verifies inbound deliveries.
@@ -188,8 +218,8 @@ when the application intentionally wants redelivery.
 
 ## Test without Resend
 
-Run the project's focused typecheck and configured Node and Cloudflare checks.
-The SDK and verifier run in Node and workerd with Flue's required
+Run the project's focused typecheck and `vite build` for the configured
+target. The SDK and verifier run in Node and workerd with Flue's required
 `nodejs_compat` configuration. Use the project's existing credential
 convention; both `process.env` and typed Worker bindings are supported.
 

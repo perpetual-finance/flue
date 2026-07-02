@@ -1,44 +1,48 @@
 # Flue
 
-Framework where projects containing agents and workflows are compiled into deployable server artifacts.
+Framework where projects containing agents are built into deployable server artifacts by the `flue()` Vite plugin.
 
 ## Terminology
 
 ```
 Agent profile                 — one reusable `defineAgentProfile(...)` value
 Agent definition              — one runtime initializer from `defineAgent(...)`
-Agent module                  — `agents/<name>.ts`; default-exports an agent definition
+Agent module                  — a source file whose first statement is the `'use agent'` directive and
+                                that default-exports an agent definition; the file basename is the
+                                agent's durable identity
 └─ AgentInstance              — URL `<id>`; provided to `defineAgent(({ id }))`
    └─ Harness                 — runtime-initialized agent environment; defaults to name `"default"`
       └─ Session              — one `harness.session(name?)`; defaults to `"default"`
          └─ Operation        — one `session.prompt` / `skill` / `task` / `shell` call
             └─ Turn          — one LLM round-trip inside pi-agent-core
-Workflow                     — `workflows/<name>.ts`; exports `run(...)`
-└─ Workflow run/invocation    — unique `ctx.id === runId`; initializes local agent definitions via `init(agent)` when needed
 ```
 
-Runs are workflow-only. Direct HTTP/WebSocket agent prompts and dispatched agent inputs operate within persistent sessions and must not be described as runs. `dispatch(...)` is identified by `dispatchId`; SDK `client.runs` and raw `/runs` APIs inspect workflow runs only.
+There are no workflows or runs: conversations are the only durable unit, and a bounded job is a `defineAction(...)` in an agent's `actions: [...]`. Direct HTTP agent prompts and dispatched agent inputs operate within persistent sessions and must not be described as runs; `dispatch(...)` is identified by `dispatchId`.
 
-Use `harness` as the variable name for the return value of `init()`. Agents have names; agent instances have ids; harnesses and sessions have names; operations have generated ids.
+Routing is explicit: `app.ts` is the application's route map, mounting each HTTP-reachable agent (`app.route('/agents/<name>', agent.route())`) and channel (`app.route('/channels/<x>', channel.route())`). Registration comes from the `'use agent'` scan, not from mounting; `.route()` is a pure router factory.
+
+Use `harness` as the variable name for the harness an action's `run({ harness })` receives. Agent instances have ids; harnesses and sessions have names; operations have generated ids.
 
 A blueprint is a Markdown implementation guide returned by `flue add`; its kind is `sandbox`, `database`, `channel`, or `tooling`. Use “sandbox adapter” for project-owned implementations and generated `src/sandboxes/` paths while preserving serialized/runtime API identifiers and Microsoft Bot Connector terminology.
 
 ## Project Structure
 
-- `packages/runtime/` — Runtime library (`@flue/runtime`): sessions, agent harnesses, tools, and sandbox plumbing.
-- `packages/cli/` — CLI and build/dev tooling (`@flue/cli`): Vite build graph, target integration, discovery, and configuration.
+- `packages/runtime/` — Runtime library (`@flue/runtime`): sessions, agent harnesses, tools, sandbox plumbing, and the `/config` loader for `flue.config.ts`.
+- `packages/vite/` — The `flue()` Vite plugin (`@flue/vite`): `'use agent'` scan/transform, generated bootstraps, Node dev/build, and the Cloudflare target adapter (wrangler merge; `@cloudflare/vite-plugin` is a sibling, not a dependency).
+- `packages/cli/` — CLI (`@flue/cli`): `flue run` transport-free local execution, `init`, blueprint `add`/`update`, and offline `docs`.
 - `examples/hello-world/` — General runtime integration fixture.
 - `examples/cloudflare/` — Cloudflare integration fixture.
 - `examples/imported-skill/` — Packaged skill and release fixture.
 
-Agent and workflow sources use either `<root>/.flue/` or `<root>/`; when `.flue/` exists, the bare `agents/` and `workflows/` layout is ignored.
+Project source roots resolve as the first existing of `<root>/.flue/`, `<root>/src/`, then `<root>/`. `app.ts` (the route map) lives at the source root; agent modules are found anywhere under it by the `'use agent'` directive scan, not by directory convention.
 
 ## Development
 
-Build runtime before CLI or examples:
+Build runtime, then the Vite plugin, then the CLI (examples last):
 
 ```
 pnpm run build          # in packages/runtime/
+pnpm run build          # in packages/vite/
 pnpm run build          # in packages/cli/
 ```
 

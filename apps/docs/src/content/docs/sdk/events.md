@@ -1,29 +1,26 @@
 ---
 title: Events and records
-description: SDK event, workflow-run record, and normalized model-turn types.
-lastReviewedAt: 2026-06-15
+description: SDK event and normalized model-turn types.
+lastReviewedAt: 2026-07-02
 ---
 
 ## `FlueEvent`
 
-`FlueEvent` is the observable runtime-event union. It includes run lifecycle, agent lifecycle, model turn, message, tool, task, compaction, operation, log, structured `data`, idle, and recovery-settlement (`submission_settled`) events. Events are durably stored in an event stream and can be replayed from any offset via the Durable Streams protocol. Dispatched activity uses `dispatchId` as its delivery identity rather than becoming a workflow run.
+`FlueEvent` is the observable runtime activity union: agent lifecycle, model turn, message, tool, task, compaction, operation, log, idle, and settlement (`submission_settled`) events.
 
-Every delivered event carries the durable event-format version `v: 3`, a per-context `eventIndex`, and a `timestamp`. SDK readers reject v1, v2, missing, and unknown versions with `UnsupportedFlueEventVersionError`; they do not normalize historical formats. The SDK union mirrors the wire format: `turn_request` is in-process only on the server (`observe()` subscribers and exporters) and never appears on streams the SDK reads.
+The conversation wire — `observe()`, `history()`, and `wait()` — does not carry this union; it carries the materialized-conversation protocol (`ConversationStreamChunk`), which `observe()` reduces into `FlueConversationState`. `FlueEvent` is exported for first-party presenters that consume runtime activity delivered outside HTTP (for example, the `flue run` CLI presenter), and it mirrors the runtime's event union exactly.
 
-A `data` event carries a template-safe `name`, optional stable `id`, and JSON-compatible `data` payload. It is append-only on the wire; UI consumers can reconcile repeated `(name, id)` events last-writer-wins, while events without ids remain distinct.
+Every delivered event carries the durable event-format version `v: 3`, a per-context `eventIndex`, and a `timestamp`. SDK readers reject v1, v2, missing, and unknown versions with `UnsupportedFlueEventVersionError`; they do not normalize historical formats. Applicable events also carry identity and correlation fields — `instanceId`, `conversationId`, `submissionId`, `agentName`, `dispatchId`, `session`, `parentSession`, `taskId`, `harness`, `operationId`, `turnId`.
 
-`message_start` and `message_end` bound both user and assistant messages. Text and thinking deltas are best-effort live progress; for a completed assistant message, `message_end` is authoritative. A reader that attaches after generation starts may miss earlier partial output until it arrives. Internal interrupted-turn recovery uses separate durable state and is unaffected by this public stream behavior.
+`message_start` and `message_end` bound both user and assistant messages. Text and thinking deltas are best-effort live progress; for a completed assistant message, `message_end` is authoritative. A reader that attaches after generation starts may miss earlier partial output until it arrives. Internal interrupted-turn recovery uses separate durable state and is unaffected by this public event behavior.
 
 ## `AttachedAgentEvent`
 
-`AttachedAgentEvent` is emitted by direct interactions with persistent agent instances. It excludes workflow-run lifecycle events, requires `instanceId`, and does not include `runId`.
+`AttachedAgentEvent` is a `FlueEvent` emitted by direct interactions with an agent instance. It requires `instanceId`.
 
-## Run types
+## `ConversationStreamChunk`
 
-| Type        | Description                                                                                                      |
-| ----------- | ---------------------------------------------------------------------------------------------------------------- |
-| `RunRecord` | Persisted workflow-run record, including the workflow name, status, timestamps, input, result, and error fields. |
-| `RunStatus` | Workflow-run status: `'active'`, `'completed'`, or `'errored'`.                                                  |
+The conversation `updates` wire union. It is not stable application API — application code should consume materialized `FlueConversationState` via `observe()` rather than handling chunks — but first-party presenters reduce it directly, so the type is exported. `wait()`'s `onEvent` callback also receives it for progress rendering.
 
 ## Normalized model-turn types
 
@@ -31,9 +28,9 @@ A `data` event carries a template-safe `name`, optional stable `id`, and JSON-co
 
 | Type                  | Description                                                              |
 | --------------------- | ------------------------------------------------------------------------ |
-| `ModelRequestInput`   | Model-visible system prompt, messages, and tools.                         |
+| `ModelRequestInput`   | Model-visible system prompt, messages, and tools.                        |
 | `ModelRequestInfo`    | Provider identity, requested model, API, and request settings.           |
-| `ModelRequest`        | `ModelRequestInfo` plus the full request `input`; used by `turn_request`. |
+| `ModelRequest`        | `ModelRequestInfo` plus the full request `input`.                        |
 | `ModelResponse`       | Response identity, output, usage, finish reason, and normalized error.   |
 | `LlmAssistantMessage` | Normalized assistant message.                                            |
 | `LlmTextContent`      | Text content.                                                            |
@@ -42,3 +39,5 @@ A `data` event carries a template-safe `name`, optional stable `id`, and JSON-co
 | `LlmTurnPurpose`      | Model-turn purpose: `'agent'`, `'compaction'`, or `'compaction_prefix'`. |
 
 `request.providerId` is the provider-registration key used in model specifiers. `request.providerName` is the semantic provider identity and may differ for gateways or custom registrations.
+
+See the [Events Reference](/docs/api/events-reference/) for the full per-event vocabulary.

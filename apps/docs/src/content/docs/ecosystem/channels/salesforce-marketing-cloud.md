@@ -58,9 +58,7 @@ export const channel = createSalesforceMarketingCloudChannel({
           // natural message text for an engagement event.
           body: JSON.stringify(event.info ?? {}),
           attributes: {
-            ...(typeof event.timestampUTC === 'string'
-              ? { occurredAt: event.timestampUTC }
-              : {}),
+            ...(typeof event.timestampUTC === 'string' ? { occurredAt: event.timestampUTC } : {}),
             callbackId: ref.callbackId,
             mid: ref.mid,
             eid: ref.eid,
@@ -83,6 +81,18 @@ full generated module handles additional send and engagement families and lets
 the bound agent retrieve the configured callback. Callback registration, OAuth,
 token refresh, and the one-time `/ens-verify` call remain application-owned;
 Node and Cloudflare targets use the same Fetch and Web Crypto implementation.
+
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the module's named `channel` export:
+
+```ts title="src/app.ts"
+import { channel as salesforceMarketingCloud } from './channels/salesforce-marketing-cloud.ts';
+
+app.route('/channels/salesforce-marketing-cloud', salesforceMarketingCloud.route());
+```
+
+`channel.route()` is a pure router factory serving the channel's declared routes relative to the mount path. The webhook paths in this guide assume the conventional `/channels/salesforce-marketing-cloud` mount; a different mount path shifts them accordingly. The dispatch-target agent module carries the `'use agent'` directive — the directive registers it, so a dispatch-only agent needs no HTTP mount of its own.
 
 ## Configure
 
@@ -171,9 +181,7 @@ export const channel = createSalesforceMarketingCloudChannel({
           // natural message text for an engagement event.
           body: JSON.stringify(event.info ?? {}),
           attributes: {
-            ...(typeof event.timestampUTC === 'string'
-              ? { occurredAt: event.timestampUTC }
-              : {}),
+            ...(typeof event.timestampUTC === 'string' ? { occurredAt: event.timestampUTC } : {}),
             callbackId: ref.callbackId,
             mid: ref.mid,
             eid: ref.eid,
@@ -304,6 +312,7 @@ remain application-owned.
 ## Bind the agent
 
 ```ts title="src/agents/assistant.ts"
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { retrieveCallback } from '../channels/salesforce-marketing-cloud.ts';
 import { parseEmailEventInstanceId } from '../salesforce-marketing-cloud-email.ts';

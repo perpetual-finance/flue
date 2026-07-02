@@ -15,9 +15,9 @@ application-owned Intercom API behavior to a Flue project.
 
 Read local instructions, detect the package manager and deployment target, and
 select the first existing source root: `<root>/.flue/`, then `<root>/src/`,
-then `<root>/`. Inspect existing agents, environment types, secret conventions,
-Intercom installation storage, region selection, and the webhook topics the
-application needs.
+then `<root>/`. Inspect existing agents, `app.ts` (the application's route
+map), environment types, secret conventions, Intercom installation storage,
+region selection, and the webhook topics the application needs.
 
 Install `@flue/intercom` and the official `intercom-client@^7.0.3` with the
 project's package manager. Keep the SDK in project code; `@flue/intercom`
@@ -176,6 +176,27 @@ function requiredEnv(name: string): string {
 }
 ```
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the
+channel's router explicitly:
+
+```ts
+// app.ts
+import { Hono } from 'hono';
+import { channel } from './channels/intercom.ts';
+
+const app = new Hono();
+app.route('/channels/intercom', channel.route());
+
+export default app;
+```
+
+`channel.route()` is a pure router factory serving the channel's routes
+relative to the mount path. The `// Path:` comments in this guide assume the
+conventional `/channels/intercom` mount; a different mount path shifts every
+provider URL accordingly.
+
 The channel always publishes unsigned `HEAD /webhook` for Intercom's endpoint
 check and signed `POST /webhook` for notifications. The callback runs only for
 `POST`.
@@ -201,6 +222,7 @@ of being rejected by a closed union.
 Bind the verified workspace and conversation selected by trusted code:
 
 ```ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, retrieveConversation } from '../channels/intercom.ts';
 
@@ -213,6 +235,12 @@ export default defineAgent(({ id }) => {
 });
 ```
 
+The `'use agent'` directive (the module's first statement) is what registers
+the agent with the application — `dispatch(...)` from the channel callback
+needs no `app.ts` mounting. Add
+`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+should also be reachable over HTTP directly.
+
 The tool accepts no workspace, token, host, or conversation id from the model.
 The canonical key is an identifier, not an authorization capability; apply the
 project's normal access policy to direct agent routes. The channel-agent import
@@ -221,13 +249,15 @@ callbacks and initializers.
 
 ## Configure the endpoint
 
-Configure this complete HTTPS URL in Intercom's Developer Hub:
+Configure this complete HTTPS URL in Intercom's Developer Hub — the channel's
+mount path in `app.ts` plus the route suffix, with the conventional
+`app.route('/channels/intercom', ...)` mount:
 
 ```txt
 https://example.com/channels/intercom/webhook
 ```
 
-If `flue()` has an outer mount prefix, include it. Intercom first sends an
+A different mount path changes the URL accordingly. Intercom first sends an
 unsigned `HEAD` request and expects `200`. Signed notifications then arrive by
 `POST` with:
 
@@ -260,9 +290,10 @@ rather than blocking the callback on slow operations.
 
 ## Test without Intercom
 
-Run the project's typecheck, Node build, Cloudflare build, and actual workerd
-tests. Flue projects already enable `nodejs_compat`; execute both ingress and
-the official client in that configuration rather than treating bundling as
+Run the project typecheck, `vite build` for the configured target, and actual
+workerd tests. Flue projects already enable `nodejs_compat`; execute both
+ingress and the official client in that configuration rather than treating
+bundling as
 runtime proof.
 
 Use an original synthetic notification and a local test secret. Serialize the

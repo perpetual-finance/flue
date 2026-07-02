@@ -37,8 +37,8 @@ You need two processes: a Flue dev server (the backend) and this SPA.
 
 ### 1. Start a Flue example dev server
 
-CORS is required because the SPA runs on a different origin. `flue dev` enables a
-dev-only CORS layer automatically.
+CORS is required because the SPA runs on a different origin. The `flue()` Vite
+plugin enables a dev-only CORS layer automatically.
 
 The richest target is the `react-chat` example's `helper` agent, a real Anthropic model
 with a tool, reasoning, and a subagent. It needs `ANTHROPIC_API_KEY`:
@@ -46,10 +46,13 @@ with a tool, reasoning, and a subagent. It needs `ANTHROPIC_API_KEY`:
 ```sh
 # from the repo root, with ANTHROPIC_API_KEY in ./.env
 cd examples/react-chat
-node ../../packages/cli/bin/flue.mjs dev --target node --port 3583 --env ../../.env
+set -a; source ../../.env; set +a
+pnpm dev --port 3583
 ```
 
-`flue dev` loads `<exampleDir>/.env` by default, so pass `--env` to use the repo-root key.
+`vite dev` reads the shell environment (it does not load `.env` into
+`process.env`), so export the key — or `source` an env file — before starting.
+`--port 3583` matches this SPA's default agent URL.
 
 For a **credential-free** target, the same example exposes a faux echo `assistant`
 agent, and `hello-world` exposes `session-test`.
@@ -67,25 +70,27 @@ Open the printed URL (e.g. `http://localhost:5174`).
 ### 3. Connect
 
 Open **Settings** (the gear button, bottom-left) and set the **Agent URL** — the whole
-target is one URL, and everything after `/agents/` is the agent name:
+target is one URL: wherever the example's `app.ts` mounts the agent's routes
+(everything after `/agents/` is used as the display name):
 
-| Target                          | Agent URL                                  | Needs key |
-| ------------------------------- | ------------------------------------------ | --------- |
-| hello-world (session-test)      | `http://localhost:3583/agents/session-test`| yes       |
-| react-chat (assistant, faux)    | `http://localhost:3583/api/agents/assistant`| no       |
-| react-chat (helper, live model) | `http://localhost:3583/api/agents/helper`  | yes       |
+| Target                          | Agent URL                                    | Needs key |
+| ------------------------------- | -------------------------------------------- | --------- |
+| hello-world (session-test)      | `http://localhost:3583/agents/session-test`  | yes       |
+| react-chat (assistant, faux)    | `http://localhost:3583/api/agents/assistant` | no        |
+| react-chat (helper, live model) | `http://localhost:3583/api/agents/helper`    | yes       |
 
 The same dialog also selects the **live transport** (default live or explicit long-poll)
 and holds an optional **bearer token** for agents behind a `route` auth check.
 
 ## How it connects
 
-- `src/lib/flue-client.ts` parses the agent URL into the SDK `baseUrl` and agent name
-  (`<baseUrl>/agents/<name>/<id>`) and creates a `FlueClient` per connection.
-- `src/components/chat/chat-view.tsx` uses `useFlueAgent({ name, id, live })`, with the
-  transport coming from settings. The conversation `id` is the agent instance id, which is
-  also the local conversation id. The same view calls `client.agents.abort(name, id)` to
-  stop in-flight or queued work for that agent instance.
+- `src/lib/flue-client.ts` builds one conversation URL per chat — the configured agent
+  mount URL plus the caller-chosen conversation id — and creates a
+  `createFlueClient({ url })` client per connection.
+- `src/components/chat/chat-view.tsx` uses `useFlueAgent({ client, live })`, with the
+  transport coming from settings. The conversation id appended to the URL is the agent
+  instance id, which is also the local conversation id. The same view calls
+  `client.abort()` to stop in-flight or queued work for that conversation.
 - `src/components/chat/message-parts.tsx` renders each `FlueConversationPart`
   (`text` | `reasoning` | `file` | `dynamic-tool`); `tool-display.tsx` maps tool calls to
   their one-line summaries.

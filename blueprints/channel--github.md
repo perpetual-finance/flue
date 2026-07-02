@@ -15,7 +15,8 @@ application-owned GitHub API behavior to a Flue project.
 
 Read local instructions, detect the package manager and target, and select the
 first existing source root: `<root>/.flue/`, then `<root>/src/`, then
-`<root>/`. Inspect existing agents, environment types, secret conventions, and
+`<root>/`. Inspect existing agents, `app.ts` (the application's route map),
+environment types, secret conventions, and
 whether the application responds to issue comments, pull-request conversation
 comments, inline review comments, opened issues, or another verified delivery.
 
@@ -132,6 +133,27 @@ export function commentOnIssue(ref: { owner: string; repo: string; issueNumber: 
 }
 ```
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the
+channel's router explicitly:
+
+```ts
+// app.ts
+import { Hono } from 'hono';
+import { channel } from './channels/github.ts';
+
+const app = new Hono();
+app.route('/channels/github', channel.route());
+
+export default app;
+```
+
+`channel.route()` is a pure router factory serving the channel's routes
+relative to the mount path. The `// Path:` comments in this guide assume the
+conventional `/channels/github` mount; a different mount path shifts every
+provider URL accordingly.
+
 For Cloudflare projects, follow the project's existing credential convention.
 Flue enables `nodejs_compat`, so `process.env` is supported; typed bindings
 from `cloudflare:workers` are also valid when the project prefers them.
@@ -148,6 +170,7 @@ paths, or credentials unless the application has explicitly authorized that.
 Bind the trusted conversation destination inside the agent initializer:
 
 ```ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, commentOnIssue } from '../channels/github.ts';
 
@@ -156,6 +179,12 @@ export default defineAgent(({ id }) => ({
   tools: [commentOnIssue(channel.parseConversationKey(id))],
 }));
 ```
+
+The `'use agent'` directive (the module's first statement) is what registers
+the agent with the application — `dispatch(...)` from the channel callback
+needs no `app.ts` mounting. Add
+`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+should also be reachable over HTTP directly.
 
 The channel-agent import cycle is supported only because these imported
 bindings are read inside deferred callbacks and initializers. Do not read the
@@ -167,13 +196,17 @@ agent binding while constructing `channel`.
 `GITHUB_TOKEN` authenticates outbound Octokit calls. They serve different
 purposes. Follow existing project secret conventions and never invent values.
 
+Point the GitHub webhook URL at the channel's mount path in `app.ts` plus the
+route suffix — `/channels/github/webhook` with the conventional
+`app.route('/channels/github', ...)` mount.
 Configure the GitHub webhook content type as `application/json`. Ingress is
 JSON-only; form-encoded (`application/x-www-form-urlencoded`) deliveries are
 rejected before verification. Subscribe to the minimum event set the
 application handles.
 
-Run the project's typecheck and configured Flue build. Create a local JSON
-payload and `X-Hub-Signature-256` HMAC to test success, invalid signatures,
+Run the project typecheck and `vite build` for the configured target. Create a
+local JSON payload and `X-Hub-Signature-256` HMAC to test success, invalid
+signatures,
 the issue-comment and pull-request review-comment variants,
 `/channels/github/webhook`, and the empty `200` default. GitHub expects a `2xx`
 within ten seconds and does not auto-retry, so admit durable work quickly and

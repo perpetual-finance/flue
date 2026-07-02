@@ -1,7 +1,7 @@
 ---
 title: What is an agent?
 description: What an AI agent actually is, why a model alone isn't one, and what makes a Flue agent different.
-lastReviewedAt: 2026-05-29
+lastReviewedAt: 2026-07-02
 ---
 
 Ask ten people what an "AI agent" is and you'll get ten answers: a chatbot, a clever prompt, a workflow, a model with tools. But none of these fully capture it.
@@ -29,7 +29,8 @@ Each piece of the harness exists to give the agent new abilities and focus:
 Flue's built-in agent harness gives you all of these pieces in TypeScript, ready to power your agents and run on the deployment target of your choice:
 
 ```ts
-// Example: .flue/agents/triage.ts
+// Example: src/agents/triage.ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
@@ -64,14 +65,14 @@ const agent = defineAgent(() => ({
 	model: 'anthropic/claude-sonnet-4-6',
 	tools,
 	skills,
+	actions: [triageIssue], // application-controlled operations the model can run
 }));
 
-// Bind finite orchestration to that policy.
-const workflow = defineWorkflow({
-	agent,
-	async run({ harness }) {
-		return await (await harness.session()).prompt('Triage this incoming issue.');
-	},
+// Drive it in code: mount its routes, dispatch events into its
+// conversations, or run it one-shot from the CLI.
+await dispatch(agent, {
+	id: issue.id,
+	message: { kind: 'signal', type: 'issue.opened', body: issue.summary },
 });
 ```
 
@@ -87,7 +88,7 @@ Out of the box, Flue provides a lightweight virtual sandbox — an in-memory fil
 
 ## Where to go next
 
-- [Why Flue](/docs/introduction/why-flue/) — the case for building agents and workflows this way.
-- [Agents](/docs/guide/building-agents/) — defining an addressable agent, its sessions, and its runtime configuration.
-- [Workflows](/docs/guide/workflows/) — initializing an agent from code during a finite operation.
+- [Why Flue](/docs/introduction/why-flue/) — the case for building agents this way.
+- [Agents](/docs/guide/building-agents/) — defining an agent, its sessions, and its runtime configuration.
+- [Actions](/docs/guide/actions/) — finite, application-controlled operations an agent can run.
 - [Sandboxes](/docs/guide/sandboxes/), [Tools](/docs/guide/tools/), [Skills](/docs/guide/skills/), and [Subagents](/docs/guide/subagents/) — the pieces of the harness, in depth.

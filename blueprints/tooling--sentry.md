@@ -8,17 +8,16 @@ You are an AI coding agent adding Sentry error reporting to a Flue project. Use
 the SDK for the configured target, initialize it at the correct runtime
 boundary, and bridge selected Flue events into Sentry with correlation tags.
 
-The integration reports failed workflow runs, failed top-level operations for
-persistent agents, failed durable submission settlements, and explicit
-`ctx.log.error(...)` calls. It does not export prompts, model responses, tool
-arguments, traces, or AI metrics by default.
+The integration reports failed top-level agent operations, failed durable
+submission settlements, and explicit `log.error(...)` calls. It does not export
+prompts, model responses, tool arguments, traces, or AI metrics by default.
 
 ## Inspect the project
 
 Read local instructions, detect the package manager, and select the first
 existing source root: `<root>/.flue/`, then `<root>/src/`, then `<root>/`. Inspect
-`flue.config.ts`, deployment commands, `app.ts`, every module under `agents/` and
-`workflows/`, environment types, and secret conventions.
+`flue.config.ts`, `vite.config.ts`, deployment commands, `app.ts`, every module
+under `agents/`, environment types, and secret conventions.
 
 Determine the configured target before installing a Sentry package:
 
@@ -76,7 +75,7 @@ with the current Sentry-recommended preload, for example
 Flue server. Do not claim complete auto-instrumentation from the late
 `sentry.ts` initialization alone.
 
-### Cloudflare import
+### Cloudflare initialization
 
 ```ts title="src/sentry.ts"
 // flue-blueprint: tooling/sentry@2
@@ -84,33 +83,22 @@ import { type FlueEvent, observe } from '@flue/runtime';
 import * as Sentry from '@sentry/cloudflare';
 ```
 
-Do not call `Sentry.init()` in this file on Cloudflare. The Durable Object
-wrapper configured below initializes the SDK with the current binding
-environment.
+Initialize `@sentry/cloudflare` following Sentry's current documented Workers
+setup; research it from primary sources rather than assuming the Node
+module-scope `Sentry.init(...)` call applies unchanged. Flue's required
+`nodejs_compat` mode makes environment values available through `process.env`.
+Verify captures are actually delivered from a Durable Object isolate before
+claiming the integration works.
 
 ### Shared bridge
 
 Append this code after the target-specific imports and initialization:
 
 ```ts
-const runTags = new Map<string, Record<string, string>>();
-
 observe((event) => {
-  if (event.type === 'run_start' || event.type === 'run_resume') {
-    runTags.set(event.runId, { 'flue.workflow': event.workflowName });
-    return;
-  }
-
   const tags = correlationTags(event);
 
-  if (event.type === 'run_end') {
-    runTags.delete(event.runId);
-    if (!event.isError) return;
-    captureException(event.error, tags, { durationMs: event.durationMs });
-    return;
-  }
-
-  if (event.type === 'operation' && event.isError && !event.runId) {
+  if (event.type === 'operation' && event.isError) {
     captureException(event.error, tags, {
       durationMs: event.durationMs,
       operationKind: event.operationKind,
@@ -150,13 +138,13 @@ function captureException(
 }
 
 function correlationTags(event: FlueEvent): Record<string, string> {
-  const tags: Record<string, string> = event.runId ? { ...runTags.get(event.runId) } : {};
-  if (event.runId) tags['flue.run.id'] = event.runId;
+  const tags: Record<string, string> = {};
   if (event.instanceId) tags['flue.instance.id'] = event.instanceId;
   if (event.dispatchId) tags['flue.dispatch.id'] = event.dispatchId;
   if (event.submissionId) tags['flue.submission.id'] = event.submissionId;
   if (event.harness) tags['flue.harness'] = event.harness;
   if (event.session) tags['flue.session'] = event.session;
+  if (event.parentSession) tags['flue.parent_session'] = event.parentSession;
   if (event.operationId) tags['flue.operation.id'] = event.operationId;
   if (event.taskId) tags['flue.task.id'] = event.taskId;
   return tags;
@@ -191,66 +179,36 @@ import './sentry.ts';
 
 Preserve the application's existing imports, middleware, routes, and default
 export. If there is no `app.ts`, create one that imports `./sentry.ts`, creates a
-Hono application, mounts `flue()` at `/`, and default-exports the app. Install a
-direct `hono` dependency when authoring that file.
+Hono application, mounts each HTTP-reachable agent with
+`app.route('/agents/<name>', agent.route())`, and default-exports the app.
+Install a direct `hono` dependency when authoring that file.
 
-`observe(...)` is isolate-local. Workflow failures carry `runId` and can be
-inspected with SDK `client.runs` or raw `/runs` APIs. Direct and dispatched
-agent interactions are not workflow runs; their failed top-level operations and
-failed durable settlements use agent instance, session, operation, submission,
-and dispatch correlation instead.
+`observe(...)` is isolate-local and receives every event from every agent the
+current isolate handles. Captures correlate through agent instance, session,
+operation, submission, and dispatch fields; pivoting on `flue.instance.id` in
+Sentry's search finds every capture from a single conversation, and
+`flue.submission.id` pins down one submission.
 
-The `!event.runId` guard is the deduplication boundary: workflow operations can
-fail on the way to one canonical failed `run_end`, while operations without a
-`runId` have no workflow terminal event. Do not capture lower-level failed tool,
-task, turn, or compaction events; they can be recoverable and would duplicate
-the selected terminal signals. Do not forward prompts, model output, tool
-arguments, or arbitrary event payloads without an explicit data-handling
-decision.
+Capture only the terminal signals above. A terminal agent failure can surface
+as both a failed `operation` and a failed settlement for the same underlying
+error; Sentry's grouping folds them into one issue. Do not capture lower-level
+failed tool, task, turn, or compaction events; they can be recoverable and
+would duplicate the selected terminal signals. Do not forward prompts, model
+output, tool arguments, or arbitrary event payloads without an explicit
+data-handling decision.
 
-## Wrap Cloudflare Durable Objects
+## Cloudflare isolate scoping
 
 Skip this section for Node.
 
-Flue agents and workflows run in separate Durable Object isolates. Every agent
-and workflow module that should report through Sentry must export a module-local
-Cloudflare extension that wraps the final Flue-generated class. Add the
-following to each module, preserving its existing default agent definition or
-workflow definition export:
-
-```ts
-import * as Sentry from '@sentry/cloudflare';
-import { extend } from '@flue/runtime/cloudflare';
-
-interface Env {
-  SENTRY_DSN?: string;
-  SENTRY_ENVIRONMENT?: string;
-  SENTRY_RELEASE?: string;
-}
-
-export const cloudflare = extend({
-  wrap: (Final) =>
-    Sentry.instrumentDurableObjectWithSentry(
-      (env: Env) => ({
-        dsn: env.SENTRY_DSN,
-        enabled: Boolean(env.SENTRY_DSN),
-        environment: env.SENTRY_ENVIRONMENT,
-        release: env.SENTRY_RELEASE,
-        attachStacktrace: true,
-        tracesSampleRate: 0,
-      }),
-      Final,
-    ),
-});
-```
-
-The export must be in each discovered `agents/<name>.ts` and
-`workflows/<name>.ts` module, not only in source-root `app.ts` or
-`cloudflare.ts`. Flue applies `wrap` after constructing its final generated
-Durable Object class, and types the class it hands to `wrap` as the branded
-Durable Object constructor Sentry's TypeScript signature requires, so the
-pass-through needs no generics, casts, or runtime constructability checks. Do
-not replace Flue-owned lifecycle methods or return a subclass.
+On Cloudflare each agent runs in its own Durable Object, which is its own V8
+isolate, separate from the outer Worker and from every other agent. `app.ts` —
+and therefore the `sentry.ts` it imports — is evaluated once per isolate: the
+outer Worker once, plus each Durable Object once. Initialization and
+`observe(...)` therefore run independently inside every isolate, and each
+isolate captures its own errors with its own Sentry client. This is the right
+shape, not a workaround: there is no shared module state across isolates, no
+per-agent wiring is needed, and no cross-isolate plumbing is possible.
 
 Configure `SENTRY_DSN` through a Worker secret or environment binding according
 to the project's policy. For local Wrangler development, follow the existing
@@ -259,26 +217,25 @@ can be rotated or disabled without a code change. Environment and release values
 may be Wrangler `vars`.
 
 Flue already requires Cloudflare's `nodejs_compat` compatibility flag. Preserve
-it. This wrapper covers generated agent and workflow Durable Objects. It does
-not wrap the generated outer Worker or `FlueRegistry`. If the project has an
-authored Hono `app.ts` and the user wants HTTP request instrumentation, research
-and add the current `@sentry/hono` Cloudflare middleware separately; do not
-claim the Durable Object wrapper covers the outer HTTP application.
+it. The bridge covers agent Durable Objects and the outer Worker through their
+own module evaluations. If the user also wants HTTP request instrumentation for
+the authored Hono `app.ts`, research and add Sentry's current Hono or Workers
+middleware separately; do not claim the event bridge covers HTTP requests.
 
 ## Verify
 
-1. Type-check the project and build its configured Flue target.
+1. Type-check the project and build it with `vite build` for its configured
+   Flue target.
 2. Start the real target runtime with a non-production Sentry project.
-3. Trigger a workflow whose operation fails and escapes the workflow; confirm
-   exactly one Sentry issue from `run_end`, with `flue.run.id` and
-   `flue.workflow` tags.
-4. Trigger a failed direct or dispatched agent operation and confirm one issue
-   with no `flue.run.id`; reconcile a durable submission as failed and confirm
-   one settlement issue.
-5. Call `ctx.log.error(...)` once with an `error` attribute and once without;
-   confirm an exception and an error-level message are captured.
-6. On Cloudflare, exercise at least one wrapped agent or workflow Durable Object
-   under workerd and confirm the event is delivered from that isolate.
+3. Send a message to an agent that fails terminally; confirm the captures group
+   into one Sentry issue tagged with `flue.instance.id` and
+   `flue.submission.id`.
+4. Call `log.error(...)` from an action once with an `error` attribute and once
+   without; confirm an exception and an error-level message are captured while
+   the conversation completes normally.
+5. Trigger a successful conversation and confirm it produces no Sentry traffic.
+6. On Cloudflare, exercise at least one agent Durable Object under workerd and
+   confirm the event is delivered from that isolate.
 7. Remove the DSN and confirm the application still starts and capture calls are
    no-ops.
 8. Inspect event payloads to confirm prompts, model responses, tool arguments,

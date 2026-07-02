@@ -96,7 +96,7 @@ export async function handleAgentRequest(opts: HandleAgentOptions): Promise<Resp
 			throw new InvalidRequestError({
 				reason:
 					'Agent prompts are fire-and-forget and do not support `?wait=result`. ' +
-					"Await completion with the SDK client's `agents.wait()`, or read the conversation stream (GET this URL).",
+					"Await completion with the SDK client's `wait()`, or read the conversation stream (GET this URL).",
 			});
 		}
 		// The wire body IS a DeliveredMessage — the same validated shape a

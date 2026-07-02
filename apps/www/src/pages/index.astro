@@ -63,7 +63,7 @@ const piCells = piPixelPattern.flatMap((line, sourceRow) =>
     <link rel="manifest" href="/site.webmanifest" />
     <meta name="generator" content={Astro.generator} />
     <title>Flue — The Open Agent Framework</title>
-    <meta name="description" content="Build durable AI agents and workflows with Flue's programmable TypeScript harness. Write once, deploy anywhere, use any LLM." />
+    <meta name="description" content="Build durable AI agents with Flue's programmable TypeScript harness. Write once, deploy anywhere, use any LLM." />
     <meta name="theme-color" content="#ffffff" />
     <link rel="canonical" href="https://flueframework.com/" />
 
@@ -71,7 +71,7 @@ const piCells = piPixelPattern.flatMap((line, sourceRow) =>
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Flue" />
     <meta property="og:title" content="Flue — The Open Agent Framework" />
-    <meta property="og:description" content="Build durable AI agents and workflows with Flue's programmable TypeScript harness. Write once, deploy anywhere, use any LLM." />
+    <meta property="og:description" content="Build durable AI agents with Flue's programmable TypeScript harness. Write once, deploy anywhere, use any LLM." />
     <meta property="og:url" content="https://flueframework.com/" />
     <meta property="og:image" content="https://flueframework.com/og3.jpg" />
     <meta property="og:image:alt" content="Flue framework logo" />
@@ -79,7 +79,7 @@ const piCells = piPixelPattern.flatMap((line, sourceRow) =>
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Flue — The Open Agent Framework" />
-    <meta name="twitter:description" content="Build durable AI agents and workflows with Flue's programmable TypeScript harness. Write once, deploy anywhere, use any LLM." />
+    <meta name="twitter:description" content="Build durable AI agents with Flue's programmable TypeScript harness. Write once, deploy anywhere, use any LLM." />
     <meta name="twitter:image" content="https://flueframework.com/og3.jpg" />
     <meta name="twitter:image:alt" content="Flue framework logo" />
 
@@ -179,7 +179,7 @@ const piCells = piPixelPattern.flatMap((line, sourceRow) =>
           The Open Agent Framework
         </h1>
         <p class="mt-3 lg:mt-4 max-w-xl text-md sm:text-xl  text-gray-600">
-          Build durable AI agents and workflows with Flue's programmable TypeScript harness. Write once, deploy anywhere, use any LLM.
+          Build durable AI agents with Flue's programmable TypeScript harness. Write once, deploy anywhere, use any LLM.
         </p>
         <div class="mt-6 lg:mt-8 flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap sm:items-center">
           <div id="copy-prompt-shell" class="group/copy relative" data-feedback="false" data-copy-error="false">
@@ -253,7 +253,7 @@ const piCells = piPixelPattern.flatMap((line, sourceRow) =>
                   <polyline points="4 17 10 11 4 5"/>
                   <line x1="12" y1="19" x2="20" y2="19"/>
                 </svg>
-                <span class="font-[JetBrains_Mono,monospace] text-[13px] text-gray-600">flue run triage</span>
+                <span class="font-[JetBrains_Mono,monospace] text-[13px] text-gray-600">flue run agents/triage.ts</span>
               </div>
               <!-- HTTP agent interaction mode -->
               <div class="hidden sm:flex items-baseline gap-2 px-4 py-2.5" title="Prompt a persistent agent instance over HTTP">
@@ -468,21 +468,21 @@ const piCells = piPixelPattern.flatMap((line, sourceRow) =>
             </div>
           </a>
 
-          <a href="/docs/guide/workflows/" class="lg:col-span-3 bg-white flex flex-col transition-colors hover:bg-gray-50 [&>div]:transition-colors hover:[&>div]:border-gray-400">
+          <a href="/docs/guide/actions/" class="lg:col-span-3 bg-white flex flex-col transition-colors hover:bg-gray-50 [&>div]:transition-colors hover:[&>div]:border-gray-400">
             <div class="relative flex h-[184px] items-center justify-center overflow-hidden border border-slate-300 bg-[#e9eef4]">
               <svg class="absolute inset-0 h-full w-full" aria-hidden="true">
                 <defs>
-                  <pattern id="workflowsPaperGrid" width="20" height="20" patternUnits="userSpaceOnUse">
+                  <pattern id="actionsPaperGrid" width="20" height="20" patternUnits="userSpaceOnUse">
                     <path d="M20 0H0V20" fill="none" stroke="#64748b" stroke-opacity="0.72" stroke-width="0.8" stroke-dasharray="1 2"/>
                   </pattern>
                 </defs>
-                <rect width="100%" height="100%" fill="url(#workflowsPaperGrid)"/>
+                <rect width="100%" height="100%" fill="url(#actionsPaperGrid)"/>
               </svg>
               <div class="feature-shader pattern-layer relative z-10 h-[128px] w-[128px] rounded-full" style="--shadow-rgb: 59 130 246;" data-ambient-shader data-color-back="#00000000" data-color-front="#3b82f6" data-shape="sphere" data-type="4x4" data-size="2" data-scale="1.02" data-speed="0.18"></div>
             </div>
             <div class="flex-1 border-x border-b border-gray-300 p-6">
-              <h3 class="font-heading text-xl font-semibold tracking-tight text-gray-950">Workflows</h3>
-              <p class="mt-1.5 text-[15px] text-gray-600 leading-relaxed">Run structured automations where your code guides agent reasoning from a clear input to a finished result.</p>
+              <h3 class="font-heading text-xl font-semibold tracking-tight text-gray-950">Actions</h3>
+              <p class="mt-1.5 text-[15px] text-gray-600 leading-relaxed">Give agents deterministic, model-callable jobs so structured automations run inside a durable conversation.</p>
             </div>
           </a>
 

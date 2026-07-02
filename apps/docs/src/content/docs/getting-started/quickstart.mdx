@@ -1,7 +1,7 @@
 ---
 title: Getting Started
 description: Set up a Flue project automatically or create your first agent manually.
-lastReviewedAt: 2026-05-29
+lastReviewedAt: 2026-07-02
 ---
 
 import CopyPrompt from '../../../components/docs/CopyPrompt.astro';
@@ -28,48 +28,103 @@ Copy this prompt and paste it into your coding agent. Your agent will guide you 
 
 ### 1. Install Flue
 
-In a new directory, install Flue and initialize your target. The `flue init` command creates `flue.config.ts`; you will add an agent module in the next step.
+In a new directory, install the runtime, the Vite plugin, and the CLI:
 
 ```bash
-npm install @flue/runtime
-npm install --save-dev @flue/cli
+npm install @flue/runtime hono
+npm install --save-dev @flue/vite @flue/cli vite
 echo 'ANTHROPIC_API_KEY="your-api-key"' > .env
-npx flue init --target node # or: --target cloudflare
 ```
 
 Add `.env` to `.gitignore` and do not commit provider credentials. We use Anthropic in this example, but you can use any LLM provider that Pi supports. Read Pi's ["Providers" documentation](https://pi.dev/docs/latest/providers#api-keys) for the complete list of supported providers.
 
-### 2. Create your first agent module
+### 2. Configure the project
 
-Create `agents/hello-world.ts`. This example uses Claude Sonnet, but you can choose any [supported model](https://pi.dev/models) and configure its provider credentials instead:
+A Flue application is a Vite project with the `flue()` plugin. Create two small config files at the project root:
 
-```ts title="agents/hello-world.ts"
+```ts title="vite.config.ts"
+import { flue } from '@flue/vite';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+	plugins: [flue()],
+});
+```
+
+```ts title="flue.config.ts"
+import { defineConfig } from '@flue/runtime/config';
+
+export default defineConfig({
+	target: 'node', // or 'cloudflare'
+});
+```
+
+For the Cloudflare target, also install `@cloudflare/vite-plugin` and add `cloudflare()` after `flue()` in the plugins array; see [Vite plugin](/docs/guide/vite-plugin/).
+
+### 3. Create your first agent module
+
+Create `src/agents/assistant.ts`. The `'use agent'` directive on the first line is what makes the module an agent of your application — the file basename becomes its identity, `assistant`. This example uses Claude, but you can choose any [supported model](https://pi.dev/models) and configure its provider credentials instead:
+
+```ts title="src/agents/assistant.ts"
+'use agent';
 import { defineAgent } from '@flue/runtime';
 
 export default defineAgent(() => ({
-	model: 'anthropic/claude-sonnet-4-6',
-	instructions: 'Tell a funny "hello world" engineering joke.',
+	model: 'anthropic/claude-haiku-4-5',
+	instructions: 'You are a helpful assistant. Keep replies short.',
 }));
 ```
 
-The default export of `agents/hello-world.ts` is what registers the agent — the filename makes it available in Flue as `hello-world`.
+### 4. Create the route map
 
-### 3. Run your agent locally
+`src/app.ts` is the only file a Flue application requires: an ordinary [Hono](https://hono.dev/) app that mounts every route explicitly, including your agent's:
 
-Execute one prompt against the discovered agent:
+```ts title="src/app.ts"
+import { Hono } from 'hono';
+import assistant from './agents/assistant.ts';
 
-```bash
-npx flue run hello-world --input '{"message":"Tell me a joke."}'
+const app = new Hono();
+
+app.route('/agents/assistant', assistant.route());
+
+export default app;
 ```
 
-The command starts your configured Node.js or Cloudflare runtime, invokes the agent through the application, prints its response, and exits.
+### 5. Run your agent
 
-Congratulations! You have created and run your first Flue agent. From here, you can shape its behavior, add capabilities, or deploy it as part of an application.
+Talk to the agent directly from your terminal — no server involved:
+
+```bash
+npx flue run src/agents/assistant.ts --message "Say hello in five words or fewer."
+```
+
+`flue run` loads the module, streams the agent's activity to stderr, prints the final reply to stdout, and exits. It also prints a conversation id — pass `--id <that-id>` (or any id you choose) on the next invocation to continue the same conversation.
+
+### 6. Start the dev server
+
+`flue run` loads your project's `.env` automatically; the dev server and built server read only the shell environment, so export the key first:
+
+```bash
+set -a; source .env; set +a
+npx vite dev
+```
+
+Vite serves your `app.ts` (by default at `http://localhost:5173`), and the agent is live at the URL you mounted. Send it a message — one `POST` per message, `202` on admission:
+
+```bash
+curl -X POST http://localhost:5173/agents/assistant/hello-1 \
+  -H 'content-type: application/json' \
+  -d '{"kind":"user","body":"Tell me a joke."}'
+```
+
+The trailing `hello-1` is the conversation id (you choose it). Read the conversation back with `curl "http://localhost:5173/agents/assistant/hello-1?view=history"`, or use the [SDK](/docs/sdk/overview/) and [React hooks](/docs/guide/react/) for real clients.
+
+Congratulations! You have created and run your first Flue agent. From here, you can shape its behavior, add capabilities, or deploy it: `vite build` produces `dist/server.mjs` on the Node target (run it with `node dist/server.mjs`), or a deployable Worker on Cloudflare.
 
 ## Next steps
 
-- If you selected the Cloudflare target, continue with [Deploy on Cloudflare](/docs/ecosystem/deploy/cloudflare/) to configure and run your Worker.
+- Learn how the pieces fit together in [Routing](/docs/guide/routing/) and the [Vite plugin](/docs/guide/vite-plugin/).
+- Understand what the `'use agent'` directive does in ['use agent'](/docs/guide/use-agent/).
 - Learn how continuing interactions are modeled in [Agents](/docs/concepts/agents/).
-- Create bounded operations around agents with [Workflows](/docs/guide/workflows/).
-- Configure targets and local environment behavior in [Configuration](/docs/reference/configuration/).
+- Deploy on [Cloudflare](/docs/ecosystem/deploy/cloudflare/) or [Node.js](/docs/ecosystem/deploy/node/).
 - Choose execution capabilities in [Sandboxes](/docs/guide/sandboxes/).

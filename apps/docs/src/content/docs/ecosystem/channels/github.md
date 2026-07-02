@@ -70,6 +70,18 @@ bound agent post an issue or pull-request comment through Octokit. Cloudflare
 targets retain the project's credential convention and run Octokit's Fetch path
 under Flue's `nodejs_compat` configuration.
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the module's named `channel` export:
+
+```ts title="src/app.ts"
+import { channel as github } from './channels/github.ts';
+
+app.route('/channels/github', github.route());
+```
+
+`channel.route()` is a pure router factory serving the channel's declared routes relative to the mount path. The webhook paths in this guide assume the conventional `/channels/github` mount; a different mount path shifts them accordingly. The dispatch-target agent module carries the `'use agent'` directive — the directive registers it, so a dispatch-only agent needs no HTTP mount of its own.
+
 ## Configure
 
 | Variable                | Purpose                                              |
@@ -212,6 +224,7 @@ callback.
 ## Bind the tool
 
 ```ts title="src/agents/assistant.ts"
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, commentOnIssue } from '../channels/github.ts';
 

@@ -1,7 +1,7 @@
 ---
 title: Tools
 description: Give agents application capabilities through custom tools and MCP servers.
-lastReviewedAt: 2026-05-29
+lastReviewedAt: 2026-07-02
 ---
 
 Tools let an agent retrieve information or perform actions while it works. Define tools when an agent needs to call your application's data layer or services, such as looking up an order, creating a ticket, or approving a request.
@@ -52,6 +52,7 @@ Use clear action-oriented names, such as `lookup_order_status` or `create_suppor
 Provide a stable capability in the configuration for the agent that needs it:
 
 ```ts title="src/agents/order-assistant.ts"
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { lookupOrderStatus } from '../shared/order-tools.ts';
 
@@ -73,6 +74,7 @@ A tool's parameters are model-selected inputs, not an authorization boundary. Yo
 For an addressable customer-support agent, the selected agent instance can establish which customer's orders are accessible:
 
 ```ts title="src/agents/customer-orders.ts"
+'use agent';
 import { defineAgent, defineTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { orders } from '../shared/orders.ts';
@@ -97,29 +99,29 @@ export default defineAgent(({ id: customerId }) => ({
 
 In this example, the model may choose an order ID to look up, but it cannot choose the customer used in the query. Your route must still authenticate the caller and ensure that they may access the selected agent `id`; see [Agents](/docs/guide/building-agents/) and [Routing](/docs/guide/routing/).
 
-The same principle applies in workflows. Configure bounded tools on the workflow's agent, and pass invocation-specific authorized identifiers through the Action input:
+The same principle applies inside [Actions](/docs/guide/actions/): the Action's validated `input` carries the authorized identifier, and its handler builds tools bound to it for the session it drives:
 
-```ts title="src/workflows/review-orders.ts"
-const lookupCustomerOrder = defineTool({
-  name: 'lookup_customer_order',
-  description: 'Look up one order belonging to the authenticated customer.',
+```ts title="src/actions/review-order.ts"
+import { defineAction, defineTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { orders } from '../shared/orders.ts';
+
+export const reviewOrder = defineAction({
+  name: 'review_order',
+  description: 'Review one order the caller is authorized to see.',
   input: v.object({ orderId: v.string() }),
-  async run({ input }) {
-    const status = await orders.getStatus(customer.id, input.orderId);
-    return status ?? 'No accessible order was found.';
-  },
-});
 
-const agent = defineAgent(() => ({
-  model: 'anthropic/claude-haiku-4-5',
-  tools: [lookupCustomerOrder],
-}));
-
-export default defineWorkflow({
-  agent,
-  input: v.object({ orderId: v.string() }),
   async run({ harness, input }) {
-    return await (await harness.session()).prompt(`Review order ${input.orderId}.`);
+    const lookupOrder = defineTool({
+      name: 'lookup_order',
+      description: 'Look up the order under review.',
+      async run() {
+        return (await orders.getStatus(input.orderId)) ?? 'No accessible order was found.';
+      },
+    });
+
+    const session = await harness.session();
+    return await session.prompt(`Review order ${input.orderId}.`, { tools: [lookupOrder] });
   },
 });
 ```
@@ -171,32 +173,20 @@ authorization design for them.
 
 An MCP server supplies remotely implemented tools. `connectMcpServer(...)` lists those tools and returns ordinary tool definitions, which you provide to agent work in the same way as your own custom tools.
 
-```ts title="src/workflows/inventory-assistant.ts"
-import { connectMcpServer, defineAgent, defineWorkflow } from '@flue/runtime';
-import * as v from 'valibot';
-
-type Env = {
-  INVENTORY_MCP_URL: string;
-  INVENTORY_MCP_TOKEN: string;
-};
+```ts title="src/agents/inventory-assistant.ts"
+'use agent';
+import { connectMcpServer, defineAgent } from '@flue/runtime';
 
 const inventory = await connectMcpServer('inventory', {
   url: process.env.INVENTORY_MCP_URL!,
   headers: { Authorization: `Bearer ${process.env.INVENTORY_MCP_TOKEN}` },
 });
 
-const agent = defineAgent<Env>(() => ({
+export default defineAgent(() => ({
   model: 'anthropic/claude-haiku-4-5',
+  instructions: 'Answer inventory questions using the inventory tools.',
   tools: inventory.tools,
 }));
-
-export default defineWorkflow({
-  agent,
-  input: v.object({ question: v.string() }),
-  async run({ harness, input }) {
-    return await (await harness.session()).prompt(input.question);
-  },
-});
 ```
 
 Provide MCP credentials and connection settings from trusted application code and close the connection during application shutdown. Flue prefixes each MCP tool's model-facing name with its connection name; for example, `lookup_item` from this server becomes `mcp__inventory__lookup_item`.
@@ -215,7 +205,7 @@ For application-controlled, multi-step agent work, use an [Action](/docs/guide/a
 ## Next steps
 
 - [Agents](/docs/guide/building-agents/) — configure continuing agents that use tools.
-- [Workflows](/docs/guide/workflows/) — initialize agent work with invocation-specific tools.
+- [Actions](/docs/guide/actions/) — drive agent work with invocation-specific tools and validated input.
 - [Skills](/docs/guide/skills/) — add reusable instructions that may direct an agent to use its tools.
 - [Sandboxes](/docs/guide/sandboxes/) — control the workspace and command boundary available to agent work.
 - [Agent API](/docs/api/agent-api/) — look up operation options, including tools supplied for one call.

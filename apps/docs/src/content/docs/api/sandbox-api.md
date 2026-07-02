@@ -33,7 +33,7 @@ export function provider(sandbox: ProviderSandbox): SandboxFactory {
 }
 ```
 
-Sandbox adapters are pure adapters. They map a provider sandbox to a `SessionEnv` rooted at the provider-owned base cwd and stop there. They must not apply an agent definition's `cwd`: Flue resolves that value once against the adapter's base cwd while initializing a root harness. A factory may be called again for later requests or workflow runs, and closing a harness does not destroy provider infrastructure. The application owns provider resource creation, reuse, and deletion.
+Sandbox adapters are pure adapters. They map a provider sandbox to a `SessionEnv` rooted at the provider-owned base cwd and stop there. They must not apply an agent definition's `cwd`: Flue resolves that value once against the adapter's base cwd while initializing a root harness. A factory may be called again for later submissions, and closing a harness does not destroy provider infrastructure. The application owns provider resource creation, reuse, and deletion.
 
 ## Imports
 
@@ -88,7 +88,7 @@ export interface SandboxFactory {
 }
 ```
 
-`createSessionEnv` is called once for each root harness initialization, and every session and nested task or Action scope of that harness shares the returned `SessionEnv`. The `id` option is the agent instance id for direct agent work or the workflow run id for a workflow. The same agent instance may initialize a new root harness for later submissions, so an adapter that keys provider resources on `id` must tolerate repeated calls and deliberately reuse or replace its provider resource. Flue closes in-memory harness state after the operation or run; it does not destroy provider infrastructure.
+`createSessionEnv` is called once for each root harness initialization, and every session and nested task or Action scope of that harness shares the returned `SessionEnv`. The `id` option is the agent instance id. The same agent instance may initialize a new root harness for later submissions, so an adapter that keys provider resources on `id` must tolerate repeated calls and deliberately reuse or replace its provider resource. Flue closes in-memory harness state after the operation or run; it does not destroy provider infrastructure.
 
 `tools` replaces the framework's default model-facing tool list for this sandbox. Omit it for the standard filesystem and shell tools.
 

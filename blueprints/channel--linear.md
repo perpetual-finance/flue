@@ -15,9 +15,9 @@ webhooks with project-owned outbound Linear API access to a Flue project.
 
 Read local instructions, detect the package manager and target, and select the
 first existing source root: `<root>/.flue/`, then `<root>/src/`, then
-`<root>/`. Inspect existing agents, environment types, secret conventions, and
-whether the application needs ordinary issue comments, Linear agent sessions,
-or both.
+`<root>/`. Inspect existing agents, `app.ts` (the application's route map),
+environment types, secret conventions, and whether the application needs
+ordinary issue comments, Linear agent sessions, or both.
 
 Install `@flue/linear` and `@linear/sdk@^86.0.0`. Flue owns verified ingress.
 The project owns the official SDK client and every outbound tool.
@@ -153,6 +153,27 @@ export function postMessage(ref: LinearConversationRef) {
 }
 ```
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the
+channel's router explicitly:
+
+```ts
+// app.ts
+import { Hono } from 'hono';
+import { channel } from './channels/linear.ts';
+
+const app = new Hono();
+app.route('/channels/linear', channel.route());
+
+export default app;
+```
+
+`channel.route()` is a pure router factory serving the channel's routes
+relative to the mount path. The `// Path:` comments in this guide assume the
+conventional `/channels/linear` mount; a different mount path shifts every
+provider URL accordingly.
+
 Use `accessToken` instead of `apiKey` when an installed OAuth application owns
 the client. Do not implement token storage, refresh, or organization-to-token
 resolution unless the project already owns that installation system.
@@ -164,6 +185,7 @@ organization or webhook authorized by the signing secret.
 ## Wire the agent
 
 ```ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, postMessage } from '../channels/linear.ts';
 
@@ -173,12 +195,20 @@ export default defineAgent(({ id }) => ({
 }));
 ```
 
+The `'use agent'` directive (the module's first statement) is what registers
+the agent with the application — `dispatch(...)` from the channel callback
+needs no `app.ts` mounting. Add
+`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+should also be reachable over HTTP directly.
+
 The channel-agent import cycle is supported because imported bindings are read
 inside deferred callbacks and initializers.
 
 ## Configure ordinary webhooks
 
-Create a Linear webhook with:
+Create a Linear webhook pointing at the channel's mount path in `app.ts` plus
+the route suffix — with the conventional
+`app.route('/channels/linear', ...)` mount:
 
 ```txt
 https://example.com/channels/linear/webhook
@@ -239,7 +269,7 @@ Sign the exact bytes locally and cover:
 - handler responses and failures;
 - SDK comment and agent-activity GraphQL requests against an injected fake
   Fetch transport in workerd with `nodejs_compat`;
-- Node and Cloudflare project builds.
+- the project typecheck and `vite build` for the configured target.
 
 Do not contact Linear or copy third-party fixtures.
 

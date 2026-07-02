@@ -82,6 +82,6 @@ import { getDefaultWorkspace, getShellSandbox } from '../sandboxes/cloudflare-sh
 
 Use Cloudflare Shell when files must be stored in a durable Workspace and agent work can be expressed through Workspace operations. It is not interchangeable with a container: `harness.shell(...)` and `session.shell(...)` do not provide Linux command execution through this adapter.
 
-If the workspace should survive later user interactions, associate it with a stable addressable agent instance. A workspace created inside one workflow invocation belongs to that invocation's owner rather than forming a shared cross-run workspace.
+If the workspace should survive later user interactions, associate it with a stable agent instance id. A workspace keyed to a throwaway id belongs to that id's owner rather than forming a shared workspace.
 
 See [Sandboxes](/docs/guide/sandboxes/) and [Deploy on Cloudflare](/docs/ecosystem/deploy/cloudflare/).

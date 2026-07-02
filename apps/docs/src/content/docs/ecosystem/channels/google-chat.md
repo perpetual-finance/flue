@@ -79,6 +79,18 @@ client. Workspace Events add an authenticated `/events` route and preserve the
 Pub/Sub wrapper for application-owned decoding and deduplication. Both Node and
 Cloudflare targets use standards-based Fetch and Web Crypto.
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the module's named `channel` export:
+
+```ts title="src/app.ts"
+import { channel as googleChat } from './channels/google-chat.ts';
+
+app.route('/channels/google-chat', googleChat.route());
+```
+
+`channel.route()` is a pure router factory serving the channel's declared routes relative to the mount path. The webhook paths in this guide assume the conventional `/channels/google-chat` mount; a different mount path shifts them accordingly. The dispatch-target agent module carries the `'use agent'` directive — the directive registers it, so a dispatch-only agent needs no HTTP mount of its own.
+
 ## Configure
 
 | Variable                             | Purpose                                                                                                                              |
@@ -310,6 +322,7 @@ export function postMessage(ref: GoogleChatConversationRef) {
 Bind the destination when creating the agent:
 
 ```ts title="src/agents/assistant.ts"
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, postMessage } from '../channels/google-chat.ts';
 

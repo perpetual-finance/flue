@@ -1,6 +1,6 @@
 ---
 title: OpenTelemetry
-description: Export Flue workflows, agents, model calls, and tools with OpenTelemetry GenAI semantics.
+description: Export Flue agents, model calls, and tools with OpenTelemetry GenAI semantics.
 package:
   name: '@flue/opentelemetry'
   href: https://www.npmjs.com/package/@flue/opentelemetry
@@ -32,23 +32,22 @@ Pass configured tracer, meter, or structural Logger instances when the applicati
 
 ## Trace model
 
-| Flue activity | OpenTelemetry representation |
-| --- | --- |
-| Workflow invocation | `invoke_workflow <name>` |
-| Prompt or skill | `invoke_agent <agent>` |
-| Delegated task | one task-owned `invoke_agent <agent>` |
-| Provider inference | `chat <requested-model>` client span |
-| GenAI tool execution | `execute_tool <name>` |
-| Caller shell execution | `flue.operation shell` |
-| Context compaction | `flue.compaction` with child chat spans |
+| Flue activity          | OpenTelemetry representation            |
+| ---------------------- | --------------------------------------- |
+| Prompt or skill        | `invoke_agent <agent>`                  |
+| Delegated task         | one task-owned `invoke_agent <agent>`   |
+| Provider inference     | `chat <requested-model>` client span    |
+| GenAI tool execution   | `execute_tool <name>`                   |
+| Caller shell execution | `flue.operation shell`                  |
+| Context compaction     | `flue.compaction` with child chat spans |
 
 Provider chat spans cover provider inference only. The projection reads canonical model telemetry directly: semantic `request.providerName` becomes `gen_ai.provider.name`, while `request.providerId` remains the Flue registration identity. It does not fall back to removed top-level event fields. Local tools are sibling spans under the agent invocation and correlate with model output through `gen_ai.tool.call.id`.
 
-`gen_ai.conversation.id` identifies one persisted Flue session. It is not a workflow run, submission, dispatch, operation, trace, session name, or provider-affinity key. Flue correlation fields remain under documented `flue.*` attributes when no exact standard field exists.
+`gen_ai.conversation.id` identifies one persisted Flue session. It is not a submission, dispatch, operation, trace, session name, or provider-affinity key. Flue correlation fields remain under documented `flue.*` attributes when no exact standard field exists.
 
 ## Protect content
 
-Content is disabled by default. This excludes implemented model messages, reasoning, system instructions, tool definitions, descriptions, arguments/results, exception messages, and external-content paths. Workflow values are not currently exported even when capture is enabled.
+Content is disabled by default. This excludes implemented model messages, reasoning, system instructions, tool definitions, descriptions, arguments/results, exception messages, and external-content paths.
 
 Use one instrumentation-wide policy to enable and redact content:
 
@@ -71,15 +70,15 @@ The `enabled` value is the global privacy ceiling. A detached converted value pa
 
 ## Metrics and Logs
 
-The instrumentation emits client-operation, token-usage, workflow, agent-invocation, and tool-duration histograms. Metric dimensions exclude execution IDs; review your application-controlled workflow, agent, tool, provider, and model names for appropriate cardinality. Input token totals include cache-read and cache-creation input tokens.
+The instrumentation emits client-operation, token-usage, agent-invocation, and tool-duration histograms. Metric dimensions exclude execution IDs; review your application-controlled agent, tool, provider, and model names for appropriate cardinality. Input token totals include cache-read and cache-creation input tokens.
 
 Logs require explicit Logger injection. Failed inference operations emit the standard `gen_ai.client.operation.exception` event at WARN/13. Error type is always recorded; transformed exception messages are included only when content capture is enabled. Logger absence does not affect traces or metrics.
 
 ## Propagation and recovery
 
-Flue validates and persists `traceparent` and optional `tracestate` at workflow and direct-agent admission. Baggage is not persisted. Durable direct-agent processing activates its extracted admission context, and execution interceptors activate owning spans around workflow, agent, model-stream, tool, and task work. `dispatch(...)` does not currently propagate trace context.
+Flue validates and persists `traceparent` and optional `tracestate` at direct-agent admission. Baggage is not persisted. Durable direct-agent processing activates its extracted admission context, and execution interceptors activate owning spans around agent, model-stream, tool, and task work. `dispatch(...)` does not currently propagate trace context.
 
-Workflow recovery restores the persisted admission carrier as the parent of a new recovery-handling span. The new span begins at `run_resume`; it does not reconstruct or backdate the interrupted span. Recovery does not replay provider or tool execution. Stored stream chunks create no chat spans or usage observations, and synthetic interrupted-tool repairs create no `execute_tool` spans.
+Recovery does not replay provider or tool execution. Stored stream chunks create no chat spans or usage observations, and synthetic interrupted-tool repairs create no `execute_tool` spans.
 
 ## Streaming limitation
 

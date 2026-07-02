@@ -73,6 +73,18 @@ full generated module validates matching ticket identity in `subject` and
 current ticket through the project-owned client. That client preserves large
 Zendesk identifiers and runs in Node or Cloudflare Workers.
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the module's named `channel` export:
+
+```ts title="src/app.ts"
+import { channel as zendesk } from './channels/zendesk.ts';
+
+app.route('/channels/zendesk', zendesk.route());
+```
+
+`channel.route()` is a pure router factory serving the channel's declared routes relative to the mount path. The webhook paths in this guide assume the conventional `/channels/zendesk` mount; a different mount path shifts them accordingly. The dispatch-target agent module carries the `'use agent'` directive — the directive registers it, so a dispatch-only agent needs no HTTP mount of its own.
+
 ## Configure
 
 | Variable                         | Purpose                                                                |
@@ -310,6 +322,7 @@ instead of being rounded.
 ## Bind the tool
 
 ```ts title="src/agents/assistant.ts"
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, retrieveTicket } from '../channels/zendesk.ts';
 

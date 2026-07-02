@@ -1,71 +1,86 @@
 ---
 title: Deploy Agents on Node.js
-description: Build and deploy Flue agents as a Node.js server.
-lastReviewedAt: 2026-06-20
+description: Build and deploy Flue agents as a Node.js server with Vite.
+lastReviewedAt: 2026-07-02
 ---
 
 Build and deploy Flue agents as a Node.js server. This guide walks you through creating your first agent, running it locally, and deploying it anywhere you can run Node.js — a VPS, Docker, Railway, Fly.io, or any cloud platform.
 
 By the end, you will have a Flue agent running as a Node.js server, and you will know how to add subagents, sandbox context, external CLIs, remote sandboxes, and durable session storage when your agent needs them.
 
-This guide focuses on deploying the generated Node server. First review the [CLI overview](/docs/cli/overview/) for the development lifecycle and build output, then see [Routing](/docs/guide/routing/) for direct HTTP agent delivery, workflow endpoints, and asynchronous `dispatch(...)` from application-owned routes. To package the server as a container image, see [Deploy Agents with Docker](/docs/ecosystem/deploy/docker/).
-
-## Project layout
-
-The project root is your project directory. Flue selects authored source from `.flue/`, then `src/`, then the project root. The first matching directory wins, and layouts never mix. See [Project Layout](/docs/guide/project-layout/) for the full convention.
-
-By default `flue build` writes to `./dist/` at the project root; pass `--output <path>` to redirect the build elsewhere. Examples in this guide use the `./.flue/` layout.
+Flue is a Vite plugin: `vite dev` serves the application locally and `vite build` produces the deployable server artifact. First review [Routing](/docs/guide/routing/) for how `app.ts` mounts agent routes and how server code can `dispatch(...)` into agents. To package the server as a container image, see [Deploy Agents with Docker](/docs/ecosystem/deploy/docker/).
 
 ## Hello World
 
-The simplest agent — no container, no storage, just a prompt and a typed result.
+The simplest agent — no container, no storage, just a prompt and a reply.
 
 ### 1. Set up your project
 
 ```bash
 mkdir my-flue-server && cd my-flue-server
 npm init -y
-npm install @flue/runtime valibot
-npm install -D @flue/cli
+npm install @flue/runtime hono valibot
+npm install -D @flue/vite @flue/cli vite
+```
+
+Add the Vite plugin:
+
+```ts title="vite.config.ts"
+import { flue } from '@flue/vite';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  plugins: [flue()],
+});
+```
+
+And the scripts:
+
+```jsonc title="package.json"
+{
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+  },
+}
 ```
 
 ### 2. Create your first agent
 
-`.flue/workflows/translate.ts`:
+An agent module is an ordinary TypeScript file plus one line: the `'use agent'` directive. The directive is how an agent joins the application — the build scans your source root for marked modules, and the file basename becomes the agent's durable identity.
 
-```typescript
-import { defineAgent, defineWorkflow, type WorkflowRouteHandler } from '@flue/runtime';
-import * as v from 'valibot';
+```typescript title="src/agents/translator.ts"
+'use agent';
+import { defineAgent } from '@flue/runtime';
 
-export const route: WorkflowRouteHandler = async (_c, next) => next();
-
-const translator = defineAgent(() => ({ model: 'openai/gpt-5.5' }));
-
-export default defineWorkflow({
-  agent: translator,
-  input: v.object({ text: v.string(), language: v.string() }),
-
-  async run({ harness, input }) {
-    const { data } = await (
-      await harness.session()
-    ).prompt(`Translate this to ${input.language}: "${input.text}"`, {
-      result: v.object({
-        translation: v.string(),
-        confidence: v.picklist(['low', 'medium', 'high']),
-      }),
-    });
-    return data;
-  },
-});
+export default defineAgent(() => ({
+  model: 'openai/gpt-5.5',
+  instructions:
+    'Translate the user message into the requested language. Reply with the translation only.',
+}));
 ```
 
-A few things to note:
+By default the agent receives a virtual sandbox powered by [just-bash](https://github.com/vercel-labs/just-bash) — no container needed.
 
-- **`route`** — Export Hono middleware to expose this workflow via HTTP. It may perform authentication before calling `next()`.
-- **`defineAgent(...)` + `defineWorkflow(...)`** — The required workflow agent declares model and sandbox policy. Flue initializes its harness for each run. By default, it receives a virtual sandbox powered by [just-bash](https://github.com/vercel-labs/just-bash). No container needed.
-- **Schemas** — The [Valibot](https://valibot.dev) schema defines the expected output shape. Flue parses the agent's response and returns it on `response.data`, fully typed.
+### 3. Create app.ts — the route map
 
-### 3. Add your API key
+`app.ts` is the only required file. Its default export owns the request pipeline, and every route is mounted explicitly — `app.ts` IS the routing table:
+
+```typescript title="src/app.ts"
+import { Hono } from 'hono';
+import translator from './agents/translator.ts';
+
+const app = new Hono();
+
+app.route('/agents/translator', translator.route());
+app.get('/api/ping', (c) => c.text('pong'));
+
+export default app;
+```
+
+`translator.route()` is a pure router factory: the mount path is yours to choose, and per-agent middleware comes from the module's own `route` named export (export Hono middleware from the agent file to authenticate requests before they reach the agent). See the [Routing API](/docs/api/routing-api/).
+
+### 4. Add your API key
 
 Put provider API keys in a `.env` file at the project root:
 
@@ -79,42 +94,75 @@ printf '\n.env\n' >> .gitignore
 
 Use the env var name your provider expects — `OPENAI_API_KEY` for OpenAI, `ANTHROPIC_API_KEY` for Anthropic, and so on. Do not commit `.env`.
 
-### 4. Build and run
+### 5. Run it
 
-For local development, `flue dev --target node` is the fastest path. It loads project-root `.env` before configuration, builds your project, starts the server on port 3583, and reloads local runtime environment values when `.env` is created, edited, deleted, or recreated.
+For local development, `vite dev` serves `app.ts` with hot reload:
 
 ```bash
-npx flue dev --target node
+npx vite dev
 ```
 
-Test it:
+Talk to the agent over HTTP. A conversation lives at the mount path plus any id you choose; the `POST` returns `202` immediately and the reply lands in the conversation:
 
 ```bash
-curl 'http://localhost:3583/workflows/translate?wait=result' \
+curl -X POST 'http://localhost:5173/agents/translator/demo-1' \
   -H "Content-Type: application/json" \
-  -d '{"text": "Hello world", "language": "French"}'
+  -d '{"kind": "user", "body": "Translate to French: Hello world"}'
+
+# read the conversation (the reply appears once the agent settles)
+curl 'http://localhost:5173/agents/translator/demo-1'
 ```
 
-The `?wait=result` mode keeps this request attached until the workflow completes and returns its result. Without it, an admitted HTTP workflow responds immediately with `202` and a `runId` for later inspection.
+Application code should use the [SDK](/docs/sdk/overview/) instead of raw curl — `createFlueClient({ url }).send(...)` plus `wait()`/`observe()` handles admission and streaming for you.
 
-Every workflow that exports `route` gets an HTTP endpoint automatically. The middleware may authenticate the request and call `next()` to admit it. The route follows the pattern `/workflows/<name>` — for example, `.flue/workflows/translate.ts` becomes `/workflows/translate`.
-
-For a production-style server, build and then start the generated artifact. `flue build` loads `.env` for configuration and build-time evaluation, while the built server reads only the environment supplied when you start it:
+For a one-shot local check without any server, `flue run` executes the agent module directly — transport-free, no port:
 
 ```bash
-npx flue build --target node
+npx flue run src/agents/translator.ts --message "Translate to French: Hello world"
+```
+
+### 6. Build for production
+
+```bash
+npx vite build
 set -a; source .env; set +a
 node dist/server.mjs
 ```
 
-`flue build --target node` compiles your project into a `./dist` directory without packaging `.env` credentials into the server. The built server uses [Hono](https://hono.dev/) under the hood and listens on port 3000 by default (configurable via `PORT`). Your project's `node_modules` are still needed at runtime — the build externalizes your dependencies rather than bundling them.
+`vite build` compiles your project into `./dist/server.mjs` without packaging `.env` credentials into the server; the built server reads only the environment supplied when you start it. It uses [Hono](https://hono.dev/) under the hood and listens on port 3000 by default (configurable via `PORT`). Your project's `node_modules` are still needed at runtime — the build externalizes your dependencies rather than bundling them.
 
-You can also invoke an agent or workflow through a temporary local server. `flue run` executes the normal `app.ts` and middleware, temporarily exposes route-free resources through an existing authored `flue()` mount, and loads project-root `.env` automatically; pass `--env` only to select one alternate file:
+`vite preview` is not supported for the Node target yet — run the artifact directly with `node dist/server.mjs`.
 
-```bash
-npx flue run translate --target node \
-  --input '{"text": "Hello world", "language": "French"}'
+## Deterministic jobs with actions
+
+For structured automations — the role workflows used to play — give the agent a model-callable [Action](/docs/guide/actions/): a finite, schema-validated job that runs inside the durable conversation.
+
+```typescript title="src/agents/reporter.ts"
+'use agent';
+import { defineAction, defineAgent } from '@flue/runtime';
+import * as v from 'valibot';
+
+const compileReport = defineAction({
+  name: 'compile-report',
+  description: 'Compile the weekly metrics report.',
+  input: v.object({ period: v.string() }),
+  async run({ harness, input }) {
+    const session = await harness.session();
+    const { data } = await session.prompt(`Compile the metrics report for ${input.period}.`, {
+      result: v.object({ summary: v.string() }),
+    });
+    return data;
+  },
+});
+
+export default defineAgent(() => ({
+  model: 'openai/gpt-5.5',
+  instructions: 'When asked for a report, call the `compile-report` action.',
+  actions: [compileReport],
+}));
 ```
+
+Drive it with `flue run src/agents/reporter.ts --message "Compile the weekly report."`, a `dispatch()` from server code, or the SDK.
 
 ## Subagents
 
@@ -127,18 +175,12 @@ const analyst = defineAgentProfile({
   name: 'analyst',
   instructions: 'Focus on quantitative insights, trends, and actionable takeaways.',
 });
-const reportAgent = defineAgent(() => ({ model: 'openai/gpt-5.5', subagents: [analyst] }));
 
-export default defineWorkflow({
-  agent: reportAgent,
-  async run({ harness }) {
-    return await (
-      await harness.session()
-    ).task("Analyze this quarter's metrics", {
-      agent: 'analyst',
-    });
-  },
-});
+export default defineAgent(() => ({
+  model: 'openai/gpt-5.5',
+  instructions: "Delegate metric analysis to the 'analyst' subagent via a task.",
+  subagents: [analyst],
+}));
 ```
 
 ## Sandbox context
@@ -161,7 +203,7 @@ Focus on the key points and keep it to 2-3 sentences.
 
 **`AGENTS.md`** at the root of the sandbox is the agent's system prompt — it provides global context about the project.
 
-Call a skill from your agent:
+Call a skill from an Action or tool body:
 
 ```typescript
 import * as v from 'valibot';
@@ -180,40 +222,16 @@ Run flue itself inside an isolation boundary you trust — a CI runner, a contai
 
 Env exposure is opt-in. By default only shell essentials (`PATH`, `HOME`, locale, etc.) are inherited from `process.env`; anything else — API keys, tokens, deploy credentials — has to be passed explicitly via `local({ env: { ... } })`. That keeps the model's `bash` tool from seeing host secrets by accident.
 
-`.flue/workflows/reviewer.ts`:
-
-```typescript
-import { defineAgent, defineWorkflow, type WorkflowRouteHandler } from '@flue/runtime';
+```typescript title="src/agents/reviewer.ts"
+'use agent';
+import { defineAgent } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
-import * as v from 'valibot';
 
-export const route: WorkflowRouteHandler = async (_c, next) => next();
-
-const reviewer = defineAgent(() => ({ sandbox: local(), model: 'anthropic/claude-sonnet-4-6' }));
-
-export default defineWorkflow({
-  agent: reviewer,
-  input: v.object({ topic: v.string() }),
-
-  async run({ harness, input }) {
-    const { data } = await (
-      await harness.session()
-    ).prompt(`Review the codebase and identify potential issues related to: ${input.topic}`, {
-      result: v.object({
-        issues: v.array(
-          v.object({
-            file: v.string(),
-            line: v.optional(v.number()),
-            severity: v.picklist(['low', 'medium', 'high']),
-            description: v.string(),
-          }),
-        ),
-        summary: v.string(),
-      }),
-    });
-    return data;
-  },
-});
+export default defineAgent(() => ({
+  sandbox: local(),
+  model: 'anthropic/claude-sonnet-4-6',
+  instructions: 'Review the codebase and identify potential issues in the area the user names.',
+}));
 ```
 
 The agent reads, searches, and modifies files via its built-in tools — read, write, edit, grep, glob, bash. Anything on `$PATH` (`git`, `npm`, `gh`, `docker`) is reachable from the bash tool. Env vars are opt-in via `local({ env: { ... } })` — pass `process.env.GH_TOKEN`, `process.env.NPM_TOKEN`, etc. into the sandbox for the binaries that need them.
@@ -223,7 +241,7 @@ The agent reads, searches, and modifies files via its built-in tools — read, w
 - **Self-hosted coding agents** — review PRs, fix bugs, refactor against the actual repo.
 - **File processing** — read documents, transform data, generate reports from local files.
 - **Dev tooling** — analyze project structure, run linters, generate boilerplate.
-- **CI** — issue triage, deploy checks, anything where the runner already provides isolation.
+- **CI** — issue triage, deploy checks, anything where the runner already provides isolation. `flue run` is a natural fit here: one agent, one message, no port.
 
 No container startup, real project context, fast iteration. If you need a tighter boundary on a specific operation — agent can call it, never sees the underlying secret — wrap it as a custom tool via `defineAgent(() => ({ tools: [...] }))`. The tool reads `process.env`; the agent only sees the tool's params and result.
 
@@ -248,7 +266,7 @@ Start with the local or virtual sandbox. Move to a remote sandbox when you need 
 
 ## Conversation persistence
 
-On Node.js, canonical agent conversations, attachments, and accepted submissions use in-memory SQLite by default, so they persist for the lifetime of one process but are lost on restart. Add `db.ts` when that state must survive restart or support replacement recovery. A shared database does not remove the requirement for one live Node owner per agent instance.
+On Node.js, canonical agent conversations, attachments, and accepted submissions use in-memory SQLite by default in the built server, so they persist for the lifetime of one process but are lost on restart. (`vite dev` points the same default at a local disk file so history survives reloads within a dev session.) Add `db.ts` when that state must survive restart or support replacement recovery. A shared database does not remove the requirement for one live Node owner per agent instance.
 
 See [Database](/docs/guide/database/) for `db.ts`, SQLite, Postgres, and custom adapter setup. See [Data Persistence API](/docs/api/data-persistence-api/) for the adapter contract.
 
@@ -258,7 +276,7 @@ Flue compiles your project into a Node.js server:
 
 ```bash
 # Build
-npx flue build --target node
+npx vite build
 
 # Run locally
 node dist/server.mjs
@@ -267,16 +285,15 @@ node dist/server.mjs
 PORT=8080 node dist/server.mjs
 ```
 
-The `FLUE_MODE`, `FLUE_CLI_*`, and `FLUE_INTERNAL_CLI_IPC` environment variables are reserved by the Flue CLI — do not set them when starting the built server. In particular, `FLUE_MODE=local` in production includes developer guidance in error envelopes.
+The built server never runs in local dev mode: developer-only error guidance and the dev SQLite file are wired only through `vite dev`, not through environment variables.
 
-The default root-mounted Flue application can expose:
+The deployed server exposes exactly the routes `app.ts` mounts. For each mounted agent, relative to its mount:
 
-- `POST /agents/:name/:id` — send an attached prompt to an agent module that exports `route`;
-- `GET /agents/:name/:id` — stream agent events via the Durable Streams protocol;
-- `POST /workflows/:name` — invoke a workflow module that exports `route`;
-- `GET /runs/:runId` — stream or inspect runs whose owning workflow exports `runs` middleware (`?meta` reads the run record).
+- `POST /:id` — deliver a message into a conversation (`202` admission);
+- `GET /:id` — read the conversation (materialized history or live updates via the Durable Streams protocol);
+- `POST /:id/abort` — abort in-flight and queued work.
 
-Flue does not add a health endpoint or deployment-wide inspection routes by default. Define a host-required health route in `app.ts`, expose per-workflow run resources with `runs` middleware, and [compose your own admin endpoints](/docs/api/routing-api/#compose-your-own-admin-endpoints) behind operator authorization when listing is required. Agent prompt routes advance sessions without creating runs.
+Flue does not add a health endpoint or inspection routes by default. Define a host-required health route in `app.ts` and compose any operator endpoints behind your own authorization. See [Routing](/docs/guide/routing/).
 
 ### Choosing a sandbox strategy
 

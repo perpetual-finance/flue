@@ -1,6 +1,7 @@
 ---
 title: Channels
 description: Receive verified provider events and connect them to Flue applications.
+lastReviewedAt: 2026-07-02
 ---
 
 Channels bring provider HTTP events into a Flue application. A channel verifies
@@ -46,6 +47,14 @@ The named `channel` export is the Flue integration. The named `client` export is
 ordinary application code initialized with the provider SDK. A channel module
 may also export application-owned tools or helper functions.
 
+The channel serves HTTP only once your `app.ts` mounts it:
+
+```ts title="src/app.ts"
+import { channel as slack } from './channels/slack.ts';
+
+app.route('/channels/slack', slack.route());
+```
+
 See the [Ecosystem](/docs/ecosystem/#channels) for first-party packages
 and provider-specific setup.
 
@@ -58,7 +67,7 @@ webhook documentation and select the generic channel blueprint:
 flue add channel https://provider.example/webhooks --print | codex
 ```
 
-The blueprint guides your coding agent through creating a discovered
+The blueprint guides your coding agent through creating a
 `channels/<provider>.ts` module, verifying requests against the unconsumed body,
 preserving provider-native events, and adding the provider's established SDK for
 outbound calls. Review the generated code and test valid and invalid signatures,
@@ -77,7 +86,8 @@ event affects the rest of the system.
 | Request authentication and signature verification      | Channel package |
 | Provider handshakes and automatic protocol responses   | Channel package |
 | Body limits, parsing, and typed provider payloads      | Channel package |
-| Discovered routes beneath `/channels/<name>/...`       | Flue            |
+| Route suffixes beneath the mount (`/events`, …)        | Channel package |
+| The mount path chosen in `app.ts`                      | Application     |
 | Provider SDK client and outbound credentials           | Application     |
 | OAuth, installation, token storage, and token rotation | Application     |
 | Agent tools and authorization policy                   | Application     |
@@ -88,41 +98,35 @@ instead of rebuilding it inside Flue. Provider ecosystem guides can document
 useful SDK operations, but those methods remain SDK capabilities rather than
 features implemented by the channel package.
 
-## File-based routing
+## Mounting
 
-Each immediate file beneath `channels/` exports one named `channel` binding.
-The filename defines its route namespace:
-
-```txt
-src/channels/github.ts -> /channels/github/webhook
-src/channels/slack.ts  -> /channels/slack/events
-                          /channels/slack/interactions
-                          /channels/slack/commands
-```
-
-The provider package defines one or more fixed, non-empty suffixes such as
-`/webhook`, `/events`, or `/interactions`. The namespace itself, such as
-`/channels/slack`, is not an endpoint.
-
-No `app.ts` is required. If an authored application mounts `flue()` beneath a
-prefix, discovered channels receive the same prefix as agents and workflows:
+A channel object exposes `.route()`, a pure router factory that serves the
+provider's declared routes relative to wherever `app.ts` mounts it:
 
 ```ts title="src/app.ts"
-import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
+import { channel as github } from './channels/github.ts';
+import { channel as slack } from './channels/slack.ts';
 
 const app = new Hono();
-app.route('/api', flue());
+
+app.route('/channels/github', github.route()); // -> POST /channels/github/webhook
+app.route('/channels/slack', slack.route()); // -> POST /channels/slack/events
+//    POST /channels/slack/interactions
+//    POST /channels/slack/commands
 
 export default app;
 ```
 
-This publishes the Slack Events API route at
-`/api/channels/slack/events`. An authored application can prefix all Flue
-routes, but it cannot relocate one discovered channel independently.
+The provider package defines one or more fixed, non-empty suffixes such as
+`/webhook`, `/events`, or `/interactions`. The mount path is yours —
+`/channels/slack` is a convention, and a prefix is just a longer mount path
+(`app.route('/api/channels/slack', slack.route())`). The mount root itself is
+not an endpoint.
 
-Use an application-owned Hono route instead when a provider requires a fully
-custom URL. See [Routing](/docs/guide/routing/).
+Point the provider's webhook configuration at your chosen mount plus the
+provider's suffix. Use an application-owned Hono route instead when a provider
+requires a fully custom URL shape. See [Routing](/docs/guide/routing/).
 
 ## Handle verified events
 
@@ -233,9 +237,8 @@ Conversation keys are canonical identifiers, not authorization capabilities.
 If a caller can select an agent id through another route, authorize that id
 before deriving provider destinations or outbound tools from it.
 
-A dispatched event is an operation inside an agent session. It is not a
-workflow run. See [Agents](/docs/guide/building-agents/) for continuing agent
-state and [Workflows](/docs/guide/workflows/) for finite invocations.
+A dispatched event is an operation inside an agent session. See
+[Agents](/docs/guide/building-agents/) for continuing agent state.
 
 ## Use provider SDKs
 

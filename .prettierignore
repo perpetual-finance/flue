@@ -8,5 +8,6 @@
 packages/cli/bin/_blueprints.generated.ts
 blueprints/sandbox*.md
 blueprints/channel*.md
-blueprints/tooling--vitest-evals.md
+blueprints/database*.md
+blueprints/tooling*.md
 plans/

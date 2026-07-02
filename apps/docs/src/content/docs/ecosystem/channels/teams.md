@@ -54,6 +54,18 @@ configured, a text activity continues the agent instance for its verified Teams
 conversation, and the bound tool can post a reply to the same Connector service
 URL and thread. The generated Fetch client runs on Node and Cloudflare Workers.
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the module's named `channel` export:
+
+```ts title="src/app.ts"
+import { channel as teams } from './channels/teams.ts';
+
+app.route('/channels/teams', teams.route());
+```
+
+`channel.route()` is a pure router factory serving the channel's declared routes relative to the mount path. The webhook paths in this guide assume the conventional `/channels/teams` mount; a different mount path shifts them accordingly. The dispatch-target agent module carries the `'use agent'` directive — the directive registers it, so a dispatch-only agent needs no HTTP mount of its own.
+
 ## Configure
 
 | Variable             | Purpose                                               |
@@ -162,6 +174,7 @@ any non-2xx response, so return a 2xx once the work is safely admitted.
 ## Bind the tool
 
 ```ts title="src/agents/assistant.ts"
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, postMessage } from '../channels/teams.ts';
 

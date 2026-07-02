@@ -56,7 +56,7 @@ const app = new Hono();
 app.get('/api/ping', (c) => c.json({ pong: true, at: new Date().toISOString() }));
 
 // Each agent's HTTP surface, mounted explicitly. Relative to the mount:
-//   POST /:id            prompt (202 admission; ?wait=result)
+//   POST /:id            prompt (202 admission)
 //   GET|HEAD /:id        conversation stream
 //   POST /:id/abort      abort in-flight work
 // The mount path is yours to choose; the file basename (the agent's durable

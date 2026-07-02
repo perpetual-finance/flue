@@ -16,8 +16,9 @@ Flue project.
 
 Read local instructions, detect the package manager and target, and select the
 first existing source root: `<root>/.flue/`, then `<root>/src/`, then
-`<root>/`. Inspect existing agents, environment types, secret conventions, and
-which Google Chat event families the application needs.
+`<root>/`. Inspect existing agents, `app.ts` (the application's route map),
+environment types, secret conventions, and which Google Chat event families
+the application needs.
 
 Install `@flue/google-chat` and `jose@^6.2.3`. Do not use `google-auth-library` in the
 canonical integration: its current package declares Node support and depends
@@ -30,9 +31,8 @@ Install `valibot` using the project's existing dependency conventions.
 ## Create the Fetch client
 
 Create `<source-dir>/lib/google-chat-client.ts`. Keep helpers outside the
-immediate `channels/` directory because every file there is discovered as a
-channel module. Implement and export a narrow `createGoogleChatClient(...)`
-that:
+`channels/` directory so channel modules stay focused on ingress. Implement
+and export a narrow `createGoogleChatClient(...)` that:
 
 - imports the service-account PKCS#8 private key with `jose`;
 - signs an `RS256` JWT assertion with the service-account email as `iss`,
@@ -163,6 +163,27 @@ export function postMessage(ref: GoogleChatConversationRef) {
 }
 ```
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the
+channel's router explicitly:
+
+```ts
+// app.ts
+import { Hono } from 'hono';
+import { channel } from './channels/google-chat.ts';
+
+const app = new Hono();
+app.route('/channels/google-chat', channel.route());
+
+export default app;
+```
+
+`channel.route()` is a pure router factory serving the channel's routes
+relative to the mount path. The `// Path:` comments in this guide assume the
+conventional `/channels/google-chat` mount; a different mount path shifts
+every provider URL accordingly.
+
 Direct callbacks receive `{ c, payload }`. `payload` preserves Google Chat's
 native field names and uppercase discriminants such as `MESSAGE`,
 `ADDED_TO_SPACE`, `CARD_CLICKED`, and `APP_COMMAND`; future authenticated types
@@ -186,6 +207,7 @@ the dispatch boundary.
 ## Wire the agent
 
 ```ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, postMessage } from '../channels/google-chat.ts';
 
@@ -195,12 +217,20 @@ export default defineAgent(({ id }) => ({
 }));
 ```
 
+The `'use agent'` directive (the module's first statement) is what registers
+the agent with the application — `dispatch(...)` from the channel callback
+needs no `app.ts` mounting. Add
+`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+should also be reachable over HTTP directly.
+
 The channel-agent import cycle is supported only because imported bindings are
 read inside deferred callbacks and initializers.
 
 ## Credentials and verification
 
-Set the Google Chat app connection to **HTTP endpoint URL** and configure:
+Set the Google Chat app connection to **HTTP endpoint URL** and configure the
+channel's mount path in `app.ts` plus the route suffix — with the conventional
+`app.route('/channels/google-chat', ...)` mount:
 
 ```txt
 https://example.com/channels/google-chat/interactions
@@ -236,8 +266,8 @@ values. Domain-wide delegation and user impersonation are not required for
 ordinary app-authenticated posting; add them only for application features
 that explicitly require user authentication.
 
-Run the project's typecheck and both Node and Cloudflare builds. Generate local
-RSA keys and signed OIDC or Chat service tokens. Test valid and invalid
+Run the project typecheck and `vite build` for the configured target. Generate
+local RSA keys and signed OIDC or Chat service tokens. Test valid and invalid
 audience, issuer, expiry, signing key, token identity, event subject, body
 shape, and response behavior. Exercise service-account assertion signing,
 OAuth exchange construction, thread/space mismatch rejection, and one outbound

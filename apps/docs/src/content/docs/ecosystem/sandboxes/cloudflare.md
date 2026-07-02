@@ -15,33 +15,23 @@ flue add sandbox cloudflare
 
 ## Overview
 
-Cloudflare Sandbox is a Cloudflare target integration rather than a generated adapter. In a Cloudflare-targeted project, the blueprint installs `@cloudflare/sandbox`; a workflow obtains the bound Durable Object with `getSandbox(...)`, wraps it with Flue's `cloudflareSandbox(...)`, and passes that sandbox factory to an agent definition.
+Cloudflare Sandbox is a Cloudflare target integration rather than a generated adapter. In a Cloudflare-targeted project, the blueprint installs `@cloudflare/sandbox`; the agent's initializer obtains the bound Durable Object with `getSandbox(...)`, wraps it with Flue's `cloudflareSandbox(...)`, and returns that sandbox factory in its runtime config.
 
-```ts title="<source-root>/workflows/coding-agent.ts (excerpt)"
-import { defineAgent, defineWorkflow, type WorkflowRouteHandler } from '@flue/runtime';
+```ts title="src/agents/coding-agent.ts (excerpt)"
+'use agent';
+import { defineAgent } from '@flue/runtime';
 import { cloudflareSandbox } from '@flue/runtime/cloudflare';
 import { getSandbox } from '@cloudflare/sandbox';
-import * as v from 'valibot';
 
 type Env = { Sandbox: DurableObjectNamespace };
 
-export const route: WorkflowRouteHandler = async (_c, next) => next();
-
-const agent = defineAgent<Env>(({ id, env }) => ({
+export default defineAgent<Env>(({ id, env }) => ({
   sandbox: cloudflareSandbox(getSandbox(env.Sandbox, id)),
   model: 'anthropic/claude-opus-4-7',
 }));
-
-export default defineWorkflow({
-  agent,
-  input: v.object({ message: v.string() }),
-  async run({ harness, input }) {
-    return await (await harness.session()).prompt(input.message);
-  },
-});
 ```
 
-The blueprint also exports `Sandbox` from `<source-root>/cloudflare.ts`, adds its Durable Object binding, a new migration entry, and its container declaration to `wrangler.jsonc`, and creates a project-root `Dockerfile` whose image tag matches the installed package version. The resulting workflow runs agent shell and file operations in the container-backed sandbox identified by the workflow run id. Cloudflare's direct delete API does not expose recursive or force controls, so `cloudflareSandbox()` rejects either option before mutation. A Node-targeted project must migrate to the Cloudflare target before using this integration.
+The blueprint also exports `Sandbox` from the source-root `cloudflare.ts`, adds its Durable Object binding, a new migration entry, and its container declaration to `wrangler.jsonc`, and creates a project-root `Dockerfile` whose image tag matches the installed package version. Agent shell and file operations run in the container-backed sandbox keyed by the agent instance id. Cloudflare's direct delete API does not expose recursive or force controls, so `cloudflareSandbox()` rejects either option before mutation. A Node-targeted project must migrate to the Cloudflare target before using this integration.
 
 ## Configure
 

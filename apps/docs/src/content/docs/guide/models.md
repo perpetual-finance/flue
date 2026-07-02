@@ -1,12 +1,12 @@
 ---
 title: LLM (Models & Providers)
 description: Select models, configure providers, and tune reasoning behavior in Flue agents.
-lastReviewedAt: 2026-05-29
+lastReviewedAt: 2026-07-02
 ---
 
 Models determine what kind of work an agent can perform. Providers determine how your application reaches those models, authenticates its requests, and applies any transport-specific configuration.
 
-This guide covers model selection and provider setup. For configuring addressable agents, see [Agents](/docs/guide/building-agents/). For running model-driven work inside finite orchestration, see [Workflows](/docs/guide/workflows/). For provider registration signatures, see the [Provider API](/docs/api/provider-api/). For operation inputs and results, see the [Agent API](/docs/api/agent-api/).
+This guide covers model selection and provider setup. For configuring agents, see [Agents](/docs/guide/building-agents/). For provider registration signatures, see the [Provider API](/docs/api/provider-api/). For operation inputs and results, see the [Agent API](/docs/api/agent-api/).
 
 ## Model specifier
 
@@ -74,7 +74,7 @@ Most hosted providers require credentials before they will accept model requests
 | `openai`     | `OPENAI_API_KEY`     |
 | `openrouter` | `OPENROUTER_API_KEY` |
 
-Keep credential values out of agent modules and committed configuration files. `flue build`, `flue dev`, and `flue run` load project-root `.env` before configuration, with `--env` available to select one alternate file. During Cloudflare development, Worker runtime variables continue to use `.env` or `.dev.vars` through Workers tooling. See [Configuration](/docs/reference/configuration/) for details.
+Keep credential values out of agent modules and committed configuration files. `flue run` loads project-root `.env` automatically, with `--env` available to select one alternate file. `vite dev` and the built Node server read only the environment supplied by the shell, so export credentials before starting them (for example `set -a; source .env; set +a`). During Cloudflare development, Worker runtime variables use `.dev.vars` through Workers tooling.
 
 Some provider paths authenticate through their platform integration instead of a model-provider API key. In particular, the binding-backed `cloudflare/...` provider uses your Worker's `AI` binding, as described in [Cloudflare Workers AI](#cloudflare-workers-ai-cloudflare-only).
 
@@ -98,8 +98,8 @@ Use `registerProvider(...)` in `src/app.ts` when a built-in provider should reta
 
 ```ts title="src/app.ts"
 import { registerProvider } from '@flue/runtime';
-import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
+import assistant from './agents/assistant.ts';
 
 if (process.env.ANTHROPIC_GATEWAY_URL) {
   registerProvider('anthropic', {
@@ -109,12 +109,12 @@ if (process.env.ANTHROPIC_GATEWAY_URL) {
 }
 
 const app = new Hono();
-app.route('/', flue());
+app.route('/agents/assistant', assistant.route());
 
 export default app;
 ```
 
-A provider override can change its endpoint, API key, or headers without changing the provider ID used in your model specifiers. It can also opt into hosted response persistence for supported OpenAI Responses API providers. Each `registerProvider(...)` call replaces the previous registration for that provider ID; the effective settings are always the catalog defaults plus the latest call's options. Keep this runtime setup in `app.ts` rather than repeating it in agents or individual operations.
+A provider override can change its endpoint, API key, or headers without changing the provider ID used in your model specifiers. It can also opt into hosted response persistence for supported OpenAI Responses API providers. Each `registerProvider(...)` call replaces the previous registration for that provider ID; the effective settings are always the catalog defaults plus the latest call's options. Keep this runtime setup in `app.ts` rather than repeating it in agents or individual operations — unless the agent must also work under [`flue run`](/docs/cli/run/), which loads only the agent module and never `app.ts`; register inside the agent module in that case.
 
 ### Custom providers
 
@@ -124,8 +124,8 @@ For example, you can register a local Ollama server through its OpenAI-compatibl
 
 ```ts title="src/app.ts"
 import { registerProvider } from '@flue/runtime';
-import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
+import localAssistant from './agents/local-assistant.ts';
 
 registerProvider('ollama', {
   api: 'openai-completions',
@@ -133,7 +133,7 @@ registerProvider('ollama', {
 });
 
 const app = new Hono();
-app.route('/', flue());
+app.route('/agents/local-assistant', localAssistant.route());
 
 export default app;
 ```
@@ -154,7 +154,7 @@ Choose a new provider ID unless you intend to override a built-in connection pat
 
 ## Cloudflare Workers AI (Cloudflare only)
 
-For applications built with `--target cloudflare`, Flue provides the `cloudflare/...` provider ID for running model calls through a [Workers AI](https://developers.cloudflare.com/workers-ai/) binding. This path uses the binding attached to your Worker rather than URL-backed provider credentials.
+For applications built for the Cloudflare target, Flue provides the `cloudflare/...` provider ID for running model calls through a [Workers AI](https://developers.cloudflare.com/workers-ai/) binding. This path uses the binding attached to your Worker rather than URL-backed provider credentials.
 
 Everything after `cloudflare/` is passed as the model ID to `env.AI.run(...)`. Use Workers AI model IDs such as `@cf/moonshotai/kimi-k2.6`, or a binding-supported AI Gateway model ID such as `openai/gpt-5.5` when your Worker should reach that model through Cloudflare's binding and gateway path. Use `openai/gpt-5.5` without the `cloudflare/` prefix only when you intend to use Flue's direct OpenAI provider and its credentials.
 
@@ -186,8 +186,8 @@ By default, Flue routes `cloudflare/...` binding calls through Cloudflare AI Gat
 ```ts title="src/app.ts"
 import { env } from 'cloudflare:workers';
 import { registerProvider } from '@flue/runtime';
-import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
+import assistant from './agents/assistant.ts';
 
 registerProvider('cloudflare', {
   api: 'cloudflare-ai-binding',
@@ -201,7 +201,7 @@ registerProvider('cloudflare', {
 });
 
 const app = new Hono();
-app.route('/', flue());
+app.route('/agents/assistant', assistant.route());
 
 export default app;
 ```

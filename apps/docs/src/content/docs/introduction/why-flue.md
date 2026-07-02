@@ -1,10 +1,10 @@
 ---
 title: Why Flue?
-description: Build autonomous AI agents and powerful workflows with a programmable TypeScript harness, and run them anywhere.
-# lastReviewedAt: 2026-05-29
+description: Build autonomous AI agents with a programmable TypeScript harness, and run them anywhere.
+lastReviewedAt: 2026-07-02
 ---
 
-**Flue** is the TypeScript framework for building **autonomous AI agents** and the workflows around them. Flue is best-known for giving any model the same [harness-driven architecture](/docs/concepts/agents/) used by Claude Code and other coding agents: sessions, tools, skills, instructions, filesystem access, and a secure sandbox to work in. If you need agents that can do more than produce a single response—agents that operate in an environment your code defines, then run anywhere from local CI to a Node.js server to Cloudflare—then Flue is for you.
+**Flue** is the TypeScript framework for building **autonomous AI agents**. Flue is best-known for giving any model the same [harness-driven architecture](/docs/concepts/agents/) used by Claude Code and other coding agents: sessions, tools, skills, instructions, filesystem access, and a secure sandbox to work in. If you need agents that can do more than produce a single response—agents that operate in an environment your code defines, then run anywhere from local CI to a Node.js server to Cloudflare—then Flue is for you.
 
 ## Features
 
@@ -13,9 +13,10 @@ description: Build autonomous AI agents and powerful workflows with a programmab
 Some highlights include:
 
 - **[Agents](/docs/concepts/agents/):** Autonomous agents that keep context across conversations and events.
-- **[Workflows](/docs/guide/workflows/):** Structured automations from a clear input to a finished result.
+- **[Actions](/docs/guide/actions/):** Structured, validated operations from a clear input to a finished result.
 - **[Sandboxes](/docs/guide/sandboxes/):** A secure environment where agents act and run code.
-- **[CLI](/docs/cli/overview/):** Develop locally, run applications or jobs, and build them for deployment.
+- **[Vite plugin](/docs/guide/vite-plugin/):** `vite dev` and `vite build` own the deployable application.
+- **[CLI](/docs/cli/overview/):** Run any agent one-shot from your terminal with `flue run`.
 - **[Subagents](/docs/guide/subagents/):** Delegate specialized tasks to the right expert.
 - **[Tools](/docs/guide/tools/):** Typed actions for calling APIs and changing data.
 - **[Skills](/docs/guide/skills/):** Reusable expertise agents load on demand.
@@ -51,7 +52,7 @@ Flue is deliberately open:
 - **Open sandboxes:** Connect to a remote provider, or use the built-in virtual sandbox.
 - **Open deploys:** Build your agent for Node.js, Cloudflare, GitHub, GitLab, etc.
 
-See [Sandboxes](/docs/guide/sandboxes/) and the [CLI overview](/docs/cli/overview/) for more details.
+See [Sandboxes](/docs/guide/sandboxes/) and the [Vite plugin](/docs/guide/vite-plugin/) for more details.
 
 ### AI-first
 

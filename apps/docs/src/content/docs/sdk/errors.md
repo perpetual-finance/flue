@@ -30,9 +30,22 @@ interface FluePublicError {
 
 Structured server error data used by transport error responses.
 
+## `FlueExecutionError`
+
+```ts
+class FlueExecutionError extends Error {
+  readonly target: 'agent_submission';
+  readonly targetId: string;
+  readonly failure: 'failed' | 'aborted' | 'terminal_event_missing';
+  readonly error: unknown;
+}
+```
+
+Thrown by `wait()` when the awaited submission settles failed or aborted, or when the stream ends without a terminal settlement (`terminal_event_missing`). `targetId` is the submission id; `error` carries the serialized failure detail when the server recorded one.
+
 ## Stream errors
 
-`stream()` and `events()` reads are backed by [`@durable-streams/client`](https://www.npmjs.com/package/@durable-streams/client), and stream failures surface as that package's error classes. The SDK re-exports the ones reachable through its read paths so you can `instanceof`-match them without installing the package yourself. Their shapes are owned by `@durable-streams/client` and track its releases.
+`observe()` and `wait()` reads are backed by [`@durable-streams/client`](https://www.npmjs.com/package/@durable-streams/client), and stream failures surface as that package's error classes. The SDK re-exports the ones reachable through its read paths so you can `instanceof`-match them without installing the package yourself. Their shapes are owned by `@durable-streams/client` and track its releases.
 
 ### `DurableStreamError`
 

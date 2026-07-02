@@ -1,7 +1,7 @@
 ---
 title: flue init
 description: Reference for creating an initial Flue project configuration file.
-lastReviewedAt: 2026-05-30
+lastReviewedAt: 2026-07-02
 ---
 
 ## Synopsis
@@ -12,7 +12,7 @@ flue init --target <node|cloudflare> [--root <path>] [--force]
 
 ## Description
 
-`flue init` writes a starter `flue.config.ts`. It does not create agents, workflows, or an application entrypoint.
+`flue init` writes a starter `flue.config.ts`. It does not create agents, an `app.ts` entrypoint, or a `vite.config.ts`.
 
 ## Options
 
@@ -29,12 +29,14 @@ Without `--force`, any existing `flue.config.*` file prevents generation. If `--
 The generated `target` value matches `--target`. For `flue init --target node`, the file is:
 
 ```ts title="flue.config.ts"
-import { defineConfig } from '@flue/cli/config';
+import { defineConfig } from '@flue/runtime/config';
 
 export default defineConfig({
   target: 'node',
 });
 ```
+
+`defineConfig` is exported from `@flue/runtime/config` (it moved out of `@flue/cli`).
 
 ## Examples
 

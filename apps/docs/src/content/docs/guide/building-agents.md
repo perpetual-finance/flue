@@ -1,18 +1,19 @@
 ---
 title: Agents
 description: Create an agent, configure its capabilities, and send it messages over time.
-lastReviewedAt: 2026-06-22
+lastReviewedAt: 2026-07-02
 ---
 
 Agents are useful when your application needs a model to keep working within a continuing context. This guide covers creating an agent, configuring its capabilities and environment, and exposing it safely to users.
 
-For the underlying mental model, start with [What is an agent?](/docs/concepts/agents/). If you need single-use or background work instead of a continuing agent, see [Workflows](/docs/guide/workflows/).
+For the underlying mental model, start with [What is an agent?](/docs/concepts/agents/). For bounded work the model should perform reliably inside an agent, see [Actions](/docs/guide/actions/).
 
 ## Creating a new agent
 
-In a Flue project, an agent is a file in `src/agents/` whose default export is created with `defineAgent(...)`:
+In a Flue project, an agent is a module marked with the [`'use agent'` directive](/docs/guide/use-agent/) whose default export is created with `defineAgent(...)`:
 
 ```ts title="src/agents/joke-teller.ts"
+'use agent';
 import { defineAgent, type AgentRouteHandler } from '@flue/runtime';
 
 export const description = 'Tells a short joke in response to each message.';
@@ -27,18 +28,31 @@ export default defineAgent(() => ({
 
 In this example:
 
-- **The filename:** This gives the agent its name: `joke-teller`.
-- `description`: This optional static description is collected into the deployment manifest at build time and returned by [`listAgents()`](/docs/api/data-persistence-api/#inspection-primitives). When present, it must be a non-empty string.
-- `route`: This exposes the agent over HTTP at `POST /agents/joke-teller/:id`. Event streaming is available at `GET /agents/joke-teller/:id`.
+- **`'use agent'`:** This registers the module with the application. The filename gives the agent its durable identity: `joke-teller`.
+- `description`: This optional static description of the agent. When present, it must be a non-empty string.
+- `route`: This optional middleware runs on every HTTP request the agent's routes serve. Here it allows everything; real applications authenticate in it.
 - `defineAgent(...)`: This defines the agent's behavior and environment.
 
-See [Project Layout](/docs/guide/project-layout/) and [Models & Providers](/docs/guide/models/) for more information.
+The module defines the agent; making it reachable over HTTP is a separate, explicit step in `app.ts`:
+
+```ts title="src/app.ts"
+import { Hono } from 'hono';
+import jokeTeller from './agents/joke-teller.ts';
+
+const app = new Hono();
+app.route('/agents/joke-teller', jokeTeller.route());
+
+export default app;
+```
+
+See [Routing](/docs/guide/routing/) for the routes `.route()` serves and [Models & Providers](/docs/guide/models/) for model selection.
 
 ## Agent configuration
 
 The object returned by `defineAgent(...)` defines the agent's behavior, capabilities, and environment. For example, a repository reviewer can be given review instructions, reusable Actions, tools and skills, and a local workspace to work within:
 
 ```ts title="src/agents/repository-reviewer.ts"
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 import reviewChecklist from '../skills/review-checklist/SKILL.md' with { type: 'skill' };
@@ -63,6 +77,7 @@ Actions let the model call finite agent-backed operations, tools execute bounded
 Long instructions can live in their own markdown file. Import a `.md` file with the `with { type: 'markdown' }` import attribute and Flue inlines its contents as a string at build time:
 
 ```ts title="src/agents/repository-reviewer.ts"
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import instructions from './repository-reviewer.md' with { type: 'markdown' };
 
@@ -74,9 +89,9 @@ export default defineAgent(() => ({
 
 The attribute is required — a `.md` import without it fails the build. `SKILL.md` files are not plain markdown and must use `with { type: 'skill' }` instead; see [Skills](/docs/guide/skills/).
 
-## Agent ID
+## Conversation ID
 
-Each agent is initialized with an `id`, which identifies the continuing instance of that agent.
+Each agent conversation is identified by an `id` — the trailing segment of its URL, chosen by the caller:
 
 ```text
 POST /agents/support-assistant/ticket-8472
@@ -85,13 +100,12 @@ POST /agents/support-assistant/ticket-8472
 
 It's up to the developer to decide what `id` means and whether it maps to important application data, such as a user ID, customer support ticket, or GitHub issue. A randomly generated ID can also work.
 
-Flue passes that ID to `defineAgent(...)`, where the application can configure the resources that belong to that instance. For example, a support agent can receive tools scoped to one ticket:
+Flue passes that ID to `defineAgent(...)`, where the application can configure the resources that belong to that conversation. For example, a support agent can receive tools scoped to one ticket:
 
 ```ts title="src/agents/support-assistant.ts"
-import { defineAgent, type AgentRouteHandler } from '@flue/runtime';
+'use agent';
+import { defineAgent } from '@flue/runtime';
 import { createTicketTools } from '../shared/support-tickets.ts';
-
-export const route: AgentRouteHandler = async (_c, next) => next();
 
 export default defineAgent(({ id }) => ({
   model: 'anthropic/claude-haiku-4-5',
@@ -100,13 +114,14 @@ export default defineAgent(({ id }) => ({
 }));
 ```
 
-In this example, the agent can access the ticket selected by its `id`, but its tools do not give it access to other tickets. Conversation history belongs in the agent instance's canonical conversation stream, while durable application data should remain in your own data layer.
+In this example, the agent can access the ticket selected by its `id`, but its tools do not give it access to other tickets. Conversation history belongs in the conversation's canonical stream, while durable application data should remain in your own data layer.
 
 ## Agent profiles
 
-An agent profile defines reusable behavior and capabilities without creating a public agent or configuring its runtime resources. Use profiles to share an agent's model, instructions, tools, or skills across your project.
+An agent profile defines reusable behavior and capabilities without creating an application agent or configuring its runtime resources. Use profiles to share an agent's model, instructions, tools, or skills across your project.
 
 ```ts title="src/agents/support-assistant.ts"
+'use agent';
 import { defineAgent, defineAgentProfile } from '@flue/runtime';
 import { supportTools } from '../shared/support-tools.ts';
 
@@ -128,6 +143,7 @@ export default defineAgent(() => ({
 Subagents are another use for agent profiles: they let an agent delegate focused work to another agent.
 
 ```ts title="src/agents/policy-assistant.ts"
+'use agent';
 import { defineAgent, defineAgentProfile } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
@@ -146,33 +162,35 @@ export default defineAgent(() => ({
 }));
 ```
 
-Here, `policy-assistant` can use its built-in task capability to delegate source lookup to `policy_researcher` before answering a policy question. The subagent is available to its parent for delegated work. It does not receive its own public endpoint because it is not exported as the agent for that file.
+Here, `policy-assistant` can use its built-in task capability to delegate source lookup to `policy_researcher` before answering a policy question. The subagent is available to its parent for delegated work. It does not receive its own public endpoint because it is not an agent module of its own.
 
 For more information, see [Subagents](/docs/guide/subagents/).
 
 ## Interacting with your agent
 
-Users can interact directly with an agent over HTTP. Your application must verify that the caller can access the selected agent `id`.
+Users can interact directly with a mounted agent over HTTP. Your application must verify that the caller can access the selected conversation `id`.
 
 ### HTTP
 
-An agent with a `route` export accepts HTTP messages at `POST /agents/<name>/<id>`. The body contains a message:
+A mounted agent accepts one message per `POST` to its conversation URL. The body is the delivered message:
 
-```http title="Prompt a support agent instance"
+```http title="Prompt a support agent conversation"
 POST /agents/support-assistant/ticket-8472 HTTP/1.1
 Authorization: Bearer <token>
 Content-Type: application/json
 
 {
-  "message": "Can you summarize the open issues in my case?"
+  "kind": "user",
+  "body": "Can you summarize the open issues in my case?"
 }
 ```
 
-The body may also carry an optional `images` array of `{ "type": "image", "data": "<base64>", "mimeType": "image/png" }` attachments for vision-capable models. See the [Routing API](/docs/api/routing-api/) for the full request contract.
+The server responds `202` with an admission record — prompts are fire-and-forget, and the reply is read from the conversation (`GET` the same URL for the durable event stream, or `?view=history` for a snapshot). A `kind: 'user'` message may also carry an `attachments` array of `{ "type": "image", "data": "<base64>", "mimeType": "image/png" }` values for vision-capable models. The [SDK](/docs/sdk/overview/) wraps all of this — `send()`, `wait()`, `observe()`, `history()` — around one conversation URL.
 
-Use the `route` handler to protect direct HTTP access to an agent instance:
+Use the `route` handler to protect direct HTTP access to a conversation:
 
 ```ts title="src/agents/support-assistant.ts"
+'use agent';
 import { defineAgent, type AgentRouteHandler } from '@flue/runtime';
 import { authenticate } from '../auth.ts';
 
@@ -200,7 +218,6 @@ Use `dispatch(...)` when your application receives an event for an agent asynchr
 
 ```ts title="src/app.ts"
 import { dispatch } from '@flue/runtime';
-import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 import supportAssistant from './agents/support-assistant.ts';
 import { verifySupportWebhook } from './shared/support-webhooks.ts';
@@ -222,20 +239,19 @@ app.post('/webhooks/support-comments', async (c) => {
   return c.json(receipt, 202);
 });
 
-app.route('/', flue());
+app.route('/agents/support-assistant', supportAssistant.route());
 
 export default app;
 ```
 
-Your application chooses the agent instance before dispatching the event. `dispatch(...)` accepts it for asynchronous processing rather than waiting for an agent response. See [Channels](/docs/guide/channels/) for verified provider ingress and application-owned outbound behavior.
+Your application chooses the agent conversation before dispatching the event. `dispatch(...)` accepts it for asynchronous processing rather than waiting for an agent response. Because registration comes from the `'use agent'` scan, an agent used only through `dispatch(...)` needs no mount at all. See [Channels](/docs/guide/channels/) for verified provider ingress and application-owned outbound behavior.
 
 ## Next steps
 
 - [Agent API](/docs/api/agent-api/) — look up session operations and their results.
 - [Actions](/docs/guide/actions/), [Tools](/docs/guide/tools/), [Skills](/docs/guide/skills/), and [Sandboxes](/docs/guide/sandboxes/) — configure what an agent can do and where it works.
 - [Subagents](/docs/guide/subagents/) — delegate focused work to specialist profiles.
-- [Routing](/docs/guide/routing/) — expose agent HTTP surfaces inside an authenticated application.
-- [Workflows](/docs/guide/workflows/) — run single-use or background agent work.
-- [Schedules](/docs/guide/schedules/) — invoke finite workflows or dispatch continuing agent input on a schedule.
+- [Routing](/docs/guide/routing/) — mount agent HTTP surfaces inside an authenticated application.
+- [Schedules](/docs/guide/schedules/) — dispatch agent input on a schedule.
 - [Channels](/docs/guide/channels/) — deliver verified provider events into agent sessions.
 - [Observability](/docs/guide/observability/) — inspect agent activity.

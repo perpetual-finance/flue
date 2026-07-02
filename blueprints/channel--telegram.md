@@ -15,8 +15,9 @@ with project-owned outbound Telegram access to a Flue project.
 
 Read local instructions, detect the package manager and target, and select the
 first existing source root: `<root>/.flue/`, then `<root>/src/`, then
-`<root>/`. Inspect existing agents, environment types, secret conventions, and
-which Telegram Update families the application handles.
+`<root>/`. Inspect existing agents, `app.ts` (the application's route map),
+environment types, secret conventions, and which Telegram Update families the
+application handles.
 
 Install `@flue/telegram` and `grammy@^1.44.0`. Flue owns verified webhook
 ingress. The project owns grammY's full `Api` client, update policy, durable
@@ -150,9 +151,31 @@ export function postMessage(ref: TelegramConversationRef) {
 }
 ```
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the
+channel's router explicitly:
+
+```ts
+// app.ts
+import { Hono } from 'hono';
+import { channel } from './channels/telegram.ts';
+
+const app = new Hono();
+app.route('/channels/telegram', channel.route());
+
+export default app;
+```
+
+`channel.route()` is a pure router factory serving the channel's routes
+relative to the mount path. The `// Path:` comment in this guide assumes the
+conventional `/channels/telegram` mount; a different mount path shifts every
+provider URL accordingly.
+
 ## Wire the agent
 
 ```ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, postMessage } from '../channels/telegram.ts';
 
@@ -162,6 +185,12 @@ export default defineAgent(({ id }) => ({
 }));
 ```
 
+The `'use agent'` directive (the module's first statement) is what registers
+the agent with the application — `dispatch(...)` from the channel callback
+needs no `app.ts` mounting. Add
+`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+should also be reachable over HTTP directly.
+
 The channel-agent import cycle is supported because imported bindings are read
 inside deferred callbacks and initializers.
 
@@ -169,7 +198,9 @@ inside deferred callbacks and initializers.
 
 Create a random `TELEGRAM_WEBHOOK_SECRET_TOKEN` containing only letters,
 numbers, underscores, and hyphens. Do not reuse it across bots. Register the
-route and the secret:
+route and the secret — the registered URL is the channel's mount path in
+`app.ts` plus the route suffix, shown here with the conventional
+`app.route('/channels/telegram', ...)` mount:
 
 ```ts
 await client.setWebhook('https://example.com/channels/telegram/webhook', {
@@ -231,7 +262,7 @@ cover:
 - regular, business, thread, and direct-topic conversation keys;
 - empty, JSON, Hono, thrown, and invalid handler responses;
 - real grammY `Api` calls against an injected fake Fetch transport in workerd;
-- Node and Cloudflare project builds.
+- the project typecheck and `vite build` for the configured target.
 
 Do not contact Telegram or copy third-party fixtures.
 

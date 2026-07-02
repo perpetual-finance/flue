@@ -15,8 +15,9 @@ ingress with project-owned outbound WhatsApp access to a Flue project.
 
 Read local instructions, detect the package manager and target, and select the
 first existing source root: `<root>/.flue/`, then `<root>/src/`, then
-`<root>/`. Inspect existing agents, environment types, secret conventions, and
-which WhatsApp message families the application handles.
+`<root>/`. Inspect existing agents, `app.ts` (the application's route map),
+environment types, secret conventions, and which WhatsApp message families the
+application handles.
 
 Install `@flue/whatsapp` and `@kapso/whatsapp-cloud-api@^0.2.1`. Flue owns GET
 verification, exact-body POST signature verification, and forwarding Meta's
@@ -169,9 +170,31 @@ export function postMessage(ref: WhatsAppConversationRef) {
 Use the current Graph API version supported by the project. `v25.0` is current
 when this blueprint was authored; keep version upgrades explicit and tested.
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the
+channel's router explicitly:
+
+```ts
+// app.ts
+import { Hono } from 'hono';
+import { channel } from './channels/whatsapp.ts';
+
+const app = new Hono();
+app.route('/channels/whatsapp', channel.route());
+
+export default app;
+```
+
+`channel.route()` is a pure router factory serving the channel's routes
+relative to the mount path. The `// Paths:` comment in this guide assumes the
+conventional `/channels/whatsapp` mount; a different mount path shifts every
+provider URL accordingly.
+
 ## Wire the agent
 
 ```ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, postMessage } from '../channels/whatsapp.ts';
 
@@ -180,6 +203,12 @@ export default defineAgent(({ id }) => ({
   tools: [postMessage(channel.parseConversationKey(id))],
 }));
 ```
+
+The `'use agent'` directive (the module's first statement) is what registers
+the agent with the application — `dispatch(...)` from the channel callback
+needs no `app.ts` mounting. Add
+`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+should also be reachable over HTTP directly.
 
 The channel-agent import cycle is supported because imported bindings are read
 inside deferred callbacks and initializers.
@@ -197,7 +226,9 @@ WHATSAPP_ACCESS_TOKEN=...
 ```
 
 Generate `WHATSAPP_VERIFY_TOKEN` independently. In the Meta app dashboard,
-configure this callback URL and token:
+configure this callback URL and token — the channel's mount path in `app.ts`
+plus the route suffix, with the conventional
+`app.route('/channels/whatsapp', ...)` mount:
 
 ```txt
 https://example.com/channels/whatsapp/webhook
@@ -278,7 +309,7 @@ Create original synthetic payloads from the current official schemas and cover:
   collisions;
 - real SDK helper and low-level BSUID requests against an injected fake Fetch
   transport in workerd;
-- Node and Cloudflare project builds.
+- the project typecheck and `vite build` for the configured target.
 
 Do not contact Meta or copy third-party fixtures.
 

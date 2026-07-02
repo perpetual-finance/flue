@@ -15,9 +15,9 @@ application-owned Stripe API behavior to a Flue project.
 
 Read local instructions, detect the package manager and target, and select the
 first existing source root: `<root>/.flue/`, then `<root>/src/`, then
-`<root>/`. Inspect existing agents, environment types, secret conventions, the
-Stripe event destination's payload style, and which event types the application
-needs.
+`<root>/`. Inspect existing agents, `app.ts` (the application's route map),
+environment types, secret conventions, the Stripe event destination's payload
+style, and which event types the application needs.
 
 Install `@flue/stripe` and Stripe's official `stripe@^22.2.1` SDK with the
 project's package manager. In a TypeScript project, keep the compatible
@@ -102,6 +102,27 @@ export function retrieveCustomer(customerId: string) {
 }
 ```
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the
+channel's router explicitly:
+
+```ts
+// app.ts
+import { Hono } from 'hono';
+import { channel } from './channels/stripe.ts';
+
+const app = new Hono();
+app.route('/channels/stripe', channel.route());
+
+export default app;
+```
+
+`channel.route()` is a pure router factory serving the channel's routes
+relative to the mount path. The `// Path:` comments in this guide assume the
+conventional `/channels/stripe` mount; a different mount path shifts every
+provider URL accordingly.
+
 The example assumes one Stripe account and uses its customer id as the agent
 instance id. For Connect or organization destinations, derive a stable
 application-specific id that also includes the verified `event.account` or
@@ -117,6 +138,7 @@ application has explicitly authorized that access.
 Bind the trusted customer id inside the agent initializer:
 
 ```ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { retrieveCustomer } from '../channels/stripe.ts';
 
@@ -125,6 +147,12 @@ export default defineAgent(({ id: customerId }) => ({
   tools: [retrieveCustomer(customerId)],
 }));
 ```
+
+The `'use agent'` directive (the module's first statement) is what registers
+the agent with the application — `dispatch(...)` from the channel callback
+needs no `app.ts` mounting. Add
+`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+should also be reachable over HTTP directly.
 
 The channel-agent import cycle is supported only because imported bindings are
 read inside deferred callbacks and initializers. Do not read the agent binding
@@ -172,13 +200,15 @@ weakening every known event's native narrowing.
 calls and initializes the project-owned SDK client. They are separate
 credentials. Follow the project's secret conventions and never invent values.
 
-Configure the Stripe event destination as:
+Configure the Stripe event destination as the channel's mount path in `app.ts`
+plus the route suffix — with the conventional
+`app.route('/channels/stripe', ...)` mount:
 
 ```txt
 https://example.com/channels/stripe/webhook
 ```
 
-If `flue()` has an outer mount prefix, include it in the configured URL.
+A different mount path changes the configured URL accordingly.
 Subscribe only to event types the application handles.
 
 The official Stripe SDK exposes a `workerd` implementation backed by Fetch and
@@ -188,7 +218,7 @@ typed Worker bindings remain an option. The completed project must execute
 webhook verification and one fake-transport client request in workerd under
 that configuration and pass its actual Cloudflare build.
 
-Run the project's typecheck and configured Node and Cloudflare builds. Generate
+Run the project typecheck and `vite build` for the configured target. Generate
 original local snapshot and thin payloads with `Stripe-Signature` HMACs. Test
 valid and tampered exact bytes, missing and stale signatures, payload-mode
 mismatches, malformed and oversized bodies, `/channels/stripe/webhook`, and the

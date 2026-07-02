@@ -72,6 +72,18 @@ for the verified business-scoped user or group, and the bound client tool replie
 to that same destination. The Fetch-based client runs on Node and Cloudflare
 Workers with Flue's `nodejs_compat` setting.
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the module's named `channel` export:
+
+```ts title="src/app.ts"
+import { channel as whatsapp } from './channels/whatsapp.ts';
+
+app.route('/channels/whatsapp', whatsapp.route());
+```
+
+`channel.route()` is a pure router factory serving the channel's declared routes relative to the mount path. The webhook paths in this guide assume the conventional `/channels/whatsapp` mount; a different mount path shifts them accordingly. The dispatch-target agent module carries the `'use agent'` directive — the directive registers it, so a dispatch-only agent needs no HTTP mount of its own.
+
 ## Configure
 
 | Variable                       | Purpose                                                                      |

@@ -1,7 +1,7 @@
 ---
 title: Skills
 description: Add Agent Skills to Flue agents and invoke them from sessions.
-lastReviewedAt: 2026-06-12
+lastReviewedAt: 2026-07-02
 ---
 
 Flue supports [Agent Skills](https://agentskills.io/specification): reusable instructions and supporting resources that agents can load for specialized, repeatable work, such as applying a review process, following an operational workflow, or using shared project guidance. Skills can be bundled with your application or supplied by the runtime workspace where an agent operates.
@@ -12,19 +12,17 @@ Skills guide agent work; they do not add executable capabilities. Use [tools](/d
 
 Flue lets you import an Agent Skill from your project or an installed package. Flue packages its instructions and supporting files with your application so an initialized harness can use it without depending on files in its runtime workspace.
 
-To keep an application-owned skill next to the agents and workflows that use it, add its directory to your project. This guide uses `src/skills/`:
+To keep an application-owned skill next to the agents that use it, add its directory to your project. This guide uses `src/skills/`:
 
 ```text title="Application-owned skill"
 src/
 ├─ agents/
 │  └─ assistant.ts
-├─ skills/
-│  └─ review/
-│     ├─ SKILL.md
-│     └─ references/
-│        └─ checklist.md
-└─ workflows/
-   └─ review-change.ts
+└─ skills/
+   └─ review/
+      ├─ SKILL.md
+      └─ references/
+         └─ checklist.md
 ```
 
 The example stores the skill in `src/skills/` alongside other authored source, but its location does not make it available on its own. Import its `SKILL.md` to include it in the application and make it available to an agent. See [Project Layout](/docs/guide/project-layout/) for how Flue organizes authored source.
@@ -34,6 +32,7 @@ The example stores the skill in `src/skills/` alongside other authored source, b
 Import your skills with the `skill` import attribute (a new feature in modern JavaScript). Once imported, pass the imported reference to the agent's `skills` configuration:
 
 ```ts title="src/agents/assistant.ts"
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import review from '../skills/review/SKILL.md' with { type: 'skill' };
 import triage from '../skills/triage/SKILL.md' with { type: 'skill' };
@@ -92,20 +91,15 @@ Unknown frontmatter fields are ignored, so skills that carry extra host-specific
 
 Normally you can trust the agent to use the skills you provide it, as needed, to complete its work.
 
-In workflows, you can manually trigger a skill through the `session.skill(name: string)` API method. This works with both registered imported skills and workspace-discovered skills.
+In application-controlled code such as an [Action](/docs/guide/actions/), you can manually trigger a skill through the `session.skill(name: string)` API method. This works with both registered imported skills and workspace-discovered skills.
 
-```ts title="src/workflows/review-change.ts"
-import { defineAgent, defineWorkflow } from '@flue/runtime';
+```ts title="src/actions/review-change.ts"
+import { defineAction } from '@flue/runtime';
 import * as v from 'valibot';
-import review from '../skills/review/SKILL.md' with { type: 'skill' };
 
-const agent = defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-  skills: [review],
-}));
-
-export default defineWorkflow({
-  agent,
+export const reviewChange = defineAction({
+  name: 'review_change',
+  description: 'Apply the review skill to one proposed change.',
   input: v.object({ change: v.string() }),
 
   async run({ harness, input }) {
@@ -123,7 +117,7 @@ export default defineWorkflow({
 });
 ```
 
-`args` provides input for this invocation of the skill. The `result` schema makes `response.data` a validated structured result; omit it when you want text output from `response.text`. The string passed to `session.skill(...)` is the declared skill name, not a path to `SKILL.md`.
+`args` provides input for this invocation of the skill. The `result` schema makes `response.data` a validated structured result; omit it when you want text output from `response.text`. The string passed to `session.skill(...)` is the declared skill name, not a path to `SKILL.md` — here the agent that exposes this Action registers the `review` skill in its `skills` configuration.
 
 See the [Agent API](/docs/api/agent-api/) for operation options and response types.
 
@@ -132,7 +126,7 @@ See the [Agent API](/docs/api/agent-api/) for operation options and response typ
 Skills are most useful when:
 
 - an agent needs a repeatable process, checklist, or set of conventions;
-- specialized guidance should be shared across agents and workflows;
+- specialized guidance should be shared across agents;
 - instructions need supporting templates, examples, or reference files;
 - a workspace should provide its own guidance without changing application code.
 

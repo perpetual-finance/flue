@@ -69,6 +69,18 @@ retrieve that order without letting the model choose a shop, token, or order id.
 The same verified Fetch path runs on Node and Cloudflare Workers with Flue's
 `nodejs_compat` setting.
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the module's named `channel` export:
+
+```ts title="src/app.ts"
+import { channel as shopify } from './channels/shopify.ts';
+
+app.route('/channels/shopify', shopify.route());
+```
+
+`channel.route()` is a pure router factory serving the channel's declared routes relative to the mount path. The webhook paths in this guide assume the conventional `/channels/shopify` mount; a different mount path shifts them accordingly. The dispatch-target agent module carries the `'use agent'` directive — the directive registers it, so a dispatch-only agent needs no HTTP mount of its own.
+
 ## Configure
 
 | Variable                         | Purpose                                                                |
@@ -280,6 +292,7 @@ string through `Number`.
 ## Bind the tool
 
 ```ts title="src/agents/orders.ts"
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { orderRefFromInstanceId, retrieveOrder } from '../channels/shopify.ts';
 

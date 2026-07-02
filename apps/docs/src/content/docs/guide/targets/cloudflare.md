@@ -1,34 +1,31 @@
 ---
 title: Cloudflare
 description: Understand the Cloudflare-specific runtime behavior and APIs for Flue applications.
-lastReviewedAt: 2026-07-01
+lastReviewedAt: 2026-07-02
 ---
 
-The Cloudflare target builds your agents and workflows for the Cloudflare platform. Generated agents and workflows run inside Durable Objects, using the Agents SDK, Workers AI, Cloudflare Sandbox, Cloudflare Shell, and other Worker primitives where appropriate. Durable Objects give each agent instance its own persistent state, durable execution, and global addressability out of the box.
+The Cloudflare target builds your agents for the Cloudflare platform. Each agent runs inside its own Durable Object class, using the Agents SDK, Workers AI, Cloudflare Sandbox, Cloudflare Shell, and other Worker primitives where appropriate. Durable Objects give each agent conversation its own persistent state, durable execution, and global addressability out of the box.
 
-For a deployment walkthrough, see [Deploy Agents on Cloudflare](/docs/ecosystem/deploy/cloudflare/).
+The build is owned by Vite: `flue()` plus the official `@cloudflare/vite-plugin` in `vite.config.ts`, with `flue()` first. See [Vite plugin](/docs/guide/vite-plugin/#the-cloudflare-target) for the plugin mechanics and [Deploy Agents on Cloudflare](/docs/ecosystem/deploy/cloudflare/) for a deployment walkthrough.
 
 ## Generated Durable Objects
 
-Flue generates a Durable Object class and a Wrangler binding for each discovered agent and workflow. Agents are discovered from `src/agents/` and workflows from `src/workflows/` (see [Project Layout](/docs/guide/project-layout/) for supported alternatives):
+Flue generates a Durable Object class and a Wrangler binding for each [`'use agent'`](/docs/guide/use-agent/) module found by the scan. Both derive from the file basename — the agent's identity:
 
 ```txt
 src/agents/support-chat.ts   ->  FlueSupportChatAgent
                                  env.FLUE_SUPPORT_CHAT_AGENT
-
-src/workflows/translate.ts   ->  FlueTranslateWorkflow
-                                 env.FLUE_TRANSLATE_WORKFLOW
 ```
 
-The class name is how Cloudflare identifies the Durable Object in migrations. The binding is how your application code accesses the Durable Object namespace at runtime through `env`.
+The class name is how Cloudflare identifies the Durable Object in migrations. The binding is how your application code accesses the Durable Object namespace at runtime through `env`. Because both come from the file basename, renaming an agent file is a storage-identity change — see [Managing migrations](#managing-migrations).
 
-Canonical agent conversation streams, immutable attachments, accepted submissions, and workflow run history are stored in the owning Durable Object's SQLite storage automatically. The Cloudflare target does not use `db.ts`; a source-root `db.ts` is rejected at build time.
+Canonical agent conversation streams, immutable attachments, and accepted submissions are stored in the owning Durable Object's SQLite storage automatically. The Cloudflare target does not use `db.ts`; a source-root `db.ts` is rejected at build time.
 
 Do not hand-author Flue's generated `FLUE_*` bindings in `wrangler.jsonc`. Declare migrations for generated classes, and declare bindings only for application-owned resources such as your own Durable Objects, R2 buckets, Queues, Hyperdrive configs, Browser Rendering bindings, or Send Email bindings.
 
 ## `wrangler.jsonc`
 
-Your project's `wrangler.jsonc` at the project root configures your Worker's name, compatibility settings, and Durable Object migrations. Flue reads this file during builds and merges its generated bindings alongside your authored configuration.
+Your project's `wrangler.jsonc` at the project root configures your Worker's name, compatibility settings, and Durable Object migrations. Flue reads this file, merges its contributions (`main` and the per-agent Durable Object bindings) into a generated `.flue-vite.wrangler.jsonc` that the Cloudflare Vite plugin consumes, and never modifies your authored file. Add `.flue-vite/` and `.flue-vite.wrangler.jsonc` to `.gitignore`.
 
 Flue generates the Durable Object classes and bindings, but your `wrangler.jsonc` must declare two things:
 
@@ -44,49 +41,44 @@ Flue generates the Durable Object classes and bindings, but your `wrangler.jsonc
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["FlueRegistry", "FlueSupportChatAgent", "FlueTranslateWorkflow"],
+      "new_sqlite_classes": ["FlueSupportChatAgent"],
     },
   ],
 }
 ```
 
-`FlueRegistry` is a Flue-internal Durable Object that indexes workflow runs across the deployment. Always include it in your initial migration.
-
 ### Managing migrations
 
-Cloudflare requires an ordered migration history that accounts for every Durable Object class your Worker has ever deployed. When you add a new agent or workflow, append a new migration entry with a unique tag:
+Migration history stays user-authored — Flue never writes it, because it is an ordered, append-only record of your deployments. Adding an agent is always a triple: the `'use agent'` file, the mount in `app.ts` (unless dispatch-only), and a new migration entry with a unique tag:
 
 ```jsonc
 {
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["FlueRegistry", "FlueSupportChatAgent"] },
-    { "tag": "v2", "new_sqlite_classes": ["FlueTranslateWorkflow"] },
+    { "tag": "v1", "new_sqlite_classes": ["FlueSupportChatAgent"] },
+    { "tag": "v2", "new_sqlite_classes": ["FlueTriageAgent"] },
   ],
 }
 ```
 
 Never rewrite or reorder deployed migration entries. Generated agent classes require Durable Object SQLite, so introduce them through `new_sqlite_classes`, not legacy `new_classes`. Use Cloudflare's `renamed_classes` and `deleted_classes` migration fields when changing deployed class names or removing classes.
 
-For example, if you remove an agent or workflow that was previously deployed, append a `deleted_classes` migration so Cloudflare knows the class is no longer exported. Without this entry, Wrangler will fail because the migration history references a class that the Worker no longer provides:
+For example, if you remove an agent that was previously deployed, append a `deleted_classes` migration so Cloudflare knows the class is no longer exported. Without this entry, Wrangler will fail because the migration history references a class that the Worker no longer provides:
 
 ```jsonc
 {
   "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["FlueRegistry", "FlueSupportChatAgent", "FlueTranslateWorkflow"],
-    },
-    { "tag": "v2", "deleted_classes": ["FlueSupportChatAgent"] },
+    { "tag": "v1", "new_sqlite_classes": ["FlueSupportChatAgent", "FlueTriageAgent"] },
+    { "tag": "v2", "deleted_classes": ["FlueTriageAgent"] },
   ],
 }
 ```
 
-Similarly, use `renamed_classes` when a deployed class changes its name, such as when renaming an agent module file:
+Similarly, use `renamed_classes` when a deployed class changes its name — which for Flue agents means the agent's **file** was renamed:
 
 ```jsonc
 {
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["FlueRegistry", "FlueSupportChatAgent"] },
+    { "tag": "v1", "new_sqlite_classes": ["FlueSupportChatAgent"] },
     {
       "tag": "v2",
       "renamed_classes": [{ "from": "FlueSupportChatAgent", "to": "FlueSupportAssistantAgent" }],
@@ -95,13 +87,15 @@ Similarly, use `renamed_classes` when a deployed class changes its name, such as
 }
 ```
 
+Renaming preserves the class's stored conversations under the new name. Re-mounting an agent at a different URL in `app.ts`, by contrast, needs no migration at all — the mount path is not part of the storage identity.
+
 ## Durable agent execution
 
-Cloudflare agents durably admit direct HTTP prompts together with `dispatch(...)` inputs. All accepted input for one agent instance enters the same queue.
+Cloudflare agents durably admit direct HTTP prompts together with `dispatch(...)` inputs. All accepted input for one agent conversation enters the same queue.
 
 ```txt
 direct HTTP prompt ─────────────────────┐
-                                        ├→ durable per-instance queue → canonical stream
+                                        ├→ durable per-conversation queue → canonical stream
 dispatch(...) input ────────────────────┘
 ```
 
@@ -122,14 +116,15 @@ type Env = { AGENT_APP: Fetcher };
 
 export default {
   async fetch(request: Request, env: Env) {
-    const client = createFlueClient({
+    const convo = createFlueClient({
       // The host is never dialed — only the pathname and query select a route.
-      // `baseUrl` must be absolute, so any placeholder origin works.
-      baseUrl: 'https://agent.internal',
+      // The URL must be absolute, so any placeholder origin works; the path is
+      // wherever the agent app's app.ts mounts the agent, plus the conversation id.
+      url: 'https://agent.internal/agents/support/ticket-42',
       fetch: (input, init) => env.AGENT_APP.fetch(new Request(input, init)),
     });
 
-    const admission = await client.agents.send('support', 'ticket-42', {
+    const admission = await convo.send({
       message: { kind: 'user', body: 'Summarize this ticket.' },
     });
 
@@ -140,10 +135,10 @@ export default {
 
 The binding carries the same HTTP requests the public routes use, so every client operation works over it — `send`, `wait`, `abort`, `history`, and `observe` in both `long-poll` and `sse` modes. Streaming reads travel through the same `fetch`, so live conversation updates cross the binding and the owning Durable Object with no extra wiring.
 
-Attachments are the one exception. `client.agents.attachmentUrl(...)` returns a URL on the placeholder host and the client never fetches it for you; the same URL also appears on `file` parts in `observe()` and `history()` snapshots. To download attachment bytes over a binding, forward that URL through the same fetcher:
+Attachments are the one exception. `convo.attachmentUrl(...)` returns a URL on the placeholder host and the client never fetches it for you; the same URL also appears on `file` parts in `observe()` and `history()` snapshots. To download attachment bytes over a binding, forward that URL through the same fetcher:
 
 ```ts
-const url = client.agents.attachmentUrl('support', 'ticket-42', attachmentId);
+const url = convo.attachmentUrl(attachmentId);
 const response = await env.AGENT_APP.fetch(new Request(url));
 ```
 
@@ -168,6 +163,7 @@ To customize the gateway, disable it, or target a named gateway, re-register the
 [Cloudflare Sandbox](https://developers.cloudflare.com/containers/) provides container-backed Linux environments for agents that need tools such as git, package installation, native binaries, or a real filesystem. Export the sandbox Durable Object class from `cloudflare.ts`, declare its binding and container image in `wrangler.jsonc`, then wrap the RPC stub returned by `getSandbox(...)` with `cloudflareSandbox(...)`:
 
 ```ts
+'use agent';
 import { getSandbox } from '@cloudflare/sandbox';
 import { defineAgent } from '@flue/runtime';
 import { cloudflareSandbox } from '@flue/runtime/cloudflare';
@@ -203,11 +199,12 @@ import { getDefaultWorkspace, getShellSandbox } from '../sandboxes/cloudflare-sh
 
 Use Cloudflare Shell when a durable Workspace and structured code operations are enough. Use Cloudflare Sandbox when you need a full Linux environment with arbitrary shell access. See [Cloudflare Shell](/docs/ecosystem/sandboxes/cloudflare-shell/) for setup details.
 
-## Extending Agents and Workflows on Cloudflare
+## Extending Agents on Cloudflare
 
-Flue owns each generated Durable Object class. When an agent or workflow needs access to native Cloudflare Agents SDK capabilities such as `onStart()`, `schedule()`, `scheduleEvery()`, or `queue()`, export a `cloudflare` extension descriptor from its module:
+Flue owns each generated Durable Object class. When an agent needs access to native Cloudflare Agents SDK capabilities such as `onStart()`, `schedule()`, `scheduleEvery()`, or `queue()`, export a `cloudflare` extension descriptor from its module:
 
 ```ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { extend } from '@flue/runtime/cloudflare';
 
@@ -242,11 +239,11 @@ export const cloudflare = extend({
 
 Both `base` and `wrap` are optional. Do not override Flue-owned `fetch()`, `onRequest()`, `onFiberRecovered()`, or `alarm()` methods.
 
-Use this module-local extension point for scheduled or queued behavior that belongs to one generated agent or workflow Durable Object. Do not add a Worker cron trigger just to reach `scheduleEvery(...)`; the Agents SDK scheduling APIs run inside the generated Durable Object after that object is created. If your application needs to create the first instance, expose an authenticated bootstrap route in `app.ts` or otherwise obtain the Durable Object namespace from `env` and address the instance once.
+Use this module-local extension point for scheduled or queued behavior that belongs to one generated agent Durable Object. Do not add a Worker cron trigger just to reach `scheduleEvery(...)`; the Agents SDK scheduling APIs run inside the generated Durable Object after that object is created. If your application needs to create the first conversation, expose an authenticated bootstrap route in `app.ts` or otherwise obtain the Durable Object namespace from `env` and address the conversation once.
 
 ## Extending `cloudflare.ts` Entrypoint
 
-Your project may include a source-root `cloudflare.ts` file for Worker-level Cloudflare code that is separate from individual agent and workflow modules.
+Your project may include a source-root `cloudflare.ts` file for Worker-level Cloudflare code that is separate from individual agent modules.
 
 Any **named export** from this file becomes a top-level Worker export. This is how you add application-owned Durable Objects to the same Worker that Flue manages. For example, a cache Durable Object that your agents can access through `env`:
 
@@ -262,7 +259,7 @@ export class SalesforceAuthCache extends DurableObject {
 }
 ```
 
-After exporting the class, declare its Durable Object binding and migration in `wrangler.jsonc`. Your agents and workflows can then access it through `env.SALESFORCE_AUTH_CACHE`.
+After exporting the class, declare its Durable Object binding and migration in `wrangler.jsonc`. Your agents can then access it through `env.SALESFORCE_AUTH_CACHE`.
 
 The **default export** may contribute non-HTTP Worker handlers. For example, a `scheduled` handler that runs on a cron trigger:
 
@@ -276,7 +273,7 @@ export default {
 
 Use `app.ts` for custom HTTP routes and middleware. `cloudflare.ts` must not define a default `fetch` handler because Flue keeps HTTP composition in `app.ts`.
 
-Use `cloudflare.ts` for Worker-level events such as inbound email, queues, or cron handlers that are not owned by a specific generated agent or workflow class. To start a Flue Workflow from one of these handlers, import its discovered default export and call `invoke(workflow, { input })`. Ambient invocation creates a real Workflow Run, does not require an exported HTTP `route`, and bypasses HTTP middleware. Do not call the Workflow's Action or `run(...)` callback directly. See [Schedules](/docs/guide/schedules/) for a Cron Trigger example and [Workflows](/docs/guide/workflows/#application-code) for invocation semantics.
+Use `cloudflare.ts` for Worker-level events such as inbound email, queues, or cron handlers that are not owned by a specific generated agent class. To deliver scheduled input to an agent from one of these handlers, import the agent's default export and call `dispatch(agent, { id, message })` — dispatch needs no mount and bypasses HTTP middleware. See [Schedules](/docs/guide/schedules/) for a Cron Trigger example.
 
 ## Reference
 
@@ -290,7 +287,7 @@ function extend<TBase extends object = CloudflareAgentLike, TEnv = any>(
 ): CloudflareExtension<TBase, TEnv>;
 ```
 
-Creates a branded Cloudflare extension descriptor for an agent or workflow module. The descriptor may contain `base` and `wrap` callbacks.
+Creates a branded Cloudflare extension descriptor for an agent module. The descriptor may contain `base` and `wrap` callbacks.
 
 Both callbacks are typed against `CloudflareAgentLike`, a structural view of the Agents SDK `Agent` base class covering `state`, `setState()`, `onStart()`, `schedule()`, `scheduleEvery()`, and `queue()`, so typos inside `base` callbacks fail at typecheck. Pass an explicit `TBase` (for example `extend<CloudflareAgentLike<MyState>>({ ... })`) to type against a richer class shape, and an explicit `TEnv` to type the `env` an instrumentation callback receives.
 
@@ -327,12 +324,12 @@ import { getDurableObjectIdentity } from '@flue/runtime/cloudflare';
 function getDurableObjectIdentity(): FlueDurableObjectIdentity;
 ```
 
-Returns the generated Durable Object identity for the current agent or workflow context. Only valid inside a generated Durable Object request handler.
+Returns the generated Durable Object identity for the current agent context. Only valid inside a generated Durable Object request handler.
 
 The returned `FlueDurableObjectIdentity` includes:
 
-- `bindingName` -- the Wrangler binding name, such as `"FLUE_TRANSLATE_WORKFLOW"`.
-- `className` -- the generated class name, such as `"FlueTranslateWorkflow"`.
+- `bindingName` -- the Wrangler binding name, such as `"FLUE_SUPPORT_CHAT_AGENT"`.
+- `className` -- the generated class name, such as `"FlueSupportChatAgent"`.
 - `name` -- the instance name passed to `idFromName` or `getAgentByName`.
 - `id` -- the Durable Object ID as a string.
 

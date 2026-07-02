@@ -1,52 +1,53 @@
 ---
 title: Project Layout
 description: Understand the source files and generated output in a Flue project.
-lastReviewedAt: 2026-06-22
+lastReviewedAt: 2026-07-02
 ---
 
-Flue discovers application entrypoints from your project's source directory. Use `src/` for new projects, with `app.ts`, `db.ts`, `cloudflare.ts`, `agents/`, `workflows/`, and `channels/` defining the application surfaces Flue builds.
+A Flue project is a Vite project. Two config files at the root wire it up, `src/app.ts` is the application's route map (and the only required source file), and agents are ordinary modules marked with the [`'use agent'` directive](/docs/guide/use-agent/) anywhere under the source directory.
 
 ## Example project layout
 
 ```text
 my-project/
 ├─ package.json
+├─ vite.config.ts
 ├─ flue.config.ts
+├─ wrangler.jsonc        # Cloudflare target only
 ├─ src/
-│  ├─ app.ts
-│  ├─ db.ts
-│  ├─ cloudflare.ts
+│  ├─ app.ts             # required — the route map
+│  ├─ db.ts              # optional — Node persistence
+│  ├─ cloudflare.ts      # optional — non-HTTP Worker handlers
 │  ├─ agents/
-│  │  └─ support-assistant.ts
-│  ├─ workflows/
-│  │  └─ summarize-ticket.ts
+│  │  └─ support-assistant.ts   # 'use agent'
 │  └─ channels/
 │     └─ github.ts
 └─ dist/
 ```
 
-Organize supporting application code however you prefer inside `src/`. The files and directories below are the parts of your application that Flue discovers and builds automatically.
+Organize supporting application code however you prefer inside `src/`. Only `app.ts`, `db.ts`, and `cloudflare.ts` are discovered by their names; everything else — including where agent and channel modules live — is your own structure. `agents/` and `channels/` are conventions this documentation follows, not rules.
 
-## Important files and directories
+## Important files
 
-| Path            | Purpose                                                                               | Learn more                                                            |
-| --------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `app.ts`        | Optional entrypoint for composing Flue with your application's routes and middleware. | [Routing](/docs/guide/routing/)                                       |
-| `db.ts`         | Optional Node.js persistence adapter for agent conversations and workflow runs.       | [Database](/docs/guide/database/)                                     |
-| `cloudflare.ts` | Optional Cloudflare-only module for Worker exports and non-HTTP handlers.             | [Cloudflare](/docs/ecosystem/deploy/cloudflare/#extending-the-worker) |
-| `agents/`       | Addressable agents that can receive continuing interactions over time.                | [Agents](/docs/guide/building-agents/)                                |
-| `workflows/`    | Finite operations that receive input and return a result.                             | [Workflows](/docs/guide/workflows/)                                   |
-| `channels/`     | Verified provider HTTP ingress discovered by filename.                                | [Channels](/docs/guide/channels/)                                     |
+| Path             | Purpose                                                                                | Learn more                                                                      |
+| ---------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `vite.config.ts` | Makes the project a Flue application via the `flue()` plugin; `vite dev`/`vite build`. | [Vite plugin](/docs/guide/vite-plugin/)                                         |
+| `flue.config.ts` | Optional host-independent project config (target, entry paths, agent-scan glob).       | [Configuration](/docs/reference/configuration/)                                 |
+| `app.ts`         | **Required.** The route map: mounts agents, channels, and custom routes.               | [Routing](/docs/guide/routing/)                                                 |
+| `db.ts`          | Optional Node.js persistence adapter for durable conversations.                        | [Database](/docs/guide/database/)                                               |
+| `cloudflare.ts`  | Optional Cloudflare-only module for Worker exports and non-HTTP handlers.              | [Cloudflare](/docs/guide/targets/cloudflare/#extending-cloudflarets-entrypoint) |
+| Agent modules    | Files with the `'use agent'` directive, anywhere under the source directory.           | ['use agent'](/docs/guide/use-agent/)                                           |
+| Channel modules  | Files exporting a `channel` binding, mounted in `app.ts`.                              | [Channels](/docs/guide/channels/)                                               |
 
 ### `app.ts`
 
-`app.ts` is an optional custom application entrypoint. Add it when your server needs to compose Flue routes with application behavior such as authentication, webhooks, health endpoints, or a route prefix. A project without `app.ts` uses Flue's generated application directly.
+`app.ts` default-exports an ordinary Hono application and is the single source of truth for your application's URLs — every agent and channel route is mounted there explicitly (`app.route('/agents/triage', triage.route())`). A project without an `app.ts` fails the build with a two-line starter suggestion. Because it imports `Hono`, include `hono` in your application dependencies.
 
 For more information, see [Routing](/docs/guide/routing/).
 
 ### `db.ts`
 
-`db.ts` is an optional Node.js persistence entrypoint. Its default export configures the `PersistenceAdapter` used for canonical agent conversations, attachments, accepted submissions, and workflow-run records. Without it, Node.js uses in-memory SQLite and loses this state when the process exits. Cloudflare provides Durable Object SQLite automatically and rejects `db.ts`.
+`db.ts` is an optional Node.js persistence entrypoint. Its default export configures the `PersistenceAdapter` used for canonical agent conversations, attachments, and accepted submissions. Without it, Node.js uses in-memory SQLite and loses this state when the process exits. Cloudflare provides Durable Object SQLite automatically and does not use `db.ts`.
 
 For more information, see [Database](/docs/guide/database/).
 
@@ -54,34 +55,19 @@ For more information, see [Database](/docs/guide/database/).
 
 `cloudflare.ts` is an optional Cloudflare-only deployment module. Its named exports become top-level Worker exports, and its optional default export adds non-HTTP Worker handlers. Use it for same-Worker Durable Object classes, explicit Cloudflare Sandbox aliases, queue consumers, scheduled handlers, and other Cloudflare-native additions. Custom HTTP handling remains in `app.ts`.
 
-For more information, see [Deploy on Cloudflare](/docs/ecosystem/deploy/cloudflare/#extending-the-worker).
+For more information, see [Cloudflare](/docs/guide/targets/cloudflare/#extending-cloudflarets-entrypoint).
 
-### `agents/`
+### Agent modules
 
-The `agents/` directory contains agents that Flue can address by name. Each immediate file defines one discovered agent, and its filename becomes the agent name: `src/agents/support-assistant.ts` is discovered as `support-assistant`.
+An agent is any module under the source directory whose first statement is the `'use agent'` directive and whose default export is `defineAgent(...)`. The file basename is the agent's durable identity, so basenames must be unique among an application's agents and use lower-kebab-case (`support-assistant.ts`). Nesting is fine — `src/agents/` is just a tidy convention.
 
-Keep agent files flat inside `agents/`; nested files are not discovered as additional agents. Prefer lower-kebab-case filenames such as `support-assistant.ts` so names remain portable across deployment targets.
+The build scans the source directory for marked modules and registers all of them; mounting in `app.ts` is a separate, explicit step (and optional for dispatch-only agents). To narrow the scan, set the `agents` glob in `flue.config.ts`.
 
-For more information, see [Agents](/docs/guide/building-agents/).
+For more information, see ['use agent'](/docs/guide/use-agent/).
 
-### `workflows/`
+### Channel modules
 
-The `workflows/` directory contains finite operations that Flue can invoke by name. Each immediate file defines one discovered workflow, and its filename becomes the workflow name: `src/workflows/summarize-ticket.ts` is discovered as `summarize-ticket`.
-
-Keep workflow files flat inside `workflows/`; nested files are not discovered as additional workflows. Prefer lower-kebab-case filenames such as `summarize-ticket.ts` so names remain portable across deployment targets.
-
-For more information, see [Workflows](/docs/guide/workflows/).
-
-### `channels/`
-
-The `channels/` directory contains provider HTTP integrations. Each immediate
-file must export one named `channel` binding. Its filename becomes an immutable
-namespace: `src/channels/github.ts` publishes provider-declared routes beneath
-`/channels/github`.
-
-Nested files are ordinary support modules and are not discovered as channels.
-Every route has a provider-owned non-empty suffix such as `/webhook`, `/events`,
-or `/interactions`; `/channels/github` itself is not an endpoint.
+A channel module exports one named `channel` binding created by a provider package (`createSlackChannel(...)`, …). Mount it wherever you like: `app.route('/channels/slack', channel.route())`. The provider defines route suffixes such as `/events` or `/webhook` beneath your chosen mount.
 
 For more information, see [Channels](/docs/guide/channels/).
 
@@ -93,22 +79,13 @@ For more information, see [Channels](/docs/guide/channels/).
 2. `src/` **(Recommended)** — The recommended layout for new projects.
 3. The project root — A compact layout for small dedicated projects.
 
-The first matching directory wins. Flue does not merge layouts: when `.flue/` exists, it does not discover agents, workflows, channels, `app.ts`, `db.ts`, or `cloudflare.ts` from `src/` or the project root. Authored modules may still import ordinary supporting code from elsewhere in the project.
+The first matching directory wins. Flue does not merge layouts: when `.flue/` exists, `app.ts`, `db.ts`, `cloudflare.ts`, and the `'use agent'` scan are resolved from it, not from `src/` or the project root. Authored modules may still import ordinary supporting code from elsewhere in the project.
 
-The source directory is always discovered relative to your project root. To configure the project root, see [Configuration](/docs/reference/configuration/).
+Entry paths can also be set explicitly in `flue.config.ts` (`app`, `db`, `cloudflare`); see [Configuration](/docs/reference/configuration/).
 
-## Output directory
+## Generated output
 
-`dist/` is the default output directory for generated build artifacts. It is created at the project root when you build the application and is never part of authored source discovery.
+- `dist/` — Vite's build output: `dist/server.mjs` on the Node target, the Worker output on Cloudflare. Configure it with Vite's own `build.outDir` if needed.
+- `.flue-vite/` and `.flue-vite.wrangler.jsonc` — Cloudflare-target inputs generated by the plugin (the Worker entry and the merged wrangler config). Add them to `.gitignore`; your authored `wrangler.jsonc` is never modified.
 
-To change where generated artifacts are written, set `output` in `flue.config.ts`:
-
-```ts title="flue.config.ts"
-import { defineConfig } from '@flue/cli/config';
-
-export default defineConfig({
-  output: './build',
-});
-```
-
-For more information about project and output configuration, see [Configuration](/docs/reference/configuration/).
+Generated output is never part of authored source discovery or the agent scan.

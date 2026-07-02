@@ -1,121 +1,110 @@
 ---
 title: Deploy to Cloudflare
-description: Build and deploy Flue agents on Cloudflare Workers.
-lastReviewedAt: 2026-06-20
+description: Build and deploy Flue agents on Cloudflare Workers with Vite.
+lastReviewedAt: 2026-07-02
 ---
 
 Build and deploy Flue agents on Cloudflare Workers. This guide walks you through the different kinds of agents you can build — from simple prompt-and-response endpoints to full coding agents backed by persistent storage and remote sandboxes.
 
 By the end, you will have a Flue agent running on Cloudflare Workers, and you will know how to add subagents, R2-backed context, Cloudflare sandboxes, and Durable Object-backed sessions.
 
-## Project layout
-
-The project root is your project directory. Flue selects authored source from `.flue/`, then `src/`, then the project root. The first matching directory wins, and layouts never mix. See [Project Layout](/docs/guide/project-layout/) for the full convention.
-
-By default `flue build` writes to `./dist/` at the project root; pass `--output <path>` to redirect the build elsewhere. `wrangler.jsonc` and any `Dockerfile` you ship live at the project root, regardless of where the build lands. Examples in this guide use the `./.flue/` layout.
+On Cloudflare, Flue is two Vite plugins side by side: `flue()` from `@flue/vite` plus the official `@cloudflare/vite-plugin`. `flue()` scans your `'use agent'` modules, generates the Worker entry (one Durable Object class per agent), and merges its contributions into your Wrangler config; the Cloudflare plugin owns workerd dev and the deployable Worker output.
 
 ## Hello World
 
-The simplest agent — no container, no storage, just a prompt and a typed result.
+The simplest agent — no container, no storage, just a prompt and a reply.
 
 ### 1. Set up your project
 
 ```bash
 mkdir my-flue-worker && cd my-flue-worker
 npm init -y
-npm install @flue/runtime valibot 'agents@^0.14.2'
-npm install -D @flue/cli wrangler
+npm install @flue/runtime hono 'agents@^0.14.2'
+npm install -D @flue/vite @cloudflare/vite-plugin vite wrangler
 ```
 
 `agents` is Cloudflare's Agents SDK — Flue uses its Durable Object base class and native lifecycle capabilities while retaining ownership of application routing. Flue is tested against `agents` 0.14.x; the generated worker checks at runtime that the installed SDK provides the durability API it relies on (such as `runFiber`) and fails with an explicit error if it does not. If you also need a remote sandbox, additionally install `@cloudflare/sandbox` (see [Connecting a remote sandbox](#connecting-a-remote-sandbox) below).
 
-### 2. Create your first agent
+```ts title="vite.config.ts"
+import { cloudflare } from '@cloudflare/vite-plugin';
+import { flue } from '@flue/vite';
+import { defineConfig } from 'vite';
 
-`.flue/workflows/translate.ts`:
-
-```typescript
-import { defineAgent, defineWorkflow, type WorkflowRouteHandler } from '@flue/runtime';
-import * as v from 'valibot';
-
-export const route: WorkflowRouteHandler = async (_c, next) => next();
-
-const translator = defineAgent(() => ({ model: 'anthropic/claude-sonnet-4-6' }));
-
-export default defineWorkflow({
-  agent: translator,
-  input: v.object({ text: v.string(), language: v.string() }),
-
-  async run({ harness, input }) {
-    const { data } = await (
-      await harness.session()
-    ).prompt(`Translate this to ${input.language}: "${input.text}"`, {
-      result: v.object({
-        translation: v.string(),
-        confidence: v.picklist(['low', 'medium', 'high']),
-      }),
-    });
-    return data;
-  },
+// flue() must come before cloudflare(): it prepares the generated Worker
+// entry and the merged wrangler config that the Cloudflare plugin consumes.
+// The cloudflare target is auto-detected from the presence of cloudflare()
+// in the plugin array.
+export default defineConfig({
+  plugins: [flue(), cloudflare()],
 });
 ```
 
-A few things to note:
+```jsonc title="package.json"
+{
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "deploy": "vite build && wrangler deploy",
+  },
+}
+```
 
-- **`route`** — Export Hono middleware to expose this workflow via HTTP. It may perform authentication before calling `next()`.
-- **`defineAgent(...)` + `defineWorkflow(...)`** — The required workflow agent declares model and sandbox policy. Flue initializes its harness for each run. By default, it receives a virtual sandbox powered by [just-bash](https://github.com/vercel-labs/just-bash). No container needed.
-- **Schemas** — The [Valibot](https://valibot.dev) schema defines the expected output shape. Flue parses the agent's response and returns it on `response.data`, fully typed.
+### 2. Create your first agent
 
-### 3. Configure Durable Object migrations
+An agent module is an ordinary TypeScript file plus one line: the `'use agent'` directive. The directive is how an agent joins the application — the build scans your source root for marked modules, emits one Durable Object class per marked file, and the file basename becomes the agent's durable identity.
 
-Cloudflare requires an explicit migration whenever a Worker adds a Durable Object class. Flue generates the classes and bindings for discovered agents and workflows, but your project owns the ordered migration history in `wrangler.jsonc`.
+```typescript title="src/agents/translator.ts"
+'use agent';
+import { defineAgent } from '@flue/runtime';
 
-`wrangler.jsonc`:
+export default defineAgent(() => ({
+  model: 'anthropic/claude-sonnet-4-6',
+  instructions:
+    'Translate the user message into the requested language. Reply with the translation only.',
+}));
+```
 
-```jsonc
+By default, the agent receives a virtual sandbox powered by [just-bash](https://github.com/vercel-labs/just-bash). No container needed.
+
+### 3. Create app.ts — the route map
+
+`app.ts` is the only required file. Its default export owns the request pipeline; each mounted agent route resolves the generated binding and forwards to that agent's Durable Object, and everything else is just a Hono app running in the Worker isolate:
+
+```typescript title="src/app.ts"
+import { Hono } from 'hono';
+import translator from './agents/translator.ts';
+
+const app = new Hono();
+
+app.route('/agents/translator', translator.route());
+app.get('/api/ping', (c) => c.text('pong'));
+
+export default app;
+```
+
+The mount path is yours to choose; the file basename (the agent's durable identity) is what keys conversations and the Durable Object class. See the [Routing API](/docs/api/routing-api/).
+
+### 4. Configure Durable Object migrations
+
+Cloudflare requires an explicit migration whenever a Worker adds a Durable Object class. Flue generates the classes and bindings for scanned agents, but your project owns the ordered migration history in `wrangler.jsonc`:
+
+```jsonc title="wrangler.jsonc"
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "my-flue-worker",
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FlueRegistry", "FlueTranslateWorkflow"] }],
+  "migrations": [
+    { "tag": "flue-class-FlueTranslatorAgent", "new_sqlite_classes": ["FlueTranslatorAgent"] },
+  ],
 }
 ```
 
-Every Cloudflare target includes `FlueRegistry`. Flue-owned bindings use upper snake case and generated classes use PascalCase: `.flue/workflows/translate.ts` binds `FLUE_TRANSLATE_WORKFLOW` to `FlueTranslateWorkflow`, while `.flue/agents/support-chat.ts` binds `FLUE_SUPPORT_CHAT_AGENT` to `FlueSupportChatAgent`.
+Class names derive from agent file basenames: `src/agents/translator.ts` produces the class `FlueTranslatorAgent` and the binding `FLUE_TRANSLATOR_AGENT`. Flue requires `nodejs_compat` and a `compatibility_date` of `2026-04-01` or newer, and validates both at build time.
 
-Keep deployed migration entries in order. When you add an agent or workflow later, append a uniquely tagged migration for its new class. Generated Flue agent classes require Durable Object SQLite: introduce them through `new_sqlite_classes`, not legacy `new_classes`. An already deployed KV-backed Durable Object class cannot be converted to SQLite in place. For this pre-1.0 agent durability upgrade, use a fresh generated agent class identity and treat deployment as a hard execution-state boundary: in-flight direct prompts and dispatched inputs from earlier generated-agent identities are not adopted. Use Cloudflare's explicit rename or delete migrations when changing a deployed class lifecycle. When upgrading a workflow deployment created before this naming scheme, append `renamed_classes` entries such as `{ "from": "TranslateWorkflow", "to": "FlueTranslateWorkflow" }`; do not rewrite deployed migration history.
+**Adding an agent is a triple**: the `'use agent'` file, the `app.route(...)` mount, and a uniquely tagged migration for its new class. Keep deployed migration entries in order and append, never rewrite. Generated Flue agent classes require Durable Object SQLite: introduce them through `new_sqlite_classes`, not legacy `new_classes`.
 
-### 4. Build and deploy
-
-```bash
-npx flue build --target cloudflare
-npx wrangler deploy --config dist/my-flue-worker/wrangler.json
-```
-
-`flue build --target cloudflare` compiles your project into a `./dist` directory containing a Cloudflare Workers-compatible artifact. Deploy the generated Wrangler config from the build output, not the source-root `wrangler.jsonc`, so Wrangler uses Flue's generated entrypoint, merged bindings, and Cloudflare Vite output. The generated directory is named from your Worker name, so this example writes `dist/my-flue-worker/wrangler.json`.
-
-Before deploying, run the same generated config through Wrangler's dry run:
-
-```bash
-npx wrangler deploy --dry-run --config dist/my-flue-worker/wrangler.json
-```
-
-### Serving assets from the same Worker
-
-Workers static assets are served before your Worker script unless `assets.run_worker_first` says otherwise. If a single Worker serves a front-end build and application routes that invoke Flue, include every application-owned API prefix and every mounted Flue prefix in `run_worker_first` so those requests reach Hono instead of the asset handler or SPA fallback:
-
-```jsonc title="wrangler.jsonc"
-{
-  "assets": {
-    "directory": "./dist/client",
-    "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/_flue/*"],
-  },
-}
-```
-
-Adjust the prefixes to match where your `app.ts` mounts public routes and `flue()`. If Flue is mounted at `/api`, include `/api/*`; if your application mounts Flue at a private internal prefix, include that prefix too and protect it with middleware.
+Renaming an agent **file** is a storage-identity change — the class name follows the basename. Express it with wrangler-native `renamed_classes` (`{ "from": "FlueOldNameAgent", "to": "FlueNewNameAgent" }`) to keep the deployed Durable Objects. Re-mounting an agent at a different URL is not an identity change and needs no migration.
 
 ### 5. Add your API key
 
@@ -129,43 +118,79 @@ EOF
 printf '\n.dev.vars*\n.env*\n' >> .gitignore
 ```
 
-Use the variable name your provider expects — `ANTHROPIC_API_KEY` for Anthropic, `OPENAI_API_KEY` for OpenAI, and so on. Do not commit local secret files. Cloudflare also supports `.env`-based local variables, but use either `.dev.vars` or `.env`, not both; when `.dev.vars` exists, `.env` values are not loaded into local Worker bindings. Flue loads `.env` or one explicitly selected `--env` file before CLI configuration and builds, but Worker runtime variables continue to follow Cloudflare's local-variable rules.
+Use the variable name your provider expects — `ANTHROPIC_API_KEY` for Anthropic, `OPENAI_API_KEY` for OpenAI, and so on. Do not commit local secret files. Cloudflare also supports `.env`-based local variables, but use either `.dev.vars` or `.env`, not both; when `.dev.vars` exists, `.env` values are not loaded into local Worker bindings. Worker runtime variables follow Cloudflare's local-variable rules (`.dev.vars`, `.env`, `CLOUDFLARE_ENV`).
+
+Alternatively, route model traffic through the [Workers AI binding](/docs/guide/models/) (`cloudflare/...` model specifiers) and skip API keys entirely.
 
 For a deployed Worker, add secrets through Wrangler rather than treating a local-development file as production configuration:
 
 ```bash
 npx wrangler secret put ANTHROPIC_API_KEY
-npx flue build --target cloudflare
-npx wrangler deploy --config dist/my-flue-worker/wrangler.json
 ```
 
 For CI or a managed deployment pipeline, `wrangler deploy --secrets-file <path>` is also available when your pipeline provides a protected secrets file.
 
 ### 6. Try it locally
 
-For local development, use `flue dev --target cloudflare`. It builds your project root, then starts a Cloudflare Workers development server through the official Vite integration on port 3583 and watches for changes:
+`vite dev` runs the Worker in local workerd through the official Cloudflare Vite integration, with Flue's generated entry and merged config:
 
 ```bash
-npx flue dev --target cloudflare
+npx vite dev
 ```
 
-Then test it:
+Then talk to the agent — a conversation lives at the mount path plus any id you choose:
 
 ```bash
-curl http://localhost:3583/workflows/translate?wait=result \
+curl -X POST 'http://localhost:5173/agents/translator/demo-1' \
   -H "Content-Type: application/json" \
-  -d '{"text": "Hello world", "language": "French"}'
+  -d '{"kind": "user", "body": "Translate to French: Hello world"}'
+# → 202 { "streamUrl": "...", "offset": "...", "submissionId": "..." }
+
+curl 'http://localhost:5173/agents/translator/demo-1'   # read the conversation
 ```
 
-For one finite local operation, `flue run --target cloudflare <name>` starts the same Vite/workerd application runtime without watch mode, invokes an agent or workflow through an existing authored `flue()` mount, and exits. It runs normal application middleware and temporarily exposes route-free discovered resources through the mount.
+Application code should use the [SDK](/docs/sdk/overview/) — `createFlueClient({ url }).send(...)` plus `wait()`/`observe()` handles admission and streaming.
 
-Route middleware sees the original inbound HTTP request before Flue forwards accepted work into its Durable Object. Durable direct-agent processing is a later boundary: after admission, Flue uses a deterministic internal request and does not persist or reconstruct the caller's original headers, cookies, query parameters, URL, or body as operation-time `ctx.req`. Authenticate before admission and carry any non-secret correlation you need later in application-owned input or storage.
+Adding or removing an agent file regenerates the Worker entry and wrangler config automatically; body edits inside an agent are ordinary hot updates.
+
+Route middleware (the agent module's `route` export) sees the original inbound HTTP request before Flue forwards accepted work into its Durable Object. Durable agent processing is a later boundary: after admission, Flue uses a deterministic internal request and does not persist or reconstruct the caller's original headers, cookies, query parameters, URL, or body. Authenticate before admission and carry any non-secret correlation you need later in application-owned input or storage.
+
+`flue run` does not emulate Cloudflare: it is Node-local, and agent modules that import `cloudflare:*` fail under it with a pointer at `vite dev`.
+
+### 7. Build and deploy
+
+```bash
+npx vite build
+npx wrangler deploy
+```
+
+`vite build` writes the Workers-compatible artifact plus its finalized Wrangler config into `dist/`, and the Cloudflare Vite plugin records a deploy redirect so `wrangler deploy` (and `wrangler dev`) read that built output — deploy from the project root with no `--config` flag. Run `wrangler deploy --dry-run` first to validate.
+
+Flue never rewrites your authored `wrangler.jsonc`. It reads it, layers its contributions (the generated `main`, one Durable Object binding per scanned agent) into a generated, gitignored Vite input config (`.flue-vite.wrangler.jsonc`), and hands that to the Cloudflare plugin. Migration history passes through from your file unchanged. Durable-object bindings whose names collide with Flue's generated `FLUE_*_AGENT` names are a build error.
+
+### Serving assets from the same Worker
+
+Workers static assets are served before your Worker script unless `assets.run_worker_first` says otherwise. If a single Worker serves a front-end build and application routes that invoke Flue, include every application-owned API prefix — including every prefix where `app.ts` mounts agents or channels — in `run_worker_first` so those requests reach Hono instead of the asset handler or SPA fallback:
+
+```jsonc title="wrangler.jsonc"
+{
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/agents/*", "/channels/*"],
+  },
+}
+```
+
+Adjust the prefixes to match your `app.ts` route map.
 
 ### Extending generated Cloudflare Durable Objects
 
-Flue normally owns each generated agent and workflow Durable Object class. When an addressable agent or workflow needs native Cloudflare Agents SDK capabilities such as `onStart()`, `schedule()`, `scheduleEvery()`, or `queue()`, export a `cloudflare` extension descriptor from its module:
+Flue normally owns each generated agent Durable Object class. When an agent needs native Cloudflare Agents SDK capabilities such as `onStart()`, `schedule()`, `scheduleEvery()`, or `queue()`, export a `cloudflare` extension descriptor from its module:
 
-```ts
+```ts title="src/agents/heartbeat.ts"
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { extend } from '@flue/runtime/cloudflare';
 
@@ -185,7 +210,7 @@ export const cloudflare = extend({
 });
 ```
 
-This is an advanced Cloudflare-only extension point. Flue applies `base` first, then defines its own Durable Object subclass with the generated Flue binding and class identity. For `.flue/agents/support-chat.ts`, authored Worker code can access the namespace as `env.FLUE_SUPPORT_CHAT_AGENT`, and Wrangler binds that name to `FlueSupportChatAgent`. For `.flue/workflows/translate.ts`, the corresponding names are `env.FLUE_TRANSLATE_WORKFLOW` and `FlueTranslateWorkflow`. Use `base` for native SDK lifecycle hooks and additional named methods. Do not override `fetch()`, `onRequest()`, `onFiberRecovered()`, or `alarm()`: Flue and the Agents SDK use those methods for routing, interruption recovery, and alarm multiplexing.
+This is an advanced Cloudflare-only extension point. Flue applies `base` first, then defines its own Durable Object subclass with the generated binding and class identity. For `src/agents/heartbeat.ts`, authored Worker code can access the namespace as `env.FLUE_HEARTBEAT_AGENT`, and Wrangler binds that name to `FlueHeartbeatAgent`. Use `base` for native SDK lifecycle hooks and additional named methods. Do not override `fetch()`, `onRequest()`, `onFiberRecovered()`, or `alarm()`: Flue and the Agents SDK use those methods for routing, interruption recovery, and alarm multiplexing.
 
 Use `wrap` when an integration needs to wrap the final Flue-generated Durable Object class:
 
@@ -198,13 +223,13 @@ export const cloudflare = extend({
 });
 ```
 
-Both `base` and `wrap` are optional. Do not override Flue-owned `fetch()`, `onRequest()`, `onFiberRecovered()`, or `alarm()` methods. This module-local export is distinct from the optional source-root `.flue/cloudflare.ts` deployment module below. Native SDK callbacks run as Durable Object activity: they do not receive a Flue workflow context, create workflow runs, or automatically initialize a Flue harness or session.
+Both `base` and `wrap` are optional. This module-local export is distinct from the optional source-root `cloudflare.ts` deployment module below. Native SDK callbacks run as Durable Object activity: they do not receive a Flue harness or session automatically.
 
 ### Extending the Worker
 
-Add an optional `.flue/cloudflare.ts` module when your deployment needs native Cloudflare capabilities outside Flue's generated classes. Named exports become top-level Worker exports, which lets the same Worker define application-owned Durable Objects:
+Add an optional `src/cloudflare.ts` module (path configurable via the `cloudflare` field in `flue.config.ts`) when your deployment needs native Cloudflare capabilities outside Flue's generated classes. Named exports become top-level Worker exports, which lets the same Worker define application-owned Durable Objects:
 
-```ts
+```ts title="src/cloudflare.ts"
 import { DurableObject } from 'cloudflare:workers';
 
 export class SalesforceAuthCache extends DurableObject {
@@ -225,7 +250,7 @@ Declare the corresponding binding and migration in your project-root `wrangler.j
 }
 ```
 
-Your agents and workflows receive the namespace through `env.SALESFORCE_AUTH_CACHE`. Keep bindings, containers, and ordered migration history in Wrangler configuration; `cloudflare.ts` provides the Worker code exports but does not infer deployment topology.
+Your agents receive the namespace through `env.SALESFORCE_AUTH_CACHE`. Keep bindings, containers, and ordered migration history in Wrangler configuration; `cloudflare.ts` provides the Worker code exports but does not infer deployment topology.
 
 An optional default export adds non-HTTP Worker handlers:
 
@@ -237,7 +262,7 @@ export default {
 };
 ```
 
-Use `.flue/app.ts` for custom HTTP routes and middleware. `cloudflare.ts` must not export a default `fetch` handler because Flue keeps HTTP composition in `app.ts`.
+Use `app.ts` for custom HTTP routes and middleware. `cloudflare.ts` must not export a default `fetch` handler because Flue keeps HTTP composition in `app.ts`.
 
 ## Subagents
 
@@ -250,93 +275,50 @@ const triager = defineAgentProfile({
   name: 'triager',
   instructions: 'Search thoroughly, cite sources, and stay concise.',
 });
-const support = defineAgent(() => ({ model: 'anthropic/claude-sonnet-4-6', subagents: [triager] }));
 
-export default defineWorkflow({
-  agent: support,
-  async run({ harness }) {
-    return await (
-      await harness.session()
-    ).task('Help me reset my password', {
-      agent: 'triager',
-    });
-  },
-});
+export default defineAgent(() => ({
+  model: 'anthropic/claude-sonnet-4-6',
+  instructions: "Delegate research to the 'triager' subagent via a task.",
+  subagents: [triager],
+}));
 ```
 
 ## Using the sandbox
 
 By default, the virtual sandbox starts empty — no files, no skills, no context. This is fine for stateless prompt-and-response agents like the translator above. But many agents need files to work with.
 
-Because the agent has shell access, it can set up its own workspace on the fly:
+Because the agent has shell access, it can set up its own workspace on the fly, and a deterministic [Action](/docs/guide/actions/) can seed context before prompting:
 
-```typescript
-import { defineAgent, defineWorkflow, type WorkflowRouteHandler } from '@flue/runtime';
+```typescript title="src/agents/support.ts"
+'use agent';
+import { defineAction, defineAgent } from '@flue/runtime';
 import * as v from 'valibot';
 
-export const route: WorkflowRouteHandler = async (_c, next) => next();
-
-const reporter = defineAgent(() => ({ model: 'openai/gpt-5.5' }));
-
-export default defineWorkflow({
-  agent: reporter,
-  input: v.object({ topic: v.string() }),
-
-  async run({ harness, input }) {
-    const session = await harness.session();
-    await session.shell(`mkdir -p /workspace/data`);
-    await session.shell(`cat > /workspace/data/config.json << 'EOF'
-{
-  "rules": ["Be concise", "Use bullet points", "Cite sources"],
-  "tone": "professional"
-}
-EOF`);
-
-    return await session.prompt(
-      `Read the config in /workspace/data/config.json.
-       Generate a report about: ${input.topic}`,
-    );
-  },
-});
-```
-
-The agent can use its built-in tools — grep, glob, read — to search and read these files. This is still running on a virtual sandbox (no container), so it's fast and cheap.
-
-## Support agents with context files
-
-For support agents, you can seed Flue's default virtual sandbox with the knowledge required for a request. The agent can search and read these files using its built-in `grep`, `glob`, and `read` tools without provisioning a container or installing a sandbox adapter.
-
-`.flue/workflows/support.ts`:
-
-```typescript
-import { defineAgent, defineWorkflow, type WorkflowRouteHandler } from '@flue/runtime';
-import * as v from 'valibot';
-
-export const route: WorkflowRouteHandler = async (_c, next) => next();
-
-const support = defineAgent(() => ({ model: 'openrouter/moonshotai/kimi-k2.6' }));
-
-export default defineWorkflow({
-  agent: support,
+const answer = defineAction({
+  name: 'answer',
+  description: 'Answer one support request using the workspace articles.',
   input: v.object({ message: v.string() }),
-
   async run({ harness, input }) {
     await harness.fs.writeFile(
       '/workspace/articles/reset-password.md',
       '# Reset your password\n\nUse the account settings page to request a password reset email.',
     );
 
-    return await (
-      await harness.session()
-    ).prompt(
-      `You are a support agent. Search the workspace for articles relevant
-      to this request, then write a helpful response.\n\nCustomer: ${input.message}`,
+    const session = await harness.session();
+    return await session.prompt(
+      `Search the workspace for articles relevant to this request, then write a helpful response.\n\nCustomer: ${input.message}`,
     );
   },
 });
+
+export default defineAgent(() => ({
+  model: 'anthropic/claude-sonnet-4-6',
+  instructions: 'For each support request, call the `answer` action with the customer message.',
+  actions: [answer],
+}));
 ```
 
-This remains the default just-bash virtual sandbox: it starts quickly, supports shell and filesystem tools, and requires no Worker Loader binding. If an application needs durable external storage or a full Linux environment, choose and own a sandbox adapter appropriate to that requirement.
+The agent can use its built-in tools — grep, glob, read — to search and read these files. This is still running on a virtual sandbox (no container), so it's fast and cheap. If an application needs durable external storage or a full Linux environment, choose and own a sandbox adapter appropriate to that requirement.
 
 ## Connecting a remote sandbox
 
@@ -351,7 +333,7 @@ If you'd rather connect to an external provider — e.g. Daytona — instead of 
 You own the container config. That means four things:
 
 1. Install `@cloudflare/sandbox`: `npm install @cloudflare/sandbox`.
-2. Export the Sandbox class from `.flue/cloudflare.ts`.
+2. Export the Sandbox class from `src/cloudflare.ts`.
 3. Declare the Durable Object binding, migration, and container image in your `wrangler.jsonc` at the project root.
 4. Commit a `Dockerfile` at the path your `containers[].image` points to.
 
@@ -359,9 +341,7 @@ Append the Sandbox migration to the same top-level history you use for generated
 
 ### Example
 
-`.flue/cloudflare.ts`:
-
-```ts
+```ts title="src/cloudflare.ts"
 export { Sandbox } from '@cloudflare/sandbox';
 ```
 
@@ -377,7 +357,7 @@ export { Sandbox } from '@cloudflare/sandbox';
     "bindings": [{ "class_name": "Sandbox", "name": "Sandbox" }],
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["FlueRegistry", "FlueAssistantAgent"] },
+    { "tag": "v1", "new_sqlite_classes": ["FlueAssistantAgent"] },
     { "tag": "v2", "new_sqlite_classes": ["Sandbox"] },
   ],
   "containers": [{ "class_name": "Sandbox", "image": "./Dockerfile" }],
@@ -392,14 +372,11 @@ FROM docker.io/cloudflare/sandbox:0.9.2
 
 The base image is published by Cloudflare and bundles the control-plane HTTP server that `@cloudflare/sandbox` needs to communicate with the container, along with `node`, `git`, `curl`, and a working directory at `/workspace`. Pin the tag to match the `@cloudflare/sandbox` version in your `package.json` — they're versioned together. Add your own `RUN` lines to install extra tools as needed.
 
-`.flue/agents/assistant.ts`:
-
-```typescript
-import { defineAgent, type AgentRouteHandler } from '@flue/runtime';
+```typescript title="src/agents/assistant.ts"
+'use agent';
+import { defineAgent } from '@flue/runtime';
 import { cloudflareSandbox } from '@flue/runtime/cloudflare';
 import { getSandbox } from '@cloudflare/sandbox';
-
-export const route: AgentRouteHandler = async (_c, next) => next();
 
 export default defineAgent(({ id, env }) => ({
   sandbox: cloudflareSandbox(getSandbox(env.Sandbox, id)),
@@ -411,8 +388,7 @@ export default defineAgent(({ id, env }) => ({
 
 Different agents can use different container images. Export a separate alias for each Sandbox class, then declare each binding and container entry:
 
-```ts
-// .flue/cloudflare.ts
+```ts title="src/cloudflare.ts"
 export { Sandbox as PyBoxSandbox } from '@cloudflare/sandbox';
 export { Sandbox as NodeSandbox } from '@cloudflare/sandbox';
 ```
@@ -426,7 +402,7 @@ export { Sandbox as NodeSandbox } from '@cloudflare/sandbox';
     ],
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["FlueRegistry", "FlueAssistantAgent"] },
+    { "tag": "v1", "new_sqlite_classes": ["FlueAssistantAgent"] },
     { "tag": "v2", "new_sqlite_classes": ["PyBoxSandbox", "NodeSandbox"] },
   ],
   "containers": [
@@ -475,39 +451,36 @@ Most agents don't need a remote sandbox. Start with a virtual sandbox and only m
 
 ## Conversation persistence
 
-For agents, generated Cloudflare applications store one append-only canonical conversation stream per agent instance in Durable Object SQLite, with attachment bytes in a separate immutable store. Sessions select conversations from that stream; there is no second session transcript or persisted conversation snapshot. Workflow harness conversation state is execution-scoped to its run, while workflow run records and event history use the workflow durable-runtime path.
+Generated Cloudflare applications store one append-only canonical conversation stream per agent instance in Durable Object SQLite, with attachment bytes in a separate immutable store. Sessions select conversations from that stream; there is no second session transcript or persisted conversation snapshot. `db.ts` is a Node-only convention — on Cloudflare, Durable Object SQLite is the persistence layer.
 
 Filesystem durability remains a separate decision. The default lightweight sandbox uses an in-memory filesystem and must not be treated as durable merely because conversation state is stored in a Durable Object. Use a durable workspace or container-backed integration when files or installed artifacts must survive later activity.
 
-Agent clients read materialized history or projected updates at `GET /agents/:name/:id`; see the [Streaming Protocol](/docs/api/streaming-protocol/).
+Clients read materialized history or projected updates with a `GET` on the conversation URL; see the [Streaming Protocol](/docs/api/streaming-protocol/).
 
 ## Interruption and recovery semantics
 
-A deployment or code update can reset a Durable Object while an operation is running. Flue handles interrupted Cloudflare operations according to their execution model:
+A deployment or code update can reset a Durable Object while an operation is running. Flue handles interrupted Cloudflare operations conservatively:
 
-| Operation                                          | After interruption                                                                                                                                                                                                                                                                                        |
-| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Direct attached agent HTTP prompt                  | The accepted prompt remains queued independently of its transport. Flue requeues only when canonical input is provably absent, recognizes provably completed canonical output, and otherwise records a visible terminal interruption without blindly replaying provider work. No public agent run exists. |
-| Dispatched agent input                             | Durable delivery and internal deduplication are keyed by `dispatchId` and persisted submission state, not by a run. Direct and dispatched inputs to one agent instance share one accepted order. Reconciliation uses the same conservative replay rules.                                                  |
-| Flue workflow invocation (`202` or `?wait=result`) | Flue terminalizes the interrupted run as errored. An attached synchronous response may fail. Flue does not automatically start a replacement run.                                                                                                                                                         |
+| Operation                   | After interruption                                                                                                                                                                                                                                                            |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Direct attached HTTP prompt | The accepted prompt remains queued independently of its transport. Flue requeues only when canonical input is provably absent, recognizes provably completed canonical output, and otherwise records a visible terminal interruption without blindly replaying provider work. |
+| Dispatched agent input      | Durable delivery and internal deduplication are keyed by `dispatchId` and persisted submission state. Direct and dispatched inputs to one agent instance share one accepted order. Reconciliation uses the same conservative replay rules.                                    |
 
-Cloudflare direct prompts and dispatched inputs enter one SQLite-backed submission queue owned by the target agent Durable Object. The attached transport observes accepted backend work but does not own it: losing an HTTP response does not cancel the accepted submission. Agent events are durably stored and can be replayed from any offset via the Durable Streams protocol.
+Cloudflare direct prompts and dispatched inputs enter one SQLite-backed submission queue owned by the target agent Durable Object. The attached transport observes accepted backend work but does not own it: losing an HTTP response does not cancel the accepted submission. Conversation records are durably stored and the conversation stream can be replayed from any offset via the Durable Streams protocol.
 
 Before provider processing starts, Flue persists canonical submitted input and records an operational input-application boundary. After interruption, Flue retries only when it can prove provider work did not cross that boundary. If replay safety is uncertain, it appends a framework interruption advisory to canonical session history and terminalizes the operational submission instead of risking duplicate model work or external effects. Later prompts to the same agent instance can see that factual advisory.
 
-All Cloudflare workflow invocations use the same Fiber-backed durable admission path. The transport controls only whether the caller receives an immediate `{ runId }` receipt or waits for `{ runId, result }`. Run events are durably stored and can be streamed through `GET /runs/:runId` when the workflow exports `runs` middleware.
+External effects remain application-owned. An interruption can leave the outcome of already-started model or tool activity uncertain, and an explicit caller retry can repeat effects. For dispatched agent work, correlate effects with `dispatchId` or an application-level idempotency key.
 
-External effects remain application-owned. An interruption can leave the outcome of already-started model or tool activity uncertain, and an explicit caller retry can repeat effects. For dispatched agent work, correlate effects with `dispatchId` or an application-level idempotency key. Direct attached prompts do not expose a public receipt or replay API.
+Submission payloads are durable application data while queued and running. Settled submission data is retained indefinitely in this beta release. Dispatch receipt rows persist indefinitely as well, providing duplicate-delivery protection for repeated forwarding of one `dispatchId`; there is no public submission lookup API. Treat persisted inputs as sensitive: do not submit secrets unless your application retention and access policy permits storing them.
 
-Flue persists workflow inputs with workflow run records before admitted work starts so operators can inspect the original input after an interruption. Flue does not automatically retry interrupted workflows. The caller or application should decide whether retry is appropriate and explicitly invoke the workflow again when needed. Use an application-level idempotency key when a repeated invocation may encounter external side effects from an earlier attempt. Agent submission payloads are likewise durable application data while queued and running. Settled submission data is retained indefinitely in this beta release. Dispatch receipt rows persist indefinitely as well, providing duplicate-delivery protection for repeated forwarding of one `dispatchId`; there is no public submission lookup API. Treat persisted inputs as sensitive: do not submit secrets unless your application retention and access policy permits storing them.
+Flue does not automatically propagate a trace carrier with dispatched input or preserve the original attached direct request after durable admission. For trace interpretation and application-owned HTTP extraction, see [OpenTelemetry](/docs/ecosystem/tooling/opentelemetry/#propagation-and-recovery).
 
-When Flue terminalizes an admitted interrupted workflow run, it emits `run_resume` before `run_end`, including when the interruption happened before live observers received `run_start`. This is recovery of terminal handling, not resumed or retried workflow code. Flue does not automatically propagate a trace carrier with dispatched input or preserve the original attached direct request after durable admission. For trace interpretation and application-owned HTTP extraction, see [OpenTelemetry](/docs/ecosystem/tooling/opentelemetry/#attach-application-trace-context).
-
-Flue workflows do not resume from checkpointed durable steps after Durable Object interruption. For jobs that require durable step-level continuation, implement those steps with [Cloudflare Workflows](https://developers.cloudflare.com/workflows/).
+For jobs that require durable step-level continuation, implement those steps with [Cloudflare Workflows](https://developers.cloudflare.com/workflows/).
 
 ### Beta persisted-schema boundary
 
-Flue supports the Cloudflare Durable Object SQL table shape created by `v0.8.0` or newer. Existing supported SQLite-backed databases receive additive execution-store tables such as `flue_agent_submissions` at runtime and may retain unused historical columns; they do not require table rebuilds. Flue stamps every Durable Object database with its persisted schema version in a one-row `flue_meta` table the first time it opens it, and refuses to open a database stamped by a newer Flue version (for example, after rolling back a deploy). KV-backed Durable Object classes remain outside this boundary because Cloudflare cannot convert them to SQLite in place. Persisted agent session records still follow Flue's beta session-data version boundary. Clear or separately migrate records written by an older session-data schema before upgrading.
+Flue stamps every Durable Object database with its persisted schema version in a one-row `flue_meta` table the first time it opens it, and refuses to open a database stamped by an unknown or newer Flue version (for example, after rolling back a deploy). The pre-1.0 format is reset-only: clear state written by an older schema before upgrading rather than migrating in place. KV-backed Durable Object classes remain outside this boundary because Cloudflare cannot convert them to SQLite in place — generated Flue agent classes must be introduced with `new_sqlite_classes`.
 
 ## Sandbox context
 
@@ -515,7 +488,7 @@ Flue supports the Cloudflare Durable Object SQL table shape created by `v0.8.0` 
 
 If you want to use them, put them in your sandbox. How you do that depends on which sandbox you're using: write them in via `session.shell()` or `session.fs` for the default virtual sandbox, or `COPY` them in for a container.
 
-**Skills** are reusable agent tasks defined as markdown files in `.agents/skills/`. They give the agent a focused instruction set for a specific job:
+**Skills** are reusable agent tasks defined as markdown files in `.agents/skills/`:
 
 `.agents/skills/greet/SKILL.md`:
 
@@ -531,12 +504,7 @@ greeting. Keep it to one or two sentences.
 
 **`AGENTS.md`** at the root of the sandbox is the agent's system prompt — it provides global context about the project.
 
-```markdown
-You are a helpful assistant working on the my-project codebase.
-Use the project's existing patterns and conventions.
-```
-
-Call a skill from your agent:
+Call a skill from an Action or tool body:
 
 ```typescript
 const { data } = await session.skill('greet', {
@@ -547,30 +515,27 @@ const { data } = await session.skill('greet', {
 
 ## Building and deploying
 
-Flue compiles your project into a deployable artifact. For Cloudflare, this means a Workers-compatible bundle:
-
 ```bash
 # Local development (reads local variables from .dev.vars or .env)
-npx flue dev --target cloudflare
+npx vite dev
 
-# One-off build for Cloudflare
-npx flue build --target cloudflare
+# Build the deployable Worker output
+npx vite build
 
-# Configure a deployed secret interactively, then deploy
+# Configure a deployed secret interactively, then deploy the built output
 npx wrangler secret put ANTHROPIC_API_KEY
-npx wrangler deploy --config dist/my-agent/wrangler.json
+npx wrangler deploy
 ```
 
-Every workflow that exports `route` gets an HTTP endpoint automatically. The middleware may authenticate the request and call `next()` to admit it. The route follows the pattern `/workflows/<name>` — for example, `.flue/workflows/translate.ts` becomes `/workflows/translate`.
+Every mounted agent's conversations are addressable at your chosen mount path:
 
 ```bash
-# Hit your deployed workflow
-curl https://my-support-agent.<your-subdomain>.workers.dev/workflows/translate?wait=result \
+curl -X POST 'https://my-agent.<your-subdomain>.workers.dev/agents/translator/customer-123' \
   -H "Content-Type: application/json" \
-  -d '{"text": "Hello world", "language": "French"}'
+  -d '{"kind": "user", "body": "Translate to French: Hello world"}'
 ```
 
-Stream events from a deployed agent with `GET https://my-support-agent.<your-subdomain>.workers.dev/agents/chat/customer-123?offset=-1&live=sse`. Live reads require an `offset` — use `-1` to replay from the start, or `now` for future events only (see the [Streaming Protocol](/docs/api/streaming-protocol/)).
+Read the conversation with `GET .../agents/translator/customer-123` (history), or follow live updates with `?view=updates&offset=...&live=sse` (see the [Streaming Protocol](/docs/api/streaming-protocol/)).
 
 ### Choosing a sandbox strategy
 

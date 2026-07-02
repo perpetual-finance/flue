@@ -15,8 +15,9 @@ application-owned Notion API behavior to a Flue project.
 
 Read local instructions, detect the package manager and target, and select the
 first existing source root: `<root>/.flue/`, then `<root>/src/`, then
-`<root>/`. Inspect existing agents, environment types, secret conventions, and
-which Notion page or comment events the application needs.
+`<root>/`. Inspect existing agents, `app.ts` (the application's route map),
+environment types, secret conventions, and which Notion page or comment events
+the application needs.
 
 Install `@flue/notion` and the official `@notionhq/client@^5.22.0`. In a strict
 TypeScript project, keep the compatible `@types/node` peer available because
@@ -135,6 +136,27 @@ export function pageIdFromInstanceId(id: string): string {
 }
 ```
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the
+channel's router explicitly:
+
+```ts
+// app.ts
+import { Hono } from 'hono';
+import { channel } from './channels/notion.ts';
+
+const app = new Hono();
+app.route('/channels/notion', channel.route());
+
+export default app;
+```
+
+`channel.route()` is a pure router factory serving the channel's routes
+relative to the mount path. The `// Path:` comments in this guide assume the
+conventional `/channels/notion` mount; a different mount path shifts every
+provider URL accordingly.
+
 The page identity helper is application code, not a capability supplied by
 Notion or `@flue/notion`. The example uses Notion's page id because one
 project-owned client selects the installation. Add verified workspace or
@@ -156,6 +178,7 @@ application's agent policy.
 ## Wire the agent
 
 ```ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { pageIdFromInstanceId, retrievePage } from '../channels/notion.ts';
 
@@ -165,18 +188,26 @@ export default defineAgent(({ id }) => ({
 }));
 ```
 
+The `'use agent'` directive (the module's first statement) is what registers
+the agent with the application — `dispatch(...)` from the channel callback
+needs no `app.ts` mounting. Add
+`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+should also be reachable over HTTP directly.
+
 The channel-agent import cycle is supported because imported bindings are read
 inside deferred callbacks and initializers.
 
 ## Configure endpoint verification
 
-Configure the exact webhook URL:
+Configure the exact webhook URL — the channel's mount path in `app.ts` plus
+the route suffix, with the conventional
+`app.route('/channels/notion', ...)` mount:
 
 ```txt
 https://example.com/channels/notion/webhook
 ```
 
-If `flue()` is mounted beneath an outer prefix, include it.
+A different mount path changes the URL accordingly.
 
 Notion first sends one unsigned JSON object containing `verification_token`.
 This request is setup traffic, not authenticated application ingress. To
@@ -229,7 +260,7 @@ response body. A normal Hono or Fetch `Response` passes through unchanged.
 
 ## Test without Notion
 
-Run the project's typecheck and configured Node and Cloudflare builds. Create
+Run the project typecheck and `vite build` for the configured target. Create
 original synthetic payloads and test:
 
 - the unsigned one-field verification request and secure capture path;

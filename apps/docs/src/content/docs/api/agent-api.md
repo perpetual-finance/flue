@@ -1,7 +1,7 @@
 ---
 title: Agent API
 description: Reference for defining agents and running agent operations with @flue/runtime.
-lastReviewedAt: 2026-06-21
+lastReviewedAt: 2026-07-02
 ---
 
 The agent API is exported from `@flue/runtime`.
@@ -80,7 +80,7 @@ Throws when the profile contains unknown fields, invalid capabilities, duplicate
 | --------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`          | `string`                    | Profile name. Required when selecting this profile with `session.task()`.                                                                                                   |
 | `description`   | `string`                    | Human-readable profile description.                                                                                                                                         |
-| `model`         | `string`                    | Default model specifier.                                                                                                                                                |
+| `model`         | `string`                    | Default model specifier.                                                                                                                                                    |
 | `instructions`  | `string`                    | Instructions prepended to discovered workspace context.                                                                                                                     |
 | `skills`        | `Skill[]`                   | Registered skills available to initialized sessions.                                                                                                                        |
 | `tools`         | `ToolDefinition[]`          | Custom model-callable tools available to initialized sessions.                                                                                                              |
@@ -200,11 +200,11 @@ interface McpServerConnection {
 }
 ```
 
-| Field     | Description                                            |
-| --------- | ------------------------------------------------------ |
-| `name`    | Server name supplied to `connectMcpServer()`.          |
-| `tools`   | MCP tools ready to pass directly in `tools` arrays.     |
-| `close()` | Close the underlying MCP client connection.            |
+| Field     | Description                                         |
+| --------- | --------------------------------------------------- |
+| `name`    | Server name supplied to `connectMcpServer()`.       |
+| `tools`   | MCP tools ready to pass directly in `tools` arrays. |
+| `close()` | Close the underlying MCP client connection.         |
 
 ## `defineAgent(...)`
 
@@ -216,7 +216,19 @@ function defineAgent<TEnv = Record<string, any>>(
 ): AgentDefinition<TEnv>;
 ```
 
-Defines an agent initializer. Default-export the returned value from an `agents/<name>.ts` module to define an addressable agent, or bind it to a Workflow Definition.
+Defines an agent initializer. Default-export the returned value from a module whose first statement is the `'use agent'` directive to make the agent part of the application:
+
+```ts title="src/agents/triage.ts"
+'use agent';
+import { defineAgent } from '@flue/runtime';
+
+export default defineAgent(() => ({
+  model: 'anthropic/claude-sonnet-4-6',
+  instructions: '...',
+}));
+```
+
+The directive gives the agent its durable identity (the file basename) and registers it with the built application — there is no name-based addressing beyond that identity. To expose the agent over HTTP, mount `agent.route()` in `app.ts`; see the [Routing API](/docs/api/routing-api/). A dispatch-only agent needs no mount. `flue run <path>` and raw `defineAgent` values in unit tests do not require the directive.
 
 The initializer runs whenever a runner initializes a root harness from the agent definition. Do not treat it as a one-time constructor for a persistent agent instance id. Return a runtime config object with `model: '<provider>/<model>'` or a profile with its own model field.
 
@@ -224,30 +236,38 @@ The initializer runs whenever a runner initializes a root harness from the agent
 
 | Field | Type     | Description                                            |
 | ----- | -------- | ------------------------------------------------------ |
-| `id`  | `string` | Agent instance ID or workflow run ID.                  |
+| `id`  | `string` | The agent instance (conversation) id.                  |
 | `env` | `TEnv`   | Platform environment bindings supplied by the runtime. |
 
 #### `AgentRuntimeConfig`
 
-| Field           | Type                        | Description                                                                                                                                                                                                                                                                               |
-| --------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `description`   | `string`                    | Optional organizational metadata describing what this agent does. Overrides the profile description when set. Per-initialization metadata only — for a static description that surfaces in the deployment manifest and `listAgents()`, use the module-level `description` export instead. |
-| `profile`       | `AgentProfile`              | Reusable baseline profile. Agent-definition fields replace or extend profile values.                                                                                                                                                                                                         |
-| `model`         | `string`                    | Default model specifier.                                                                                                                                                                                                                                                               |
-| `instructions`  | `string`                    | Instructions prepended to discovered workspace context.                                                                                                                                                                                                                                   |
-| `skills`        | `Skill[]`                   | Additional registered skills available to initialized sessions.                                                                                                                                                                                                                           |
-| `tools`         | `ToolDefinition[]`          | Additional custom model-callable tools available to initialized sessions.                                                                                                                                                                                                                 |
-| `actions`       | `ActionDefinition[]`        | Additional reusable Actions exposed as framework-managed model tools.                                                                                                                                                                                                                     |
-| `subagents`     | `AgentProfile[]`            | Additional named profiles available for delegated `session.task()` operations.                                                                                                                                                                                                            |
-| `thinkingLevel` | `ThinkingLevel`             | Default reasoning effort. Individual operations may override this value.                                                                                                                                                                                                                  |
-| `compaction`    | `false \| CompactionConfig` | Automatic conversation-compaction configuration. `false` disables threshold compaction; overflow recovery and explicit `session.compact()` calls still compact when needed.                                                                                                               |
-| `durability`    | `DurabilityConfig`          | Durability configuration for durable agent submissions. Controls recovery attempt limits and submission timeouts.                                                                                                                                                                         |
-| `cwd`           | `string`                    | Working directory inside the initialized sandbox.                                                                                                                                                                                                                                         |
-| `sandbox`       | `SandboxFactory`            | Sandbox factory used to construct the initialized environment. Omit for the default in-memory sandbox; use `bash(...)` to wrap a custom just-bash factory (`BashFactory`). See [Sandboxes](/docs/guide/sandboxes/).                                                                       |
+| Field           | Type                        | Description                                                                                                                                                                                                                                              |
+| --------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `description`   | `string`                    | Optional organizational metadata describing what this agent does. Overrides the profile description when set. Per-initialization metadata only — for static, statically-collectable metadata, use the agent module's `description` named export instead. |
+| `profile`       | `AgentProfile`              | Reusable baseline profile. Agent-definition fields replace or extend profile values.                                                                                                                                                                     |
+| `model`         | `string`                    | Default model specifier.                                                                                                                                                                                                                                 |
+| `instructions`  | `string`                    | Instructions prepended to discovered workspace context.                                                                                                                                                                                                  |
+| `skills`        | `Skill[]`                   | Additional registered skills available to initialized sessions.                                                                                                                                                                                          |
+| `tools`         | `ToolDefinition[]`          | Additional custom model-callable tools available to initialized sessions.                                                                                                                                                                                |
+| `actions`       | `ActionDefinition[]`        | Additional reusable Actions exposed as framework-managed model tools.                                                                                                                                                                                    |
+| `subagents`     | `AgentProfile[]`            | Additional named profiles available for delegated `session.task()` operations.                                                                                                                                                                           |
+| `thinkingLevel` | `ThinkingLevel`             | Default reasoning effort. Individual operations may override this value.                                                                                                                                                                                 |
+| `compaction`    | `false \| CompactionConfig` | Automatic conversation-compaction configuration. `false` disables threshold compaction; overflow recovery and explicit `session.compact()` calls still compact when needed.                                                                              |
+| `durability`    | `DurabilityConfig`          | Durability configuration for durable agent submissions. Controls recovery attempt limits and submission timeouts.                                                                                                                                        |
+| `cwd`           | `string`                    | Working directory inside the initialized sandbox.                                                                                                                                                                                                        |
+| `sandbox`       | `SandboxFactory`            | Sandbox factory used to construct the initialized environment. Omit for the default in-memory sandbox; use `bash(...)` to wrap a custom just-bash factory (`BashFactory`). See [Sandboxes](/docs/guide/sandboxes/).                                      |
 
 #### `AgentDefinition`
 
-`AgentDefinition` is the opaque initializer value returned by `defineAgent()`.
+`AgentDefinition` is the opaque initializer value returned by `defineAgent()`. It carries one method:
+
+```ts
+interface AgentDefinition<TEnv> {
+  route(): Hono;
+}
+```
+
+`route()` builds the agent's mountable HTTP sub-app (`POST /:id` prompt, `GET|HEAD /:id` conversation stream, `POST /:id/abort`, and the opt-in attachment route). It is a pure factory with no registration side effects — registration comes from the `'use agent'` scan — and it throws when the definition carries no identity. See the [Routing API](/docs/api/routing-api/) for the full route table and middleware semantics.
 
 ## `dispatch(...)`
 
@@ -271,17 +291,17 @@ interface DispatchReceipt {
 }
 ```
 
-Delivers a message for asynchronous processing by a continuing agent instance. The agent-definition overload requires a value default-exported by one discovered `agents/<name>.ts` module. The named overload selects a discovered agent module by name.
+Delivers a message for asynchronous processing by a continuing agent instance. The agent-definition overload takes a registered agent definition (a `'use agent'` module's default export) — no HTTP mount is required. The named overload selects a registered agent by identity (the module file basename).
 
-| Field        | Description                                                                             |
-| ------------ | ----------------------------------------------------------------------------------------- |
-| `agent`      | Discovered agent module name for the named overload.                                      |
-| `id`         | Target agent instance id.                                                                 |
-| `message`    | The message delivered to the session. Flue snapshots it when accepted.                    |
-| `dispatchId` | Generated delivery identifier returned in the receipt. This is not a workflow `runId`.     |
-| `acceptedAt` | ISO timestamp assigned when dispatch admission begins.                                    |
+| Field        | Description                                                              |
+| ------------ | ------------------------------------------------------------------------ |
+| `agent`      | Registered agent identity (module file basename) for the named overload. |
+| `id`         | Target agent instance id.                                                |
+| `message`    | The message delivered to the session. Flue snapshots it when accepted.   |
+| `dispatchId` | Generated delivery identifier returned in the receipt.                   |
+| `acceptedAt` | ISO timestamp assigned when dispatch admission begins.                   |
 
-`await dispatch(...)` resolves when the current runtime accepts and queues the message. It does not wait for model processing, tool calls, or an agent reply. Dispatched activity belongs to the continuing agent instance: it does not create workflow-run history and does not appear in SDK `client.runs` or raw `/runs` APIs.
+`await dispatch(...)` resolves when the current runtime accepts and queues the message. It does not wait for model processing, tool calls, or an agent reply. Dispatched activity belongs to the continuing agent instance and shares one accepted order with direct HTTP prompts to the same instance.
 
 #### `DeliveredMessage`
 
@@ -303,12 +323,12 @@ The single unified message shape delivered into an agent's session, whether it a
 
 `kind: 'signal'` is a structured, non-conversational event — a webhook payload, a scheduled trigger, an internal system notification. It produces a canonical `signal` record and renders into the model conversation as an XML-tagged block rather than a chat turn. This is the right shape for more advanced scenarios, including most channels: a Slack thread or GitHub issue is a multi-user conversation the agent participates in as one member, and signals model each participant's activity — with sender identity in `attributes` — where a `user` message would confuse other participants with the assistant's own user.
 
-| Field         | Applies to | Description                                                                                          |
+| Field         | Applies to | Description                                                                                            |
 | ------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
 | `body`        | both       | The message content. Always a string today; JSON-stringify structured payloads yourself.               |
 | `attachments` | `user`     | Images attached to the message. See `DeliveredAttachment`.                                             |
 | `type`        | `signal`   | Caller-defined event/signal type, e.g. `'slack.message'`.                                              |
-| `attributes`  | `signal`   | Flat, scalar-valued metadata for correlation — analogous to HTTP headers. Rendered alongside the body.  |
+| `attributes`  | `signal`   | Flat, scalar-valued metadata for correlation — analogous to HTTP headers. Rendered alongside the body. |
 | `tagName`     | `signal`   | Overrides the XML tag name used when rendering the signal into the model prompt. Defaults to `signal`. |
 
 #### `DeliveredAttachment`
@@ -328,11 +348,11 @@ Delivery durability depends on the generated target. Node uses a process-lifetim
 
 ## Agent
 
-An agent definition is the opaque value returned by `defineAgent()`. Default-export it from `agents/<name>.ts` to make persistent instances addressable, or bind it to a workflow as execution policy. Workflow runners initialize their harness automatically.
+An agent definition is the opaque value returned by `defineAgent()`. Default-export it from a `'use agent'` module to register it with the application; mount `agent.route()` in `app.ts` to make its conversations addressable over HTTP.
 
 ## Harness
 
-A harness is an initialized agent environment supplied by the active runner. Actions receive it as `context.harness`; application code does not name or initialize workflow harnesses.
+A harness is an initialized agent environment supplied by the active runner. Actions receive it as `context.harness`; application code does not name or initialize harnesses itself.
 
 #### `FlueHarness`
 

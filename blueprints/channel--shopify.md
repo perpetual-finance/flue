@@ -15,8 +15,9 @@ application-owned Admin GraphQL behavior to a Flue project.
 
 Read local instructions, detect the package manager and target, and select the
 first existing source root: `<root>/.flue/`, then `<root>/src/`, then
-`<root>/`. Inspect existing agents, environment types, secret conventions,
-Shopify installation storage, and which webhook topics the application needs.
+`<root>/`. Inspect existing agents, `app.ts` (the application's route map),
+environment types, secret conventions, Shopify installation storage, and which
+webhook topics the application needs.
 
 Install `@flue/shopify` and the official
 `@shopify/admin-api-client@^1.1.2`. Add a compatible `@types/node` development
@@ -214,6 +215,27 @@ export function orderRefFromInstanceId(id: string): {
 }
 ```
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the
+channel's router explicitly:
+
+```ts
+// app.ts
+import { Hono } from 'hono';
+import { channel } from './channels/shopify.ts';
+
+const app = new Hono();
+app.route('/channels/shopify', channel.route());
+
+export default app;
+```
+
+`channel.route()` is a pure router factory serving the channel's routes
+relative to the mount path. The `// Path:` comment in this guide assumes the
+conventional `/channels/shopify` mount; a different mount path shifts every
+provider URL accordingly.
+
 Shopify order ids can exceed JavaScript's safe integer range.
 `@flue/shopify` uses `lossless-json`: safe numeric literals remain numbers,
 while unsafe numeric literals retain their exact decimal spelling as strings.
@@ -237,6 +259,7 @@ through its own authenticated state and authorization policy.
 Bind the trusted shop and order selected by application code:
 
 ```ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import {
   orderRefFromInstanceId,
@@ -255,6 +278,12 @@ export default defineAgent(({ id }) => {
 });
 ```
 
+The `'use agent'` directive (the module's first statement) is what registers
+the agent with the application — `dispatch(...)` from the channel callback
+needs no `app.ts` mounting. Add
+`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+should also be reachable over HTTP directly.
+
 The model cannot choose another shop, token, URL, API version, or order id
 through tool arguments. The agent instance id remains an identifier rather
 than an authorization capability; apply the project's normal access policy to
@@ -265,13 +294,15 @@ inside deferred callbacks and initializers.
 
 ## Credentials and endpoint
 
-Configure a JSON webhook subscription with this URL:
+Configure a JSON webhook subscription with this URL — the channel's mount path
+in `app.ts` plus the route suffix, with the conventional
+`app.route('/channels/shopify', ...)` mount:
 
 ```txt
 https://example.com/channels/shopify/webhook
 ```
 
-If `flue()` is mounted beneath an outer prefix, include it. Use JSON delivery;
+A different mount path changes the URL accordingly. Use JSON delivery;
 the first-party channel intentionally rejects XML.
 
 `SHOPIFY_CLIENT_SECRET` verifies inbound webhook bodies.
@@ -332,8 +363,8 @@ installation token.
 
 ## Test without Shopify
 
-Run the project's focused typecheck and configured Node and Cloudflare checks.
-Use original synthetic JSON bodies and local secrets:
+Run the project's focused typecheck and `vite build` for the configured
+target. Use original synthetic JSON bodies and local secrets:
 
 1. Serialize one body once and preserve its exact bytes.
 2. HMAC-SHA256 those bytes with a local client secret and base64-encode the

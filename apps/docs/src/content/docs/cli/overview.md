@@ -1,67 +1,64 @@
 ---
 title: CLI
-description: Use the Flue CLI to configure, develop, exercise, inspect, and build an application.
-lastReviewedAt: 2026-06-22
+description: Use the Flue CLI to configure a project, exercise agents locally, and fetch blueprints and documentation.
+lastReviewedAt: 2026-07-02
 ---
 
 Install `@flue/cli` as a development dependency, then invoke `flue` through your package manager:
 
 ```bash
 npm install --save-dev @flue/cli
-npx flue dev
+npx flue run src/agents/assistant.ts --message "Summarize this repository."
 ```
 
-The CLI requires Node.js `>=22.19.0`. Cloudflare development and deployment also require `wrangler` as a development dependency.
+The CLI requires Node.js `>=22.19.0`.
 
-## Develop locally
+## Dev servers and builds belong to Vite
 
-`flue dev` serves the application for its configured Node.js or Cloudflare target, watches source files, and rebuilds on changes:
+The CLI does not serve or build your application. Development and production builds are owned by Vite through the `flue()` plugin from `@flue/vite`:
+
+```ts title="vite.config.ts"
+import { flue } from '@flue/vite';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  plugins: [flue()],
+});
+```
 
 ```bash
-npx flue dev
+vite dev     # local development server
+vite build   # deployable artifacts
 ```
 
-Use its real HTTP and SDK surface while authoring application routes and integrations. Agents and workflows are not public merely because they are discovered; [Routing](/docs/guide/routing/) explains authored exposure.
+`flue dev` and `flue build` were removed, not wrapped — running them prints a pointer to the Vite command. See the [Node.js](/docs/ecosystem/deploy/node/) and [Cloudflare](/docs/ecosystem/deploy/cloudflare/) deployment guides for the target-specific build story.
 
-## Exercise one resource
+## Exercise one agent
 
-`flue run` executes one agent prompt or workflow invocation and exits:
+`flue run` executes one agent module locally — transport-free, no HTTP listener — streams its activity, prints the reply, and exits:
 
 ```bash
-npx flue run assistant --input '{"message":"Summarize this repository."}'
-npx flue run summarize-ticket --input '{"ticket":"Ticket details"}'
+npx flue run src/agents/assistant.ts --message "Draft a release summary."
 ```
 
-Without an absolute `--server`, the command starts the configured Node.js or Cloudflare runtime temporarily. It calls through the authored `app.ts` and an existing `flue()` mount, so normal application and resource middleware executes. Route-free resources are temporarily available through that mount for local use; this does not alter deployment behavior or create a mount.
-
-Use `--server /api/flue` for a non-root authored local mount. An absolute URL attaches to an already-running local or deployed application:
-
-```bash
-npx flue run workflow:summarize-ticket \
-  --server https://example.com/api/flue \
-  --input '{"ticket":"Ticket details"}'
-```
-
-See [`flue run`](/docs/cli/run/) for input, identity, headers, resource qualification, and server behavior.
-
-## Build and deploy
-
-`flue build` creates target-specific deployment output:
-
-```bash
-npx flue build
-```
-
-A build packages the discovered application for its runtime target. It does not choose a model, add credentials, expose additional routes, or configure platform-owned bindings. Continue to the [Node.js](/docs/ecosystem/deploy/node/) or [Cloudflare](/docs/ecosystem/deploy/cloudflare/) deployment guide.
+Pass `--id` to continue the same conversation across invocations. See [`flue run`](/docs/cli/run/).
 
 ## Command reference
 
-| Command                              | Description                                                                     |
-| ------------------------------------ | ------------------------------------------------------------------------------- |
-| [`flue init`](/docs/cli/init/)       | Create an initial `flue.config.ts`.                                             |
-| [`flue dev`](/docs/cli/dev/)         | Serve and watch the local application.                                          |
-| [`flue run`](/docs/cli/run/)         | Execute one agent prompt or workflow invocation, then exit.                     |
-| [`flue build`](/docs/cli/build/)     | Create deployable application artifacts.                                        |
-| [`flue add`](/docs/cli/add/)         | Fetch sandbox, channel, or database installation blueprints for a coding agent. |
-| [`flue update`](/docs/cli/update/)   | Fetch a current blueprint so a coding agent can apply its newer upgrade guides. |
-| [`flue docs`](/docs/cli/docs/)       | List, read, and search the bundled Flue documentation.                          |
+| Command                            | Description                                                                     |
+| ---------------------------------- | ------------------------------------------------------------------------------- |
+| [`flue run`](/docs/cli/run/)       | Run one agent module locally (transport-free), print its reply, then exit.      |
+| [`flue init`](/docs/cli/init/)     | Create an initial `flue.config.ts`.                                             |
+| [`flue add`](/docs/cli/add/)       | Fetch sandbox, channel, database, or tooling blueprints for a coding agent.     |
+| [`flue update`](/docs/cli/update/) | Fetch a current blueprint so a coding agent can apply its newer upgrade guides. |
+| [`flue docs`](/docs/cli/docs/)     | List, read, and search the bundled Flue documentation.                          |
+
+## Removed commands
+
+| Removed           | Replacement                                                             |
+| ----------------- | ----------------------------------------------------------------------- |
+| `flue dev`        | `vite dev` with the `flue()` plugin in `vite.config.ts`.                |
+| `flue build`      | `vite build` with the `flue()` plugin in `vite.config.ts`.              |
+| `flue run <name>` | `flue run <path>` — the command takes an agent module path, not a name. |
+
+Removed commands and dropped flags fail with an explicit pointer at their replacement rather than a generic usage error.

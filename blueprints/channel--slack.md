@@ -15,9 +15,9 @@ application-owned Slack Web API behavior to a Flue project.
 
 Read local instructions, detect the package manager and target, and select the
 first existing source root: `<root>/.flue/`, then `<root>/src/`, then
-`<root>/`. Inspect existing agents, environment types, secret conventions, and
-whether the application needs Events API, interactivity, slash commands, or a
-combination.
+`<root>/`. Inspect existing agents, `app.ts` (the application's route map),
+environment types, secret conventions, and whether the application needs
+Events API, interactivity, slash commands, or a combination.
 
 Install `@flue/slack` and Slack's official
 `@slack/web-api@^8.0.0-rc.1` SDK with the project's package manager. Version 8
@@ -108,6 +108,27 @@ export function replyInThread(ref: { channelId: string; threadTs: string }) {
 }
 ```
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the
+channel's router explicitly:
+
+```ts
+// app.ts
+import { Hono } from 'hono';
+import { channel as slack } from './channels/slack.ts';
+
+const app = new Hono();
+app.route('/channels/slack', slack.route());
+
+export default app;
+```
+
+`channel.route()` is a pure router factory serving the channel's routes
+relative to the mount path. The `// Path:` comments in this guide assume the
+conventional `/channels/slack` mount; a different mount path shifts every
+provider URL accordingly.
+
 Slack Events API callbacks receive the provider-native outer `payload`.
 `payload.event` uses the official `SlackEvent` union re-exported by
 `@flue/slack`. Preserve Slack field names and discriminants; do not add a
@@ -126,6 +147,7 @@ them into a dispatched message, model context, logs, or durable session data.
 ## Wire the agent
 
 ```ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, replyInThread } from '../channels/slack.ts';
 
@@ -134,6 +156,12 @@ export default defineAgent(({ id }) => ({
   tools: [replyInThread(channel.parseConversationKey(id))],
 }));
 ```
+
+The `'use agent'` directive (the module's first statement) is what registers
+the agent with the application — `dispatch(...)` from the channel callback
+needs no `app.ts` mounting. Add
+`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+should also be reachable over HTTP directly.
 
 The channel-agent import cycle is supported because imported bindings are read
 inside deferred callbacks and initializers.
@@ -147,7 +175,9 @@ signature verification. Workspace and enterprise identity remain in the
 provider payload; add application-owned authorization only when the project
 requires it.
 
-Configure only required provider URLs:
+Configure only required provider URLs. Each is the channel's mount path in
+`app.ts` plus the route suffix — with the conventional
+`app.route('/channels/slack', ...)` mount:
 
 ```txt
 /channels/slack/events
@@ -155,7 +185,7 @@ Configure only required provider URLs:
 /channels/slack/commands
 ```
 
-Run the project typecheck and configured Node and Cloudflare builds. Generate
+Run the project typecheck and `vite build` for the configured target. Generate
 local `X-Slack-Signature` values from original synthetic Events API,
 interaction, and slash-command payloads. Test URL verification, exact-byte
 signature rejection, timestamp rejection, multi-workspace and enterprise

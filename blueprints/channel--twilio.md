@@ -15,8 +15,9 @@ with project-owned outbound Twilio access to a Flue project.
 
 Read local instructions, detect the package manager and target, and select the
 first existing source root: `<root>/.flue/`, then `<root>/src/`, then
-`<root>/`. Inspect existing agents, environment types, secret conventions, and
-whether the project uses one Twilio address or a Messaging Service.
+`<root>/`. Inspect existing agents, `app.ts` (the application's route map),
+environment types, secret conventions, and whether the project uses one Twilio
+address or a Messaging Service.
 
 Install `@flue/twilio` and `twilio@^6.0.2`. Flue owns signed webhook validation,
 exact public-URL handling, fixed account and destination identity, provider-native verified form
@@ -141,9 +142,31 @@ destination: {
 },
 ```
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the
+channel's router explicitly:
+
+```ts
+// app.ts
+import { Hono } from 'hono';
+import { channel } from './channels/twilio.ts';
+
+const app = new Hono();
+app.route('/channels/twilio', channel.route());
+
+export default app;
+```
+
+`channel.route()` is a pure router factory serving the channel's routes
+relative to the mount path. The `// Path:` comments in this guide assume the
+conventional `/channels/twilio` mount; a different mount path shifts every
+provider URL accordingly.
+
 ## Wire the agent
 
 ```ts
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, postMessage } from '../channels/twilio.ts';
 
@@ -152,6 +175,12 @@ export default defineAgent(({ id }) => ({
   tools: [postMessage(channel.parseConversationKey(id))],
 }));
 ```
+
+The `'use agent'` directive (the module's first statement) is what registers
+the agent with the application — `dispatch(...)` from the channel callback
+needs no `app.ts` mounting. Add
+`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+should also be reachable over HTTP directly.
 
 The channel-agent import cycle is supported because imported bindings are read
 inside deferred callbacks and initializers.
@@ -168,15 +197,17 @@ TWILIO_WEBHOOK_URL=https://example.com/channels/twilio/webhook
 ```
 
 Configure the phone number or Messaging Service inbound webhook to send `POST`
-requests to the exact `TWILIO_WEBHOOK_URL` value. The URL must include any
-outer `flue()` mount prefix and any query string. Twilio signs the external
+requests to the exact `TWILIO_WEBHOOK_URL` value. The URL is the channel's
+mount path in `app.ts` plus the route suffix (shown with the conventional
+`app.route('/channels/twilio', ...)` mount) and must include any query
+string. Twilio signs the external
 configured URL and form fields in `X-Twilio-Signature`, so do not derive this
 value from the incoming request behind a proxy.
 
 The external path may differ from the internal request path when a trusted
 proxy strips a prefix. The package validates the signature over the configured
-external URL — query string included — while Flue's fixed route owns the
-internal path. The incoming request's own query string is not re-checked: it is
+external URL — query string included — while the mounted channel route owns
+the internal path. The incoming request's own query string is not re-checked: it is
 already covered by the signed bytes, so any tampering fails signature (`401`).
 
 Twilio connection-override fragments such as `#rc=2&rp=all` may remain in the
@@ -269,7 +300,7 @@ Create original synthetic form posts from current official schemas and cover:
 - canonical conversation-key round trips;
 - real outbound Fetch requests against local fake transports in Node and
   workerd;
-- Node and Cloudflare project builds.
+- the project typecheck and `vite build` for the configured target.
 
 Do not contact Twilio or copy third-party fixtures.
 

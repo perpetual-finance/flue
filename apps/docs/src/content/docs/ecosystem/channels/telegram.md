@@ -52,6 +52,18 @@ continues the agent instance for its chat, business chat, or topic, and the
 bound grammY tool replies to that same destination. grammY's Fetch export runs
 on Node and Cloudflare Workers with Flue's `nodejs_compat` setting.
 
+## Mount the channel
+
+A channel serves HTTP routes only where `app.ts` mounts it. Mount the module's named `channel` export:
+
+```ts title="src/app.ts"
+import { channel as telegram } from './channels/telegram.ts';
+
+app.route('/channels/telegram', telegram.route());
+```
+
+`channel.route()` is a pure router factory serving the channel's declared routes relative to the mount path. The webhook paths in this guide assume the conventional `/channels/telegram` mount; a different mount path shifts them accordingly. The dispatch-target agent module carries the `'use agent'` directive — the directive registers it, so a dispatch-only agent needs no HTTP mount of its own.
+
 ## Configure
 
 | Variable                        | Purpose                                              |
@@ -207,6 +219,7 @@ export function postMessage(ref: TelegramConversationRef) {
 ## Bind the tool
 
 ```ts title="src/agents/assistant.ts"
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, postMessage } from '../channels/telegram.ts';
 

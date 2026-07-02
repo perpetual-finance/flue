@@ -30,11 +30,11 @@ Try out Flue today. Pass along the prompt below to your coding agent to have it 
 
 Read our [Getting Started](/docs/getting-started/quickstart/) guide for full details.
 
-_Update: `flue run` can execute either an agent or workflow on Node.js or Cloudflare. The experimental interactive console now ships separately as `@flue/dev-console`._
+_Update: Flue's adoption surface has since been redesigned — Flue is now a Vite plugin (`vite dev` / `vite build` replace `flue dev` / `flue build`), routes are mounted explicitly in `app.ts`, `flue run <path> --message` runs one agent locally, and workflows were folded into agents as [actions](/docs/guide/actions/). This post is preserved as written; see the [migration guide](/docs/guide/migration/) for the current surface. The experimental interactive console ships separately as `@flue/dev-console`._
 
 ## Introducing: Agents
 
-Flue originally launched with a simple programmable TypeScript harness, built on top of [Pi](https://pi.dev/). Flue's deterministic approach to agent orchestration turned out to be great for background work — structured automations we now call [Workflows](/docs/guide/workflows/). Workflows are where your trusted code drives the model from start to finish:
+Flue originally launched with a simple programmable TypeScript harness, built on top of [Pi](https://pi.dev/). Flue's deterministic approach to agent orchestration turned out to be great for background work — structured automations we called Workflows. Workflows are where your trusted code drives the model from start to finish:
 
 ```ts
 // src/workflows/summarize.ts

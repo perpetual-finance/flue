@@ -73,17 +73,19 @@ These are the things that aren't obvious from the spec or the example.
   values for them. Let the project's conventions (`AGENTS.md`, an existing
   `.env` / `.dev.vars`, a secret manager, CI vars, etc.) decide where they
   belong, and ask the user only if nothing in the project gives a clear
-  signal. For local dev, `flue dev --env <file>` and `flue run --env <file>`
-  load any `.env`-format file.
+  signal. For local one-shot runs, `flue run` loads the project's `.env` by
+  default and `--env <file>` selects one alternate `.env`-format file;
+  `vite dev` and the built server read the shell environment (`process.env`).
 
 ## Wrapping up
 
 - Typecheck the project (`npx tsc --noEmit` is safe). Fix anything you broke.
 - If the user is mid-task on an agent that this adapter is meant to plug
   into, finish that wiring. Otherwise share a small snippet showing how to
-  wire it up — typically returning the factory from a bound `defineAgent(() => ({ sandbox: ... }))`, then passing that agent to a default-exported `defineWorkflow({ agent, ... })` or default-exporting it from an agent module.
+  wire it up — default-export a bound `defineAgent(() => ({ sandbox: ... }))` from a module whose first statement is the `'use agent';` directive.
 - Tell the user what commands to run next: any new deps you added, any env
-  vars they need to set, and `flue dev`.
+  vars they need to set, and `flue run <path-to-the-agent-module> --message "..."`
+  (or `vite dev` for the full application).
 
 ## Hard rules
 

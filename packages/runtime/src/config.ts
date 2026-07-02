@@ -63,9 +63,10 @@ export interface FlueConfig {
 	 */
 	cloudflare?: string;
 	/**
-	 * Glob narrowing the `'use agent'` scan, relative to the project root
-	 * (e.g. `'src/**\/*.ts'`). Defaults to the whole source root,
-	 * recursively. Passed through verbatim for the scanner to interpret.
+	 * Glob narrowing the `'use agent'` scan, relative to the source root
+	 * (`.flue/`, `src/`, or the project root — whichever resolves). Defaults
+	 * to the whole source root, recursively. Passed through verbatim for the
+	 * scanner to interpret.
 	 */
 	agents?: string;
 }

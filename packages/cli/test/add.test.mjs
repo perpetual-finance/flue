@@ -498,7 +498,7 @@ describe('flue add', () => {
 		assert.ok(result.stdout.includes('braintrustFlueObserver'));
 		assert.ok(result.stdout.includes("event.type === 'tool'"));
 		assert.ok(result.stdout.includes("type: 'tool_call'"));
-		assert.ok(result.stdout.includes("event.type === 'run_resume'"));
+		assert.ok(result.stdout.includes("event.type === 'operation_start'"));
 		assert.ok(result.stdout.includes('// flue-blueprint: tooling/braintrust@1'));
 		assert.ok(result.stdout.includes('Node.js and Cloudflare'));
 		assert.ok(result.stdout.includes('This comparison is required when the marker is missing.'));
@@ -510,11 +510,11 @@ describe('flue add', () => {
 		assert.equal(result.code, 0);
 		assert.ok(result.stdout.includes('@sentry/node'));
 		assert.ok(result.stdout.includes('@sentry/cloudflare'));
-		assert.ok(result.stdout.includes('instrumentDurableObjectWithSentry'));
-		assert.match(
-			result.stdout,
-			/types:\s*\[[^\]]*'operation'[^\]]*'submission_settled'[^\]]*'log'[^\]]*\]/s,
+		assert.ok(result.stdout.includes("event.type === 'operation' && event.isError"));
+		assert.ok(
+			result.stdout.includes("event.type === 'submission_settled' && event.outcome === 'failed'"),
 		);
+		assert.ok(result.stdout.includes("event.type === 'log' && event.level === 'error'"));
 		assert.ok(result.stdout.includes('// flue-blueprint: tooling/sentry@1'));
 		assert.ok(result.stdout.includes('This comparison is required when the marker is missing.'));
 	});
@@ -528,11 +528,11 @@ describe('flue add', () => {
 		assert.ok(result.stdout.includes('vitest.evals.config.ts'));
 		assert.ok(result.stdout.includes('createFlueClient'));
 		assert.ok(result.stdout.includes('createFlueAgentHarness'));
-		assert.ok(result.stdout.includes('client.agents.history'));
+		assert.ok(result.stdout.includes('await conversation.history('));
 		assert.ok(result.stdout.includes('collectToolCalls(history.messages)'));
 		assert.ok(result.stdout.includes('crypto.randomUUID()'));
 		assert.ok(result.stdout.includes('// flue-blueprint: tooling/vitest-evals@1'));
-		assert.ok(result.stdout.includes('Do not add an unauthenticated `route` export'));
+		assert.ok(result.stdout.includes('Do not mount an unauthenticated agent route'));
 		assert.ok(result.stdout.includes('This comparison is required when the marker is missing.'));
 	});
 

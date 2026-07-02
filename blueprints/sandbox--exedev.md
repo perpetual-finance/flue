@@ -61,29 +61,26 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  *
  * @example Existing VM (most common)
  * ```typescript
+ * 'use agent';
+ * import { defineAgent } from '@flue/runtime';
  * import { exedev } from './sandboxes/exedev';
  *
- * const agent = defineAgent(() => ({
+ * export default defineAgent(() => ({
  *   sandbox: exedev({ host: 'maple-dune.exe.xyz' }),
  *   model: 'anthropic/claude-sonnet-4-6',
  * }));
- * export default defineWorkflow({ agent, async run({ harness }) {
- *   return await (await harness.session()).prompt('Inspect the workspace.');
- * }});
  * ```
  *
  * @example Create a VM before wrapping it
  * ```typescript
- * import { createExeVm, deleteExeVm, exedev } from './sandboxes/exedev';
+ * 'use agent';
+ * import { defineAgent } from '@flue/runtime';
+ * import { createExeVm, exedev } from './sandboxes/exedev';
  *
- * const vm = await createExeVm({ apiToken: process.env.EXE_API_TOKEN! });
- * const agent = defineAgent(() => ({
- *   sandbox: exedev(vm),
+ * export default defineAgent(async ({ env }) => ({
+ *   sandbox: exedev(await createExeVm({ apiToken: env.EXE_API_TOKEN })),
  *   model: 'anthropic/claude-sonnet-4-6',
  * }));
- * export default defineWorkflow({ agent, async run({ harness }) {
- *   return await (await harness.session()).prompt('Inspect the workspace.');
- * }});
  * ```
  */
 import {
@@ -711,8 +708,9 @@ Use project conventions (`.env`, `.dev.vars`, a secret manager, CI vars,
 etc.) for storing any token or host values. If nothing in the project gives
 you a clear signal, ask the user instead of guessing.
 
-For reference: `flue dev --env <file>` and `flue run --env <file>` load
-any `.env`-format file the user points them at.
+For reference: `flue run` loads the project's `.env` by default, and
+`--env <file>` selects one alternate `.env`-format file. `vite dev` and the
+built server read the shell environment (`process.env`).
 
 ## Wiring it into an agent
 
@@ -728,24 +726,19 @@ no obvious project convention like `EXE_VM_HOST`, ask for the exe.dev VM
 hostname before wiring the adapter.
 
 ```ts
-import { defineAgent, defineWorkflow, type WorkflowRouteHandler } from "@flue/runtime";
+'use agent';
+import { defineAgent } from "@flue/runtime";
 import { exedev } from "../sandboxes/exedev";
 
-export const route: WorkflowRouteHandler = async (_c, next) => next();
-
-const agent = defineAgent(({ env }) => ({
+export default defineAgent(({ env }) => ({
   sandbox: exedev({ host: env.EXE_VM_HOST }),
   model: "anthropic/claude-sonnet-4-6",
 }));
-
-export default defineWorkflow({
-  agent,
-  run: async ({ harness }) => {
-    const session = await harness.session();
-    return await session.shell("uname -a");
-  },
-});
 ```
+
+The `'use agent'` directive at the top is what registers the module with
+the application. Mount `agent.route()` in `app.ts` only if the agent needs
+an HTTP endpoint — `flue run` and `dispatch()` work without a mount.
 
 ### Fresh VM
 
@@ -754,25 +747,16 @@ API token with `new` permission. The bound agent initializer creates the VM and
 passes it to `exedev(...)`.
 
 ```ts
-import { defineAgent, defineWorkflow, type WorkflowRouteHandler } from "@flue/runtime";
+'use agent';
+import { defineAgent } from "@flue/runtime";
 import { createExeVm, exedev } from "../sandboxes/exedev";
 
-export const route: WorkflowRouteHandler = async (_c, next) => next();
-
-const agent = defineAgent(async ({ env }) => {
+export default defineAgent(async ({ env }) => {
   const vm = await createExeVm({ apiToken: env.EXE_API_TOKEN });
   return {
     sandbox: exedev(vm),
     model: "anthropic/claude-sonnet-4-6",
   };
-});
-
-export default defineWorkflow({
-  agent,
-  run: async ({ harness }) => {
-    const session = await harness.session();
-    return await session.shell("uname -a");
-  },
 });
 ```
 
@@ -783,12 +767,11 @@ an API token with `cp` permission. If the project also deletes the clone, the
 token needs `rm` permission.
 
 ```ts
-import { defineAgent, defineWorkflow, type WorkflowRouteHandler } from "@flue/runtime";
+'use agent';
+import { defineAgent } from "@flue/runtime";
 import { cloneExeVm, exedev } from "../sandboxes/exedev";
 
-export const route: WorkflowRouteHandler = async (_c, next) => next();
-
-const agent = defineAgent(async ({ env }) => {
+export default defineAgent(async ({ env }) => {
   const vm = await cloneExeVm({
     apiToken: env.EXE_API_TOKEN,
     source: "my-dev-vm",
@@ -797,14 +780,6 @@ const agent = defineAgent(async ({ env }) => {
     sandbox: exedev(vm),
     model: "anthropic/claude-sonnet-4-6",
   };
-});
-
-export default defineWorkflow({
-  agent,
-  run: async ({ harness }) => {
-    const session = await harness.session();
-    return await session.shell("uname -a");
-  },
 });
 ```
 
@@ -817,8 +792,10 @@ export default defineWorkflow({
    actually wrote the file.
 4. Tell the user the next steps: install `ssh2` and `@types/ssh2` (if you
    didn't), make sure the needed exe.dev SSH/API values are available at
-   runtime (per the Authentication section above), and run `flue dev --target node`
-   (or `flue run <workflow> --target node`) to try it.
+   runtime (per the Authentication section above), and run
+   `flue run <path-to-the-agent-module> --message "..."` (or `vite dev`
+   for the full application) to try it. Both require the Node target —
+   this adapter is not Cloudflare-compatible.
 
 When updating an existing integration, inspect and compare it against this complete current blueprint, apply every relevant change while preserving customizations, and then add or update the marker in the primary marked file. This comparison is required when the marker is missing.
 

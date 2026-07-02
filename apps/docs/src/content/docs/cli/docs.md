@@ -51,7 +51,7 @@ Unknown pages exit with status `1`.
     {
       "path": "concepts/durable-execution",
       "title": "Durable Agents",
-      "description": "Understand how Flue agents and workflows handle server restarts, interrupted connections, and other disruptions.",
+      "description": "Understand how Flue agents handle server restarts, interrupted connections, and other disruptions.",
       "excerpt": "Durable execution is about recovering safely when running work is disrupted by a server restart, deployment, lost connec…",
       "score": 138.34
     }

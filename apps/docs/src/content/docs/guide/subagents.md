@@ -1,7 +1,7 @@
 ---
 title: Subagents
 description: Let agents delegate focused work to named specialists.
-lastReviewedAt: 2026-05-29
+lastReviewedAt: 2026-07-02
 ---
 
 Subagents let an agent delegate a piece of work to a named specialist while it continues to own the interaction. Use them when an agent should ask another configured role to research, classify, or review something and then work with the returned answer.
@@ -13,6 +13,7 @@ A subagent is an [agent profile](/docs/guide/building-agents/#agent-profiles) de
 Create a named profile with `defineAgentProfile(...)`, then provide it through an agent's `subagents` configuration:
 
 ```ts title="src/agents/support-assistant.ts"
+'use agent';
 import { defineAgent, defineAgentProfile } from '@flue/runtime';
 
 const issueClassifier = defineAgentProfile({
@@ -50,31 +51,22 @@ A subagent profile is self-contained. The capability fields that define what the
 
 A `task()` call without an `agent` name is not a subagent delegation: the child session reuses the parent's full configuration in a fresh context.
 
-## Use subagents in workflows
+## Use subagents in Actions
 
-A workflow can choose delegation directly when application logic requires work from a particular subagent. Call `session.task(...)` with the name of a declared subagent, and provide `result` when the workflow needs validated data:
+An [Action](/docs/guide/actions/) can choose delegation directly when application logic requires work from a particular subagent. Call `session.task(...)` with the name of a declared subagent, and provide `result` when the Action needs validated data:
 
-```ts title="src/workflows/review-change.ts"
-import { defineAgent, defineWorkflow, defineAgentProfile } from '@flue/runtime';
+```ts title="src/actions/review-change.ts"
+import { defineAction } from '@flue/runtime';
 import * as v from 'valibot';
-
-const reviewer = defineAgentProfile({
-  name: 'reviewer',
-  instructions: 'Review the proposed change and identify concrete correctness risks.',
-});
-
-const coordinator = defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-  subagents: [reviewer],
-}));
 
 const Review = v.object({
   summary: v.string(),
   risks: v.array(v.string()),
 });
 
-export default defineWorkflow({
-  agent: coordinator,
+export const reviewChange = defineAction({
+  name: 'review_change',
+  description: 'Have the reviewer subagent assess one proposed change.',
   input: v.object({ change: v.string() }),
   output: Review,
 
@@ -90,12 +82,12 @@ export default defineWorkflow({
 });
 ```
 
-Here, the workflow chooses `reviewer` rather than leaving delegation to the parent agent. See [Workflows](/docs/guide/workflows/) for workflow orchestration and the [Agent API](/docs/api/agent-api/) for task options and result types.
+Here, application code chooses `reviewer` rather than leaving delegation to the parent agent. The agent exposing this Action declares the `reviewer` profile in its `subagents` configuration. See the [Agent API](/docs/api/agent-api/) for task options and result types.
 
 ## Next steps
 
 - [Agents](/docs/guide/building-agents/) — create agents and reusable agent profiles.
-- [Workflows](/docs/guide/workflows/) — orchestrate finite agent work in application code.
+- [Actions](/docs/guide/actions/) — orchestrate finite agent work in application code.
 - [Tools](/docs/guide/tools/) and [Skills](/docs/guide/skills/) — give an agent profile capabilities and reusable instructions.
 - [Sandboxes](/docs/guide/sandboxes/) — control the workspace available during delegated work.
 - [Agent API](/docs/api/agent-api/) — look up `session.task(...)` options and results.

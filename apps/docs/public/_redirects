@@ -14,3 +14,17 @@
 /docs/ecosystem/overview/ /docs/ecosystem/ 301
 /docs/cli/connect /docs/cli/console/ 301
 /docs/cli/connect/ /docs/cli/console/ 301
+/docs/cli/dev /docs/cli/overview/ 301
+/docs/cli/dev/ /docs/cli/overview/ 301
+/docs/cli/build /docs/cli/overview/ 301
+/docs/cli/build/ /docs/cli/overview/ 301
+/docs/sdk/agents /docs/sdk/client/ 301
+/docs/sdk/agents/ /docs/sdk/client/ 301
+/docs/sdk/runs /docs/sdk/client/ 301
+/docs/sdk/runs/ /docs/sdk/client/ 301
+/docs/sdk/workflows /docs/sdk/client/ 301
+/docs/sdk/workflows/ /docs/sdk/client/ 301
+/docs/api/workflow-api /docs/api/action-api/ 301
+/docs/api/workflow-api/ /docs/api/action-api/ 301
+/docs/guide/workflows /docs/guide/migration/ 301
+/docs/guide/workflows/ /docs/guide/migration/ 301

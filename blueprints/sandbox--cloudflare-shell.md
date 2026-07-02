@@ -309,41 +309,37 @@ mounted filesystem paths, use `@cloudflare/sandbox` Containers with
 `mountBucket` instead. Application-specific data loading into the Workspace
 belongs outside this adapter.
 
-## Wiring it into a workflow
+## Wiring it into an agent
 
 ```ts
-import { defineAgent, defineWorkflow, type WorkflowRouteHandler } from '@flue/runtime';
+'use agent';
+import { defineAgent } from '@flue/runtime';
 import { getDefaultWorkspace, getShellSandbox } from '../sandboxes/cloudflare-shell';
-
-export const route: WorkflowRouteHandler = async (_c, next) => next();
 
 interface Env {
   LOADER: WorkerLoader;
 }
 
-const agent = defineAgent<Env>(({ env }) => {
+export default defineAgent<Env>(({ env }) => {
   const workspace = getDefaultWorkspace();
   return {
     sandbox: getShellSandbox({ workspace, loader: env.LOADER }),
     model: 'cloudflare/@cf/moonshotai/kimi-k2.6',
   };
 });
-
-export default defineWorkflow({
-  agent,
-  run: async ({ harness }) => {
-    const session = await harness.session();
-    return await session.prompt('Use the code tool to list the workspace root.');
-  },
-});
 ```
+
+The `'use agent'` directive at the top is what registers the module with
+the application. Mount the agent's HTTP surface explicitly in `app.ts`
+(`app.route('/agents/<name>', agent.route())`) if it needs an endpoint —
+`dispatch()` needs no mount.
 
 ## Verify
 
 1. Run the user's typechecker.
 2. Confirm the import path matches where you wrote `cloudflare-shell.ts`.
 3. Confirm `wrangler.jsonc` has a `worker_loaders` binding matching the code.
-4. Tell the user to use `flue dev --target cloudflare`; if local Wrangler cannot simulate Worker Loader, use remote dev or deploy a preview Worker.
+4. Tell the user to use `vite dev` (the Cloudflare target comes from the `cloudflare()` plugin in `vite.config.ts`); if local Wrangler cannot simulate Worker Loader, use remote dev or deploy a preview Worker with `vite build && wrangler deploy`.
 
 When updating an existing integration, inspect and compare it against this complete current blueprint, apply every relevant change while preserving customizations, and then add or update the marker in the primary marked file. This comparison is required when the marker is missing.
 
