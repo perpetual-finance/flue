@@ -1,26 +1,8 @@
-import { createServer } from 'node:net';
-import * as path from 'node:path';
-import { build, cloudflareViteConfigPath, createCloudflareViteConfig } from './build.ts';
-import { createNodeLocalRuntime } from './node-local-runtime.ts';
-import type { BuildOptions } from './types.ts';
+import { cloudflareViteConfigPath, createCloudflareViteConfig } from './build.ts';
 
 export interface LocalHttpRuntimeOutput {
 	stream: 'stdout' | 'stderr';
 	line: string;
-}
-
-export interface StartLocalHttpRuntimeOptions {
-	root: string;
-	sourceRoot: string;
-	target: 'node' | 'cloudflare';
-	output?: string;
-	port?: number;
-	configFile?: string;
-	envFile?: string;
-	env?: NodeJS.ProcessEnv;
-	onOutput?: (output: LocalHttpRuntimeOutput) => void;
-	onBuildComplete?: () => void;
-	signal?: AbortSignal;
 }
 
 export interface LocalHttpRuntime {
@@ -48,68 +30,6 @@ interface StartedRuntime {
 	reload(): Promise<void>;
 	stop(): Promise<void>;
 	killSync(): void;
-}
-
-export async function startLocalHttpRuntime(
-	options: StartLocalHttpRuntimeOptions,
-): Promise<LocalHttpRuntime> {
-	const root = path.resolve(options.root);
-	const sourceRoot = path.resolve(options.sourceRoot);
-	throwIfAborted(options.signal);
-	const port = options.port ?? (await selectAvailablePort());
-	throwIfAborted(options.signal);
-	if (options.target === 'node') {
-		const runtime = await startInMemoryNodeRuntime({ ...options, root, sourceRoot, port });
-		options.onBuildComplete?.();
-		return { target: 'node', ...runtime };
-	}
-	const output = path.resolve(options.output ?? path.join(root, 'dist'));
-	const buildOptions: BuildOptions = {
-		root,
-		sourceRoot,
-		output,
-		target: options.target,
-		mode: 'development',
-		log: 'silent',
-		configFile: options.configFile,
-		envFile: options.envFile,
-		temporaryLocalExposure: true,
-	};
-	await build(buildOptions);
-	options.onBuildComplete?.();
-	throwIfAborted(options.signal);
-	const started = await startCloudflareLocalRuntime({ root, port, watch: false });
-	return { target: 'cloudflare', ...started };
-}
-
-async function startInMemoryNodeRuntime(
-	options: StartLocalHttpRuntimeOptions & { root: string; sourceRoot: string; port: number },
-): Promise<StartedRuntime> {
-	const runtime = await createNodeLocalRuntime({
-		root: options.root,
-		sourceRoot: options.sourceRoot,
-		port: options.port,
-		temporaryLocalExposure: true,
-		cors: true,
-		hostname: '127.0.0.1',
-		env: options.env,
-		onOutput: options.onOutput,
-	});
-	try {
-		throwIfAborted(options.signal);
-		await runtime.start();
-		throwIfAborted(options.signal);
-	} catch (error) {
-		await runtime.stop().catch(() => runtime.closeSync());
-		throw error;
-	}
-	return {
-		port: runtime.port,
-		url: runtime.url,
-		reload: () => runtime.reload(),
-		stop: () => runtime.stop(),
-		killSync: () => runtime.closeSync(),
-	};
 }
 
 export async function startCloudflareLocalRuntime(
@@ -235,22 +155,3 @@ function suppressPunycodeDeprecation(): () => void {
 	};
 }
 
-function throwIfAborted(signal?: AbortSignal): void {
-	if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
-}
-
-async function selectAvailablePort(): Promise<number> {
-	return new Promise<number>((resolve, reject) => {
-		const server = createServer();
-		server.once('error', reject);
-		server.listen(0, '127.0.0.1', () => {
-			const address = server.address();
-			if (!address || typeof address === 'string') {
-				server.close();
-				reject(new Error('Unable to select an available local HTTP port.'));
-				return;
-			}
-			server.close((error) => (error ? reject(error) : resolve(address.port)));
-		});
-	});
-}

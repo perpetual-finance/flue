@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ParseArgsOptionsConfig, parseArgs as parseNodeArgs } from 'node:util';
-import type { ConversationStreamChunk, FlueEvent } from '@flue/sdk';
+import type { ConversationStreamChunk } from '@flue/sdk';
 import { determineAgent } from '@vercel/detect-agent';
 import MiniSearch from 'minisearch';
 import pc from 'picocolors';
@@ -16,16 +16,14 @@ import {
 	type UserFlueConfig,
 } from '../src/lib/config.ts';
 import { resolveConfigCandidates } from '../src/lib/config-paths.ts';
-import { closeExecutionForSignal } from '../src/lib/console-shutdown.ts';
+import {
+	type AbortableExecution,
+	closeExecutionForSignal,
+} from '../src/lib/console-shutdown.ts';
 import { DEFAULT_DEV_PORT, dev } from '../src/lib/dev.ts';
 import { createEnvLoader, type EnvLoader, selectEnvFile } from '../src/lib/env.ts';
-import {
-	createExecutionLifecycle,
-	type ExecutionLifecycle,
-} from '../src/lib/execution-lifecycle.ts';
 import { createLineEventPresenter } from '../src/lib/line-event-presenter.ts';
-import { parseAgentInput, runTarget } from '../src/lib/run-controller.ts';
-import { parseHeaders, resolveServerUrl } from '../src/lib/run-http.ts';
+import { createLocalAgentRun } from '../src/lib/run-local.ts';
 import { brand, brandRows, error as cliError, note, row, success } from '../src/lib/terminal.ts';
 import { BLUEPRINTS, KIND_ROOTS } from './_blueprints.generated.ts';
 
@@ -98,7 +96,7 @@ function printUsage(log: (message: string) => void = console.error) {
 	log(
 		'Usage:\n' +
 			'  flue dev   [--target <node|cloudflare>] [--root <path>] [--output <path>] [--config <path>] [--port <number>] [--env <path>]\n' +
-			"  flue run     <name> [--target <node|cloudflare>] [--id <id>] [--input <json>] [--server <path|url>] [--header 'Name: value'] [--root <path>] [--output <path>] [--config <path>] [--env <path>]\n" +
+			'  flue run     <path> --message <text> [--id <conversation-id>] [--env <path>] [--json]\n' +
 			'  flue build   [--target <node|cloudflare>] [--root <path>] [--output <path>] [--config <path>] [--env <path>]\n' +
 			'  flue init  --target <node|cloudflare> [--root <path>] [--force]\n' +
 			'  flue add   [<kind> <name|url>] [--print]\n' +
@@ -107,7 +105,7 @@ function printUsage(log: (message: string) => void = console.error) {
 			'\n' +
 			'Commands:\n' +
 			'  dev    Long-running watch-mode dev server. Rebuilds and reloads on file changes.\n' +
-			'  run      Invoke one agent or workflow through its normal HTTP application, then exit.\n' +
+			'  run      Run one agent module locally (transport-free, no HTTP), print its reply, then exit.\n' +
 			'  build    Build a deployable artifact to ./dist (production deploys).\n' +
 			'  init   Scaffold a starter flue.config.ts in the target directory.\n' +
 			'  add    Fetch a blueprint implementation guide for an AI coding agent to follow.\n' +
@@ -115,9 +113,12 @@ function printUsage(log: (message: string) => void = console.error) {
 			'  docs   Browse the Flue docs. No args lists pages; `read` prints a page as markdown; `search` prints JSON results.\n' +
 			'\n' +
 			'Flags:\n' +
-			'  --root <path>        Project root. Default: current working directory.\n' +
-			'  --output <path>      Where the build artifacts are written. Default: <root>/dist.\n' +
-			'  --config <path>      Path to a flue.config.{ts,mts,mjs,js,cjs,cts} file (relative to cwd).\n' +
+			'  --message <text>     (flue run) The user message submitted to the agent. Required.\n' +
+			'  --id <id>            (flue run) Conversation id to create or continue. Default: a fresh id, printed.\n' +
+			'  --json               (flue run) Print a JSON result envelope to stdout instead of the message text.\n' +
+			'  --root <path>        (flue dev/build) Project root. Default: current working directory.\n' +
+			'  --output <path>      (flue dev/build) Where the build artifacts are written. Default: <root>/dist.\n' +
+			'  --config <path>      (flue dev/build) Path to a flue.config.{ts,mts,mjs,js,cjs,cts} file (relative to cwd).\n' +
 			'                       Default: search the root dir (or cwd) for `flue.config.*`.\n' +
 			'                       CLI flags always override values set in the config file.\n' +
 			`  --port <number>      Port for the dev server. Default: ${DEFAULT_DEV_PORT}\n` +
@@ -129,8 +130,8 @@ function printUsage(log: (message: string) => void = console.error) {
 			'Examples:\n' +
 			'  flue dev --target node\n' +
 			'  flue dev --target cloudflare --port 8787\n' +
-			'  flue run hello --target node\n' +
-			'  flue run hello --target node --input \'{"name": "World"}\' --env .env.staging\n' +
+			'  flue run src/agents/hello.ts --message "Hi there"\n' +
+			'  flue run src/agents/hello.ts --message "And then?" --id support-4821 --env .env.staging\n' +
 			'  flue build --target node\n' +
 			'  flue build --target cloudflare --root ./my-app\n' +
 			'  flue build --target node --output ./build\n' +
@@ -152,15 +153,11 @@ function printUsage(log: (message: string) => void = console.error) {
 
 interface RunArgs {
 	command: 'run';
-	resource: string;
-	target: 'node' | 'cloudflare' | undefined;
-	input: string | undefined;
+	/** Path of the agent module (relative or absolute). */
+	modulePath: string;
+	message: string;
 	id: string | undefined;
-	server: string | undefined;
-	headers: string[];
-	explicitRoot: string | undefined;
-	explicitOutput: string | undefined;
-	configFile: string | undefined;
+	json: boolean;
 	envFile: string | undefined;
 }
 
@@ -498,6 +495,80 @@ function parseInitArgs(rest: string[]): InitArgs {
 	};
 }
 
+/**
+ * Flags the legacy HTTP-based `flue run <name>` accepted. Each one hard-errors
+ * with a pointer at its replacement so old invocations fail loudly and
+ * helpfully rather than as generic "unknown flag" noise.
+ */
+const DROPPED_RUN_FLAGS: Record<string, string> = {
+	'--input': 'Pass the message text with --message <text>.',
+	'--server':
+		'`flue run` executes the agent module in-process without HTTP. ' +
+		'To call a deployed server, use the SDK (`createFlueClient`).',
+	'--header':
+		'`flue run` executes the agent module in-process without HTTP. ' +
+		'To call a deployed server, use the SDK (`createFlueClient`).',
+	'--target': '`flue run` is always Node-local; there is no target to select.',
+	'--root': 'Run `flue run` from the project directory; the module path is resolved from cwd.',
+	'--output': '`flue run` executes the agent module directly and writes no build artifacts.',
+	'--config': 'flue.config.* is discovered from the current working directory.',
+};
+
+function parseRunArgs(rest: string[]): RunArgs {
+	for (const arg of rest) {
+		if (arg === '--') break;
+		const flagName = arg.startsWith('--') ? (arg.split('=', 1)[0] ?? arg) : arg;
+		const hint = DROPPED_RUN_FLAGS[flagName];
+		if (hint !== undefined) {
+			fail(`\`flue run\` no longer accepts ${flagName}. ${hint}`);
+		}
+	}
+
+	const { positionals, values } = parseCommandOptions(
+		'run',
+		rest,
+		{
+			message: { type: 'string' },
+			id: { type: 'string' },
+			json: { type: 'boolean' },
+			env: { type: 'string', multiple: true },
+		},
+		new Set(['--message', '--id', '--json', '--env']),
+	);
+
+	const [modulePath, ...extra] = positionals;
+	if (!modulePath) {
+		console.error(
+			'Missing agent module path for `flue run`.\n\nUsage:\n  flue run <path> --message <text> [--id <conversation-id>] [--env <path>] [--json]',
+		);
+		process.exit(1);
+	}
+	if (extra.length > 0) {
+		console.error(`Unexpected extra arguments for \`flue run\`: ${extra.join(' ')}`);
+		printUsage();
+		process.exit(1);
+	}
+
+	const message = stringFlag(values, 'message', 'Missing value for --message');
+	if (message === undefined) {
+		fail('`flue run` requires --message <text>.');
+	}
+
+	const envFiles = stringListFlag(values, 'env', 'Missing value for --env');
+	if (envFiles.length > 1) {
+		fail('`--env` accepts one file. Combine values into one file or provide shell overrides.');
+	}
+
+	return {
+		command: 'run',
+		modulePath,
+		message,
+		id: stringFlag(values, 'id', 'Missing value for --id'),
+		json: booleanFlag(values, 'json', '--json'),
+		envFile: envFiles[0],
+	};
+}
+
 function parseArgs(argv: string[]): ParsedArgs {
 	const [command, ...rest] = argv;
 
@@ -570,60 +641,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 	}
 
 	if (command === 'run') {
-		const flags = parseFlags(
-			command,
-			rest,
-			new Set([
-				'--target',
-				'--input',
-				'--id',
-				'--server',
-				'--header',
-				'--root',
-				'--output',
-				'--config',
-				'--env',
-			]),
-		);
-		const [resource, ...extra] = flags.positionals;
-		if (!resource) {
-			console.error(`Missing agent or workflow name for ${command} command.`);
-			printUsage();
-			process.exit(1);
-		}
-		if (extra.length > 0) {
-			console.error(`Unexpected extra arguments for \`flue ${command}\`: ${extra.join(' ')}`);
-			printUsage();
-			process.exit(1);
-		}
-		if (flags.input !== undefined) {
-			try {
-				JSON.parse(flags.input);
-			} catch {
-				console.error(`Invalid JSON for --input: ${flags.input}`);
-				process.exit(1);
-			}
-		}
-		try {
-			parseHeaders(flags.headers);
-			if (flags.server !== undefined) resolveServerUrl(flags.server);
-		} catch (error) {
-			fail(error instanceof Error ? error.message : String(error));
-		}
-
-		return {
-			command,
-			resource,
-			target: flags.target,
-			input: flags.input,
-			id: flags.id,
-			server: flags.server,
-			headers: flags.headers,
-			explicitRoot: flags.explicitRoot,
-			explicitOutput: flags.explicitOutput,
-			configFile: flags.configFile,
-			envFile: flags.envFile,
-		};
+		return parseRunArgs(rest);
 	}
 
 	printUsage();
@@ -789,107 +807,111 @@ function displayPath(root: string, filePath: string): string {
 	return relative && !relative.startsWith('..') && !path.isAbsolute(relative) ? relative : filePath;
 }
 
-let activeExecution: ExecutionLifecycle | undefined;
+let activeExecution: AbortableExecution | undefined;
+
+function loadRunEnvironment(envFile: string | undefined): EnvLoader {
+	try {
+		const cwd = process.cwd();
+		const configPath = resolveConfigPath({ cwd, configFile: undefined });
+		const baseDir = configPath ? path.dirname(configPath) : cwd;
+		const envLoader = createEnvLoader(selectEnvFile(envFile, baseDir));
+		envLoader.apply();
+		return envLoader;
+	} catch (err) {
+		cliError(err instanceof Error ? err.message : String(err));
+		process.exit(1);
+	}
+}
+
+function describeRunError(error: unknown): string {
+	if (error instanceof Error) return error.message;
+	if (typeof error === 'string') return error;
+	if (error && typeof error === 'object' && 'message' in error) {
+		const message = (error as { message: unknown }).message;
+		if (typeof message === 'string') return message;
+	}
+	return JSON.stringify(error);
+}
 
 async function run(args: RunArgs) {
-	let resourceKind: 'agent' | 'workflow' | undefined;
-	const lifecycle = createExecutionLifecycle({
-		resource: args.resource,
-		target: args.target,
-		server: args.server,
-		headers: args.headers,
-		explicitRoot: args.explicitRoot,
-		explicitOutput: args.explicitOutput,
-		configFile: args.configFile,
-		envFile: args.envFile,
-		instanceId: args.id,
-		onRuntimeOutput: (line) => {
-			if (line.trim()) console.error(pc.dim(line));
-		},
-		onResourceResolved: (resource) => {
-			resourceKind = resource.kind;
-		},
-	});
-	activeExecution = lifecycle;
+	const envLoader = loadRunEnvironment(args.envFile);
+	const stderrLine = (line: string) => process.stderr.write(`${line}\n`);
+	// The presenter writes through process.stderr directly (not console.error)
+	// so it is unaffected by the run's console redirection.
 	const presenter = createLineEventPresenter({
-		write: (line) => console.error(line),
+		write: stderrLine,
 		dim: pc.dim,
 		textHeading: pc.bold('assistant'),
 		textIndent: '  ',
 	});
+	const execution = createLocalAgentRun({
+		modulePath: args.modulePath,
+		message: args.message,
+		conversationId: args.id,
+		onEvent: (chunk) => presenter.present(chunk as ConversationStreamChunk),
+		onRuntimeOutput: (line) => {
+			if (line.trim()) stderrLine(pc.dim(line));
+		},
+		onReady: (info) => {
+			brandRows('flue run', [
+				['agent', info.identity],
+				['id', info.conversationId],
+				['config', info.configPath ? displayPath(info.root, info.configPath) : undefined],
+				['db', info.dbEntry ?? info.dbPath],
+				['env', fs.existsSync(envLoader.file) ? displayPath(info.root, envLoader.file) : undefined],
+			]);
+			stderrLine('');
+			stderrLine(pc.bold('user'));
+			for (const line of args.message.split('\n')) stderrLine(`  ${line}`);
+			stderrLine('');
+		},
+	});
+	activeExecution = execution;
 	try {
-		const execution = await lifecycle.start();
-		const input = args.input === undefined ? undefined : JSON.parse(args.input);
-		if (execution.resource.kind === 'agent' && input === undefined) {
-			throw new Error('[flue] Agent `flue run` requires --input.');
-		}
-		brandRows('flue run', [
-			[execution.resource.kind, execution.resource.name],
-			['id', execution.instanceId],
-			['target', execution.target],
-			['server', execution.baseUrl],
-			[
-				'config',
-				execution.configPath && execution.root
-					? displayPath(execution.root, execution.configPath)
-					: undefined,
-			],
-			[
-				'env',
-				execution.envFile && execution.root
-					? displayPath(execution.root, execution.envFile)
-					: undefined,
-			],
-		]);
-		const target =
-			execution.resource.kind === 'agent'
-				? {
-						kind: 'agent' as const,
-						name: execution.resource.name,
-						instanceId: execution.instanceId as string,
-						input: parseAgentInput(input),
-					}
-				: { kind: 'workflow' as const, name: execution.resource.name, input };
-		if (target.kind === 'agent') {
-			console.error('');
-			console.error(pc.bold('user'));
-			for (const line of target.input.message.split('\n')) console.error(`  ${line}`);
-			console.error('');
-		}
-		let runIdShown = false;
-		const completed = await runTarget(
-			execution.client,
-			target,
-			(event: ConversationStreamChunk | FlueEvent) => {
-				if (!runIdShown && event.type === 'run_start') {
-					runIdShown = true;
-					row('run', event.runId);
-					console.error('');
-				}
-				presenter.present(event);
-			},
-			lifecycle.signal,
-		);
+		const result = await execution.start();
 		presenter.flush();
-		if (completed.kind === 'workflow' && !runIdShown) row('run', completed.runId);
-		if (completed.kind === 'workflow' && completed.result !== undefined && completed.result !== null) {
-			console.error('');
-			console.log(JSON.stringify(completed.result));
+		stderrLine('');
+		if (result.outcome === 'completed') {
+			if (args.json) {
+				// The stable machine-readable envelope; documented in run-local.ts.
+				console.log(
+					JSON.stringify({
+						id: result.conversationId,
+						agent: result.identity,
+						submissionId: result.submissionId,
+						outcome: result.outcome,
+						message: result.message,
+					}),
+				);
+			} else if (result.message !== '') {
+				console.log(result.message);
+			}
+			row('id', result.conversationId);
+			success('agent completed');
+		} else {
+			row('id', result.conversationId);
+			if (result.outcome === 'aborted') {
+				cliError('Agent run aborted.');
+				if (process.exitCode === undefined) process.exitCode = 130;
+			} else {
+				cliError(`Agent failed: ${describeRunError(result.error)}`);
+				process.exitCode = 1;
+			}
 		}
-		success(`${execution.resource.kind} completed`);
 	} catch (err) {
 		presenter.flush();
-		if (!lifecycle.signal.aborted) {
-			cliError(
-				`${resourceKind === 'agent' ? 'Agent' : resourceKind === 'workflow' ? 'Workflow' : 'Run'} failed: ${err instanceof Error ? err.message : String(err)}`,
-			);
+		if (!execution.signal.aborted) {
+			// Setup failures (module resolution, config, persistence) surface here;
+			// agent-execution failures settle and land in the branch above.
+			cliError(err instanceof Error ? err.message : String(err));
 			process.exitCode = 1;
 		}
 	} finally {
 		try {
-			await lifecycle.close();
+			await execution.close();
 		} finally {
-			if (activeExecution === lifecycle) activeExecution = undefined;
+			if (activeExecution === execution) activeExecution = undefined;
+			envLoader.restore();
 		}
 	}
 }

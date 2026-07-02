@@ -24,43 +24,43 @@ async function runCli(args) {
 }
 
 describe('flue (argument parsing)', () => {
-	it('treats the positional as the resource when flags precede it in `flue run`', async () => {
-		const result = await runCli(['run', '--target', 'cloudflare', 'hello']);
+	it('treats the positional as the module path when flags precede it in `flue run`', async () => {
+		const result = await runCli(['run', '--message', 'hi', 'hello']);
 		assert.equal(result.code, 1);
-		assert.ok(result.stderr.includes('Resource "hello" not found'), result.stderr);
+		assert.ok(result.stderr.includes('takes a module path, not a name'), result.stderr);
 		assert.ok(!result.stderr.includes('Unknown flag'), result.stderr);
 	});
 
-	it('reports the missing resource when `flue run` receives flags but no positional', async () => {
-		const result = await runCli(['run', '--target', 'node']);
+	it('reports the missing module path when `flue run` receives flags but no positional', async () => {
+		const result = await runCli(['run', '--message', 'hi']);
 		assert.equal(result.code, 1);
-		assert.ok(result.stderr.includes('Missing agent or workflow name'), result.stderr);
+		assert.ok(result.stderr.includes('Missing agent module path'), result.stderr);
 	});
 
-	it('treats `--target=node` the same as `--target node`', async () => {
-		const result = await runCli(['run', '--target=node']);
+	it('treats `--message=hi` the same as `--message hi`', async () => {
+		const result = await runCli(['run', '--message=hi']);
 		assert.equal(result.code, 1);
-		assert.ok(result.stderr.includes('Missing agent or workflow name'), result.stderr);
+		assert.ok(result.stderr.includes('Missing agent module path'), result.stderr);
 		assert.ok(!result.stderr.includes('Unknown flag'), result.stderr);
 	});
 
 	it('reports a missing string value when the next argument is another flag', async () => {
-		const result = await runCli(['run', 'hello', '--target', '--root', './app']);
+		const result = await runCli(['run', 'agent.mjs', '--message', '--id', 'x']);
 		assert.equal(result.code, 1);
-		assert.ok(result.stderr.includes('Missing value for --target'), result.stderr);
+		assert.ok(result.stderr.includes('Missing value for --message'), result.stderr);
 	});
 
 	it('reports a missing string value when the next argument is an inline flag', async () => {
-		const result = await runCli(['run', 'hello', '--target', '--root=./app']);
+		const result = await runCli(['run', 'agent.mjs', '--message', '--id=x']);
 		assert.equal(result.code, 1);
-		assert.ok(result.stderr.includes('Missing value for --target'), result.stderr);
+		assert.ok(result.stderr.includes('Missing value for --message'), result.stderr);
 	});
 
 	it('accepts a flag-like string value when provided inline', async () => {
-		const result = await runCli(['run', 'hello', '--target=--root']);
+		const result = await runCli(['run', 'agent.mjs', '--message=--id']);
 		assert.equal(result.code, 1);
-		assert.ok(result.stderr.includes('Invalid target: "--root"'), result.stderr);
-		assert.ok(!result.stderr.includes('Missing value for --target'), result.stderr);
+		assert.ok(result.stderr.includes('Agent module not found: agent.mjs'), result.stderr);
+		assert.ok(!result.stderr.includes('Missing value for --message'), result.stderr);
 	});
 
 	it('rejects --input when passed to `flue build`', async () => {
@@ -81,29 +81,13 @@ describe('flue (argument parsing)', () => {
 		assert.ok(result.stderr.includes('`flue dev` does not accept --input'), result.stderr);
 	});
 
-	it('accepts the workflow --id flag for resource-aware validation', async () => {
-		const result = await runCli(['run', 'workflow:hello', '--id', 'chosen-run', '--target', 'node']);
+	it('rejects a dropped legacy flag with a pointer at its replacement', async () => {
+		const result = await runCli(['run', 'agent.mjs', '--input', '{}', '--message', 'hi']);
 		assert.equal(result.code, 1);
-		assert.ok(result.stderr.includes('Resource "workflow:hello" not found'), result.stderr);
-		assert.ok(!result.stderr.includes('Unknown flag'), result.stderr);
-	});
-
-	it('attaches to an absolute server without requiring local project configuration', async () => {
-		const result = await runCli([
-			'run',
-			'workflow:report',
-			'--server',
-			'http://127.0.0.1:1/api/flue',
-		]);
-		assert.equal(result.code, 1);
-		assert.ok(!result.stderr.includes('Missing required `target`'), result.stderr);
-		assert.ok(result.stderr.includes('Workflow failed'), result.stderr);
-	});
-
-	it('rejects malformed header syntax before starting work', async () => {
-		const result = await runCli(['run', 'hello', '--header', 'invalid']);
-		assert.equal(result.code, 1);
-		assert.ok(result.stderr.includes('Invalid header'), result.stderr);
+		assert.ok(
+			result.stderr.includes('`flue run` no longer accepts --input. Pass the message text with --message'),
+			result.stderr,
+		);
 	});
 
 	it('rejects the removed --payload flag when passed to `flue run`', async () => {

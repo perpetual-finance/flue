@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { boundedShutdown, closeExecutionForSignal } from '../src/lib/console-shutdown.ts';
-import type { ExecutionLifecycle } from '../src/lib/execution-lifecycle.ts';
+import {
+	type AbortableExecution,
+	boundedShutdown,
+	closeExecutionForSignal,
+} from '../src/lib/console-shutdown.ts';
 
 const originalExitCode = process.exitCode;
 
@@ -34,9 +37,9 @@ describe('closeExecutionForSignal()', () => {
 	it('cancels run execution before bounded cleanup', async () => {
 		const cancel = vi.fn();
 		const close = vi.fn(async () => {});
-		const lifecycle = { cancel, close, forceCloseSync: vi.fn() } as unknown as ExecutionLifecycle;
+		const execution: AbortableExecution = { cancel, close, forceCloseSync: vi.fn() };
 
-		await closeExecutionForSignal('SIGTERM', lifecycle, vi.fn());
+		await closeExecutionForSignal('SIGTERM', execution, vi.fn());
 
 		expect(cancel).toHaveBeenCalledOnce();
 		expect(close).toHaveBeenCalledOnce();

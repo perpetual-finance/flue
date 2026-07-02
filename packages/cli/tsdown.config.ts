@@ -6,6 +6,11 @@ export default defineConfig({
 		flue: 'bin/flue.ts',
 		// `@flue/cli/config` subpath, written to dist/config.mjs.
 		config: 'src/config.ts',
+		// `flue run` execution bootstrap. NOT imported by the bin bundle: it is
+		// loaded through the run command's Vite module server so its
+		// `@flue/runtime` imports resolve inside the user project's
+		// single-runtime graph (see src/lib/run-local.ts).
+		'run-bootstrap': 'src/lib/run-bootstrap.ts',
 	},
 	format: ['esm'],
 	// tsdown emits `.d.mts` for every entry. We only need one for the
@@ -23,6 +28,8 @@ export default defineConfig({
 			'@cloudflare/vite-plugin',
 			'@flue/runtime',
 			'@flue/runtime/internal',
+			'@flue/runtime/config',
+			'@flue/runtime/node',
 			'@hono/node-server',
 		],
 	},
