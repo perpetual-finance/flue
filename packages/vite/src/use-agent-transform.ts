@@ -17,7 +17,7 @@
  */
 import MagicString from 'magic-string';
 import { parseAstAsync } from 'vite';
-import { programBodyHasAgentDirective } from './agent-scan.ts';
+import { parserLangForFile, programBodyHasAgentDirective } from './agent-scan.ts';
 
 /** Named exports the binding contract carries onto the definition. */
 const BOUND_NAMED_EXPORTS = ['route', 'attachments', 'description'] as const;
@@ -43,7 +43,7 @@ export async function transformUseAgentModule(options: {
 	identity: string;
 }): Promise<UseAgentTransformResult | null> {
 	const { code, id, filePath, identity } = options;
-	const program = await parseAstAsync(code, null, filePath);
+	const program = await parseAstAsync(code, { lang: parserLangForFile(filePath) }, filePath);
 	const body = program.body as readonly unknown[];
 	if (!programBodyHasAgentDirective(body)) return null;
 

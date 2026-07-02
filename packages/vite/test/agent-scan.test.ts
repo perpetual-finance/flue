@@ -104,6 +104,17 @@ describe('scanAgents()', () => {
 		expect(results.map((result) => result.identity)).toEqual(['cli-agent']);
 	});
 
+	it('parses TypeScript-only syntax in .ts and .mts agent modules', async () => {
+		const root = await makeFixture({
+			'typed.ts': `'use agent';\nimport { type FlueConfig } from '@flue/runtime/config';\nconst effort: 'high' | 'low' = 'high' as const;\nexport const description: string = effort;\nexport default { effort };\n`,
+			'typed-module.mts': `'use agent';\nconst level: number = 1;\nexport default { level };\n`,
+		});
+
+		const results = await scanAgents({ sourceRoot: root });
+
+		expect(results.map((result) => result.identity)).toEqual(['typed-module', 'typed']);
+	});
+
 	it("recognizes the directive in either order alongside 'use strict'", async () => {
 		const root = await makeFixture({
 			'strict-first.ts': `'use strict';\n'use agent';\n${AGENT_BODY}`,

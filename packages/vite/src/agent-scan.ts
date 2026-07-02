@@ -253,13 +253,21 @@ export async function codeHasAgentDirective(code: string, filePath: string): Pro
 	if (!code.includes(AGENT_DIRECTIVE)) return false;
 	let body: readonly unknown[];
 	try {
-		// The parser derives the dialect (ts/js) from the file extension.
-		const program = await parseAstAsync(code, null, filePath);
+		const program = await parseAstAsync(code, { lang: parserLangForFile(filePath) }, filePath);
 		body = program.body as readonly unknown[];
 	} catch (error) {
 		throw new AgentModuleParseError(filePath, error);
 	}
 	return programBodyHasAgentDirective(body);
+}
+
+/**
+ * The dialect must be selected explicitly: `parseAstAsync` does not derive it
+ * from the filename argument and otherwise parses in JS mode, rejecting
+ * TypeScript-only syntax in agent modules.
+ */
+export function parserLangForFile(filePath: string): 'ts' | 'js' {
+	return /\.(?:ts|mts|cts)$/.test(filePath) ? 'ts' : 'js';
 }
 
 async function hasAgentDirective(filePath: string): Promise<boolean> {
