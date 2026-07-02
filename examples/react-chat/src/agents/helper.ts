@@ -1,12 +1,6 @@
-import {
-	type AgentRouteHandler,
-	defineAgent,
-	defineAgentProfile,
-	defineTool,
-} from '@flue/runtime';
+'use agent';
+import { defineAgent, defineAgentProfile, defineTool } from '@flue/runtime';
 import * as v from 'valibot';
-
-export const route: AgentRouteHandler = async (_c, next) => next();
 
 /**
  * A named subagent the model can delegate to via the framework `task` tool.

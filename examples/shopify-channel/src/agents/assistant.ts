@@ -1,3 +1,4 @@
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { parseShopifyOrderInstanceId, retrieveOrder } from '../channels/shopify.ts';
 

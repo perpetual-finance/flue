@@ -1,3 +1,4 @@
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { getCustomerSummary, parseStripeCustomerInstanceId } from '../channels/stripe.ts';
 

@@ -1,3 +1,4 @@
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { channel, postMessage } from '../channels/telegram.ts';
 

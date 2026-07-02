@@ -192,10 +192,22 @@ importers:
       agents:
         specifier: ^0.14.2
         version: 0.14.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260602.1)(ai@6.0.191(zod@4.4.3))(chat@4.30.0(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(react@19.2.7)(rolldown@1.1.3)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(zod@4.4.3)
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
     devDependencies:
+      '@cloudflare/vite-plugin':
+        specifier: ^1.39.2
+        version: 1.39.2(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(workerd@1.20260611.1)(wrangler@4.100.0(@cloudflare/workers-types@4.20260602.1))
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
 
   examples/braintrust:
     dependencies:
@@ -215,6 +227,12 @@ importers:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
 
   examples/chat-sdk:
     dependencies:
@@ -252,6 +270,12 @@ importers:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       wrangler:
         specifier: ^4.97.0
         version: 4.97.0(@cloudflare/workers-types@4.20260602.1)
@@ -277,12 +301,21 @@ importers:
         specifier: ^1.0.0
         version: 1.4.0(typescript@6.0.3)
     devDependencies:
+      '@cloudflare/vite-plugin':
+        specifier: ^1.39.2
+        version: 1.39.2(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(workerd@1.20260611.1)(wrangler@4.97.0(@cloudflare/workers-types@4.20260602.1))
       '@cloudflare/workers-types':
         specifier: ^4.20260602.1
         version: 4.20260602.1
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       wrangler:
         specifier: ^4.97.0
         version: 4.97.0(@cloudflare/workers-types@4.20260602.1)
@@ -298,6 +331,9 @@ importers:
       '@flue/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
       valibot:
         specifier: ^1.0.0
         version: 1.4.0(typescript@6.0.3)
@@ -308,12 +344,18 @@ importers:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       agents:
         specifier: ^0.14.2
         version: 0.14.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260602.1)(ai@6.0.191(zod@4.4.3))(chat@4.30.0(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(react@19.2.7)(rolldown@1.1.3)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(zod@4.4.3)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@26.0.0)(happy-dom@18.0.1)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -329,6 +371,9 @@ importers:
       '@octokit/rest':
         specifier: '*'
         version: 22.0.1
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
       valibot:
         specifier: ^1.0.0
         version: 1.4.0(typescript@6.0.3)
@@ -339,12 +384,18 @@ importers:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       agents:
         specifier: ^0.14.2
         version: 0.14.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260602.1)(ai@6.0.191(zod@4.4.3))(chat@4.30.0(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(react@19.2.7)(rolldown@1.1.3)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(zod@4.4.3)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@26.0.0)(happy-dom@18.0.1)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -357,6 +408,9 @@ importers:
       '@flue/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
       jose:
         specifier: '*'
         version: 6.2.3
@@ -370,12 +424,18 @@ importers:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       agents:
         specifier: ^0.14.2
         version: 0.14.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260602.1)(ai@6.0.191(zod@4.4.3))(chat@4.30.0(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(react@19.2.7)(rolldown@1.1.3)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(zod@4.4.3)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@26.0.0)(happy-dom@18.0.1)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -404,6 +464,12 @@ importers:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
 
   examples/imported-skill:
     dependencies:
@@ -413,6 +479,9 @@ importers:
       agents:
         specifier: ^0.14.2
         version: 0.14.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260602.1)(ai@6.0.191(zod@4.4.3))(chat@4.30.0(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(react@19.2.7)(rolldown@1.1.3)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(zod@4.4.3)
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
       just-bash:
         specifier: ^3.0.1
         version: 3.0.1
@@ -420,6 +489,12 @@ importers:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       wrangler:
         specifier: ^4.97.0
         version: 4.97.0(@cloudflare/workers-types@4.20260602.1)
@@ -432,16 +507,25 @@ importers:
       '@flue/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
       intercom-client:
         specifier: '*'
         version: 7.0.3
     devDependencies:
+      '@cloudflare/vite-plugin':
+        specifier: ^1.39.2
+        version: 1.39.2(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(workerd@1.20260611.1)(wrangler@4.100.0(@cloudflare/workers-types@4.20260602.1))
       '@cloudflare/vitest-pool-workers':
         specifier: 0.16.15
         version: 0.16.15(@cloudflare/workers-types@4.20260602.1)(@vitest/runner@4.1.7)(@vitest/snapshot@4.1.7)(vitest@4.1.7(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(happy-dom@18.0.1)(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       '@types/node':
         specifier: ^22.10.10
         version: 22.19.19
@@ -451,6 +535,9 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(happy-dom@18.0.1)(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -466,6 +553,9 @@ importers:
       '@linear/sdk':
         specifier: '*'
         version: 86.0.0(graphql@16.14.2)
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
       valibot:
         specifier: ^1.0.0
         version: 1.4.0(typescript@6.0.3)
@@ -476,12 +566,18 @@ importers:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       agents:
         specifier: ^0.14.2
         version: 0.14.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260602.1)(ai@6.0.191(zod@4.4.3))(chat@4.30.0(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(react@19.2.7)(rolldown@1.1.3)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(zod@4.4.3)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@26.0.0)(happy-dom@18.0.1)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -494,6 +590,9 @@ importers:
       '@flue/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
       valibot:
         specifier: ^1.0.0
         version: 1.4.0(typescript@6.0.3)
@@ -504,12 +603,18 @@ importers:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       agents:
         specifier: ^0.14.2
         version: 0.14.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260602.1)(ai@6.0.191(zod@4.4.3))(chat@4.30.0(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(react@19.2.7)(rolldown@1.1.3)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(zod@4.4.3)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@26.0.0)(happy-dom@18.0.1)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -525,13 +630,16 @@ importers:
       hono:
         specifier: ^4.7.0
         version: 4.12.22
-      valibot:
-        specifier: ^1.0.0
-        version: 1.4.0(typescript@6.0.3)
     devDependencies:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
 
   examples/notion-channel:
     dependencies:
@@ -544,13 +652,22 @@ importers:
       '@notionhq/client':
         specifier: '*'
         version: 5.22.0
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
     devDependencies:
+      '@cloudflare/vite-plugin':
+        specifier: ^1.39.2
+        version: 1.39.2(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(workerd@1.20260611.1)(wrangler@4.100.0(@cloudflare/workers-types@4.20260602.1))
       '@cloudflare/vitest-pool-workers':
         specifier: 0.16.15
         version: 0.16.15(@cloudflare/workers-types@4.20260602.1)(@vitest/runner@4.1.7)(@vitest/snapshot@4.1.7)(vitest@4.1.7(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(happy-dom@18.0.1)(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       '@types/node':
         specifier: ^22.10.10
         version: 22.19.19
@@ -560,6 +677,9 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(happy-dom@18.0.1)(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -597,6 +717,9 @@ importers:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       '@types/node':
         specifier: ^22.10.10
         version: 22.19.19
@@ -621,16 +744,25 @@ importers:
       '@flue/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
       resend:
         specifier: '*'
         version: 6.12.4
     devDependencies:
+      '@cloudflare/vite-plugin':
+        specifier: ^1.39.2
+        version: 1.39.2(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(workerd@1.20260611.1)(wrangler@4.100.0(@cloudflare/workers-types@4.20260602.1))
       '@cloudflare/vitest-pool-workers':
         specifier: 0.16.15
         version: 0.16.15(@cloudflare/workers-types@4.20260602.1)(@vitest/runner@4.1.7)(@vitest/snapshot@4.1.7)(vitest@4.1.7(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(happy-dom@18.0.1)(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       '@types/node':
         specifier: ^22.10.10
         version: 22.19.19
@@ -643,6 +775,9 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(happy-dom@18.0.1)(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -655,13 +790,22 @@ importers:
       '@flue/salesforce':
         specifier: workspace:*
         version: link:../../packages/salesforce-marketing-cloud
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
     devDependencies:
+      '@cloudflare/vite-plugin':
+        specifier: ^1.39.2
+        version: 1.39.2(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(workerd@1.20260611.1)(wrangler@4.100.0(@cloudflare/workers-types@4.20260602.1))
       '@cloudflare/vitest-pool-workers':
         specifier: 0.16.15
         version: 0.16.15(@cloudflare/workers-types@4.20260602.1)(@vitest/runner@4.1.7)(@vitest/snapshot@4.1.7)(vitest@4.1.7(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(happy-dom@18.0.1)(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       '@types/node':
         specifier: ^22.10.10
         version: 22.19.19
@@ -671,6 +815,9 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(happy-dom@18.0.1)(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -690,6 +837,12 @@ importers:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
 
   examples/shopify-channel:
     dependencies:
@@ -702,13 +855,22 @@ importers:
       '@shopify/admin-api-client':
         specifier: '*'
         version: 1.1.2
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
     devDependencies:
+      '@cloudflare/vite-plugin':
+        specifier: ^1.39.2
+        version: 1.39.2(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(workerd@1.20260611.1)(wrangler@4.100.0(@cloudflare/workers-types@4.20260602.1))
       '@cloudflare/vitest-pool-workers':
         specifier: 0.16.15
         version: 0.16.15(@cloudflare/workers-types@4.20260602.1)(@vitest/runner@4.1.7)(@vitest/snapshot@4.1.7)(vitest@4.1.7(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(happy-dom@18.0.1)(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       '@types/node':
         specifier: ^22.10.10
         version: 22.19.19
@@ -718,6 +880,9 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(happy-dom@18.0.1)(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -733,6 +898,9 @@ importers:
       '@slack/web-api':
         specifier: ^8.0.0-rc.1
         version: 8.0.0-rc.1
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
       valibot:
         specifier: ^1.0.0
         version: 1.4.0(typescript@6.0.3)
@@ -743,12 +911,18 @@ importers:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       agents:
         specifier: ^0.14.2
         version: 0.14.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260602.1)(ai@6.0.191(zod@4.4.3))(chat@4.30.0(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(react@19.2.7)(rolldown@1.1.3)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(zod@4.4.3)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@26.0.0)(happy-dom@18.0.1)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -761,6 +935,9 @@ importers:
       '@flue/stripe':
         specifier: workspace:*
         version: link:../../packages/stripe
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
       stripe:
         specifier: '*'
         version: 22.2.1(@types/node@22.19.19)
@@ -771,6 +948,9 @@ importers:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       '@types/node':
         specifier: ^22.10.10
         version: 22.19.19
@@ -780,6 +960,9 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(happy-dom@18.0.1)(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -792,6 +975,9 @@ importers:
       '@flue/teams':
         specifier: workspace:*
         version: link:../../packages/teams
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
       valibot:
         specifier: ^1.0.0
         version: 1.4.0(typescript@6.0.3)
@@ -802,12 +988,18 @@ importers:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       agents:
         specifier: ^0.14.2
         version: 0.14.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260602.1)(ai@6.0.191(zod@4.4.3))(chat@4.30.0(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(react@19.2.7)(rolldown@1.1.3)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(zod@4.4.3)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@26.0.0)(happy-dom@18.0.1)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -823,6 +1015,9 @@ importers:
       grammy:
         specifier: '*'
         version: 1.44.0
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
       valibot:
         specifier: ^1.0.0
         version: 1.4.0(typescript@6.0.3)
@@ -833,12 +1028,18 @@ importers:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       agents:
         specifier: ^0.14.2
         version: 0.14.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260602.1)(ai@6.0.191(zod@4.4.3))(chat@4.30.0(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(react@19.2.7)(rolldown@1.1.3)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(zod@4.4.3)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@26.0.0)(happy-dom@18.0.1)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -851,6 +1052,9 @@ importers:
       '@flue/twilio':
         specifier: workspace:*
         version: link:../../packages/twilio
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
       valibot:
         specifier: ^1.0.0
         version: 1.4.0(typescript@6.0.3)
@@ -861,12 +1065,18 @@ importers:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       agents:
         specifier: ^0.14.2
         version: 0.14.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260602.1)(ai@6.0.191(zod@4.4.3))(chat@4.30.0(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(react@19.2.7)(rolldown@1.1.3)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(zod@4.4.3)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@26.0.0)(happy-dom@18.0.1)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -876,6 +1086,9 @@ importers:
       '@flue/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
       valibot:
         specifier: ^1.0.0
         version: 1.4.0(typescript@6.0.3)
@@ -886,9 +1099,15 @@ importers:
       '@flue/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@26.0.0)(happy-dom@18.0.1)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -907,6 +1126,9 @@ importers:
       '@kapso/whatsapp-cloud-api':
         specifier: '*'
         version: 0.2.1
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
       valibot:
         specifier: ^1.0.0
         version: 1.4.0(typescript@6.0.3)
@@ -917,12 +1139,18 @@ importers:
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       agents:
         specifier: ^0.14.2
         version: 0.14.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260602.1)(ai@6.0.191(zod@4.4.3))(chat@4.30.0(ai@6.0.191(zod@4.4.3))(zod@4.4.3))(react@19.2.7)(rolldown@1.1.3)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(zod@4.4.3)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@26.0.0)(happy-dom@18.0.1)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -935,16 +1163,25 @@ importers:
       '@flue/zendesk':
         specifier: workspace:*
         version: link:../../packages/zendesk
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
       lossless-json:
         specifier: '*'
         version: 4.3.0
     devDependencies:
+      '@cloudflare/vite-plugin':
+        specifier: ^1.39.2
+        version: 1.39.2(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(workerd@1.20260611.1)(wrangler@4.100.0(@cloudflare/workers-types@4.20260602.1))
       '@cloudflare/vitest-pool-workers':
         specifier: 0.16.15
         version: 0.16.15(@cloudflare/workers-types@4.20260602.1)(@vitest/runner@4.1.7)(@vitest/snapshot@4.1.7)(vitest@4.1.7(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(happy-dom@18.0.1)(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
       '@types/node':
         specifier: ^22.10.10
         version: 22.19.19
@@ -954,6 +1191,9 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(happy-dom@18.0.1)(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -11003,6 +11243,19 @@ snapshots:
       - utf-8-validate
       - workerd
 
+  '@cloudflare/vite-plugin@1.39.2(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(workerd@1.20260611.1)(wrangler@4.100.0(@cloudflare/workers-types@4.20260602.1))':
+    dependencies:
+      '@cloudflare/unenv-preset': 2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260611.1)
+      miniflare: 4.20260601.0
+      unenv: 2.0.0-rc.24
+      vite: 8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
+      wrangler: 4.100.0(@cloudflare/workers-types@4.20260602.1)
+      ws: 8.20.1
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+      - workerd
+
   '@cloudflare/vite-plugin@1.39.2(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(workerd@1.20260611.1)(wrangler@4.100.0(@cloudflare/workers-types@4.20260602.1))':
     dependencies:
       '@cloudflare/unenv-preset': 2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260611.1)
@@ -11010,6 +11263,19 @@ snapshots:
       unenv: 2.0.0-rc.24
       vite: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
       wrangler: 4.100.0(@cloudflare/workers-types@4.20260602.1)
+      ws: 8.20.1
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+      - workerd
+
+  '@cloudflare/vite-plugin@1.39.2(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(workerd@1.20260611.1)(wrangler@4.97.0(@cloudflare/workers-types@4.20260602.1))':
+    dependencies:
+      '@cloudflare/unenv-preset': 2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260611.1)
+      miniflare: 4.20260601.0
+      unenv: 2.0.0-rc.24
+      vite: 8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
+      wrangler: 4.97.0(@cloudflare/workers-types@4.20260602.1)
       ws: 8.20.1
     transitivePeerDependencies:
       - bufferutil

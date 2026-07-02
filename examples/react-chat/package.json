@@ -3,9 +3,9 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"dev": "pnpm run build:ui && flue dev",
-		"build": "pnpm run build:ui && flue build",
-		"build:ui": "vite build",
+		"dev": "pnpm run build:ui && vite dev",
+		"build": "vite build && pnpm run build:ui",
+		"build:ui": "vite build --config vite.config.ui.ts",
 		"check:types": "tsc --noEmit"
 	},
 	"dependencies": {
@@ -21,6 +21,7 @@
 	},
 	"devDependencies": {
 		"@flue/cli": "workspace:*",
+		"@flue/vite": "workspace:*",
 		"@types/node": "^22.10.10",
 		"@types/react": "^19.1.8",
 		"@types/react-dom": "^19.1.6",

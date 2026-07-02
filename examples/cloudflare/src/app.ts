@@ -1,18 +1,21 @@
 /**
- * Optional `app.ts` entry. When present, the Flue build delegates the
- * entire request pipeline to whatever this file's default export
- * exposes via `.fetch(request, env, ctx)`.
+ * `app.ts` — the application's route map, and the only required file.
  *
- * The same `app.ts` shape works on both Node and Cloudflare targets;
- * `flue()` adapts internally. On Cloudflare the Hono route resolves the
- * generated binding and forwards to the per-agent Durable Object via the
- * Agents SDK; everything else is just a Hono app.
+ * The default export owns the entire request pipeline via
+ * `.fetch(request, env, ctx)`. The same `app.ts` shape works on both Node and
+ * Cloudflare targets; `flue()` adapts internally. On Cloudflare each mounted
+ * agent route resolves the generated binding and forwards to that agent's
+ * Durable Object via the Agents SDK; everything else is just a Hono app.
  *
- * Delete this file and the build falls back to a default app that
- * mounts `flue()` at root with no extras.
+ * Every route is mounted explicitly: `<agent>.route()` is a pure router
+ * factory over an agent module marked with the `'use agent'` directive (the
+ * scan of marked modules — not the mount — is what registers the agent, so a
+ * dispatch-only agent needs no mount at all).
  */
-import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
+import skillsFromGit from './agents/skills-from-git';
+import skillsFromR2 from './agents/skills-from-r2';
+import withCloudflareBinding from './agents/with-cloudflare-binding';
 
 // ─── Cloudflare AI Gateway (optional) ───────────────────────────────────────
 // By default, every `cloudflare/...` model call is routed through
@@ -52,15 +55,14 @@ const app = new Hono();
 // endpoint that doesn't need agent state / streaming.
 app.get('/api/ping', (c) => c.json({ pong: true, at: new Date().toISOString() }));
 
-// Flue's built-in agent route: `POST /agents/:name/:id`. Forwards into
-// the appropriate generated per-agent Durable Object binding.
-app.route('/', flue());
-
-// To expose deployment-inspection endpoints, compose them from the
-// `listRuns`/`getRun`/`listAgents` primitives exported by `@flue/runtime`,
-// behind your own auth middleware:
-// app.use('/admin/*', myAuthMiddleware);
-// app.get('/admin/agents', async (c) => c.json(await listAgents()));
-// app.get('/admin/runs', async (c) => c.json(await listRuns({ limit: 100 })));
+// Each agent's HTTP surface, mounted explicitly. Relative to the mount:
+//   POST /:id            prompt (202 admission; ?wait=result)
+//   GET|HEAD /:id        conversation stream
+//   POST /:id/abort      abort in-flight work
+// The mount path is yours to choose; the file basename (the agent's durable
+// identity) is what keys conversations and the Durable Object class.
+app.route('/agents/with-cloudflare-binding', withCloudflareBinding.route());
+app.route('/agents/skills-from-git', skillsFromGit.route());
+app.route('/agents/skills-from-r2', skillsFromR2.route());
 
 export default app;

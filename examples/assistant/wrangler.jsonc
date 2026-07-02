@@ -31,6 +31,12 @@
 		{
 			"tag": "flue-rename-generated-classes",
 			"renamed_classes": [{ "from": "Assistant", "to": "FlueAssistantAgent" }]
+		},
+		{
+			// Workflows (and their run-pointer registry DO) were removed from
+			// Flue; the generated Worker no longer exports FlueRegistry.
+			"tag": "flue-remove-workflow-registry",
+			"deleted_classes": ["FlueRegistry"]
 		}
 	],
 	"containers": [

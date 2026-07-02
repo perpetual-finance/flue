@@ -1,3 +1,4 @@
+'use agent';
 import {
 	fauxAssistantMessage,
 	fauxText,
@@ -23,7 +24,9 @@ export default defineAgent(() => {
 						? input.content
 						: input.content.map((block) => (block.type === 'text' ? block.text : '')).join('')
 					: '';
-			const threadId = /"threadId"\s*:\s*"([^"]+)"/.exec(text)?.[1] ?? '';
+			// Dispatched signals render to the model as an XML-ish tag whose
+			// attributes carry the dispatch attributes: <signal ... threadId="...">.
+			const threadId = /threadId\s*=\s*"([^"]+)"/.exec(text)?.[1] ?? '';
 			return fauxAssistantMessage(
 				fauxToolCall('reply_to_chat_thread', {
 					threadId,

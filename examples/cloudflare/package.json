@@ -2,6 +2,11 @@
 	"name": "cloudflare",
 	"private": true,
 	"type": "module",
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"deploy": "vite build && wrangler deploy"
+	},
 	"dependencies": {
 		"@cloudflare/codemode": "*",
 		"@cloudflare/shell": "*",
@@ -11,8 +16,11 @@
 		"valibot": "^1.0.0"
 	},
 	"devDependencies": {
+		"@cloudflare/vite-plugin": "^1.39.2",
 		"@cloudflare/workers-types": "^4.20260602.1",
 		"@flue/cli": "workspace:*",
+		"@flue/vite": "workspace:*",
+		"vite": "^8.0.14",
 		"wrangler": "^4.97.0"
 	}
 }

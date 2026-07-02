@@ -13,16 +13,19 @@ signed GitHub issue_comment webhook
 
 The fixture uses Chat SDK's in-memory state adapter and a scripted model provider so its end-to-end test is local and deterministic. Use persistent Chat SDK state for production integrations.
 
-## Run on Node
+The assistant agent is *dispatch-only*: its module carries the `'use agent'` directive (which registers it with the app at build time), but `src/app.ts` never mounts it — the webhook handler reaches it through `dispatch()` with no HTTP route.
+
+## Run
 
 ```sh
-node ../../packages/cli/bin/flue.mjs dev --target node --port 3585
-node ./test/e2e.mjs
+pnpm run dev          # vite dev on port 3585 (pinned in vite.config.ts)
+pnpm run test:e2e     # in another terminal
 ```
 
-## Run on Cloudflare
+Or against the production build:
 
 ```sh
-node ../../packages/cli/bin/flue.mjs dev --target cloudflare --port 3585
-node ./test/e2e.mjs
+pnpm run build
+PORT=3585 node dist/server.mjs
+pnpm run test:e2e     # in another terminal
 ```

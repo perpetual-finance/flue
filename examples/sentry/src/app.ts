@@ -1,7 +1,7 @@
 /**
  * Sentry error reporting for Flue.
  *
- * This file is the entire integration. It does two things:
+ * This file is the entire integration. It does three things:
  *
  *   1. Initializes the Sentry Node SDK at module scope so every isolate
  *      that imports `app.ts` has a configured Sentry client.
@@ -10,9 +10,11 @@
  *      that translates terminal Flue failures and explicit error logs into
  *      `Sentry.captureException(...)` calls with Flue correlation tags.
  *
+ *   3. Mounts the app's agents — `app.ts` is the route map.
+ *
  * Read top-to-bottom — there are no other Sentry-related files in the
- * project. Every workflow in `src/workflows/` is a created Flue workflow;
- * none of them know that Sentry exists.
+ * project. Every agent in `src/agents/` is a plain Flue agent; none of
+ * them know that Sentry exists.
  *
  *
  * Scope of this example
@@ -20,24 +22,23 @@
  *
  * This is intentionally focused on **error reporting**:
  *
- *   - failed workflow runs, direct agent operations, and recovered durable
- *     submissions → captured as Sentry exceptions at `error` level.
- *   - `ctx.log.error(...)` calls from handlers → captured as Sentry
- *     exceptions when an `error` attribute is present, otherwise as
- *     messages at `error` level.
+ *   - failed agent operations and failed durable submissions → captured as
+ *     Sentry exceptions at `error` level.
+ *   - `log.error(...)` calls from actions → captured as Sentry exceptions
+ *     when an `error` attribute is present, otherwise as messages at
+ *     `error` level.
  *
  * What this example does NOT do (deliberate, for now):
  *
- *   - It does not emit Sentry spans / traces for runs, operations, or
- *     tool calls. The Flue event stream already carries the data a
- *     future span-based integration would need (`durationMs`, `usage`,
- *     `operationKind`, etc.), so layering spans on top is a follow-up
- *     rather than a redesign.
- *   - It does not forward `ctx.log.info` / `.warn` to Sentry breadcrumbs
+ *   - It does not emit Sentry spans / traces for operations or tool calls.
+ *     The Flue event stream already carries the data a future span-based
+ *     integration would need (`durationMs`, `usage`, `operationKind`,
+ *     etc.), so layering spans on top is a follow-up rather than a
+ *     redesign.
+ *   - It does not forward `log.info` / `log.warn` to Sentry breadcrumbs
  *     or logs. Add `Sentry.addBreadcrumb({ ... })` inside the `observe`
  *     callback if you want that — it's a five-line change.
- *   - It does not capture workflow operation or tool failures separately.
- *     Workflow failures are reported once at `run_end`; tool failures are
+ *   - It does not capture tool failures separately. Tool failures are
  *     usually recoverable model input.
  *
  *
@@ -68,9 +69,11 @@
  */
 
 import { type FlueEvent, observe } from '@flue/runtime';
-import { flue } from '@flue/runtime/routing';
 import * as Sentry from '@sentry/node';
 import { Hono } from 'hono';
+import boom from './agents/boom.ts';
+import explicit from './agents/explicit.ts';
+import hello from './agents/hello.ts';
 
 // ─── 1. Sentry init ─────────────────────────────────────────────────────────
 
@@ -93,23 +96,10 @@ Sentry.init({
 
 // ─── 2. The Flue → Sentry event bridge ──────────────────────────────────────
 
-const runOwnerTags = new Map<string, Record<string, string>>();
-
 observe((event) => {
-	if (event.type === 'run_start' || event.type === 'run_resume') {
-		runOwnerTags.set(event.runId, { 'flue.workflow': event.workflowName });
-		return;
-	}
-
 	const tags = flueCorrelationTags(event);
 
-	if (event.type === 'run_end') {
-		runOwnerTags.delete(event.runId);
-		if (event.isError) captureIncident(event.error, tags, { durationMs: event.durationMs });
-		return;
-	}
-
-	if (event.type === 'operation' && event.isError && !event.runId) {
+	if (event.type === 'operation' && event.isError) {
 		captureIncident(event.error, tags, {
 			durationMs: event.durationMs,
 			operationKind: event.operationKind,
@@ -156,12 +146,11 @@ function captureIncident(
  *
  * Tag keys use the `flue.*` prefix to namespace them away from
  * Sentry's built-in tags and from any application tags the user
- * adds. Pivoting on `flue.run.id` in Sentry's search box is the
- * fastest way to find every issue raised by a single Flue run.
+ * adds. Pivoting on `flue.instance.id` in Sentry's search box is the
+ * fastest way to find every issue raised by a single agent instance.
  */
 function flueCorrelationTags(event: FlueEvent): Record<string, string> {
-	const tags: Record<string, string> = event.runId ? { ...runOwnerTags.get(event.runId) } : {};
-	if (event.runId) tags['flue.run.id'] = event.runId;
+	const tags: Record<string, string> = {};
 	if (event.instanceId) tags['flue.instance.id'] = event.instanceId;
 	if (event.dispatchId) tags['flue.dispatch.id'] = event.dispatchId;
 	if (event.submissionId) tags['flue.submission.id'] = event.submissionId;
@@ -175,9 +164,9 @@ function flueCorrelationTags(event: FlueEvent): Record<string, string> {
 
 /**
  * Reconstruct an `Error` instance from a value that may already be an
- * `Error`, may be the JSON-serialized envelope Flue's run-store uses
- * (`{ name, message }`), or may be something arbitrary a handler
- * threw (a string, a number, a plain object).
+ * `Error`, may be a JSON-serialized envelope (`{ name, message }`), or
+ * may be something arbitrary a handler threw (a string, a number, a
+ * plain object).
  *
  * Sentry's `captureException` does its best with non-Error values,
  * but it produces much better issue grouping when given a real
@@ -204,9 +193,11 @@ function safeStringify(value: unknown): string {
 	}
 }
 
-// ─── 3. Mount the Flue agent route ──────────────────────────────────────────
+// ─── 3. Mount the app's agents ──────────────────────────────────────────────
 
 const app = new Hono();
-app.route('/', flue());
+app.route('/agents/hello', hello.route());
+app.route('/agents/boom', boom.route());
+app.route('/agents/explicit', explicit.route());
 
 export default app;

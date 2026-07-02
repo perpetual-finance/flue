@@ -1,9 +1,8 @@
 import {
+	type FlueConversationMessage,
 	type FlueConversationPart,
 	FlueProvider,
 	useFlueAgent,
-	useFlueClient,
-	useFlueWorkflow,
 } from '@flue/react';
 import { createFlueClient } from '@flue/sdk';
 import { type FormEvent, useState } from 'react';
@@ -15,11 +14,10 @@ const client = createFlueClient({ baseUrl: '/api' });
 function App() {
 	const [input, setInput] = useState('');
 	const [instanceId] = useState(() => crypto.randomUUID());
-	const [runId, setRunId] = useState<string>();
+	const [demoId] = useState(() => crypto.randomUUID());
 	const [actionError, setActionError] = useState<string>();
 	const agent = useFlueAgent({ name: 'assistant', id: instanceId });
-	const workflow = useFlueWorkflow({ runId });
-	const flue = useFlueClient();
+	const demo = useFlueAgent({ name: 'demo', id: demoId });
 
 	async function submit(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
@@ -35,13 +33,14 @@ function App() {
 		}
 	}
 
-	async function triggerWorkflow() {
+	// The old "trigger demo workflow" button. Workflows are gone: the demo is
+	// an agent whose deterministic job is a model-callable action, so a run is
+	// just a message into the demo conversation — its tool call, action logs,
+	// and final reply stream back like any other agent turn.
+	async function triggerDemo() {
 		setActionError(undefined);
 		try {
-			const result = await flue.workflows.invoke('demo', {
-				input: { requestedAt: new Date().toISOString() },
-			});
-			setRunId(result.runId);
+			await demo.sendMessage(`Run the demo action. requestedAt: ${new Date().toISOString()}`);
 		} catch (error) {
 			setActionError(error instanceof Error ? error.message : String(error));
 		}
@@ -51,7 +50,7 @@ function App() {
 		<main>
 			<header>
 				<p className="eyebrow">Flue React hooks</p>
-				<h1>Chat and workflow test bed</h1>
+				<h1>Chat and background-action test bed</h1>
 			</header>
 			<section>
 				<div className="section-heading">
@@ -61,12 +60,7 @@ function App() {
 				<div className="messages" aria-live="polite">
 					{agent.messages.length === 0 && <p className="empty">Send a message to begin.</p>}
 					{agent.messages.map((message) => (
-						<article className={`message ${message.role}`} key={message.id}>
-							<strong>{message.role}</strong>
-							{message.parts.map((part) => (
-								<MessagePart key={partKey(part)} part={part} />
-							))}
-						</article>
+						<Message key={message.id} message={message} />
 					))}
 				</div>
 				<form onSubmit={submit}>
@@ -84,26 +78,36 @@ function App() {
 			</section>
 			<section>
 				<div className="section-heading">
-					<h2>Workflow</h2>
-					<span className={`status ${workflow.status}`}>{workflow.status}</span>
+					<h2>Demo agent (background action)</h2>
+					<span className={`status ${demo.status}`}>{demo.status}</span>
 				</div>
-				<button onClick={triggerWorkflow} type="button">
-					Trigger demo workflow
+				<button onClick={triggerDemo} type="button">
+					Run demo action
 				</button>
-				<div className="logs" aria-live="polite">
-					{workflow.logs.length === 0 && <p className="empty">Workflow logs appear here.</p>}
-					{workflow.logs.map((log) => (
-						<div className="log" key={`${log.timestamp}-${log.eventIndex}`}>
-							<time>{new Date(log.timestamp).toLocaleTimeString()}</time>
-							<span>{log.message}</span>
-						</div>
+				<div className="messages" aria-live="polite">
+					{demo.messages.length === 0 && (
+						<p className="empty">The demo conversation appears here.</p>
+					)}
+					{demo.messages.map((message) => (
+						<Message key={message.id} message={message} />
 					))}
 				</div>
 			</section>
-			{(actionError || agent.error) && (
-				<p className="error">{actionError ?? agent.error?.message}</p>
+			{(actionError || agent.error || demo.error) && (
+				<p className="error">{actionError ?? (agent.error ?? demo.error)?.message}</p>
 			)}
 		</main>
+	);
+}
+
+function Message({ message }: { message: FlueConversationMessage }) {
+	return (
+		<article className={`message ${message.role}`}>
+			<strong>{message.role}</strong>
+			{message.parts.map((part) => (
+				<MessagePart key={partKey(part)} part={part} />
+			))}
+		</article>
 	);
 }
 

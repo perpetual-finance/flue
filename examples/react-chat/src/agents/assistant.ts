@@ -1,11 +1,11 @@
+'use agent';
 import { fauxAssistantMessage, fauxText, registerFauxProvider } from '@earendil-works/pi-ai/compat';
-import { type AgentRouteHandler, defineAgent } from '@flue/runtime';
+import { defineAgent } from '@flue/runtime';
 
-// Opt this agent into HTTP transport so the built demo server serves it at
-// `/api/agents/assistant/:id`. Without an exported `route` the agent is private
-// in production (only `flue dev`'s temporary local exposure would reach it).
-export const route: AgentRouteHandler = async (_c, next) => next();
-
+// The 'use agent' directive registers this module with the app (its file
+// basename is the durable identity); app.ts exposes it over HTTP by mounting
+// `assistant.route()` at `/api/agents/assistant`. An optional `route` named
+// export would attach middleware (e.g. auth) to every mounted route.
 export default defineAgent(() => {
 	const faux = registerFauxProvider({
 		api: 'react-chat-example',

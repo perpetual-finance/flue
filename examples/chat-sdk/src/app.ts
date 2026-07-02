@@ -1,5 +1,4 @@
 import { registerProvider } from '@flue/runtime';
-import { flue } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 import assistant from './agents/assistant.ts';
 import { bot, registerChatHandlers } from './chat.ts';
@@ -40,6 +39,12 @@ app.post('/api/github/repos/:owner/:repo/issues/:issueNumber/comments', async (c
 });
 
 app.get('/test/outbound-comments', (c) => c.json(outboundComments));
-app.route('/', flue());
+
+// The assistant agent is intentionally NOT mounted: it is dispatch-only.
+// The use-agent directive (via the build-time scan) is what registers an
+// agent with the app, so `dispatch(assistant, ...)` in chat.ts reaches it
+// with no HTTP route at all. Mounting would be one extra line —
+// `app.route('/agents/assistant', assistant.route())` — but this webhook
+// pipeline never exposes the agent over HTTP, so it stays private.
 
 export default app;

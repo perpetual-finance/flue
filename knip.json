@@ -13,12 +13,17 @@
 		},
 		"examples/*": {
 			"entry": [
-				"{src/{app,cloudflare,agents/*,workflows/*,channels/*},flue.config}.{ts,mts,js,mjs}"
+				"{src/{app,db,cloudflare,agents/*,channels/*},flue.config,vite.config,vite.config.cloudflare,vite.config.ui}.{ts,mts,js,mjs}"
 			],
 			"project": ["src/**/*.{ts,mts,js,mjs}"]
 		},
 		"examples/vitest-evals": {
-			"entry": ["src/evals/**/*.eval.ts", "src/agents/*.ts", "flue.config.ts"],
+			"entry": [
+				"src/evals/**/*.eval.ts",
+				"src/agents/*.ts",
+				"src/app.ts",
+				"flue.config.ts"
+			],
 			"project": ["src/**/*.ts", "*.ts"]
 		},
 

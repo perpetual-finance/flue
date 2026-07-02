@@ -1,7 +1,6 @@
-import { type AgentRouteHandler, defineAgent, defineTool } from '@flue/runtime';
+'use agent';
+import { defineAgent, defineTool } from '@flue/runtime';
 import * as v from 'valibot';
-
-export const route: AgentRouteHandler = async (_c, next) => next();
 
 const getServiceStatus = defineTool({
 	name: 'get_service_status',

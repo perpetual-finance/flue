@@ -1,3 +1,4 @@
+'use agent';
 import { defineAgent } from '@flue/runtime';
 import { emailIdFromInstanceId, retrieveReceivedEmail } from '../channels/resend.ts';
 
