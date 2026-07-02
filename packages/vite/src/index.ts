@@ -8,8 +8,9 @@
  * export default defineConfig({ plugins: [flue()] });
  * ```
  *
- * See plans/2026-07-02-vite-plugin-explicit-routing-redesign.md. Phase 3
- * ships the Node target; the Cloudflare adapter lands in Phase 4.
+ * See plans/2026-07-02-vite-plugin-explicit-routing-redesign.md. Targets:
+ * Node (`flue()` alone) and Cloudflare (`flue()` before a sibling
+ * `cloudflare()` from `@cloudflare/vite-plugin`).
  */
 export type { AgentScanResult, ScanAgentsOptions } from './agent-scan.ts';
 export {

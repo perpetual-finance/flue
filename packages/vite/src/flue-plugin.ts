@@ -12,7 +12,13 @@
  * inline values over a discovered `flue.config.*` (inline wins). The target
  * defaults to `'cloudflare'` when `@cloudflare/vite-plugin` is present in the
  * resolved plugin array, `'node'` otherwise; an explicit `target` overrides
- * detection. Phase 3 ships the Node target only.
+ * detection.
+ *
+ * On the Cloudflare target, `flue()` must precede `cloudflare()` in the
+ * plugin array: flue's `config` hook prepares the generated Worker entry and
+ * merged wrangler config that the sibling plugin consumes when its own
+ * `config` hook resolves (see cloudflare-adapter.ts for the handoff
+ * mechanism). The sibling owns workerd dev, build output, and preview.
  *
  * Virtual modules (resolved only inside graphs this plugin serves):
  *
@@ -46,6 +52,12 @@ import {
 	isAgentModulePath,
 	scanAgents,
 } from './agent-scan.ts';
+import {
+	CLOUDFLARE_WRANGLER_CONFIG_PATH_ENV,
+	isAuthoredWranglerPath,
+	isGeneratedCloudflarePath,
+	prepareCloudflareInputs,
+} from './cloudflare-adapter.ts';
 import {
 	type DependencyResolverState,
 	flueDependencyResolverPlugin,
@@ -114,6 +126,10 @@ interface FluePluginState {
 	agentsByPath: Map<string, AgentScanResult>;
 	explicitTarget: 'node' | 'cloudflare' | undefined;
 	target: 'node' | 'cloudflare';
+	/** Preview mode is artifact-based: no scanning, no input generation. */
+	isPreview: boolean;
+	/** Whether the config hook prepared the Cloudflare inputs (entry + wrangler). */
+	cloudflarePrepared: boolean;
 	/** Serializes watcher-driven re-scans. */
 	watchQueue: Promise<void>;
 	resolved: FlueResolvedProjectInfo | undefined;
@@ -132,6 +148,8 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 		agentsByPath: new Map(),
 		explicitTarget: undefined,
 		target: 'node',
+		isPreview: false,
+		cloudflarePrepared: false,
 		watchQueue: Promise.resolve(),
 		resolved: undefined,
 	};
@@ -186,29 +204,60 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 				config: merged,
 				configPath: loaded.configPath,
 			});
-			if (!project.app) throw missingAppEntryError(project);
-			updateAgents(await scanAgents({ sourceRoot: project.sourceRoot, agents: project.agents }));
 			state.root = root;
 			state.configPath = loaded.configPath;
 			state.mergedConfig = merged;
 			state.project = project;
 			state.explicitTarget = merged.target;
+			state.isPreview = env.isPreview === true;
+			state.cloudflarePrepared = false;
 
 			// Preliminary target detection from the user config's plugin array;
-			// `configResolved` re-detects against the final resolved array (the
-			// Phase 4 seam) and is authoritative.
+			// `configResolved` re-detects against the final resolved array and is
+			// authoritative.
 			const preliminaryTarget =
 				merged.target ?? (containsCloudflarePlugin(userConfig.plugins) ? 'cloudflare' : 'node');
 			state.target = preliminaryTarget;
 
+			// Preview is artifact-based (Cloudflare: the sibling plugin serves the
+			// built Worker output; Node: unsupported, diagnosed in
+			// configurePreviewServer). Require no source state and generate
+			// nothing.
+			if (state.isPreview) return undefined;
+
+			if (!project.app) throw missingAppEntryError(project);
+			updateAgents(await scanAgents({ sourceRoot: project.sourceRoot, agents: project.agents }));
+
 			const isBuild = env.command === 'build';
+
+			if (preliminaryTarget === 'cloudflare') {
+				// The sibling plugin resolves its configuration in ITS `config`
+				// hook, which runs after this one only when flue() precedes
+				// cloudflare() in the plugin array. Diagnose the wrong order here,
+				// before the generated inputs could silently go unread.
+				if (cloudflarePluginPrecedesFlue(userConfig.plugins, corePlugin)) {
+					throw cloudflareOrderingError();
+				}
+				const prepared = await prepareCloudflareInputs({
+					root,
+					project,
+					agents: state.agents,
+				});
+				// The documented handoff: the sibling plugin resolves its config
+				// path from `cloudflare({ configPath })` ?? this env var (via
+				// Vite's loadEnv, which includes matching process.env variables).
+				process.env[CLOUDFLARE_WRANGLER_CONFIG_PATH_ENV] = prepared.wranglerConfigPath;
+				state.cloudflarePrepared = true;
+				// The dependency resolver stays inert (root unset): the generated
+				// entry lives in the user's project, so its bare imports resolve
+				// from the user's node_modules natively, and externalization would
+				// break the workerd module graph.
+				return undefined;
+			}
+
 			resolverState.root = root;
 			resolverState.external = !isBuild;
 			resolverState.importers = isBuild ? undefined : [bootstrap.server];
-
-			// The Cloudflare adapter lands in Phase 4; contribute no Node build
-			// config for it and let configResolved render the diagnostic.
-			if (preliminaryTarget !== 'node') return { appType: 'custom' };
 
 			if (isBuild) {
 				return {
@@ -248,12 +297,11 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 				);
 			}
 			// Authoritative target detection: the full resolved plugin array is
-			// visible here. This is the seam Phase 4 extends with the Cloudflare
-			// adapter handoff.
-			const detected = resolved.plugins.some((plugin) => isCloudflarePluginName(plugin.name))
-				? 'cloudflare'
-				: 'node';
-			const target = state.explicitTarget ?? detected;
+			// visible here.
+			const cloudflareDetected = resolved.plugins.some((plugin) =>
+				isCloudflarePluginName(plugin.name),
+			);
+			const target = state.explicitTarget ?? (cloudflareDetected ? 'cloudflare' : 'node');
 			state.target = target;
 			state.resolved = {
 				config: state.mergedConfig,
@@ -265,11 +313,33 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 				},
 			};
 			if (target === 'cloudflare') {
-				throw new Error(
-					'[flue] The Cloudflare target lands in a later phase of the Vite-plugin redesign. ' +
-						"Remove @cloudflare/vite-plugin (or set `target: 'node'` in flue.config.ts) to build for Node, " +
-						'or stay on the legacy `flue dev`/`flue build` commands for Cloudflare in the meantime.',
+				if (!cloudflareDetected) {
+					throw new Error(
+						"[flue] target is 'cloudflare' but @cloudflare/vite-plugin is not in the Vite plugin array. " +
+							'Install @cloudflare/vite-plugin and add it after flue():\n\n' +
+							"  import { cloudflare } from '@cloudflare/vite-plugin';\n" +
+							'  plugins: [flue(), cloudflare()]\n',
+					);
+				}
+				// Belt-and-suspenders ordering check against the RESOLVED array:
+				// the sibling's config-resolving plugin ('vite-plugin-cloudflare')
+				// and flue's core plugin are both normal-enforce, so their resolved
+				// order mirrors config-hook execution order.
+				const flueIndex = resolved.plugins.findIndex((plugin) => plugin.name === 'flue');
+				const cloudflareIndex = resolved.plugins.findIndex(
+					(plugin) => plugin.name === 'vite-plugin-cloudflare',
 				);
+				if (cloudflareIndex !== -1 && flueIndex !== -1 && cloudflareIndex < flueIndex) {
+					throw cloudflareOrderingError();
+				}
+				if (!state.cloudflarePrepared && !state.isPreview) {
+					throw new Error(
+						'[flue] The Cloudflare plugin is present, but flue() could not see it while Vite ' +
+							'resolved the config, so the generated Worker entry and wrangler config were never ' +
+							'handed off. Add flue() and cloudflare() as plain entries of the same `plugins` ' +
+							'array (not wrapped in a Promise or added by another plugin), with flue() first.',
+					);
+				}
 			}
 		},
 
@@ -312,6 +382,10 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 		},
 
 		configureServer(server) {
+			if (state.target === 'cloudflare') {
+				setupCloudflareDevSupervision({ server, state, requestRestart, updateAgents });
+				return;
+			}
 			const controller = createNodeDevController({ server, root: state.root });
 
 			// Stop the loaded application when THIS server closes so no listeners
@@ -382,6 +456,9 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 		},
 
 		configurePreviewServer() {
+			// Cloudflare preview is fully owned by the sibling plugin (it runs
+			// workerd over the built Worker output); flue contributes nothing.
+			if (state.target === 'cloudflare') return;
 			throw new Error(
 				'[flue] Node preview is not supported yet — run the built server directly:\n\n' +
 					'  vite build && node dist/server.mjs\n',
@@ -393,6 +470,128 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Cloudflare dev supervision. The sibling plugin runs workerd and serves the
+ * app; flue's only dev job is keeping the generated inputs fresh:
+ *
+ * - Marked-set changes (agent file add/remove, directive change, agent module
+ *   moves) and authored `app.ts`/`cloudflare.ts` entry changes regenerate the
+ *   Worker entry — a module in the sibling's dev graph, so Vite invalidation
+ *   picks it up without a restart.
+ * - Anything that changes the merged wrangler config (agent set, authored
+ *   wrangler edits) rewrites `.flue-vite.wrangler.jsonc`; the sibling plugin
+ *   watches its resolved config paths and restarts the dev server itself.
+ *   Content-aware writes make body edits a no-op, so no restart loops.
+ * - `flue.config.*` changes restart the dev server (project re-resolution).
+ *
+ * Failures during regeneration (mid-edit syntax, duplicate identities,
+ * wrangler validation) are logged and leave the last good inputs in place;
+ * the next successful edit recovers.
+ */
+function setupCloudflareDevSupervision(options: {
+	server: ViteDevServer;
+	state: FluePluginState;
+	requestRestart: (server: ViteDevServer) => void;
+	updateAgents: (agents: AgentScanResult[]) => void;
+}): void {
+	const { server, state, requestRestart, updateAgents } = options;
+	const logger = server.config.logger;
+
+	const refresh = (): Promise<void> => {
+		const run = async () => {
+			let project: ResolvedFlueProject;
+			try {
+				project = resolveFlueProject({
+					root: state.root,
+					config: state.mergedConfig,
+					configPath: state.configPath,
+				});
+			} catch (error) {
+				logger.error(`[flue] Project re-resolution failed: ${formatWatchError(error)}`);
+				return;
+			}
+			if (!project.app) {
+				logger.error(missingAppEntryError(project).message);
+				return;
+			}
+			let agents: AgentScanResult[];
+			try {
+				agents = await scanAgents({ sourceRoot: project.sourceRoot, agents: project.agents });
+			} catch (error) {
+				// Keep the previous set: a duplicate identity or a module mid-edit
+				// shouldn't tear the app down. A later fix re-scans.
+				logger.error(`[flue] Agent scan failed: ${formatWatchError(error)}`);
+				return;
+			}
+			state.project = project;
+			updateAgents(agents);
+			try {
+				await prepareCloudflareInputs({ root: state.root, project, agents });
+			} catch (error) {
+				logger.error(`[flue] Regenerating Cloudflare inputs failed: ${formatWatchError(error)}`);
+			}
+		};
+		state.watchQueue = state.watchQueue.then(run, run);
+		return state.watchQueue;
+	};
+
+	const normalizedRoot = normalizePath(state.root);
+	server.watcher.on('all', (event, file) => {
+		const filePath = normalizePath(file);
+		// Never react to Flue's own generated outputs (or workerd state).
+		if (isGeneratedCloudflarePath(filePath, normalizedRoot)) return;
+		if (isFlueConfigPath(filePath, state)) {
+			logger.info('[flue] flue.config changed; restarting the dev server.');
+			requestRestart(server);
+			return;
+		}
+		// Authored wrangler edits re-merge the generated input config; the
+		// sibling plugin restarts itself when that file's content changes.
+		if (isAuthoredWranglerPath(filePath, normalizedRoot)) {
+			void refresh();
+			return;
+		}
+		// Source-module events re-check directive prologues and entry
+		// discovery. Body edits regenerate nothing (content-aware writes); the
+		// sibling's own module invalidation serves them.
+		if (
+			(event === 'add' || event === 'change' || event === 'unlink') &&
+			isAgentModulePath(filePath) &&
+			isWithinDirectory(filePath, normalizePath(state.project.sourceRoot))
+		) {
+			void refresh();
+		}
+	});
+}
+
+function formatWatchError(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Whether a cloudflare plugin entry precedes flue's core plugin in the raw
+ * user plugin array (nested arrays flattened; promise entries skipped —
+ * `configResolved` re-validates against the final array).
+ */
+function cloudflarePluginPrecedesFlue(
+	plugins: UserConfig['plugins'],
+	corePlugin: Plugin,
+): boolean {
+	const flattened = flattenPluginOptions(plugins);
+	const cloudflareIndex = flattened.findIndex((plugin) => isCloudflarePluginName(plugin.name));
+	const flueIndex = flattened.indexOf(corePlugin);
+	return cloudflareIndex !== -1 && flueIndex !== -1 && cloudflareIndex < flueIndex;
+}
+
+function cloudflareOrderingError(): Error {
+	return new Error(
+		'[flue] flue() must come before cloudflare() in the Vite plugins array. ' +
+			'flue prepares the generated Worker entry and wrangler config that the Cloudflare ' +
+			'plugin consumes while Vite resolves the config, so it has to run first. Reorder:\n\n' +
+			'  plugins: [flue(), cloudflare()]\n',
+	);
+}
 
 function generateScannedAgentsModule(agents: readonly AgentScanResult[]): string {
 	const imports = agents

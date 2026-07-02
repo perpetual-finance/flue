@@ -174,9 +174,11 @@ export default defineConfig({ app: './src/server-main.ts' });
 		expect(inlineApi.resolved?.project.app).toBe(path.join(fixture2.root, 'src', 'server-main.ts'));
 	}, 120_000);
 
-	it('fails with the phase diagnostic when the target resolves to cloudflare', async () => {
+	it('fails with the missing-sibling diagnostic when the target is cloudflare without the plugin', async () => {
 		const fixture = fixtureOf(basicNodeProjectFiles());
 		fixture.write('flue.config.ts', `export default { target: 'cloudflare' };\n`);
-		await expect(buildFixture(fixture)).rejects.toThrow(/Cloudflare target lands in a later phase/);
+		await expect(buildFixture(fixture)).rejects.toThrow(
+			/@cloudflare\/vite-plugin is not in the Vite plugin array/,
+		);
 	});
 });

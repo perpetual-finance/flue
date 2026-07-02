@@ -27,6 +27,7 @@
 		"build": "tsdown",
 		"check:types": "tsc --noEmit",
 		"test": "vitest run",
+		"test:integration:cloudflare": "vitest run --config vitest.integration.cloudflare.config.ts --no-file-parallelism",
 		"test:watch": "vitest"
 	},
 	"dependencies": {
@@ -39,6 +40,8 @@
 		"vite": "^8.0.0"
 	},
 	"devDependencies": {
+		"@cloudflare/vite-plugin": "^1.39.2",
+		"agents": "^0.14.2",
 		"hono": "4.12.22",
 		"tsdown": "^0.22.0",
 		"typescript": "^6.0.3",
