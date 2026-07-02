@@ -96,7 +96,7 @@ Use the env var name your provider expects — `OPENAI_API_KEY` for OpenAI, `ANT
 
 ### 5. Run it
 
-For local development, `vite dev` serves `app.ts` with hot reload:
+For local development, `vite dev` serves `app.ts` with hot reload, loading your `.env` automatically (shell-exported values win):
 
 ```bash
 npx vite dev

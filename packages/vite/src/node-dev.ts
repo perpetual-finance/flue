@@ -16,7 +16,11 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { RuntimeUnavailableError, toHttpResponse } from '@flue/runtime/internal';
+import {
+	configureErrorRendering,
+	RuntimeUnavailableError,
+	toHttpResponse,
+} from '@flue/runtime/internal';
 import { getRequestListener } from '@hono/node-server';
 import type { ViteDevServer } from 'vite';
 import type {
@@ -62,6 +66,12 @@ export function createNodeDevController(options: {
 	let queue: Promise<void> = Promise.resolve();
 	let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 	let queued = false;
+	let lastLoadError: string | undefined;
+
+	// This controller only exists under `vite dev`, so error envelopes may
+	// carry their dev-audience prose even before the application (which
+	// normally configures rendering) has loaded once.
+	configureErrorRendering({ devMode: true });
 
 	function enqueue(operation: () => Promise<void>): Promise<void> {
 		const next = queue.then(operation, operation);
@@ -74,7 +84,9 @@ export function createNodeDevController(options: {
 		queued = false;
 		if (!application) status = 'loading';
 		try {
-			const bootstrap = (await server.ssrLoadModule('virtual:flue/server')) as {
+			const bootstrap = (await server.ssrLoadModule('virtual:flue/server', {
+				fixStacktrace: true,
+			})) as {
 				loadFlueNodeApplication(
 					options: LoadFlueNodeApplicationOptions,
 				): Promise<LoadedFlueNodeApplication>;
@@ -91,6 +103,10 @@ export function createNodeDevController(options: {
 			const previous = application;
 			application = loaded;
 			status = 'ready';
+			if (lastLoadError !== undefined) {
+				lastLoadError = undefined;
+				logger.info('[flue] Application load recovered.');
+			}
 			if (previous) {
 				// Load-new-then-stop-old: the swap happened above, so in-flight
 				// requests on the previous application drain on their own clock.
@@ -104,7 +120,10 @@ export function createNodeDevController(options: {
 			}
 		} catch (error) {
 			// A failed load keeps the previous application serving (when there is
-			// one); the next successful edit recovers.
+			// one); the next successful edit recovers. Remap SSR stack frames to
+			// authored sources before the error is logged or rendered.
+			fixLoadErrorStack(server, error);
+			lastLoadError = error instanceof Error ? error.message : String(error);
 			logger.error(`[flue] Application load failed: ${formatError(error)}`, {
 				error: asError(error),
 			});
@@ -115,7 +134,14 @@ export function createNodeDevController(options: {
 	async function handle(request: Request): Promise<Response> {
 		if (status !== 'ready' || !application) {
 			const state = status === 'closed' || status === 'failed' ? 'failed' : 'loading';
-			return toHttpResponse(new RuntimeUnavailableError({ state }));
+			// Dev-only server: surface the load failure to the requester instead
+			// of making them tail the terminal. Null bytes (virtual module ids in
+			// stacks) would make the response fail to serialize.
+			const dev =
+				state === 'failed' && lastLoadError !== undefined
+					? `Application load failed: ${lastLoadError.replaceAll('\0', '')}`
+					: undefined;
+			return toHttpResponse(new RuntimeUnavailableError({ state, ...(dev ? { dev } : {}) }));
 		}
 		if (isObservationRequest(request)) return application.fetch(request);
 		const lease = application.enterActivity();
@@ -219,6 +245,20 @@ function retainLeaseForResponse(response: Response, lease: { release(): void }):
 			headers: response.headers,
 		},
 	);
+}
+
+/**
+ * Best-effort SSR stack remapping so load-failure frames point at authored
+ * sources instead of transformed code. `ssrFixStacktrace` can itself throw on
+ * exotic runtimes; the original error must survive that.
+ */
+function fixLoadErrorStack(server: ViteDevServer, error: unknown): void {
+	if (!(error instanceof Error)) return;
+	try {
+		server.ssrFixStacktrace(error);
+	} catch {
+		// Keep the unmapped stack.
+	}
 }
 
 function formatError(error: unknown): string {

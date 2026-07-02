@@ -141,7 +141,7 @@ In your final response, include a short checklist with the project directory, so
   - \`npx flue docs read <path>\` — print one documentation page as Markdown
   - \`npx flue docs\` — list all documentation pages
 - Important: For local development, use \`vite dev\` (the \`flue()\` plugin serves the application, watches for file changes, and hot-reloads on edits). Production builds use \`vite build\`; the Node target emits \`dist/server.mjs\` to run with \`node dist/server.mjs\`. There are no \`flue dev\` or \`flue build\` commands.
-- Important: \`flue run\` executes one agent module locally under Node with no HTTP server: \`npx flue run src/agents/<name>.ts --message "Hello"\` streams the agent's activity, prints the reply, and prints the conversation id. Pass \`--id <conversation-id>\` to continue the same conversation across invocations. It loads the project's \`.env\` by default (\`--env <path>\` selects another file); \`vite dev\` reads the shell environment instead.
+- Important: \`flue run\` executes one agent module locally under Node with no HTTP server: \`npx flue run src/agents/<name>.ts --message "Hello"\` streams the agent's activity, prints the reply, and prints the conversation id. Pass \`--id <conversation-id>\` to continue the same conversation across invocations. Both \`flue run\` and \`vite dev\` load the project's \`.env\` automatically, shell values winning (\`flue run --env <path>\` selects another file).
 `;
 
 export const GET: APIRoute = () => {

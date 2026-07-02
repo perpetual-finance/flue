@@ -222,12 +222,14 @@ class FlueHttpError extends FlueError {
 // ─── HTTP-layer error vocabulary ────────────────────────────────────────────
 
 export class RuntimeUnavailableError extends FlueHttpError {
-	constructor({ state }: { state: 'loading' | 'draining' | 'failed' }) {
+	constructor({ state, dev = '' }: { state: 'loading' | 'draining' | 'failed'; dev?: string }) {
 		super({
 			type: 'runtime_unavailable',
 			message: 'The local runtime is temporarily unavailable.',
 			details: 'Retry after the runtime finishes reloading.',
-			dev: '',
+			// Local dev servers pass the underlying load failure here, so the
+			// requester sees WHY the runtime is unavailable, not just that it is.
+			dev,
 			status: 503,
 			headers: { 'Retry-After': '1' },
 			meta: { state },

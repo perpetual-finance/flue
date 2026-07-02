@@ -39,7 +39,7 @@ export type {
 	AgentConversationSnapshot,
 	ConversationStreamChunk,
 } from './conversation-public.ts';
-export { RuntimeUnavailableError, toHttpResponse } from './errors.ts';
+export { configureErrorRendering, RuntimeUnavailableError, toHttpResponse } from './errors.ts';
 export type { InstrumentationOwner } from './instrumentation.ts';
 export {
 	createInstrumentationOwner,

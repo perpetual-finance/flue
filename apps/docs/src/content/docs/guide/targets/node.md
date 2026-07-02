@@ -73,15 +73,14 @@ See the Ecosystem [Sandboxes](/docs/ecosystem/#sandboxes) catalog for available 
 
 ## Environment and secrets
 
-[`flue run`](/docs/cli/run/) loads project-root `.env` values before executing; use `--env <path>` to select one alternate file.
+Local development loads your project's `.env` files automatically, with shell-exported values taking precedence:
 
-The Vite dev server and the built server do not load `.env`. They read only the environment supplied when they start:
+- [`flue run`](/docs/cli/run/) loads the project-root `.env`; use `--env <path>` to select one alternate file.
+- `vite dev` loads Vite's standard file set from the project root: `.env`, `.env.local`, `.env.<mode>`, and `.env.<mode>.local`.
+
+The built server is different: `node dist/server.mjs` reads only the environment supplied when it starts, because deployed environments own their configuration:
 
 ```bash
-# Development
-set -a; source .env; set +a
-vite dev
-
 # Production
 set -a; source .env; set +a
 node dist/server.mjs

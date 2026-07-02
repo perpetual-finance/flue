@@ -172,15 +172,66 @@ describe('vite dev (node target)', () => {
 		await server.listen();
 		servers.push(server);
 		const baseUrl = `http://127.0.0.1:${port}`;
-		const response = await waitFor(
+		// The 503 exists while loading AND after the load fails; wait for the
+		// failed one, whose dev-only field carries WHY the load failed so the
+		// requester doesn't have to tail the terminal.
+		const body = await waitFor(
 			async () => {
 				const result = await fetch(`${baseUrl}/api/ping`);
-				return result.status === 503 ? result : false;
+				if (result.status !== 503) return false;
+				const parsed = (await result.json()) as { error: { type: string; dev?: string } };
+				return parsed.error.dev !== undefined ? parsed : false;
 			},
-			{ description: 'the unavailable envelope' },
+			{ description: 'the failed unavailable envelope' },
 		);
-		const body = (await response.json()) as { error: { type: string } };
 		expect(body.error.type).toBe('runtime_unavailable');
+		expect(body.error.dev).toContain('boom at load time');
+	}, 60_000);
+
+	it('loads project .env files into the dev application (shell values win)', async () => {
+		process.env.FLUE_TEST_SHELL_WINS = 'from-shell';
+		try {
+			const files = basicNodeProjectFiles();
+			const fixture = fixtureOf({
+				...files,
+				'.env': 'FLUE_TEST_DOTENV=from-dotenv\nFLUE_TEST_SHELL_WINS=from-dotenv\n',
+				'src/app.ts': [
+					`import { Hono } from 'hono';`,
+					`import './test-model.ts';`,
+					`import echo from './agents/echo.ts';`,
+					`const app = new Hono();`,
+					`app.get('/api/ping', (c) => c.text('pong'));`,
+					`app.get('/api/env', (c) =>`,
+					`\tc.json({ dotenv: process.env.FLUE_TEST_DOTENV, shell: process.env.FLUE_TEST_SHELL_WINS }),`,
+					`);`,
+					`app.route('/agents/echo', echo.route());`,
+					`export default app;`,
+					'',
+				].join('\n'),
+			});
+			const { baseUrl } = await startDev(fixture);
+			const env = (await (await fetch(`${baseUrl}/api/env`)).json()) as Record<string, string>;
+			expect(env.dotenv).toBe('from-dotenv');
+			expect(env.shell).toBe('from-shell');
+		} finally {
+			delete process.env.FLUE_TEST_SHELL_WINS;
+			delete process.env.FLUE_TEST_DOTENV;
+		}
+	}, 60_000);
+
+	it('swallows the Chrome DevTools probe before it reaches user routes', async () => {
+		const files = basicNodeProjectFiles();
+		const fixture = fixtureOf({
+			...files,
+			// A catch-all route: without the middleware short-circuit the probe
+			// would land here and 200.
+			'src/app.ts': `${BASIC_APP_MODULE.replace('export default app;', `app.all('*', (c) => c.text('catch-all'));\nexport default app;`)}`,
+		});
+		const { baseUrl } = await startDev(fixture);
+		const probe = await fetch(`${baseUrl}/.well-known/appspecific/com.chrome.devtools.json`);
+		expect(probe.status).toBe(404);
+		const catchAll = await fetch(`${baseUrl}/anything-else`);
+		expect(await catchAll.text()).toBe('catch-all');
 	}, 60_000);
 
 	it('fails fast with the app.ts starter diagnostic when no app entry exists', async () => {

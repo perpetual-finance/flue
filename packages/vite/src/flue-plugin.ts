@@ -63,6 +63,7 @@ import {
 	flueDependencyResolverPlugin,
 	getUserExternals,
 } from './dependency-resolver.ts';
+import { applyDevEnv } from './dev-env.ts';
 import { importAttributePlugin } from './import-attribute-plugin.ts';
 import { createNodeDevController } from './node-dev.ts';
 import { transformUseAgentModule } from './use-agent-transform.ts';
@@ -126,6 +127,9 @@ const ENFORCED_BUILD_CONFIG_PATHS = [
 	'build.rolldownOptions.output.format',
 ];
 const ENFORCED_DEV_CONFIG_PATHS = ['appType'];
+
+/** Chrome probes this on every DevTools open; it must never reach user routes. */
+const CHROME_DEVTOOLS_PROBE_PATH = '/.well-known/appspecific/com.chrome.devtools.json';
 
 /**
  * Dev-server CORS defaults, matching the legacy dev listener: reflect the
@@ -491,6 +495,19 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 				};
 				return;
 			}
+			// Agent code runs in this process and providers resolve API keys from
+			// process.env; load the project's .env set (shell values win) so
+			// `vite dev` matches `flue run` instead of requiring a shell export.
+			const injectedEnv = applyDevEnv({
+				mode: server.config.mode,
+				envDir: server.config.envDir,
+			});
+			if (injectedEnv.length > 0) {
+				server.config.logger.info(
+					`[flue] Loaded ${injectedEnv.length} variable${injectedEnv.length === 1 ? '' : 's'} from the project .env files.`,
+				);
+			}
+
 			const controller = createNodeDevController({ server, root: state.root });
 
 			// Stop the loaded application when THIS server closes so no listeners
@@ -558,7 +575,17 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 			// Install after Vite's internal middlewares so transform/HMR
 			// endpoints keep working; everything else is the application's.
 			return () => {
-				server.middlewares.use((req, res) => controller.handleRequest(req, res));
+				server.middlewares.use((req, res) => {
+					// Swallow Chrome DevTools' well-known probe: an app with a
+					// catch-all route would otherwise route browser noise into user
+					// code (potentially an agent invocation).
+					if (req.url?.startsWith(CHROME_DEVTOOLS_PROBE_PATH)) {
+						res.statusCode = 404;
+						res.end();
+						return;
+					}
+					controller.handleRequest(req, res);
+				});
 			};
 		},
 

@@ -56,6 +56,7 @@ When `target` is unset, `flue()` inspects the resolved Vite plugin array: if `@c
 
 - watches for `'use agent'` changes — adding, removing, or renaming a marked module updates the registered agent set without a manual restart;
 - restarts the dev server when `flue.config.*` changes;
+- loads your project's `.env` file set (`.env`, `.env.local`, `.env.<mode>`, `.env.<mode>.local`) into the application's environment, shell-exported values winning — model-provider keys work without a shell export;
 - applies permissive dev CORS defaults (reflected origin with credentials, plus the durable-stream coordination headers) so a separately served SPA can talk to it. Deployed servers keep CORS as an application concern.
 
 ### Build and run

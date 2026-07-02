@@ -102,10 +102,9 @@ npx flue run src/agents/assistant.ts --message "Say hello in five words or fewer
 
 ### 6. Start the dev server
 
-`flue run` loads your project's `.env` automatically; the dev server and built server read only the shell environment, so export the key first:
+Like `flue run`, the dev server loads your project's `.env` automatically (shell-exported values win; only the _built_ server reads just the shell environment):
 
 ```bash
-set -a; source .env; set +a
 npx vite dev
 ```
 

@@ -74,7 +74,7 @@ Most hosted providers require credentials before they will accept model requests
 | `openai`     | `OPENAI_API_KEY`     |
 | `openrouter` | `OPENROUTER_API_KEY` |
 
-Keep credential values out of agent modules and committed configuration files. `flue run` loads project-root `.env` automatically, with `--env` available to select one alternate file. `vite dev` and the built Node server read only the environment supplied by the shell, so export credentials before starting them (for example `set -a; source .env; set +a`). During Cloudflare development, Worker runtime variables use `.dev.vars` through Workers tooling.
+Keep credential values out of agent modules and committed configuration files. `flue run` loads project-root `.env` automatically, with `--env` available to select one alternate file, and `vite dev` on the Node target loads Vite's standard `.env` file set (shell-exported values win in both). The built Node server reads only the environment supplied by the shell, so export credentials before starting it (for example `set -a; source .env; set +a`). During Cloudflare development, Worker runtime variables use `.dev.vars` through Workers tooling.
 
 Some provider paths authenticate through their platform integration instead of a model-provider API key. In particular, the binding-backed `cloudflare/...` provider uses your Worker's `AI` binding, as described in [Cloudflare Workers AI](#cloudflare-workers-ai-cloudflare-only).
 
