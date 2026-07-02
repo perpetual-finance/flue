@@ -104,6 +104,30 @@ const RESOLVED_AGENTS = '\0virtual:flue/agents';
 const NODE_TARGET_EXTERNALS = ['node-liblzma', '@mongodb-js/zstd'];
 
 /**
+ * Packages that must resolve to exactly one copy in every module graph:
+ * `@flue/runtime` holds module-scoped registries, and a second `hono` splits
+ * middleware/context identity. Declarative belt alongside the dependency
+ * resolver, and the only single-instance guard on the Cloudflare target
+ * (where the resolver stays inert).
+ */
+const RUNTIME_DEDUPE = ['@flue/runtime', 'hono'];
+
+/**
+ * Vite config paths flue's `config` hook forces (scalars returned from the
+ * hook override the user's values silently). User-set values are collected at
+ * config time and warned about in `configResolved` instead of erroring —
+ * matching how established Vite frameworks treat conflicting config.
+ */
+const ENFORCED_BUILD_CONFIG_PATHS = [
+	'appType',
+	'build.ssr',
+	'build.target',
+	'build.rolldownOptions.output.entryFileNames',
+	'build.rolldownOptions.output.format',
+];
+const ENFORCED_DEV_CONFIG_PATHS = ['appType'];
+
+/**
  * Dev-server CORS defaults, matching the legacy dev listener: reflect the
  * request Origin (credential-safe — never `*`-with-credentials) and expose
  * the durable-stream coordination headers so separate-origin SPAs can resume
@@ -141,6 +165,8 @@ interface FluePluginState {
 	/** Serializes watcher-driven re-scans. */
 	watchQueue: Promise<void>;
 	resolved: FlueResolvedProjectInfo | undefined;
+	/** Warnings collected during the `config` hook, logged in `configResolved`. */
+	pendingWarnings: string[];
 }
 
 export function flue(config: FlueConfig = {}): Plugin[] {
@@ -161,6 +187,7 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 		wranglerEnvRestore: undefined,
 		watchQueue: Promise.resolve(),
 		resolved: undefined,
+		pendingWarnings: [],
 	};
 	const resolverState: DependencyResolverState = {
 		root: undefined,
@@ -227,6 +254,10 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 			state.explicitTarget = merged.target;
 			state.isPreview = env.isPreview === true;
 			state.cloudflarePrepared = false;
+			state.pendingWarnings = [];
+
+			const ambiguityWarning = flueConfigAmbiguityWarning(loaded.configPath);
+			if (ambiguityWarning) state.pendingWarnings.push(ambiguityWarning);
 
 			// Preliminary target detection from the user config's plugin array;
 			// `configResolved` re-detects against the final resolved array and is
@@ -273,16 +304,24 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 				// entry lives in the user's project, so its bare imports resolve
 				// from the user's node_modules natively, and externalization would
 				// break the workerd module graph.
-				return undefined;
+				return { resolve: { dedupe: RUNTIME_DEDUPE } } satisfies UserConfig;
 			}
 
 			resolverState.root = root;
 			resolverState.external = !isBuild;
 			resolverState.importers = isBuild ? undefined : [bootstrap.server];
 
+			state.pendingWarnings.push(
+				...enforcedConfigWarnings(
+					userConfig,
+					isBuild ? ENFORCED_BUILD_CONFIG_PATHS : ENFORCED_DEV_CONFIG_PATHS,
+				),
+			);
+
 			if (isBuild) {
 				return {
 					appType: 'custom',
+					resolve: { dedupe: RUNTIME_DEDUPE },
 					build: {
 						ssr: bootstrap.entry,
 						outDir: userConfig.build?.outDir ?? 'dist',
@@ -303,6 +342,7 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 			}
 			return {
 				appType: 'custom',
+				resolve: { dedupe: RUNTIME_DEDUPE },
 				server: { cors: userConfig.server?.cors ?? DEV_CORS },
 			} satisfies UserConfig;
 		},
@@ -318,13 +358,17 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 				if (value === undefined) delete process.env[CLOUDFLARE_WRANGLER_CONFIG_PATH_ENV];
 				else process.env[CLOUDFLARE_WRANGLER_CONFIG_PATH_ENV] = value;
 			}
+			for (const warning of state.pendingWarnings) resolved.logger.warn(warning);
+			state.pendingWarnings = [];
 			if (resolved.plugins.filter((plugin) => plugin.name === 'flue').length > 1) {
-				throw new Error('[flue] flue() was added to the Vite config more than once.');
+				throw stackless(new Error('[flue] flue() was added to the Vite config more than once.'));
 			}
 			if (normalizePath(path.resolve(resolved.root)) !== normalizePath(state.root)) {
-				throw new Error(
-					`[flue] The resolved Vite root (${resolved.root}) differs from the root flue() resolved its project against (${state.root}). ` +
-						'Another plugin changed `root` after flue() ran; set `root` in the Vite config itself instead.',
+				throw stackless(
+					new Error(
+						`[flue] The resolved Vite root (${resolved.root}) differs from the root flue() resolved its project against (${state.root}). ` +
+							'Another plugin changed `root` after flue() ran; set `root` in the Vite config itself instead.',
+					),
 				);
 			}
 			// Authoritative target detection: the full resolved plugin array is
@@ -345,11 +389,13 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 			};
 			if (target === 'cloudflare') {
 				if (!cloudflareDetected) {
-					throw new Error(
-						"[flue] target is 'cloudflare' but @cloudflare/vite-plugin is not in the Vite plugin array. " +
-							'Install @cloudflare/vite-plugin and add it after flue():\n\n' +
-							"  import { cloudflare } from '@cloudflare/vite-plugin';\n" +
-							'  plugins: [flue(), cloudflare()]\n',
+					throw stackless(
+						new Error(
+							"[flue] target is 'cloudflare' but @cloudflare/vite-plugin is not in the Vite plugin array. " +
+								'Install @cloudflare/vite-plugin and add it after flue():\n\n' +
+								"  import { cloudflare } from '@cloudflare/vite-plugin';\n" +
+								'  plugins: [flue(), cloudflare()]\n',
+						),
 					);
 				}
 				// Belt-and-suspenders ordering check against the RESOLVED array:
@@ -364,11 +410,13 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 					throw cloudflareOrderingError();
 				}
 				if (!state.cloudflarePrepared && !state.isPreview) {
-					throw new Error(
-						'[flue] The Cloudflare plugin is present, but flue() could not see it while Vite ' +
-							'resolved the config, so the generated Worker entry and wrangler config were never ' +
-							'handed off. Add flue() and cloudflare() as plain entries of the same `plugins` ' +
-							'array (not wrapped in a Promise or added by another plugin), with flue() first.',
+					throw stackless(
+						new Error(
+							'[flue] The Cloudflare plugin is present, but flue() could not see it while Vite ' +
+								'resolved the config, so the generated Worker entry and wrangler config were never ' +
+								'handed off. Add flue() and cloudflare() as plain entries of the same `plugins` ' +
+								'array (not wrapped in a Promise or added by another plugin), with flue() first.',
+						),
 					);
 				}
 			}
@@ -664,12 +712,61 @@ function cloudflarePluginPrecedesFlue(
 }
 
 function cloudflareOrderingError(): Error {
-	return new Error(
-		'[flue] flue() must come before cloudflare() in the Vite plugins array. ' +
-			'flue prepares the generated Worker entry and wrangler config that the Cloudflare ' +
-			'plugin consumes while Vite resolves the config, so it has to run first. Reorder:\n\n' +
-			'  plugins: [flue(), cloudflare()]\n',
+	return stackless(
+		new Error(
+			'[flue] flue() must come before cloudflare() in the Vite plugins array. ' +
+				'flue prepares the generated Worker entry and wrangler config that the Cloudflare ' +
+				'plugin consumes while Vite resolves the config, so it has to run first. Reorder:\n\n' +
+				'  plugins: [flue(), cloudflare()]\n',
+		),
 	);
+}
+
+/**
+ * Strip the stack from an expected-user-mistake diagnostic. The message is
+ * the whole story; a framework stack under it buries the fix.
+ */
+function stackless(error: Error): Error {
+	error.stack = error.message;
+	return error;
+}
+
+/**
+ * Warn when the discovered config file has same-directory siblings that the
+ * basename priority silently loses to it — a stray `flue.config.js` next to a
+ * `flue.config.ts` is a support ticket waiting to happen.
+ */
+function flueConfigAmbiguityWarning(configPath: string | undefined): string | undefined {
+	if (!configPath) return undefined;
+	const configDir = path.dirname(configPath);
+	const siblings = FLUE_CONFIG_BASENAMES.map((basename) => path.join(configDir, basename)).filter(
+		(candidate) => fs.existsSync(candidate),
+	);
+	if (siblings.length <= 1) return undefined;
+	return (
+		`[flue] Multiple Flue config files found (${siblings.map((sibling) => path.basename(sibling)).join(', ')}); ` +
+		`using ${path.basename(configPath)}. Delete the others to avoid surprises.`
+	);
+}
+
+/** Warning lines for user-set Vite config paths that flue's returned config overrides. */
+function enforcedConfigWarnings(userConfig: UserConfig, enforcedPaths: string[]): string[] {
+	const overridden = enforcedPaths.filter((dottedPath) => definedAtPath(userConfig, dottedPath));
+	if (overridden.length === 0) return [];
+	return [
+		`[flue] The following Vite config options are overridden by flue():\n${overridden
+			.map((dottedPath) => `  - ${dottedPath}`)
+			.join('\n')}`,
+	];
+}
+
+function definedAtPath(value: unknown, dottedPath: string): boolean {
+	let current: unknown = value;
+	for (const segment of dottedPath.split('.')) {
+		if (current === null || typeof current !== 'object') return false;
+		current = (current as Record<string, unknown>)[segment];
+	}
+	return current !== undefined;
 }
 
 function generateScannedAgentsModule(agents: readonly AgentScanResult[]): string {
@@ -760,12 +857,14 @@ function isCloudflarePluginName(name: string | undefined): boolean {
 
 function missingAppEntryError(project: ResolvedFlueProject): Error {
 	const suggestedPath = path.join(path.relative(project.root, project.sourceRoot) || '.', 'app.ts');
-	return new Error(
-		`[flue] No app entry found. app.ts is the application's route map and the only required file.\n\n` +
-			`Create ${suggestedPath} with:\n\n` +
-			`  import { Hono } from 'hono';\n` +
-			`  export default new Hono().get('/', (c) => c.text('Hello from Flue'));\n\n` +
-			`(or set \`app\` in flue.config.ts to an existing entry module).`,
+	return stackless(
+		new Error(
+			`[flue] No app entry found. app.ts is the application's route map and the only required file.\n\n` +
+				`Create ${suggestedPath} with:\n\n` +
+				`  import { Hono } from 'hono';\n` +
+				`  export default new Hono().get('/', (c) => c.text('Hello from Flue'));\n\n` +
+				`(or set \`app\` in flue.config.ts to an existing entry module).`,
+		),
 	);
 }
 

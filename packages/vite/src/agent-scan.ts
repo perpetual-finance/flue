@@ -77,7 +77,15 @@ export interface AgentScanResult {
 }
 
 /** Base class for structured `scanAgents()` failures. */
-export class AgentScanError extends Error {}
+export class AgentScanError extends Error {
+	constructor(message: string, options?: ErrorOptions) {
+		super(message, options);
+		// Every scan failure is an expected user mistake (duplicate identity,
+		// bad filename, broken module): the message is the diagnostic, and a
+		// framework stack under it buries the fix.
+		this.stack = this.message;
+	}
+}
 
 /** Two or more scanned agent modules share a file basename. */
 export class DuplicateAgentIdentityError extends AgentScanError {

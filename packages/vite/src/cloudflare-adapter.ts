@@ -74,11 +74,14 @@ export function isAuthoredWranglerPath(filePath: string, normalizedRoot: string)
 
 /** Parity with the legacy Cloudflare build (build-plugin-cloudflare.ts). */
 function dbOnCloudflareError(): Error {
-	return new Error(
+	const error = new Error(
 		`[flue] Custom persistence (db.ts) is not supported on the Cloudflare target. ` +
 			`Cloudflare agents use Durable Object SQLite automatically. ` +
 			`Remove the db.ts file or move it outside the source root.`,
 	);
+	// Expected user mistake: the message is the diagnostic.
+	error.stack = error.message;
+	return error;
 }
 
 export interface PrepareCloudflareInputsOptions {

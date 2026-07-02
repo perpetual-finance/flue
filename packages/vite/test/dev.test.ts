@@ -190,6 +190,36 @@ describe('vite dev (node target)', () => {
 		).rejects.toThrow(/No app entry found/);
 	});
 
+	it('warns about enforced Vite config overrides and ambiguous flue.config files', async () => {
+		const fixture = fixtureOf({
+			...basicNodeProjectFiles(),
+			'flue.config.ts': `export default {};\n`,
+			'flue.config.js': `export default {};\n`,
+		});
+		const warnings: string[] = [];
+		const logger = createLogger('warn', { allowClearScreen: false });
+		const baseWarn = logger.warn.bind(logger);
+		logger.warn = (message, options) => {
+			warnings.push(String(message));
+			baseWarn(message, options);
+		};
+		const server = await createServer({
+			root: fixture.root,
+			configFile: false,
+			logLevel: 'warn',
+			customLogger: logger,
+			// User-set appType conflicts with the value flue() enforces.
+			appType: 'spa',
+			plugins: flue(),
+		});
+		servers.push(server);
+		const joined = warnings.join('\n');
+		expect(joined).toContain('overridden by flue()');
+		expect(joined).toContain('appType');
+		expect(joined).toContain('Multiple Flue config files');
+		expect(joined).toContain('using flue.config.ts');
+	});
+
 	it('restarts the dev server when flue.config appears or changes', async () => {
 		const fixture = fixtureOf({
 			...basicNodeProjectFiles(),
