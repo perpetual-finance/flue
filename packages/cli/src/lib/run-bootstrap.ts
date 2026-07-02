@@ -99,7 +99,7 @@ export interface FlueRunSession {
 
 /**
  * Storage path of an agent instance's canonical conversation stream.
- * Mirrors the runtime's `agentStreamPath` (runtime/event-stream-store.ts),
+ * Mirrors the runtime's `agentStreamPath` (runtime/stream-offsets.ts),
  * which is not exported from `@flue/runtime/internal`. The format is a
  * durable-storage contract (it keys persisted conversations), so this local
  * copy is stable; still, prefer the runtime seam once it is exported.
@@ -151,27 +151,15 @@ export async function createFlueRunSession(
 					if (userPersistenceAdapter.migrate) await userPersistenceAdapter.migrate();
 					stores = await userPersistenceAdapter.connect();
 					if (!stores || typeof stores !== 'object') {
-						throw new Error('connect() must return { executionStore, runStore, eventStreamStore }.');
+						throw new Error(
+							'connect() must return { executionStore, conversationStreamStore, attachmentStore }.',
+						);
 					}
 					if (
 						!stores.executionStore ||
 						typeof stores.executionStore.submissions?.getSubmission !== 'function'
 					) {
 						throw new Error('connect() must return an executionStore with submissions.');
-					}
-					if (
-						!stores.runStore ||
-						typeof stores.runStore.createRun !== 'function' ||
-						typeof stores.runStore.listRuns !== 'function'
-					) {
-						throw new Error('connect() must return a runStore.');
-					}
-					if (
-						!stores.eventStreamStore ||
-						typeof stores.eventStreamStore.appendEvent !== 'function' ||
-						typeof stores.eventStreamStore.readEvents !== 'function'
-					) {
-						throw new Error('connect() must return an eventStreamStore.');
 					}
 					if (
 						!stores.conversationStreamStore ||
@@ -201,13 +189,7 @@ export async function createFlueRunSession(
 				stores = await defaultAdapter.connect();
 				persistenceAdapter = defaultAdapter;
 			}
-			const {
-				executionStore,
-				runStore,
-				eventStreamStore,
-				conversationStreamStore,
-				attachmentStore,
-			} = stores;
+			const { executionStore, conversationStreamStore, attachmentStore } = stores;
 			if (!conversationStreamStore || !attachmentStore) {
 				throw new Error('[flue] Persistence adapter did not provide conversation stores.');
 			}
@@ -245,34 +227,17 @@ export async function createFlueRunSession(
 			const dispatchQueue = createNodeDispatchQueue(coordinator);
 
 			// Seed the runtime config so `dispatch()` and other registration-aware
-			// APIs behave exactly as in a generated Node entry. Workflows do not
-			// exist under `flue run`.
+			// APIs behave exactly as in a generated Node entry.
 			configureFlueRuntime({
 				target: 'node',
 				devMode: false,
 				agents,
-				workflows: [],
 				dispatchQueue,
 				activityGate,
-				admitWorkflow: () => {
-					throw new Error('[flue] Workflows are not available under `flue run`.');
-				},
-				createWorkflowContext: ({ runId, request, initialEventIndex }) =>
-					createFlueContext({
-						id: runId,
-						runId,
-						initialEventIndex,
-						env: runtimeEnv,
-						req: request,
-						agentConfig: { resolveModel },
-						createDefaultEnv,
-					}),
 				createAgentAdmission: (agentName, instanceId) =>
 					coordinator.createAdmission(agentName, instanceId),
 				abortAgentInstance: (agentName, instanceId) =>
 					coordinator.abortInstance(agentName, instanceId),
-				runStore,
-				eventStreamStore,
 				conversationStreamStore,
 				attachmentStore,
 			});

@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { ConversationRecord } from '../src/conversation-records.ts';
 import { sqlite } from '../src/node/agent-execution-store.ts';
-import type { ConversationStreamStore } from '../src/runtime/conversation-stream-store.ts';
 import { createAttachmentRef } from '../src/runtime/attachment-store.ts';
+import type { ConversationStreamStore } from '../src/runtime/conversation-stream-store.ts';
 import {
 	handleAgentAttachmentRead,
 	handleAgentConversationRead,
 } from '../src/runtime/handle-conversation-routes.ts';
-import { parseOffset } from '../src/runtime/event-stream-store.ts';
+import { parseOffset } from '../src/runtime/stream-offsets.ts';
 
 async function setup() {
 	const adapter = sqlite();

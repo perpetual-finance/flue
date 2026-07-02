@@ -11,7 +11,6 @@ import {
 } from '../src/runtime/registration.ts';
 import type { AgentDefinition } from '../src/types.ts';
 import { cloudflareRuntime, nodeRuntime } from './helpers/runtime-config.ts';
-import { createTestEventStreamStore } from './helpers/test-event-stream-store.ts';
 
 afterEach(() => {
 	resetFlueRuntimeForTests();
@@ -54,7 +53,6 @@ describe('AgentDefinition.route()', () => {
 		configureFlueRuntime(
 			nodeRuntime({
 				createAgentAdmission,
-				eventStreamStore: createTestEventStreamStore(),
 			}),
 		);
 
@@ -78,7 +76,6 @@ describe('AgentDefinition.route()', () => {
 		configureFlueRuntime(
 			nodeRuntime({
 				createAgentAdmission: () => async () => ({ submissionId: 'submission-1', offset: '-1' }),
-				eventStreamStore: createTestEventStreamStore(),
 			}),
 		);
 		const app = new Hono();
@@ -104,7 +101,7 @@ describe('AgentDefinition.route()', () => {
 			offset: '-1',
 		}));
 		configureFlueRuntime(
-			nodeRuntime({ createAgentAdmission, eventStreamStore: createTestEventStreamStore() }),
+			nodeRuntime({ createAgentAdmission }),
 		);
 		const app = new Hono();
 		app.route('/agents/support', agent.route());
@@ -120,7 +117,6 @@ describe('AgentDefinition.route()', () => {
 		configureFlueRuntime(
 			nodeRuntime({
 				createAgentAdmission: () => async () => ({ submissionId: 'submission-1', offset: '-1' }),
-				eventStreamStore: createTestEventStreamStore(),
 			}),
 		);
 		const app = new Hono();
@@ -231,7 +227,6 @@ describe('AgentDefinition.route()', () => {
 			nodeRuntime({
 				createAgentAdmission: () => async () => ({ submissionId: 'submission-1', offset: '-1' }),
 				abortAgentInstance: async () => false,
-				eventStreamStore: createTestEventStreamStore(),
 			}),
 		);
 		const app = new Hono();
@@ -274,7 +269,6 @@ describe('AgentDefinition.route()', () => {
 		configureFlueRuntime(
 			nodeRuntime({
 				createAgentAdmission: () => async () => ({ submissionId: 'submission-1', offset: '-1' }),
-				eventStreamStore: createTestEventStreamStore(),
 			}),
 		);
 		const app = new Hono();

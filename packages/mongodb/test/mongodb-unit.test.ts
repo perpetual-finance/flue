@@ -74,7 +74,7 @@ describe('mongodb() migration guards', () => {
 			runner({
 				collection: (name) =>
 					collection({
-						findOne: async () => (name === 'flue_runs' ? { _id: 'legacy' } : null),
+						findOne: async () => (name === 'flue_submissions' ? { _id: 'legacy' } : null),
 					}),
 				topology: async () => {
 					topologyCalls++;

@@ -46,10 +46,10 @@ describe('generateCloudflareEntry()', () => {
 		expect(entry).toContain('export const FlueTriageBotAgent = createFlueAgentClass({');
 		expect(entry).toContain('extension: __flue_agent_0__.cloudflare,');
 
-		// Runtime seed keeps the legacy shape (empty workflows) until Phase 7.
+		// Runtime seed carries only the conversation-era config shape.
 		expect(entry).toContain(`target: 'cloudflare',`);
-		expect(entry).toContain('workflows: [],');
-		expect(entry).toContain('routeWorkflowRequest: async () => null,');
+		expect(entry).not.toContain('workflows');
+		expect(entry).not.toContain('routeWorkflowRequest');
 
 		// Without a cloudflare.ts there is nothing to spread or re-export.
 		expect(entry).toContain('const userCloudflare = {};');

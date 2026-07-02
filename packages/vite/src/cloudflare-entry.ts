@@ -9,8 +9,7 @@
  * (real, tested code in `@flue/runtime`); the generated file only joins the
  * scanned `'use agent'` set to those factories.
  *
- * Ported from the CLI's Cloudflare build plugin
- * (packages/cli/src/lib/build-plugin-cloudflare.ts `generateEntryPoint`),
+ * Ported from the CLI's legacy Cloudflare build plugin `generateEntryPoint`,
  * minus workflows, channels, the run registry, and the no-`app.ts` fallback —
  * on the new surface `app.ts` is required and the scan is the registration.
  */
@@ -236,28 +235,17 @@ const cloudflareAgents = createCloudflareAgentRuntime({
 ${agentClassExports}
 
 // ─── Runtime seed ───────────────────────────────────────────────────────────
-// Legacy shape (workflows, channelHandlers, run routing) stays valid until
-// Phase 7 removes it; the new surface registers no workflows.
 
 configureFlueRuntime({
 	target: 'cloudflare',
 	devMode: import.meta.env.DEV,
-	temporaryLocalExposure: false,
 	agents,
-	workflows: [],
 	dispatchQueue,
-	admitWorkflow: async () => {
-		throw new Error('[flue] Internal workflow admission target is not registered.');
-	},
-	channelHandlers: {},
 	routeAgentRequest: async (request, reqEnv, target) => {
 		const binding = reqEnv?.[agentIdentities[target.agentName]?.bindingName];
 		if (!binding) return null;
 		return fetchAgent(binding, target.instanceId, request);
 	},
-	routeWorkflowRequest: async () => null,
-	routeRunRequest: async () => null,
-	createRunIndexForRequest: () => undefined,
 });
 
 // ─── App composition ────────────────────────────────────────────────────────

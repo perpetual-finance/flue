@@ -4,7 +4,6 @@ import {
 	type LlmMessage as RuntimeLlmMessage,
 	type ModelRequestInfo as RuntimeModelRequestInfo,
 	type PromptUsage as RuntimePromptUsage,
-	type RunRecord as RuntimeRunRecord,
 } from '@flue/runtime';
 import type {
 	AgentConversationSnapshot as RuntimeConversationSnapshot,
@@ -20,7 +19,6 @@ import {
 	type LlmMessage as SdkLlmMessage,
 	type ModelRequestInfo as SdkModelRequestInfo,
 	type PromptUsage as SdkPromptUsage,
-	type RunRecord as SdkRunRecord,
 } from '../src/index.ts';
 
 // The runtime projects its private canonical log onto the `history`/`updates`
@@ -83,13 +81,6 @@ const _modelRequestInfo: SdkModelRequestInfo = {} as RuntimeModelRequestInfo;
 const _modelRequestInfoBack: RuntimeModelRequestInfo = {} as SdkModelRequestInfo;
 void _modelRequestInfo;
 void _modelRequestInfoBack;
-
-// `GET /runs/:id?meta` serves the runtime `RunRecord`; the SDK duplicates the
-// shape with no intentional widening, so it must stay mutually assignable.
-const _run: SdkRunRecord = {} as RuntimeRunRecord;
-const _runBack: RuntimeRunRecord = {} as SdkRunRecord;
-void _run;
-void _runBack;
 
 // The SDK duplicates the image-redaction sentinel; both constants are literal
 // string types, so these assignments fail if the values ever diverge.

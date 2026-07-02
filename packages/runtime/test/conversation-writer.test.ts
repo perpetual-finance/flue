@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ConversationRecord } from '../src/conversation-records.ts';
 import { ConversationRecordWriter } from '../src/conversation-writer.ts';
 import {
-	InMemoryConversationStreamStore,
 	type ConversationStreamStore,
+	InMemoryConversationStreamStore,
 } from '../src/runtime/conversation-stream-store.ts';
 
 function userRecord(id: string): ConversationRecord {

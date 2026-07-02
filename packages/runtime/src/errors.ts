@@ -287,73 +287,14 @@ class InvalidJsonError extends FlueHttpError {
 	}
 }
 
-class AgentNotFoundError extends FlueHttpError {
-	constructor({ name, available }: { name: string; available: readonly string[] }) {
-		super({
-			type: 'agent_not_found',
-			message: `Agent "${name}" is not registered.`,
-			// Caller-safe: no enumeration, no framework internals.
-			details: `Verify the agent name is correct.`,
-			// Dev-only: sibling enumeration and project-root mechanics. Useful
-			// for the human running the service; would leak namespace state
-			// or framework details to a public caller.
-			dev:
-				`Available agents: ${formatList(available)}.\n` +
-				`Agents are loaded from the project root's "agents/" directory at build time. ` +
-				`Verify the agent file is present in the project root being served.`,
-			status: 404,
-		});
-	}
-}
-
-class WorkflowNotFoundError extends FlueHttpError {
-	constructor({
-		name,
-		available,
-		notHttp = false,
-	}: {
-		name: string;
-		available: readonly string[];
-		notHttp?: boolean;
-	}) {
-		super({
-			type: 'workflow_not_found',
-			message: `Workflow "${name}" is not registered.`,
-			// Caller-safe and identical for unknown and non-HTTP workflows, so
-			// public callers cannot enumerate internal-only workflow names by
-			// probing /workflows/<name>.
-			details: `Verify the workflow name is correct.`,
-			dev: notHttp
-				? `Workflow "${name}" is built but not exposed over HTTP. ` +
-					`To expose it, export route middleware and call await next() to enter the workflow handler.`
-				: `Available workflows: ${formatList(available)}.\n` +
-					`Workflows are loaded from the project root's "workflows/" directory at build time.`,
-			status: 404,
-		});
-	}
-}
-
 export class RouteNotFoundError extends FlueHttpError {
 	constructor({ method, path }: { method: string; path: string }) {
 		super({
 			type: 'route_not_found',
 			message: `No route matches ${method} ${path}.`,
-			// Thrown for any unmatched path (agent, workflow, run, or
-			// otherwise), so the guidance stays generic and we do NOT
-			// enumerate registered routes.
+			// Thrown for any unmatched path, so the guidance stays generic and
+			// we do NOT enumerate registered routes.
 			details: `Verify the request method and path are correct.`,
-			dev: '',
-			status: 404,
-		});
-	}
-}
-
-export class RunNotFoundError extends FlueHttpError {
-	constructor({ runId }: { runId: string }) {
-		super({
-			type: 'run_not_found',
-			message: `Run "${runId}" was not found.`,
-			details: 'Verify the run id is correct and its history is still available.',
 			dev: '',
 			status: 404,
 		});
@@ -366,7 +307,7 @@ export class StreamNotFoundError extends FlueHttpError {
 			type: 'stream_not_found',
 			message: `Event stream "${path}" was not found.`,
 			details:
-				'Streams are created when their agent instance receives its first prompt or their workflow run starts.',
+				'Streams are created when their agent instance receives its first prompt.',
 			dev: '',
 			status: 404,
 		});
@@ -400,18 +341,6 @@ export class AttachmentNotFoundError extends FlueHttpError {
 				'The attachment id may be incorrect, or it belongs to a conversation other than the default one.',
 			dev: '',
 			status: 404,
-		});
-	}
-}
-
-export class RunStoreUnavailableError extends FlueHttpError {
-	constructor() {
-		super({
-			type: 'run_store_unavailable',
-			message: 'Run history is not available in this runtime.',
-			details: 'This endpoint requires the generated runtime to be configured with a run store.',
-			dev: '',
-			status: 501,
 		});
 	}
 }
@@ -586,9 +515,8 @@ export class SandboxOperationUnsupportedError extends FlueError {
 // `shell()` / `compact()`. Programmatic consumers (the primary
 // audience of these calls) distinguish failures with `instanceof` against the
 // classes re-exported from the package root. When one of these escapes to the
-// HTTP layer (e.g. a synchronous `?wait=result` workflow invocation),
-// `toHttpResponse` renders its typed envelope with status 500 instead of an
-// opaque `internal_error`.
+// HTTP layer, `toHttpResponse` renders its typed envelope with status 500
+// instead of an opaque `internal_error`.
 //
 // Aborted operations are NOT part of this vocabulary — they reject with a
 // standard `AbortError` (`DOMException`); see `abort.ts`.
@@ -836,78 +764,15 @@ export class ActionOutputSerializationError extends FlueError {
 	}
 }
 
-export class WorkflowInvocationNotConfiguredError extends FlueError {
+export class ActionInputUnexpectedError extends FlueError {
 	constructor() {
 		super({
-			type: 'workflow_invocation_not_configured',
-			message: 'Workflow invocation is not configured in this runtime.',
+			type: 'action_input_unexpected',
+			message: 'This action does not accept input.',
 			details: '',
-			dev: 'Call invoke() from a Flue-built server entry.',
+			dev: 'Remove the input value for an Action that has no input schema.',
 		});
-		this.name = 'WorkflowInvocationNotConfiguredError';
-	}
-}
-
-export class WorkflowNotDiscoveredError extends FlueError {
-	constructor() {
-		super({
-			type: 'workflow_not_discovered',
-			message: 'The workflow is not registered in this application.',
-			details: '',
-			dev: 'invoke() accepts the exact Workflow Definition value default-exported by one discovered workflow module.',
-		});
-		this.name = 'WorkflowNotDiscoveredError';
-	}
-}
-
-export class WorkflowInputUnexpectedError extends FlueError {
-	constructor() {
-		super({
-			type: 'workflow_input_unexpected',
-			message: 'This workflow does not accept input.',
-			details: '',
-			dev: 'Remove the input value from invoke() for a workflow whose Action has no input schema.',
-		});
-		this.name = 'WorkflowInputUnexpectedError';
-	}
-}
-
-export class WorkflowInputSerializationError extends FlueError {
-	constructor({ cause }: { cause: unknown }) {
-		super({
-			type: 'workflow_input_serialization',
-			message: 'Workflow input is not JSON-serializable.',
-			details: '',
-			dev: 'Pass a plain JSON value as invoke().input.',
-			cause,
-		});
-		this.name = 'WorkflowInputSerializationError';
-	}
-}
-
-export class WorkflowAdmissionUnavailableError extends FlueError {
-	constructor() {
-		super({
-			type: 'workflow_admission_unavailable',
-			message: 'Workflow admission is not available in this runtime.',
-			details: '',
-			dev: 'The generated runtime did not configure a workflow admission hook.',
-		});
-		this.name = 'WorkflowAdmissionUnavailableError';
-	}
-}
-
-export class WorkflowAdmissionError extends FlueError {
-	constructor({ workflow, cause }: { workflow: string; cause: unknown }) {
-		super({
-			type: 'workflow_admission_failed',
-			message: 'Workflow admission failed.',
-			details: '',
-			dev: `The generated runtime could not admit workflow "${workflow}".`,
-			meta: { workflow },
-			cause,
-		});
-		this.name = 'WorkflowAdmissionError';
+		this.name = 'ActionInputUnexpectedError';
 	}
 }
 
@@ -1328,63 +1193,5 @@ export async function parseJsonBody(request: Request): Promise<unknown> {
 		throw new InvalidJsonError({
 			parseError: err instanceof Error ? err.message : String(err),
 		});
-	}
-}
-
-/**
- * Validate that a request targeting `/agents/<name>/<id>` is well-formed:
- * method is POST, and agent name is registered. Throws the appropriate
- * FlueHttpError on any failure.
- *
- * Path/id validation is light: we reject empty or whitespace-only segments
- * but otherwise let the URL parser's segment splitting be the source of
- * truth. The Hono route pattern enforces the public path shape.
- */
-export interface ValidateAgentRequestOptions {
-	method: string;
-	name: string;
-	id: string;
-	registeredAgents: readonly string[];
-}
-
-export interface ValidateWorkflowRequestOptions {
-	method: string;
-	name: string;
-	registeredWorkflows: readonly string[];
-	httpWorkflows: readonly string[];
-}
-
-export function validateWorkflowRequest(opts: ValidateWorkflowRequestOptions): void {
-	if (opts.method !== 'POST') {
-		throw new MethodNotAllowedError({ method: opts.method, allowed: ['POST'] });
-	}
-	if (opts.name.trim() === '') {
-		throw new InvalidRequestError({
-			reason: 'Workflow URLs must have the shape /workflows/<name> with a non-empty segment.',
-		});
-	}
-	if (!opts.registeredWorkflows.includes(opts.name)) {
-		throw new WorkflowNotFoundError({ name: opts.name, available: opts.registeredWorkflows });
-	}
-	if (!opts.httpWorkflows.includes(opts.name)) {
-		throw new WorkflowNotFoundError({
-			name: opts.name,
-			available: opts.registeredWorkflows,
-			notHttp: true,
-		});
-	}
-}
-
-export function validateAgentRequest(opts: ValidateAgentRequestOptions): void {
-	if (opts.method !== 'POST' && opts.method !== 'GET' && opts.method !== 'HEAD') {
-		throw new MethodNotAllowedError({ method: opts.method, allowed: ['GET', 'HEAD', 'POST'] });
-	}
-	if (opts.name.trim() === '' || opts.id.trim() === '') {
-		throw new InvalidRequestError({
-			reason: 'Agent URLs must have the shape /agents/<name>/<id> with non-empty segments.',
-		});
-	}
-	if (!opts.registeredAgents.includes(opts.name)) {
-		throw new AgentNotFoundError({ name: opts.name, available: opts.registeredAgents });
 	}
 }

@@ -1,3 +1,4 @@
+import { SUBMISSION_HARNESS_NAME, SUBMISSION_SESSION_NAME } from '../adapter-helpers.ts';
 import type {
 	AgentDispatchAdmission,
 	AgentSubmission,
@@ -5,6 +6,7 @@ import type {
 } from '../agent-execution-store.ts';
 import { LEASE_DURATION_MS } from '../agent-execution-store.ts';
 import { ConversationRecordWriter } from '../conversation-writer.ts';
+import { SubmissionAbortedError } from '../errors.ts';
 import {
 	type AgentSubmissionInput,
 	type AttachedAgentSubmissionAdmission,
@@ -16,16 +18,14 @@ import {
 	reconcileInterruptedSubmission,
 	submissionSyntheticRequest,
 } from '../runtime/agent-submissions.ts';
-import { SUBMISSION_HARNESS_NAME, SUBMISSION_SESSION_NAME } from '../adapter-helpers.ts';
-import { createSessionStorageKey } from '../session-identity.ts';
-import { SubmissionAbortedError } from '../errors.ts';
 import type { AttachmentStore } from '../runtime/attachment-store.ts';
 import type { ConversationStreamStore } from '../runtime/conversation-stream-store.ts';
 import type { AgentInteractionStart } from '../runtime/dev-lifecycle-logger.ts';
 import type { DispatchInput, DispatchQueue } from '../runtime/dispatch-queue.ts';
-import { agentStreamPath } from '../runtime/event-stream-store.ts';
 import type { CreateAgentContextFn } from '../runtime/handle-agent.ts';
 import type { RuntimeActivityGate, RuntimeActivityLease } from '../runtime/runtime-activity-gate.ts';
+import { agentStreamPath } from '../runtime/stream-offsets.ts';
+import { createSessionStorageKey } from '../session-identity.ts';
 import type {
 	AgentDefinition,
 	DeliveredMessage,

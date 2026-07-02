@@ -8,7 +8,7 @@
 
 import type { AgentToolResult } from '@earendil-works/pi-agent-core';
 import { formatBashResult } from './agent.ts';
-import { interceptExecution, type FlueExecutionContext } from './execution-interceptor.ts';
+import { type FlueExecutionContext, interceptExecution } from './execution-interceptor.ts';
 import type {
 	FlueEventInput,
 	FlueObservationDetail,

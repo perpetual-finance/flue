@@ -18,8 +18,6 @@ import { ConversationStreamStoreError, PersistedSchemaVersionError } from '@flue
 import {
 	defineAttachmentStoreContractTests,
 	defineConversationStreamStoreContractTests,
-	defineEventStreamStoreContractTests,
-	defineRunStoreContractTests,
 	defineStoreContractTests,
 } from '@flue/runtime/test-utils';
 import { createClient } from '@libsql/client';
@@ -131,22 +129,6 @@ function createLibsqlRunner(
 
 {
 	let adapter: ReturnType<typeof libsql> | undefined;
-	defineEventStreamStoreContractTests('libSQL EventStreamStore', {
-		async create() {
-			adapter = libsql(createLibsqlRunner());
-			await adapter.migrate?.();
-			const { eventStreamStore } = await adapter.connect();
-			return eventStreamStore;
-		},
-		async cleanup() {
-			await adapter?.close?.();
-			adapter = undefined;
-		},
-	});
-}
-
-{
-	let adapter: ReturnType<typeof libsql> | undefined;
 	defineConversationStreamStoreContractTests('libSQL ConversationStreamStore', {
 		async create() {
 			adapter = libsql(createLibsqlRunner());
@@ -159,22 +141,6 @@ function createLibsqlRunner(
 				stream: stores.conversationStreamStore,
 				executionStore: stores.executionStore,
 			};
-		},
-		async cleanup() {
-			await adapter?.close?.();
-			adapter = undefined;
-		},
-	});
-}
-
-{
-	let adapter: ReturnType<typeof libsql> | undefined;
-	defineRunStoreContractTests('libSQL RunStore', {
-		async create() {
-			adapter = libsql(createLibsqlRunner());
-			await adapter.migrate?.();
-			const { runStore } = await adapter.connect();
-			return runStore;
 		},
 		async cleanup() {
 			await adapter?.close?.();
@@ -215,27 +181,6 @@ describe('libsql() PersistenceAdapter', () => {
 		await adapter.connect();
 		if (!adapter.close) throw new Error('Expected adapter.close to be defined.');
 		await adapter.close();
-	});
-
-	it('decodes run booleans when integer rows are strings', async () => {
-		const runner = createLibsqlRunner({ intMode: 'string' });
-		const adapter = libsql(runner);
-		await adapter.migrate?.();
-		const { runStore } = await adapter.connect();
-		await runStore.createRun({
-			runId: 'run-1',
-			workflowName: 'workflow',
-			startedAt: '2026-06-03T00:00:00.000Z',
-			input: undefined,
-		});
-		await runStore.endRun({
-			runId: 'run-1',
-			endedAt: '2026-06-03T00:00:01.000Z',
-			durationMs: 1_000,
-			isError: false,
-		});
-		expect((await runStore.getRun('run-1'))?.isError).toBe(false);
-		await adapter.close?.();
 	});
 
 	it('close() is idempotent', async () => {

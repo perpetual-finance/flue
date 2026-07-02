@@ -3,8 +3,6 @@ import { PersistedSchemaVersionError } from '@flue/runtime/adapter';
 import {
 	defineAttachmentStoreContractTests,
 	defineConversationStreamStoreContractTests,
-	defineEventStreamStoreContractTests,
-	defineRunStoreContractTests,
 	defineStoreContractTests,
 } from '@flue/runtime/test-utils';
 import {
@@ -234,18 +232,6 @@ describeMongo('MongoDB shared contracts', () => {
 		},
 		cleanup,
 	});
-	defineRunStoreContractTests('MongoDB RunStore', {
-		async create() {
-			return (await stores()).runStore;
-		},
-		cleanup,
-	});
-	defineEventStreamStoreContractTests('MongoDB EventStreamStore', {
-		async create() {
-			return (await stores()).eventStreamStore;
-		},
-		cleanup,
-	});
 	defineAttachmentStoreContractTests('MongoDB AttachmentStore', {
 		async create() {
 			return (await stores()).attachmentStore;
@@ -333,17 +319,6 @@ describeMongo('mongodb() integration', () => {
 		]);
 		await cleanup();
 	});
-	it('orders concurrent event appends and rejects append after close', async () => {
-		const value = await stores();
-		await value.eventStreamStore.createStream('x');
-		const offsets = await Promise.all(
-			Array.from({ length: 10 }, (_, index) => value.eventStreamStore.appendEvent('x', { index })),
-		);
-		expect(new Set(offsets).size).toBe(10);
-		await value.eventStreamStore.closeStream('x');
-		await expect(value.eventStreamStore.appendEvent('x', {})).rejects.toThrow();
-		await cleanup();
-	});
 	it('rejects schema version 2 without migrating it', async () => {
 		const value = await stores();
 		void value;
@@ -367,50 +342,6 @@ describeMongo('mongodb() integration', () => {
 			.collection<{ _id: string; value: number }>('flue_meta')
 			.updateOne({ _id: 'schema_version' }, { $set: { value: 999 } });
 		await expect(harness.adapter.migrate?.()).rejects.toThrow(PersistedSchemaVersionError);
-		await cleanup();
-	});
-	it('keeps the first run when independent clients create it concurrently', async () => {
-		if (!url) throw new TypeError('TEST_MONGODB_URL is required.');
-		const first = await createHarness();
-		const secondClient = new MongoClient(url);
-		await secondClient.connect();
-		const second = mongodb(createRunner(secondClient, first.db));
-		await second.migrate?.();
-		const a = (await first.adapter.connect()).runStore;
-		const b = (await second.connect()).runStore;
-		await expect(
-			Promise.all([
-				a.createRun({
-					runId: 'run',
-					workflowName: 'first',
-					startedAt: '2026-01-01T00:00:00.000Z',
-					input: { source: 'first' },
-				}),
-				b.createRun({
-					runId: 'run',
-					workflowName: 'second',
-					startedAt: '2026-01-02T00:00:00.000Z',
-					input: { source: 'second' },
-				}),
-			]),
-		).resolves.toEqual([undefined, undefined]);
-		const run = await a.getRun('run');
-		expect(run?.workflowName === 'first' || run?.workflowName === 'second').toBe(true);
-		expect(run?.input).toEqual({ source: run?.workflowName });
-		await first.db.dropDatabase();
-		await first.adapter.close?.();
-		await second.close?.();
-	});
-	it('round trips an arbitrary value larger than 16 MiB', async () => {
-		const value = await stores();
-		const body = 'x'.repeat(17 * 1024 * 1024);
-		await value.runStore.createRun({
-			runId: 'large',
-			workflowName: 'w',
-			startedAt: new Date().toISOString(),
-			input: { body },
-		});
-		expect((await value.runStore.getRun('large'))?.input).toEqual({ body });
 		await cleanup();
 	});
 });

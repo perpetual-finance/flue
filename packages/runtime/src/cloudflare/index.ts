@@ -1,6 +1,6 @@
 /**
  * Public authoring surface of `@flue/runtime/cloudflare`: APIs that user
- * agent/workflow modules import on the Cloudflare target.
+ * agent modules import on the Cloudflare target.
  *
  * Generated-entry plumbing lives in `./internal.ts`
  * (`@flue/runtime/cloudflare/internal`), which also owns the

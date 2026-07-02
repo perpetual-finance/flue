@@ -1,15 +1,15 @@
 /**
  * Internal Cloudflare runtime plumbing consumed by the generated Worker
- * entry point (the Cloudflare build plugin).
+ * entry point (the `@flue/vite` Cloudflare target).
  *
  * This subpath is NOT part of the public API. The authoring surface for
  * Cloudflare users lives at `@flue/runtime/cloudflare`; the Node/shared
  * generated-entry helpers live at `@flue/runtime/internal`.
  *
- * This entry owns the `cloudflare:workers` import graph (via the
- * `FlueRegistry` Durable Object). That virtual module only resolves inside
- * workerd, so it must never be imported from `@flue/runtime/internal` or any
- * other Node-loadable entry — doing so poisons Node builds.
+ * Modules on this entry may type-import `cloudflare:workers`. That virtual
+ * module only resolves inside workerd, so nothing here may be imported from
+ * `@flue/runtime/internal` or any other Node-loadable entry — doing so
+ * poisons Node builds.
  */
 export { cfSandboxToSessionEnv } from './cf-sandbox.ts';
 export { runWithCloudflareContext } from './context.ts';
@@ -17,7 +17,4 @@ export type { ResolvedCloudflareExtension } from './extension.ts';
 export { resolveCloudflareExtension } from './extension.ts';
 export type { CreateFlueAgentClassOptions } from './flue-agent-class.ts';
 export { createFlueAgentClass } from './flue-agent-class.ts';
-export { FlueRegistry } from './registry-do.ts';
-export type { CloudflareRunIndex } from './run-store.ts';
-export { createCloudflareRunIndex, createCloudflareRunStore } from './run-store.ts';
 export { getCloudflareAIBindingApiProvider } from './workers-ai-provider.ts';

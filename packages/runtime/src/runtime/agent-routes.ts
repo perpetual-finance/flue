@@ -20,7 +20,6 @@
 import type { MiddlewareHandler } from 'hono';
 import { validator } from 'hono-openapi';
 import { InvalidRequestError, RouteNotFoundError } from '../errors.ts';
-import { agentStreamPath } from './event-stream-store.ts';
 import type { FlueRuntime } from './flue-app.ts';
 import { handleAgentRequest } from './handle-agent.ts';
 import {
@@ -28,6 +27,7 @@ import {
 	handleAgentConversationHead,
 	handleAgentConversationRead,
 } from './handle-conversation-routes.ts';
+import { agentStreamPath } from './stream-offsets.ts';
 
 /** One agent-scoped HTTP interaction, already resolved to its storage identity. */
 export interface AgentRequestTarget {

@@ -11,8 +11,7 @@
  *
  * The registered agent set comes from the scan — `.route()` mounts in app.ts
  * are pure routers over it. There are no workflows and no channel-handler
- * registry on this surface (mounting is the dispatch); the runtime config
- * keeps its legacy shape with empty values until Phase 7 removes them.
+ * registry on this surface: mounting is the dispatch.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { format } from 'node:util';
@@ -23,7 +22,6 @@ import type { AgentDefinition } from '@flue/runtime';
 import type {
 	AgentRecord,
 	CreateAgentContextOptions,
-	CreateWorkflowContextOptions,
 	FlueAgentRegistration,
 	PersistenceAdapter,
 	RuntimeActivityLease,
@@ -199,7 +197,7 @@ export async function loadFlueNodeApplication(
 						>;
 						if (!connected || typeof connected !== 'object') {
 							throw new Error(
-								'connect() must return { executionStore, runStore, eventStreamStore }.',
+								'connect() must return { executionStore, conversationStreamStore, attachmentStore }.',
 							);
 						}
 						if (
@@ -207,20 +205,6 @@ export async function loadFlueNodeApplication(
 							typeof connected.executionStore.submissions?.getSubmission !== 'function'
 						) {
 							throw new Error('connect() must return an executionStore with submissions.');
-						}
-						if (
-							!connected.runStore ||
-							typeof connected.runStore.createRun !== 'function' ||
-							typeof connected.runStore.listRuns !== 'function'
-						) {
-							throw new Error('connect() must return a runStore.');
-						}
-						if (
-							!connected.eventStreamStore ||
-							typeof connected.eventStreamStore.appendEvent !== 'function' ||
-							typeof connected.eventStreamStore.readEvents !== 'function'
-						) {
-							throw new Error('connect() must return an eventStreamStore.');
 						}
 						if (
 							!connected.conversationStreamStore ||
@@ -259,13 +243,7 @@ export async function loadFlueNodeApplication(
 					stores = await defaultAdapter.connect();
 					persistenceAdapter = defaultAdapter;
 				}
-				const {
-					executionStore,
-					runStore,
-					eventStreamStore,
-					conversationStreamStore,
-					attachmentStore,
-				} = stores;
+				const { executionStore, conversationStreamStore, attachmentStore } = stores;
 
 				// ─── Coordinator ──────────────────────────────────────────────
 				const activityGate = createRuntimeActivityGate();
@@ -300,22 +278,6 @@ export async function loadFlueNodeApplication(
 					});
 				}
 
-				function createWorkflowContextForRequest({
-					runId,
-					request,
-					initialEventIndex,
-				}: CreateWorkflowContextOptions) {
-					return createFlueContext({
-						id: runId,
-						runId,
-						initialEventIndex,
-						env: runtimeEnv,
-						req: request,
-						agentConfig: { resolveModel },
-						createDefaultEnv,
-					});
-				}
-
 				// ─── Runtime seed ─────────────────────────────────────────────
 				// Seed the runtime before the application is installed into its
 				// listener. `.route()` handlers in the user's app read this
@@ -324,25 +286,13 @@ export async function loadFlueNodeApplication(
 				configureFlueRuntime({
 					target: 'node',
 					devMode: isLocalMode,
-					temporaryLocalExposure: false,
 					agents,
-					workflows: [],
 					createAgentAdmission: (agentName, instanceId) =>
 						coordinator.createAdmission(agentName, instanceId),
 					abortAgentInstance: (agentName, instanceId) =>
 						coordinator.abortInstance(agentName, instanceId),
 					dispatchQueue,
 					activityGate,
-					admitWorkflow: async () => {
-						// No workflows exist on the Vite-built surface; this admission
-						// target survives only because the runtime config keeps its
-						// legacy shape until Phase 7.
-						throw new Error('[flue] Internal workflow admission target is not registered.');
-					},
-					channelHandlers: {},
-					createWorkflowContext: createWorkflowContextForRequest,
-					runStore,
-					eventStreamStore,
 					conversationStreamStore,
 					attachmentStore,
 				});

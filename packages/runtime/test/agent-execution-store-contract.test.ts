@@ -161,51 +161,6 @@ describe('sqlite() PersistenceAdapter', () => {
 		await adapter.close?.();
 	});
 
-	it('preserves workflow run records and run listing across close() and reconnect cycles', async () => {
-		const dir = createTempDir();
-		const dbPath = join(dir, 'run-restart-test.db');
-		const adapter = sqlite(dbPath);
-
-		await adapter.migrate?.();
-		const { runStore: runStore1 } = await adapter.connect();
-		await runStore1.createRun({
-			runId: 'run_01DAILYREPORT',
-			workflowName: 'daily-report',
-			startedAt: '2026-06-03T00:00:00.000Z',
-			input: { day: 'wednesday' },
-		});
-		await runStore1.endRun({
-			runId: 'run_01DAILYREPORT',
-			endedAt: '2026-06-03T00:00:01.000Z',
-			isError: false,
-			durationMs: 1000,
-			result: { report: 'done' },
-		});
-		await adapter.close?.();
-
-		await adapter.migrate?.();
-		const { runStore: runStore2 } = await adapter.connect();
-		expect(await runStore2.getRun('run_01DAILYREPORT')).toMatchObject({
-			runId: 'run_01DAILYREPORT',
-			workflowName: 'daily-report',
-			status: 'completed',
-			input: { day: 'wednesday' },
-			result: { report: 'done' },
-		});
-		expect(await runStore2.lookupRun('run_01DAILYREPORT')).toEqual({
-			runId: 'run_01DAILYREPORT',
-			workflowName: 'daily-report',
-		});
-		const listed = await runStore2.listRuns();
-		expect(listed.runs).toHaveLength(1);
-		expect(listed.runs[0]).toMatchObject({
-			runId: 'run_01DAILYREPORT',
-			workflowName: 'daily-report',
-			status: 'completed',
-		});
-		await adapter.close?.();
-	});
-
 	it('returns an in-memory store when no path is provided', async () => {
 		const adapter = sqlite();
 		await adapter.migrate?.();

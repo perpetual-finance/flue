@@ -12,8 +12,6 @@ import type { AgentSubmissionInput } from './runtime/agent-submissions.ts';
 import type { AttachmentStore } from './runtime/attachment-store.ts';
 import type { ConversationStreamStore } from './runtime/conversation-stream-store.ts';
 import type { DispatchInput } from './runtime/dispatch-queue.ts';
-import type { EventStreamStore } from './runtime/event-stream-store.ts';
-import type { RunStore } from './runtime/run-store.ts';
 
 // ─── Durability defaults ────────────────────────────────────────────────────
 
@@ -287,10 +285,6 @@ export interface AgentExecutionStore {
 export interface PersistenceStores {
 	/** Durable agent submission lifecycle storage. */
 	readonly executionStore: AgentExecutionStore;
-	/** Workflow run records, lookup, and listing. */
-	readonly runStore: RunStore;
-	/** Durable append-only event streams for agents and workflow runs. */
-	readonly eventStreamStore: EventStreamStore;
 	/** Canonical per-agent-instance conversation streams. */
 	readonly conversationStreamStore: ConversationStreamStore;
 	/** Immutable attachment bytes referenced by canonical conversation records. */

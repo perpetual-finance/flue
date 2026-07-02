@@ -74,11 +74,9 @@ export function parseDeliveredMessage(value: unknown): DeliveredMessage {
 	});
 }
 
-export const WorkflowRouteParamSchema = v.object({ name: v.string() });
-/** `?wait` query contract for the workflow invocation route. */
+/** `?wait` query contract for the agent prompt route. */
 export const InvocationQuerySchema = v.object({
 	wait: v.optional(v.literal('result')),
 });
-export const AgentRouteParamSchema = v.object({ name: v.string(), id: v.string() });
 /** Param contract for the mounted `AgentDefinition.route()` sub-app (`/:id`). */
 export const AgentMountRouteParamSchema = v.object({ id: v.string() });

@@ -1,7 +1,7 @@
 import {
-	classifySignal,
 	type ConversationUiMessage,
 	type ConversationUiSnapshot,
+	classifySignal,
 	projectConversationUi,
 } from './conversation-projections.ts';
 import type {

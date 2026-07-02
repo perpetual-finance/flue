@@ -5,9 +5,9 @@ import type { AgentExecutionStore } from '../src/agent-execution-store.ts';
 import type { FlueContextInternal } from '../src/client.ts';
 import { createCloudflareAgentRuntime } from '../src/cloudflare/agent-coordinator.ts';
 import type {
+	AgentSubmissionInput,
 	AgentSubmissionInspection,
 	AgentSubmissionInterruption,
-	AgentSubmissionInput,
 } from '../src/runtime/agent-submissions.ts';
 
 afterEach(() => {

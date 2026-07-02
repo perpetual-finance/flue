@@ -1,49 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createFlueContext, installDevLifecycleLogger, resolveModel } from '../src/internal.ts';
-
-function createContext(runId: string) {
-	return createFlueContext({
-		id: runId,
-		runId,
-		env: {},
-		agentConfig: { resolveModel: () => resolveModel('anthropic/claude-haiku-4-5') },
-		createDefaultEnv: async () => {
-			throw new Error('unexpected sandbox initialization');
-		},
-	});
-}
+import { installDevLifecycleLogger } from '../src/internal.ts';
 
 describe('installDevLifecycleLogger()', () => {
-	it('logs workflow lifecycle events and ignores other runtime events', () => {
-		const messages: string[] = [];
-		const logger = installDevLifecycleLogger((message) => messages.push(message));
-		const ctx = createContext('run_test');
-
-		try {
-			ctx.emitEvent({
-				type: 'run_start',
-				runId: 'run_test',
-				workflowName: 'report',
-				startedAt: new Date().toISOString(),
-				input: undefined,
-			});
-			ctx.emitEvent({ type: 'text_delta', text: 'hidden' });
-			ctx.emitEvent({
-				type: 'run_end',
-				runId: 'run_test',
-				isError: false,
-				durationMs: 42,
-			});
-
-			expect(messages).toEqual([
-				'[workflow] report@run_test started',
-				'[workflow] report@run_test completed in 42ms',
-			]);
-		} finally {
-			logger.dispose();
-		}
-	});
-
 	it('logs agent interaction starts without prompt content', () => {
 		const messages: string[] = [];
 		const logger = installDevLifecycleLogger((message) => messages.push(message));

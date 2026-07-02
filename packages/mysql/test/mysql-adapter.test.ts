@@ -2,8 +2,6 @@ import { PersistedSchemaVersionError } from '@flue/runtime/adapter';
 import {
 	defineAttachmentStoreContractTests,
 	defineConversationStreamStoreContractTests,
-	defineEventStreamStoreContractTests,
-	defineRunStoreContractTests,
 	defineStoreContractTests,
 } from '@flue/runtime/test-utils';
 import mysql2, { type Pool } from 'mysql2/promise';
@@ -92,20 +90,6 @@ function defineContracts(): void {
 	}
 	{
 		let adapter: ReturnType<typeof mysql> | undefined;
-		defineRunStoreContractTests('MySQL RunStore', {
-			async create() {
-				adapter = mysql((await createMysqlRunner()).runner);
-				await adapter.migrate?.();
-				return (await adapter.connect()).runStore;
-			},
-			async cleanup() {
-				await adapter?.close?.();
-				adapter = undefined;
-			},
-		});
-	}
-	{
-		let adapter: ReturnType<typeof mysql> | undefined;
 		defineConversationStreamStoreContractTests('MySQL ConversationStreamStore', {
 			async create() {
 				adapter = mysql((await createMysqlRunner()).runner);
@@ -125,20 +109,6 @@ function defineContracts(): void {
 			},
 		});
 	}
-	{
-		let adapter: ReturnType<typeof mysql> | undefined;
-		defineEventStreamStoreContractTests('MySQL EventStreamStore', {
-			async create() {
-				adapter = mysql((await createMysqlRunner()).runner);
-				await adapter.migrate?.();
-				return (await adapter.connect()).eventStreamStore;
-			},
-			async cleanup() {
-				await adapter?.close?.();
-				adapter = undefined;
-			},
-		});
-	}
 }
 
 describeMysql('MySQL contracts', defineContracts);
@@ -149,10 +119,10 @@ describeMysql('mysql()', () => {
 		const adapter = mysql(runner);
 		await adapter.migrate?.();
 		await runner.query(`UPDATE flue_meta SET value = '999' WHERE \`key\` = 'schema_version'`);
-		await runner.query('DROP TABLE flue_event_stream_entries');
+		await runner.query('DROP TABLE flue_conversation_stream_batches');
 		await expect(adapter.migrate?.()).rejects.toThrowError(PersistedSchemaVersionError);
 		const rows = await runner.query(
-			`SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'flue_event_stream_entries'`,
+			`SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'flue_conversation_stream_batches'`,
 		);
 		expect(rows).toEqual([]);
 		await adapter.close?.();
@@ -174,7 +144,8 @@ describeMysql('mysql()', () => {
 		const { runner } = await createMysqlRunner();
 		const adapter = mysql(runner);
 		await adapter.migrate?.();
-		await runner.query('ALTER TABLE flue_runs DROP COLUMN traceparent, DROP COLUMN tracestate');
+		// Simulate a legacy v2 database, which still carried the workflow run table.
+		await runner.query(`CREATE TABLE flue_runs (run_id VARCHAR(255) PRIMARY KEY) ENGINE=InnoDB`);
 		await runner.query(`UPDATE flue_meta SET value = '2' WHERE \`key\` = 'schema_version'`);
 		await expect(adapter.migrate?.()).rejects.toThrowError(PersistedSchemaVersionError);
 		const columns = await runner.query(
@@ -190,7 +161,8 @@ describeMysql('mysql()', () => {
 		const { runner } = await createMysqlRunner();
 		const adapter = mysql(runner);
 		await adapter.migrate?.();
-		await runner.query('ALTER TABLE flue_runs DROP COLUMN traceparent, DROP COLUMN tracestate');
+		// Simulate a legacy v3 database, which still carried the workflow run table.
+		await runner.query(`CREATE TABLE flue_runs (run_id VARCHAR(255) PRIMARY KEY) ENGINE=InnoDB`);
 		await runner.query(`UPDATE flue_meta SET value = '3' WHERE \`key\` = 'schema_version'`);
 		await expect(adapter.migrate?.()).rejects.toThrowError(PersistedSchemaVersionError);
 		const columns = await runner.query(

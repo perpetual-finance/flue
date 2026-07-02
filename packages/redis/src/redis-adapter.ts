@@ -1,48 +1,28 @@
 import { randomUUID } from 'node:crypto';
-import type { WorkflowRunPointer } from '@flue/runtime';
 import type {
 	AgentAttemptMarker,
 	AgentDispatchAdmission,
 	AgentSubmission,
-	AgentSubmissionStore,
-	CreateRunInput,
 	AgentSubmissionInput,
+	AgentSubmissionStore,
 	DispatchInput,
-	EndRunInput,
-	EventStreamMeta,
-	EventStreamReadResult,
-	EventStreamStore,
-	ListRunsOpts,
-	ListRunsResponse,
 	PersistedChunkRow,
 	PersistenceAdapter,
-	RunPointer,
-	RunRecord,
-	RunStatus,
 	SubmissionAttemptRef,
 	SubmissionClaimRef,
 } from '@flue/runtime/adapter';
 import {
 	assertSupportedFlueSchemaVersion,
-	clampLimit,
 	createDispatchAgentSubmissionInput,
 	createSessionStorageKey,
-	DEFAULT_LIST_LIMIT,
-	DEFAULT_READ_LIMIT,
 	DURABILITY_DEFAULT_MAX_ATTEMPTS,
 	DURABILITY_DEFAULT_TIMEOUT_MS,
-	decodeRunCursor,
-	encodeRunCursor,
 	FLUE_SCHEMA_VERSION,
-	formatOffset,
 	hydratePersistedSubmissionAttachments,
 	isSubmissionPayload,
 	LEASE_DURATION_MS,
-	MAX_LIST_LIMIT,
-	MAX_READ_LIMIT,
 	matchesPersistedSubmissionAttachments,
 	parseAcceptedAt,
-	parseOffset,
 	prepareSubmissionAttachments,
 	SUBMISSION_HARNESS_NAME,
 	SUBMISSION_SESSION_NAME,
@@ -54,12 +34,7 @@ import type { RedisArgument, RedisOptions, RedisRunner } from './redis-runner.ts
 import {
 	acquireGenerationScript,
 	admitSubmissionScript,
-	appendEventOnceScript,
-	appendEventScript,
 	claimSubmissionScript,
-	closeEventScript,
-	createRunScript,
-	endRunScript,
 	finalizeSettlementScript,
 	lifecycleScript,
 	markSubmissionCanonicalReadyScript,
@@ -111,20 +86,6 @@ function integer(value: unknown): number {
 
 function json(value: unknown): string {
 	return JSON.stringify(value);
-}
-
-function optionalJson(value: unknown): string {
-	return value === undefined ? empty : json(value);
-}
-
-function score(startedAt: string): number {
-	const value = Date.parse(startedAt);
-	if (!Number.isFinite(value)) throw new TypeError('Run startedAt must be a valid timestamp.');
-	return value;
-}
-
-function canonicalStartedAt(startedAt: string): string {
-	return new Date(score(startedAt)).toISOString();
 }
 
 class Backend {
@@ -198,8 +159,6 @@ export function redis(runner: RedisRunner, options: RedisOptions = {}): Persiste
 				executionStore: {
 					submissions: new RedisSubmissionStore(backend),
 				},
-				runStore: new RedisRunStore(backend),
-				eventStreamStore: new RedisEventStreamStore(backend),
 				conversationStreamStore: new RedisConversationStreamStore(runner, backend.keys),
 				attachmentStore: new RedisAttachmentStore(runner, backend.keys),
 			};
@@ -831,245 +790,5 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 			...(row.ownerId ? { ownerId: row.ownerId } : {}),
 			leaseExpiresAt: integer(row.leaseExpiresAt),
 		};
-	}
-}
-
-class RedisRunStore {
-	constructor(private backend: Backend) {}
-
-	async createRun(input: CreateRunInput): Promise<void> {
-		const orderKey = canonicalStartedAt(input.startedAt);
-		await this.backend.eval(
-			createRunScript,
-			[
-				this.backend.keys.run(input.runId),
-				this.backend.keys.runs(),
-				this.backend.keys.runsStatus('active'),
-				this.backend.keys.runsWorkflow(input.workflowName),
-				this.backend.keys.runStatuses(),
-			],
-			[
-				input.runId,
-				input.workflowName,
-				input.startedAt,
-				optionalJson(input.input),
-				score(input.startedAt),
-				orderKey,
-				optionalJson(input.traceCarrier),
-			],
-		);
-	}
-
-	async endRun(input: EndRunInput): Promise<void> {
-		const status = input.isError ? 'errored' : 'completed';
-		await this.backend.eval(
-			endRunScript,
-			[
-				this.backend.keys.run(input.runId),
-				this.backend.keys.runs(),
-				this.backend.keys.runsStatus(status),
-				this.backend.keys.runStatuses(),
-			],
-			[
-				input.runId,
-				status,
-				input.endedAt,
-				input.isError ? 1 : 0,
-				input.durationMs,
-				optionalJson(input.result),
-				optionalJson(input.error),
-				`${this.backend.keys.prefix}:runs:status:`,
-			],
-		);
-	}
-
-	async getRun(runId: string): Promise<RunRecord | null> {
-		const row = await this.backend.hgetall(this.backend.keys.run(runId));
-		return row.runId ? parseRun(row) : null;
-	}
-
-	async lookupRun(runId: string): Promise<WorkflowRunPointer | null> {
-		const values = await this.backend.command('HMGET', [
-			this.backend.keys.run(runId),
-			'runId',
-			'workflowName',
-		]);
-		if (!Array.isArray(values) || values[0] == null || values[1] == null) return null;
-		return { runId: String(values[0]), workflowName: String(values[1]) };
-	}
-
-	async listRuns(opts: ListRunsOpts = {}): Promise<ListRunsResponse> {
-		const limit = clampLimit(opts.limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
-		const cursor = decodeRunCursor(opts.cursor);
-		const cursorStartedAt = cursor ? canonicalStartedAt(cursor.startedAt) : undefined;
-		const index = opts.status
-			? this.backend.keys.runsStatus(opts.status)
-			: opts.workflowName
-				? this.backend.keys.runsWorkflow(opts.workflowName)
-				: this.backend.keys.runs();
-		const ids = await this.backend.zrange(index, 0, -1, true);
-		const records: RunPointer[] = [];
-		for (const id of ids) {
-			const run = await this.getRun(id);
-			if (
-				!run ||
-				(opts.status && run.status !== opts.status) ||
-				(opts.workflowName && run.workflowName !== opts.workflowName)
-			)
-				continue;
-			const startedAt = canonicalStartedAt(run.startedAt);
-			if (
-				cursor &&
-				cursorStartedAt &&
-				(startedAt > cursorStartedAt ||
-					(startedAt === cursorStartedAt && run.runId >= cursor.runId))
-			)
-				continue;
-			records.push(pointer(run));
-			if (records.length > limit) break;
-		}
-		const hasNext = records.length > limit;
-		const runs = records.slice(0, limit);
-		const lastRun = runs.at(-1);
-		return { runs, ...(hasNext && lastRun ? { nextCursor: encodeRunCursor(lastRun) } : {}) };
-	}
-}
-
-function parseRun(row: Hash): RunRecord {
-	const malformed = 'Persisted Redis run is malformed.';
-	return {
-		runId: required(row.runId, malformed),
-		workflowName: required(row.workflowName, malformed),
-		status: row.status as RunStatus,
-		startedAt: required(row.startedAt, malformed),
-		...(row.payload ? { input: JSON.parse(row.payload) } : {}),
-		...(row.endedAt ? { endedAt: row.endedAt } : {}),
-		...(row.isError ? { isError: row.isError === '1' } : {}),
-		...(row.durationMs ? { durationMs: integer(row.durationMs) } : {}),
-		...(row.result ? { result: JSON.parse(row.result) } : {}),
-		...(row.error ? { error: JSON.parse(row.error) } : {}),
-		...(row.traceCarrier ? { traceCarrier: JSON.parse(row.traceCarrier) } : {}),
-	};
-}
-
-function pointer(run: RunRecord): RunPointer {
-	return {
-		runId: run.runId,
-		workflowName: run.workflowName,
-		status: run.status,
-		startedAt: run.startedAt,
-		...(run.endedAt ? { endedAt: run.endedAt } : {}),
-		...(run.isError !== undefined ? { isError: run.isError } : {}),
-		...(run.durationMs !== undefined ? { durationMs: run.durationMs } : {}),
-	};
-}
-
-class RedisEventStreamStore implements EventStreamStore {
-	private listeners = new Map<string, Set<() => void>>();
-	constructor(private backend: Backend) {}
-
-	async createStream(path: string): Promise<void> {
-		await this.backend.command('HSETNX', [this.backend.keys.event(path), 'nextOffset', 0]);
-		await this.backend.command('HSETNX', [this.backend.keys.event(path), 'closed', 0]);
-		await this.backend.command('SADD', [this.backend.keys.events(), path]);
-	}
-
-	async appendEvent(path: string, event: unknown): Promise<string> {
-		const result = strings(
-			await this.backend.eval(
-				appendEventScript,
-				[
-					this.backend.keys.event(path),
-					this.backend.keys.eventEntries(path),
-					this.backend.keys.eventOrder(path),
-				],
-				[json(event)],
-			),
-		);
-		if (result[0] === 'missing') throw new TypeError(`Event stream "${path}" does not exist.`);
-		if (result[0] === 'closed') throw new TypeError(`Event stream "${path}" is closed.`);
-		this.notify(path);
-		return formatOffset(integer(result[1]));
-	}
-
-	async appendEventOnce(path: string, key: string, event: unknown): Promise<string> {
-		const result = strings(await this.backend.eval(appendEventOnceScript, [
-			this.backend.keys.event(path), this.backend.keys.eventEntries(path),
-			this.backend.keys.eventOrder(path), this.backend.keys.eventKeys(path),
-		], [key, json(event)]));
-		if (result[0] === 'missing') throw new TypeError(`Event stream "${path}" does not exist.`);
-		if (result[0] === 'closed') throw new TypeError(`Event stream "${path}" is closed.`);
-		if (result[0] === 'conflict') throw new TypeError(`Event key "${key}" has a conflicting payload.`);
-		this.notify(path);
-		return formatOffset(integer(result[1]));
-	}
-
-	async readEvents(
-		path: string,
-		opts?: { offset?: string; limit?: number },
-	): Promise<EventStreamReadResult> {
-		const meta = await this.getStreamMeta(path);
-		if (!meta) return { events: [], nextOffset: formatOffset(-1), upToDate: true, closed: false };
-		const raw = opts?.offset ?? '-1';
-		if (raw === 'now')
-			return { events: [], nextOffset: meta.nextOffset, upToDate: true, closed: meta.closed };
-		const start = raw === '-1' ? -1 : parseOffset(raw);
-		const limit = clampLimit(opts?.limit, DEFAULT_READ_LIMIT, MAX_READ_LIMIT);
-		const sequences = strings(
-			await this.backend.command('ZRANGEBYSCORE', [
-				this.backend.keys.eventOrder(path),
-				`(${start}`,
-				'+inf',
-				'LIMIT',
-				0,
-				limit + 1,
-			]),
-		);
-		const page = sequences.slice(0, limit);
-		const values =
-			page.length > 0
-				? strings(
-						await this.backend.command('HMGET', [this.backend.keys.eventEntries(path), ...page]),
-					)
-				: [];
-		const events = page.map((sequence, index) => ({
-			data: JSON.parse(required(values[index], 'Persisted Redis event stream entry is malformed.')),
-			offset: formatOffset(integer(sequence)),
-		}));
-		return {
-			events,
-			nextOffset: events.at(-1)?.offset ?? formatOffset(start),
-			upToDate: sequences.length <= limit,
-			closed: meta.closed,
-		};
-	}
-
-	async closeStream(path: string): Promise<void> {
-		await this.backend.eval(closeEventScript, [this.backend.keys.event(path)]);
-		this.notify(path);
-	}
-
-	async getStreamMeta(path: string): Promise<EventStreamMeta | null> {
-		const row = await this.backend.hgetall(this.backend.keys.event(path));
-		if (!row.nextOffset) return null;
-		return { nextOffset: formatOffset(integer(row.nextOffset) - 1), closed: row.closed === '1' };
-	}
-
-	subscribe(path: string, listener: () => void): () => void {
-		const set = this.listeners.get(path) ?? new Set();
-		set.add(listener);
-		this.listeners.set(path, set);
-		return () => {
-			set.delete(listener);
-			if (set.size === 0) this.listeners.delete(path);
-		};
-	}
-
-	private notify(path: string): void {
-		for (const listener of this.listeners.get(path) ?? []) {
-			try {
-				listener();
-			} catch {}
-		}
 	}
 }

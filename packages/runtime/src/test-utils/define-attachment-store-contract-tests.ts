@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { AttachmentConflictError, AttachmentIntegrityError } from '../errors.ts';
 import type { AttachmentStore } from '../runtime/attachment-store.ts';
 import { createAttachmentRef } from '../runtime/attachment-store.ts';
-import { AttachmentConflictError, AttachmentIntegrityError } from '../errors.ts';
 
 export interface AttachmentStoreContractBackend {
 	create(): AttachmentStore | Promise<AttachmentStore>;

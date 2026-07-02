@@ -4,7 +4,7 @@ import { ConversationStreamStoreError } from '../errors.ts';
 import { migrateFlueSqlSchema } from '../schema-version.ts';
 import { parseSessionStorageKey } from '../session-identity.ts';
 import type { SqlStorage } from '../sql-storage.ts';
-import { formatOffset, parseOffset } from './event-stream-store.ts';
+import { formatOffset, parseOffset } from './stream-offsets.ts';
 
 export interface ConversationStreamIdentity {
 	agentName: string;

@@ -9,13 +9,13 @@ import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
 	defineAgent,
 	defineTool,
-	instrument,
-	observe,
-	ToolLegacyDefinitionError,
-	ToolNameConflictError,
 	type FlueExecutionContext,
 	type FlueExecutionOperation,
+	instrument,
+	observe,
 	type ToolInput,
+	ToolLegacyDefinitionError,
+	ToolNameConflictError,
 	type ToolOutput,
 } from '../src/index.ts';
 import { createFlueContext } from '../src/internal.ts';

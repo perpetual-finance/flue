@@ -10,6 +10,8 @@
  * Gateway models use Anthropic Messages.
  */
 import type { Ai } from '@cloudflare/workers-types';
+import { stream as streamAnthropic } from '@earendil-works/pi-ai/api/anthropic-messages';
+import { convertMessages } from '@earendil-works/pi-ai/api/openai-completions';
 import type {
 	AnthropicOptions,
 	ApiProvider,
@@ -25,8 +27,6 @@ import type {
 	Usage,
 } from '@earendil-works/pi-ai/compat';
 import { createAssistantMessageEventStream, parseStreamingJson } from '@earendil-works/pi-ai/compat';
-import { stream as streamAnthropic } from '@earendil-works/pi-ai/api/anthropic-messages';
-import { convertMessages } from '@earendil-works/pi-ai/api/openai-completions';
 import { CLOUDFLARE_AI_BINDING_API, type CloudflareAIBindingApi } from '../cloudflare-model.ts';
 import { CloudflareAIBindingError } from '../errors.ts';
 import { getModelBinding, getModelGateway } from '../runtime/providers.ts';

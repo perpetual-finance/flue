@@ -3,9 +3,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 // Node-based export-map smoke tests cannot load the Cloudflare virtual module
-// pulled in by @flue/runtime/cloudflare/internal (the FlueRegistry Durable
-// Object); real Cloudflare runtime behavior is covered by explicit boundary
-// and integration suites.
+// referenced from @flue/runtime/cloudflare/internal's graph; real Cloudflare
+// runtime behavior is covered by explicit boundary and integration suites.
 vi.mock('cloudflare:workers', () => ({
 	DurableObject: class {},
 }));
@@ -26,16 +25,12 @@ describe('package entrypoints', () => {
 			DelegationDepthExceededError: expect.any(Function),
 			connectMcpServer: expect.any(Function),
 			defineAgent: expect.any(Function),
-			defineWorkflow: expect.any(Function),
 			createSandboxSessionEnv: expect.any(Function),
 			defineAction: expect.any(Function),
 			defineAgentProfile: expect.any(Function),
 			defineSkill: expect.any(Function),
 			defineTool: expect.any(Function),
 			dispatch: expect.any(Function),
-			getRun: expect.any(Function),
-			listAgents: expect.any(Function),
-			listRuns: expect.any(Function),
 			observe: expect.any(Function),
 			registerApiProvider: expect.any(Function),
 			registerProvider: expect.any(Function),
@@ -49,12 +44,11 @@ describe('package entrypoints', () => {
 		expect(runtime).not.toHaveProperty('resetProviderRuntime');
 	});
 
-	it('exposes only WorkflowDefinition from the public workflow type surface', () => {
+	it('exposes no workflow surface from the public type declarations', () => {
 		const declarations = readFileSync('dist/index.d.mts', 'utf8');
 
-		expect(declarations).toContain('WorkflowDefinition');
-		expect(declarations).not.toContain('ExtractedWorkflow');
-		expect(declarations).not.toContain('InlineWorkflow');
+		expect(declarations).not.toContain('WorkflowDefinition');
+		expect(declarations).not.toContain('defineWorkflow');
 	});
 
 	it('exposes current context names without unreleased legacy names', () => {
@@ -67,10 +61,10 @@ describe('package entrypoints', () => {
 		expect(declarations).not.toContain('inputJsonSchema');
 	});
 
-	it('exposes flue() when a consumer imports @flue/runtime/routing', async () => {
+	it('exposes no runtime values from @flue/runtime/routing (types only)', async () => {
 		const routing = await import('@flue/runtime/routing');
 
-		expect(routing.flue).toEqual(expect.any(Function));
+		expect(routing).not.toHaveProperty('flue');
 		expect(routing).not.toHaveProperty('admin');
 	});
 
@@ -110,9 +104,9 @@ describe('package entrypoints', () => {
 
 		expect(internal).toMatchObject({
 			configureFlueRuntime: expect.any(Function),
-			createDefaultFlueApp: expect.any(Function),
 			resolveModel: expect.any(Function),
 		});
+		expect(internal).not.toHaveProperty('createDefaultFlueApp');
 	});
 
 	it('exposes local() when a consumer imports @flue/runtime/node', async () => {
@@ -140,13 +134,12 @@ describe('package entrypoints', () => {
 
 		expect(internal).toMatchObject({
 			cfSandboxToSessionEnv: expect.any(Function),
-			createCloudflareRunIndex: expect.any(Function),
-			createCloudflareRunStore: expect.any(Function),
-			FlueRegistry: expect.any(Function),
 			getCloudflareAIBindingApiProvider: expect.any(Function),
 			resolveCloudflareExtension: expect.any(Function),
 			runWithCloudflareContext: expect.any(Function),
 		});
+		expect(internal).not.toHaveProperty('FlueRegistry');
+		expect(internal).not.toHaveProperty('createCloudflareRunStore');
 	});
 
 	it('exposes the adapter contract suites when an adapter author imports @flue/runtime/test-utils', async () => {
@@ -154,9 +147,10 @@ describe('package entrypoints', () => {
 
 		expect(testUtils).toMatchObject({
 			defineAttachmentStoreContractTests: expect.any(Function),
-			defineEventStreamStoreContractTests: expect.any(Function),
-			defineRunStoreContractTests: expect.any(Function),
+			defineConversationStreamStoreContractTests: expect.any(Function),
 			defineStoreContractTests: expect.any(Function),
 		});
+		expect(testUtils).not.toHaveProperty('defineRunStoreContractTests');
+		expect(testUtils).not.toHaveProperty('defineEventStreamStoreContractTests');
 	});
 });

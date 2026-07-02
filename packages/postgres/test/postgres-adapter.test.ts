@@ -11,8 +11,6 @@ import { PersistedSchemaVersionError } from '@flue/runtime/adapter';
 import {
 	defineAttachmentStoreContractTests,
 	defineConversationStreamStoreContractTests,
-	defineEventStreamStoreContractTests,
-	defineRunStoreContractTests,
 	defineStoreContractTests,
 } from '@flue/runtime/test-utils';
 import { describe, expect, it } from 'vitest';
@@ -67,22 +65,6 @@ function createPgliteRunner(): PostgresRunner {
 
 {
 	let adapter: ReturnType<typeof postgres> | undefined;
-	defineEventStreamStoreContractTests('Postgres EventStreamStore', {
-		async create() {
-			adapter = postgres(createPgliteRunner());
-			await adapter.migrate?.();
-			const { eventStreamStore } = await adapter.connect();
-			return eventStreamStore;
-		},
-		async cleanup() {
-			await adapter?.close?.();
-			adapter = undefined;
-		},
-	});
-}
-
-{
-	let adapter: ReturnType<typeof postgres> | undefined;
 	defineAttachmentStoreContractTests('Postgres AttachmentStore', {
 		async create() {
 			adapter = postgres(createPgliteRunner());
@@ -110,22 +92,6 @@ function createPgliteRunner(): PostgresRunner {
 				stream: stores.conversationStreamStore,
 				executionStore: stores.executionStore,
 			};
-		},
-		async cleanup() {
-			await adapter?.close?.();
-			adapter = undefined;
-		},
-	});
-}
-
-{
-	let adapter: ReturnType<typeof postgres> | undefined;
-	defineRunStoreContractTests('Postgres RunStore', {
-		async create() {
-			adapter = postgres(createPgliteRunner());
-			await adapter.migrate?.();
-			const { runStore } = await adapter.connect();
-			return runStore;
 		},
 		async cleanup() {
 			await adapter?.close?.();

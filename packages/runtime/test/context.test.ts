@@ -104,27 +104,7 @@ describe('FlueContext', () => {
 		expect(ctx.req).toBe(req);
 	});
 
-	it('decorates workflow events with run identity when a context has a run id', () => {
-		const events: FlueEvent[] = [];
-		const ctx = createContext({ id: 'workflow-instance', runId: 'run-123' });
-		ctx.setEventCallback((event) => {
-			events.push(event);
-		});
-
-		ctx.emitEvent({ type: 'idle' });
-
-		expect(events).toEqual([
-			{
-				type: 'idle',
-				runId: 'run-123',
-				v: 3,
-				eventIndex: 0,
-				timestamp: expect.any(String),
-			},
-		]);
-	});
-
-	it('decorates agent events with instance identity when a context has no run id', () => {
+	it('decorates agent events with instance identity', () => {
 		const events: FlueEvent[] = [];
 		const ctx = createContext({ id: 'agent-instance' });
 		ctx.setEventCallback((event) => {

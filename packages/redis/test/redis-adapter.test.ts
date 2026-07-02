@@ -3,8 +3,6 @@ import { PersistedSchemaVersionError } from '@flue/runtime/adapter';
 import {
 	defineAttachmentStoreContractTests,
 	defineConversationStreamStoreContractTests,
-	defineEventStreamStoreContractTests,
-	defineRunStoreContractTests,
 	defineStoreContractTests,
 } from '@flue/runtime/test-utils';
 import { createClient, RESP_TYPES } from 'redis';
@@ -79,18 +77,6 @@ describeRedis('Redis shared contracts', () => {
 		},
 		cleanup: cleanupHarness,
 	});
-	defineRunStoreContractTests('Redis RunStore', {
-		async create() {
-			return (await createHarness()).runStore;
-		},
-		cleanup: cleanupHarness,
-	});
-	defineEventStreamStoreContractTests('Redis EventStreamStore', {
-		async create() {
-			return (await createHarness()).eventStreamStore;
-		},
-		cleanup: cleanupHarness,
-	});
 	defineAttachmentStoreContractTests('Redis AttachmentStore', {
 		async create() {
 			return (await createHarness()).attachmentStore;
@@ -145,69 +131,6 @@ describeRedis('redis() concurrency', () => {
 			}),
 		]);
 		expect(results.filter(Boolean)).toHaveLength(1);
-		await cleanupPrefix(first, [second]);
-	});
-
-	it('orders concurrent event appends from independent adapters and rejects appends after close', async () => {
-		const first = await createSharedHarness();
-		const second = await createSharedHarness(first.prefix);
-		const firstStore = (await first.adapter.connect()).eventStreamStore;
-		const secondStore = (await second.adapter.connect()).eventStreamStore;
-		await firstStore.createStream('events');
-		const offsets = await Promise.all(
-			Array.from({ length: 20 }, (_, index) =>
-				(index % 2 ? firstStore : secondStore).appendEvent('events', { index }),
-			),
-		);
-		expect(new Set(offsets)).toHaveLength(20);
-		await secondStore.closeStream('events');
-		await expect(firstStore.appendEvent('events', { index: 21 })).rejects.toThrow();
-		await cleanupPrefix(first, [second]);
-	});
-
-	it('appends identical event payloads at distinct offsets', async () => {
-		const stores = await createHarness();
-		await stores.eventStreamStore.createStream('events');
-		const first = await stores.eventStreamStore.appendEvent('events', { value: 'same' });
-		const second = await stores.eventStreamStore.appendEvent('events', { value: 'same' });
-		expect(second).not.toBe(first);
-		expect((await stores.eventStreamStore.readEvents('events')).events).toEqual([
-			{ data: { value: 'same' }, offset: first },
-			{ data: { value: 'same' }, offset: second },
-		]);
-		await cleanupHarness();
-	});
-
-	it('converges concurrent endRun indexes from independent adapters', async () => {
-		const first = await createSharedHarness();
-		const second = await createSharedHarness(first.prefix);
-		const firstRuns = (await first.adapter.connect()).runStore;
-		const secondRuns = (await second.adapter.connect()).runStore;
-		await firstRuns.createRun({
-			runId: 'run',
-			workflowName: 'workflow',
-			startedAt: '2026-01-01T00:00:00+05:00',
-			input: null,
-		});
-		await Promise.all([
-			firstRuns.endRun({
-				runId: 'run',
-				endedAt: '2026-01-01T00:00:01Z',
-				durationMs: 1,
-				isError: false,
-			}),
-			secondRuns.endRun({
-				runId: 'run',
-				endedAt: '2026-01-01T00:00:02Z',
-				durationMs: 2,
-				isError: true,
-				error: 'failed',
-			}),
-		]);
-		const run = await firstRuns.getRun('run');
-		expect(run?.status === 'completed' || run?.status === 'errored').toBe(true);
-		expect((await firstRuns.listRuns({ status: 'active' })).runs).toEqual([]);
-		expect((await firstRuns.listRuns({ status: run?.status })).runs).toHaveLength(1);
 		await cleanupPrefix(first, [second]);
 	});
 });

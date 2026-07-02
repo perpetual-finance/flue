@@ -33,8 +33,6 @@ export type {
 export type { ThinkingLevel };
 
 export type AgentRouteHandler = MiddlewareHandler;
-export type WorkflowRouteHandler = MiddlewareHandler;
-export type WorkflowRunsHandler = MiddlewareHandler;
 
 /**
  * One attachment on a `kind: 'user'` {@link DeliveredMessage}. Mirrors pi-ai's

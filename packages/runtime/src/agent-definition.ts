@@ -64,9 +64,8 @@ export function defineAgentProfile(profile: AgentProfile): AgentProfile {
 }
 
 /**
- * Defines an agent initializer. Default-export the returned value from an
- * `agents/<name>.ts` module to define an addressable agent, or bind it to a
- * workflow definition.
+ * Defines an agent initializer. Default-export the returned value from a
+ * `'use agent'` module to define an addressable agent.
  *
  * The initializer runs whenever a runner initializes a root harness from the
  * agent definition. Do not treat it as a one-time

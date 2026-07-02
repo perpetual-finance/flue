@@ -27,11 +27,6 @@ export type {
 } from './agent-execution-store.ts';
 export type { FlueContextConfig, FlueContextInternal } from './client.ts';
 export { createFlueContext, initializeRootHarness } from './client.ts';
-// `FlueRegistry` (Durable Object class) and the composite Cloudflare run
-// store/index factories live in the `@flue/runtime/cloudflare/internal`
-// subpath because that entry pulls in `cloudflare:workers`, a virtual module
-// Node can't resolve. The generated CF entry imports them from there
-// directly; nothing here may import `cloudflare:workers`.
 export {
 	CLOUDFLARE_AGENT_INTERNAL_DISPATCH_PATH,
 	createCloudflareAgentRuntime,
@@ -51,7 +46,6 @@ export {
 	runWithInstrumentationOwner,
 } from './instrumentation.ts';
 export { createNodeAgentCoordinator, createNodeDispatchQueue } from './node/agent-coordinator.ts';
-export { InMemoryRunStore } from './node/run-store.ts';
 export type { AgentSubmissionInput } from './runtime/agent-submissions.ts';
 export type { AttachmentStore } from './runtime/attachment-store.ts';
 export { InMemoryAttachmentStore } from './runtime/attachment-store.ts';
@@ -63,61 +57,25 @@ export {
 export type { AgentInteractionStart } from './runtime/dev-lifecycle-logger.ts';
 export { installDevLifecycleLogger } from './runtime/dev-lifecycle-logger.ts';
 export type { DispatchInput, DispatchQueue } from './runtime/dispatch-queue.ts';
-export type { EventStreamStore } from './runtime/event-stream-store.ts';
-export { SqliteEventStreamStore } from './runtime/event-stream-store.ts';
 export type {
 	AgentRecord,
 	CloudflareRuntime,
 	FlueRuntime,
-	HandleRunRouteOptions,
 	NodeRuntime,
-	WorkflowRecord,
 } from './runtime/flue-app.ts';
-export {
-	configureFlueRuntime,
-	createDefaultFlueApp,
-	handleRunRouteRequest,
-} from './runtime/flue-app.ts';
+// `configureFlueRuntime` seeds the module-scoped config that mounted
+// `.route()` handlers read at request time. Called once per generated entry,
+// before the listener (Node) or `default.fetch` (Cloudflare) takes traffic.
+export { configureFlueRuntime } from './runtime/flue-app.ts';
 export type {
-	AdmitDetachedWorkflowOptions,
 	CreateAgentContextFn,
 	CreateAgentContextOptions,
-	CreateWorkflowContextFn,
-	CreateWorkflowContextOptions,
-	FailRecoveredRunOptions,
 	HandleAgentOptions,
-	HandleWorkflowOptions,
-	InvokeWorkflowAttachedOptions,
-	StartWorkflowAdmissionFn,
-	WorkflowAttachedInvocationResult,
-	WorkflowSchedulingPhases,
-} from './runtime/handle-agent.ts';
-// Runtime modules consumed by the generated server entries.
-//
-//   - `configureFlueRuntime` seeds the module-scoped config that
-//     `flue()` reads at request time. Called once per generated entry,
-//     before the listener (Node) or `default.fetch` (Cloudflare) takes
-//     traffic.
-//
-//   - `createDefaultFlueApp` is the no-`app.ts` fallback. Lives in
-//     @flue/runtime so the generated entry doesn't have to import `hono` (which
-//     keeps user projects from needing it as a direct dep when they
-//     don't author their own `app.ts`).
-//
-// The user-facing `flue()` itself is re-exported from `@flue/runtime/routing`, not here.
-export {
-	admitDetachedWorkflow,
-	assertWorkflowDefinition,
-	failRecoveredRun,
-	handleWorkflowRequest,
-	invokeWorkflowAttached,
 } from './runtime/handle-agent.ts';
 export {
 	handleAgentConversationHead,
 	handleAgentConversationRead,
 } from './runtime/handle-conversation-routes.ts';
-export { handleStreamHead, handleStreamRead } from './runtime/handle-stream-routes.ts';
-export { generateWorkflowRunId } from './runtime/ids.ts';
 export { hasRegisteredProvider, resetProviderRuntime } from './runtime/providers.ts';
 // Identity registry consumed by the new generated bootstraps (the scanned
 // `'use agent'` set) and by unit tests mounting `AgentDefinition.route()`.
@@ -129,15 +87,6 @@ export {
 	resolveAgentModuleBinding,
 } from './runtime/registration.ts';
 export type {
-	ListRunsOpts,
-	ListRunsResponse,
-	RunPointer,
-	RunRecord,
-	RunStatus,
-	RunStore,
-	WorkflowRunPointer,
-} from './runtime/run-store.ts';
-export type {
 	RuntimeActivityGate,
 	RuntimeActivityLease,
 } from './runtime/runtime-activity-gate.ts';
@@ -146,7 +95,6 @@ export { createRuntimeActivityGate } from './runtime/runtime-activity-gate.ts';
 export { bashFactoryToSessionEnv } from './sandbox.ts';
 export { parseSkillMarkdown } from './skill-frontmatter.ts';
 export { buildPackagedSkill, createSkillReference } from './skill-package.ts';
-export { createSqlRunStore } from './sql-run-store.ts';
 
 /**
  * Resolve a `provider-id/model-id` model specifier to a pi-ai Model.

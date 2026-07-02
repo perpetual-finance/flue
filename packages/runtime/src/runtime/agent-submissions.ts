@@ -19,7 +19,7 @@ import { getInternalSession } from '../session.ts';
 import type { AgentDefinition, CallHandle, DeliveredMessage } from '../types.ts';
 import { type AttachmentStore, createAttachmentRef } from './attachment-store.ts';
 import type { DispatchInput } from './dispatch-queue.ts';
-import { agentStreamPath } from './event-stream-store.ts';
+import { agentStreamPath } from './stream-offsets.ts';
 
 /**
  * One admitted agent submission — the persisted operational payload for both

@@ -1,15 +1,11 @@
 import { defineAgent } from '../../src/agent-definition.ts';
 import { sqlite } from '../../src/node/agent-execution-store.ts';
-import { InMemoryRunStore } from '../../src/node/run-store.ts';
 import type {
 	AgentRecord,
 	CloudflareRuntime,
 	NodeRuntime,
-	WorkflowRecord,
 } from '../../src/runtime/flue-app.ts';
 import type { AgentDefinition } from '../../src/types.ts';
-import type { WorkflowDefinition } from '../../src/workflow-definition.ts';
-import { createTestEventStreamStore } from './test-event-stream-store.ts';
 
 export function agentRecord(
 	name: string,
@@ -27,19 +23,6 @@ export function agentRecord(
 	};
 }
 
-export function workflowRecord(
-	name: string,
-	definition: WorkflowDefinition,
-	options: { route?: WorkflowRecord['route']; runs?: WorkflowRecord['runs'] } = {},
-): WorkflowRecord {
-	return {
-		name,
-		definition,
-		...(options.route === undefined ? {} : { route: options.route }),
-		...(options.runs === undefined ? {} : { runs: options.runs }),
-	};
-}
-
 export function nodeRuntime(overrides: Partial<NodeRuntime> = {}): NodeRuntime {
 	const adapter = sqlite();
 	void adapter.migrate?.();
@@ -48,20 +31,13 @@ export function nodeRuntime(overrides: Partial<NodeRuntime> = {}): NodeRuntime {
 	return {
 		target: 'node',
 		agents: [],
-		workflows: [],
 		dispatchQueue: {
 			enqueue: async (input) => ({ dispatchId: input.dispatchId, acceptedAt: input.acceptedAt }),
 		},
-		admitWorkflow: async () => ({ runId: 'run_test' }),
 		createAgentAdmission: () => {
 			throw new Error('Unexpected agent admission.');
 		},
 		abortAgentInstance: async () => false,
-		createWorkflowContext: () => {
-			throw new Error('Unexpected workflow context creation.');
-		},
-		runStore: new InMemoryRunStore(),
-		eventStreamStore: createTestEventStreamStore(),
 		conversationStreamStore: stores.conversationStreamStore,
 		attachmentStore: stores.attachmentStore,
 		...overrides,
@@ -72,15 +48,10 @@ export function cloudflareRuntime(overrides: Partial<CloudflareRuntime> = {}): C
 	return {
 		target: 'cloudflare',
 		agents: [],
-		workflows: [],
 		dispatchQueue: {
 			enqueue: async (input) => ({ dispatchId: input.dispatchId, acceptedAt: input.acceptedAt }),
 		},
-		admitWorkflow: async () => ({ runId: 'run_test' }),
 		routeAgentRequest: async () => null,
-		routeWorkflowRequest: async () => null,
-		routeRunRequest: async () => null,
-		createRunIndexForRequest: () => undefined,
 		...overrides,
 	};
 }

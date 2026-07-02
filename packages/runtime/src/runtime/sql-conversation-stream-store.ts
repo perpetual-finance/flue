@@ -9,7 +9,7 @@ import {
 	type ConversationStreamStore,
 	StreamListenerRegistry,
 } from './conversation-stream-store.ts';
-import { formatOffset, parseOffset } from './event-stream-store.ts';
+import { formatOffset, parseOffset } from './stream-offsets.ts';
 
 const DEFAULT_READ_LIMIT = 100;
 const MAX_READ_LIMIT = 1000;

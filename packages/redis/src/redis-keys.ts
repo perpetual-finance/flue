@@ -35,16 +35,6 @@ export class RedisKeys {
 	marker = (submissionId: string, attemptId: string) =>
 		this.encoded('marker', submissionId, attemptId);
 	markers = () => this.key('markers');
-	run = (id: string) => this.encoded('run', id);
-	runs = () => this.key('runs');
-	runsStatus = (status: string) => this.key('runs', 'status', status);
-	runStatuses = () => this.key('runs', 'statuses');
-	runsWorkflow = (workflow: string) => this.encoded('runs-workflow', workflow);
-	event = (path: string) => this.encoded('event', path);
-	eventEntries = (path: string) => this.encoded('event-entries', path);
-	eventOrder = (path: string) => this.encoded('event-order', path);
-	eventKeys = (path: string) => this.encoded('event-keys', path);
-	events = () => this.key('events');
 	conversation = (path: string) => this.encoded('conversation', path);
 	conversationBatches = (path: string) => this.encoded('conversation-batches', path);
 	conversationOrder = (path: string) => this.encoded('conversation-order', path);

@@ -8,8 +8,8 @@ import { ConversationRecordWriter } from './conversation-writer.ts';
 import { Harness } from './harness.ts';
 import { type AttachmentStore, InMemoryAttachmentStore } from './runtime/attachment-store.ts';
 import { InMemoryConversationStreamStore } from './runtime/conversation-stream-store.ts';
-import { agentStreamPath } from './runtime/event-stream-store.ts';
 import { dispatchGlobalEvent } from './runtime/events.ts';
+import { agentStreamPath } from './runtime/stream-offsets.ts';
 import { createCwdSessionEnv } from './sandbox.ts';
 import type {
 	AgentConfig,
@@ -29,7 +29,6 @@ import type {
 export interface FlueContextConfig {
 	id: string;
 	agentName?: string;
-	runId?: string;
 	dispatchId?: string;
 	env: Record<string, any>;
 	/**
@@ -53,7 +52,6 @@ export interface FlueContextConfig {
 
 /** Extends FlueEventContext with server-only methods. */
 export interface FlueContextInternal extends FlueEventContext {
-	readonly runId: string | undefined;
 	initializeRootHarness(agent: AgentDefinition): Promise<Harness>;
 	createEvent(event: FlueEventInput): FlueEvent;
 	publishEvent(event: FlueEvent): void;
@@ -82,7 +80,7 @@ export function createFlueContext(config: FlueContextConfig): FlueContextInterna
 
 	const createEvent = (event: FlueEventInput): FlueEvent => ({
 		...event,
-		...(config.runId === undefined ? { instanceId: config.id } : { runId: config.runId }),
+		instanceId: config.id,
 		...(config.dispatchId === undefined ? {} : { dispatchId: config.dispatchId }),
 		...(submissionId === undefined ? {} : { submissionId }),
 		...(config.agentName === undefined ? {} : { agentName: config.agentName }),
@@ -124,10 +122,6 @@ export function createFlueContext(config: FlueContextConfig): FlueContextInterna
 	const ctx: FlueContextInternal = {
 		get id() {
 			return config.id;
-		},
-
-		get runId() {
-			return config.runId;
 		},
 
 		get agentName() {
@@ -225,15 +219,13 @@ async function createLocalConversationRuntime(config: FlueContextConfig): Promis
 	attachments: AttachmentStore;
 }> {
 	const store = new InMemoryConversationStreamStore();
-	const path = config.runId === undefined
-		? agentStreamPath(config.agentName ?? 'agent', config.id)
-		: `workflow-executions/${config.runId}`;
+	const path = agentStreamPath(config.agentName ?? 'agent', config.id);
 	return {
 		writer: await ConversationRecordWriter.create({
 			store,
 			path,
-			identity: { agentName: config.agentName ?? 'workflow', instanceId: config.id },
-			producerId: `execution:${config.runId ?? config.id}`,
+			identity: { agentName: config.agentName ?? 'agent', instanceId: config.id },
+			producerId: `execution:${config.id}`,
 		}),
 		attachments: new InMemoryAttachmentStore(),
 	};
@@ -302,7 +294,7 @@ export async function initializeRootHarness(
 		config.conversationWriter,
 		config.attachmentStore,
 		definition.actions,
-		config.runId === undefined ? { instanceId: config.id } : { runId: config.runId },
+		{ instanceId: config.id },
 	);
 }
 

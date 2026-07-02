@@ -13,17 +13,15 @@ export default defineConfig({
 		'src/node/index.ts',
 		'src/test-utils/define-store-contract-tests.ts',
 		'src/test-utils/define-attachment-store-contract-tests.ts',
-		'src/test-utils/define-event-stream-store-contract-tests.ts',
 		'src/test-utils/define-conversation-stream-store-contract-tests.ts',
 	],
 	format: ['esm'],
 	dts: true,
 	clean: true,
 	// `cloudflare:workers` is a virtual module that only resolves
-	// inside workerd. We import `DurableObject` from it in
-	// `src/cloudflare/registry-do.ts`; marking the specifier external
-	// keeps the import in the emitted bundle so workerd can resolve it
-	// at runtime (rather than having rolldown fail to find a package
-	// on disk at build time).
+	// inside workerd. `src/cloudflare/extension.ts` type-imports it;
+	// marking the specifier external keeps any import in the emitted
+	// bundle so workerd can resolve it at runtime (rather than having
+	// rolldown fail to find a package on disk at build time).
 	deps: { neverBundle: ['cloudflare:workers', 'vitest'] },
 });

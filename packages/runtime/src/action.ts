@@ -1,12 +1,12 @@
 import type * as v from 'valibot';
 import {
+	ActionInputUnexpectedError,
 	ActionInputValidationError,
 	ActionOutputSerializationError,
 	ActionOutputValidationError,
-	WorkflowInputUnexpectedError,
 } from './errors.ts';
-import { isTopLevelObjectSchema, isValibotSchema, parseValibot } from './schema.ts';
 import { cloneJsonSerializable, type JsonValue } from './json-snapshot.ts';
+import { isTopLevelObjectSchema, isValibotSchema, parseValibot } from './schema.ts';
 import type { FlueHarness, FlueLogger } from './types.ts';
 
 export type { JsonValue } from './json-snapshot.ts';
@@ -113,7 +113,7 @@ export interface ParsedActionInput {
 
 export function parseActionInput(action: ActionDefinition, input?: unknown): ParsedActionInput {
 	if (!action.input) {
-		if (input !== undefined) throw new WorkflowInputUnexpectedError();
+		if (input !== undefined) throw new ActionInputUnexpectedError();
 		return { declared: false, value: undefined };
 	}
 	const parsed = parseValibot(action.input, input === undefined ? {} : input);

@@ -45,20 +45,6 @@ export function schema(prefix: string): MongoCollectionSpec[] {
 				collation: simple,
 			},
 		]),
-		spec('runs', [
-			{ name: 'run_id', key: { runId: 1 }, unique: true, collation: simple },
-			{ name: 'started_run', key: { startedAt: -1, runId: -1 }, collation: simple },
-			{
-				name: 'status_started_run',
-				key: { status: 1, startedAt: -1, runId: -1 },
-				collation: simple,
-			},
-			{
-				name: 'workflow_started_run',
-				key: { workflowName: 1, startedAt: -1, runId: -1 },
-				collation: simple,
-			},
-		]),
 		spec('conversation_streams'),
 		spec('conversation_batches', [
 			{ name: 'path_offset', key: { path: 1, offset: 1 }, unique: true, collation: simple },
@@ -72,17 +58,6 @@ export function schema(prefix: string): MongoCollectionSpec[] {
 		spec('attachments', [
 			{ name: 'path_attachment', key: { path: 1, attachmentId: 1 }, unique: true, collation: simple },
 			{ name: 'path_conversation_attachment', key: { path: 1, conversationId: 1, attachmentId: 1 }, collation: simple },
-		]),
-		spec('event_streams'),
-		spec('event_entries', [
-			{ name: 'path_offset', key: { path: 1, offset: 1 }, unique: true, collation: simple },
-			{
-				name: 'path_event_key',
-				key: { path: 1, eventKey: 1 },
-				unique: true,
-				partialFilterExpression: { eventKey: { $type: 'string' } },
-				collation: simple,
-			},
 		]),
 	];
 }

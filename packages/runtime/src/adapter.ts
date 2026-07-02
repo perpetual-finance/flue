@@ -19,13 +19,12 @@
  * (atomicity, idempotency, gating conditions) so that non-SQL backends such
  * as MongoDB are first-class implementations. An adapter is correct when the
  * executable contract suites pass: `defineStoreContractTests`,
- * `defineRunStoreContractTests`, and `defineEventStreamStoreContractTests`
- * from `@flue/runtime/test-utils`.
+ * `defineConversationStreamStoreContractTests`, and
+ * `defineAttachmentStoreContractTests` from `@flue/runtime/test-utils`.
  *
- * Stability: `RunStore` and `EventStreamStore` are stable.
- * The `AgentSubmissionStore` settlement and lease method groups mirror the
- * durable-execution engine and are subject to change until 1.0 — for every
- * backend equally.
+ * Stability: the `AgentSubmissionStore` settlement and lease method groups
+ * mirror the durable-execution engine and are subject to change until 1.0 —
+ * for every backend equally.
  */
 
 // ─── Store interfaces and vocabulary types ──────────────────────────────────
@@ -103,25 +102,6 @@ export {
 	submissionChunkOwner,
 } from './persisted-image-placement.ts';
 
-// ─── Run store types ─────────────────────────────────────────────────────────
-
-export type {
-	CreateRunInput,
-	EndRunInput,
-	ListRunsOpts,
-	ListRunsResponse,
-	RunPointer,
-	RunRecord,
-	RunStatus,
-	RunStore,
-} from './runtime/run-store.ts';
-export {
-	DEFAULT_LIST_LIMIT,
-	decodeRunCursor,
-	encodeRunCursor,
-	MAX_LIST_LIMIT,
-} from './runtime/run-store.ts';
-
 // ─── Canonical conversation stream store ────────────────────────────────────
 
 export type {
@@ -161,16 +141,11 @@ export type {
 } from './runtime/sql-conversation-stream-store.ts';
 export { defineSqlConversationStreamStore } from './runtime/sql-conversation-stream-store.ts';
 
-// ─── Event stream store ─────────────────────────────────────────────────────
+// ─── Stream offsets ─────────────────────────────────────────────────────────
 
-export type {
-	EventStreamMeta,
-	EventStreamReadResult,
-	EventStreamStore,
-} from './runtime/event-stream-store.ts';
 export {
 	DEFAULT_READ_LIMIT,
 	formatOffset,
 	MAX_READ_LIMIT,
 	parseOffset,
-} from './runtime/event-stream-store.ts';
+} from './runtime/stream-offsets.ts';

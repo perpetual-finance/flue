@@ -18,7 +18,7 @@ import type {
 	ConversationStreamReadResult,
 	ConversationStreamStore,
 } from './conversation-stream-store.ts';
-import { parseOffset } from './event-stream-store.ts';
+import { parseOffset } from './stream-offsets.ts';
 
 const SECURITY_HEADERS = {
 	'X-Content-Type-Options': 'nosniff',

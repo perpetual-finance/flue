@@ -13,12 +13,12 @@ import {
 	type DispatchInput,
 	type DispatchQueue,
 } from '../src/internal.ts';
+import { MAX_IMAGE_DATA_LENGTH } from '../src/persisted-images.ts';
 import {
-	createAgentSubmissionSessionHandler,
 	type AgentSubmissionInput,
+	createAgentSubmissionSessionHandler,
 } from '../src/runtime/agent-submissions.ts';
 import { resetFlueRuntimeForTests } from '../src/runtime/flue-app.ts';
-import { MAX_IMAGE_DATA_LENGTH } from '../src/persisted-images.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
 import { agentRecord, nodeRuntime } from './helpers/runtime-config.ts';
 

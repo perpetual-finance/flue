@@ -1,17 +1,15 @@
 import * as v from 'valibot';
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
+import { validateAndRunAction } from '../src/action.ts';
 import {
 	ActionInputValidationError,
+	type ActionOutputSchema,
 	ActionOutputSerializationError,
 	ActionOutputValidationError,
-	type ActionOutputSchema,
-	defineAgent,
-	defineWorkflow,
 	defineAction,
 	type FlueHarness,
 	type FlueLogger,
 } from '../src/index.ts';
-import { validateAndRunAction } from '../src/action.ts';
 
 const harness = {} as FlueHarness;
 const log = {} as FlueLogger;
@@ -156,82 +154,3 @@ describe('defineAction()', () => {
 	});
 });
 
-describe('defineWorkflow()', () => {
-	it('creates extracted and inline branded workflows with required agents', () => {
-		const agent = defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5' }));
-		const action = defineAction({
-			name: 'review',
-			description: 'Reviews input.',
-			run: async () => undefined,
-		});
-
-		const extracted = defineWorkflow({ agent, action });
-		const inline = defineWorkflow({
-			agent,
-			input: v.object({ repository: v.string() }),
-			run: async ({ input }) => input.repository,
-		});
-
-		expect(extracted).toMatchObject({ __flueWorkflowDefinition: true, agent, action });
-		expect(inline).toMatchObject({ __flueWorkflowDefinition: true, agent });
-		expect(inline).not.toHaveProperty('name');
-		expect(inline).not.toHaveProperty('description');
-	});
-
-	it('delegates inline schema validation to defineAction()', () => {
-		const agent = defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5' }));
-
-		expect(() =>
-			defineWorkflow({
-				agent,
-				input: v.string() as never,
-				run: async () => undefined,
-			}),
-		).toThrow('defineAction({ input }) must be a top-level object schema');
-	});
-
-	it('excludes undefined-producing inline output schemas from the public type', () => {
-		const agent = defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5' }));
-		const invalidOutput = v.undefined();
-		expectTypeOf(invalidOutput).not.toMatchTypeOf<ActionOutputSchema>();
-		defineWorkflow({
-			agent,
-			output: v.string(),
-			run: async () => 'ok',
-		});
-	});
-
-	it('rejects forged AgentDefinition and Action brands', () => {
-		const agent = defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5' }));
-		const action = defineAction({
-			name: 'review',
-			description: 'Reviews input.',
-			run: async () => undefined,
-		});
-		const forgedAgent = { __flueAgentDefinition: true, initialize: async () => ({ model: 'anthropic/claude-haiku-4-5' }) };
-		const forgedAction = {
-			__flueAction: true,
-			name: 'forged',
-			description: 'Forged action.',
-			input: undefined,
-			output: undefined,
-			run: async () => undefined,
-		};
-
-		expect(() => defineWorkflow({ agent: forgedAgent, action } as never)).toThrow('AgentDefinition');
-		expect(() => defineWorkflow({ agent, action: forgedAction } as never)).toThrow('Action');
-	});
-
-	it('rejects definitions that provide both an action and inline run', () => {
-		const agent = defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5' }));
-		const action = defineAction({
-			name: 'review',
-			description: 'Reviews input.',
-			run: async () => undefined,
-		});
-
-		expect(() => defineWorkflow({ agent, action, run: async () => undefined } as never)).toThrow(
-			'exactly one',
-		);
-	});
-});

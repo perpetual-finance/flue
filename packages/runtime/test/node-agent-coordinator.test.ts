@@ -21,10 +21,10 @@ import {
 } from '../src/node/agent-coordinator.ts';
 import { sqlite } from '../src/node/agent-execution-store.ts';
 import type { ConversationStreamStore } from '../src/runtime/conversation-stream-store.ts';
-import { agentStreamPath } from '../src/runtime/event-stream-store.ts';
-import { handleAgentConversationRead } from '../src/runtime/handle-conversation-routes.ts';
 import type { CreateAgentContextFn } from '../src/runtime/handle-agent.ts';
+import { handleAgentConversationRead } from '../src/runtime/handle-conversation-routes.ts';
 import { generateSessionAffinityKey } from '../src/runtime/ids.ts';
+import { agentStreamPath } from '../src/runtime/stream-offsets.ts';
 import { defineTool } from '../src/tool.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
 

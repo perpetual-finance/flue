@@ -149,74 +149,6 @@ if redis.call('EXISTS', KEYS[1]) == 1 then redis.call('HSET', KEYS[1], 'status',
 return 1
 `;
 
-export const createRunScript = `${guard}
-require_type(KEYS[1], 'hash')
-for i = 2, 4 do require_type(KEYS[i], 'zset') end
-require_type(KEYS[5], 'set')
-if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
-redis.call('ZADD', KEYS[2], ARGV[5], ARGV[1])
-redis.call('ZADD', KEYS[3], ARGV[5], ARGV[1])
-redis.call('ZADD', KEYS[4], ARGV[5], ARGV[1])
-redis.call('SADD', KEYS[5], 'active')
-redis.call('HSET', KEYS[1], 'runId', ARGV[1], 'workflowName', ARGV[2], 'status', 'active', 'startedAt', ARGV[3], 'orderKey', ARGV[6])
-if ARGV[4] ~= '' then redis.call('HSET', KEYS[1], 'payload', ARGV[4]) end
-if ARGV[7] ~= '' then redis.call('HSET', KEYS[1], 'traceCarrier', ARGV[7]) end
-return 1
-`;
-
-export const endRunScript = `${guard}
-require_type(KEYS[1], 'hash')
-require_type(KEYS[2], 'zset')
-require_type(KEYS[3], 'zset')
-require_type(KEYS[4], 'set')
-if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
-local score = redis.call('ZSCORE', KEYS[2], ARGV[1])
-local statuses = redis.call('SMEMBERS', KEYS[4])
-for _, status in ipairs(statuses) do redis.call('ZREM', ARGV[8] .. status, ARGV[1]) end
-if score then redis.call('ZADD', KEYS[3], score, ARGV[1]) end
-redis.call('SADD', KEYS[4], ARGV[2])
-redis.call('HSET', KEYS[1], 'status', ARGV[2], 'endedAt', ARGV[3], 'isError', ARGV[4], 'durationMs', ARGV[5])
-if ARGV[6] ~= '' then redis.call('HSET', KEYS[1], 'result', ARGV[6]) end
-if ARGV[7] ~= '' then redis.call('HSET', KEYS[1], 'error', ARGV[7]) end
-return 1
-`;
-
-export const appendEventScript = `${guard}
-require_type(KEYS[1], 'hash')
-require_type(KEYS[2], 'hash')
-require_type(KEYS[3], 'zset')
-if redis.call('EXISTS', KEYS[1]) == 0 then return {'missing'} end
-if redis.call('HGET', KEYS[1], 'closed') == '1' then return {'closed'} end
-local seq = tonumber(redis.call('HGET', KEYS[1], 'nextOffset') or '0')
-redis.call('HSET', KEYS[2], tostring(seq), ARGV[1])
-redis.call('ZADD', KEYS[3], seq, tostring(seq))
-redis.call('HSET', KEYS[1], 'nextOffset', seq + 1)
-return {'appended', tostring(seq)}
-`;
-
-export const appendEventOnceScript = `${guard}
-require_type(KEYS[1], 'hash')
-require_type(KEYS[2], 'hash')
-require_type(KEYS[3], 'zset')
-require_type(KEYS[4], 'hash')
-local existing = redis.call('HGET', KEYS[4], ARGV[1])
-if existing then
-  local separator = string.find(existing, ':')
-  local seq = string.sub(existing, 1, separator - 1)
-  local data = string.sub(existing, separator + 1)
-  if data ~= ARGV[2] then return {'conflict'} end
-  return {'appended', seq}
-end
-if redis.call('EXISTS', KEYS[1]) == 0 then return {'missing'} end
-if redis.call('HGET', KEYS[1], 'closed') == '1' then return {'closed'} end
-local seq = tonumber(redis.call('HGET', KEYS[1], 'nextOffset') or '0')
-redis.call('HSET', KEYS[2], tostring(seq), ARGV[2])
-redis.call('ZADD', KEYS[3], seq, tostring(seq))
-redis.call('HSET', KEYS[4], ARGV[1], tostring(seq) .. ':' .. ARGV[2])
-redis.call('HSET', KEYS[1], 'nextOffset', seq + 1)
-return {'appended', tostring(seq)}
-`;
-
 export const reserveSettlementScript = `${guard}
 require_type(KEYS[1], 'hash')
 for i = 2, 4 do require_type(KEYS[i], 'zset') end
@@ -241,8 +173,3 @@ redis.call('HSET', KEYS[1], 'status', 'settled', 'settledAt', ARGV[2])
 return 1
 `;
 
-export const closeEventScript = `${guard}
-require_type(KEYS[1], 'hash')
-if redis.call('EXISTS', KEYS[1]) == 1 then redis.call('HSET', KEYS[1], 'closed', 1) end
-return 1
-`;

@@ -1,60 +1,39 @@
 /**
  * libSQL / Turso persistence adapter.
  *
- * Implements {@link AgentSubmissionStore}, {@link RunStore}, and
- * {@link EventStreamStore} against a libSQL / Turso database using
- * SQLite-dialect parameterised queries (`?` placeholders).
+ * Implements {@link AgentSubmissionStore}, the canonical conversation
+ * stream store, and the attachment store against a libSQL / Turso database
+ * using SQLite-dialect parameterised queries (`?` placeholders).
  *
  * The adapter accepts any async SQL runner conforming to {@link LibsqlRunner}
  * so that an application can supply its own configured `@libsql/client`, and
  * tests can substitute an in-memory client without pulling in a real server.
  */
 
-import type { WorkflowRunPointer } from '@flue/runtime';
 import type {
 	AgentAttemptMarker,
 	AgentDispatchAdmission,
 	AgentSubmission,
-	AgentSubmissionStore,
-	CreateRunInput,
 	AgentSubmissionInput,
+	AgentSubmissionStore,
 	DispatchInput,
-	EndRunInput,
-	EventStreamMeta,
-	EventStreamReadResult,
-	EventStreamStore,
-	ListRunsOpts,
-	ListRunsResponse,
 	PersistedChunkOwner,
 	PersistedChunkRow,
 	PersistedChunkStore,
 	PersistenceAdapter,
-	RunPointer,
-	RunRecord,
-	RunStatus,
-	RunStore,
 	SubmissionAttemptRef,
 	SubmissionClaimRef,
 } from '@flue/runtime/adapter';
 import {
 	admitSubmissionWithBackend,
 	assertSupportedFlueSchemaVersion,
-	clampLimit,
 	createDispatchAgentSubmissionInput,
-	DEFAULT_LIST_LIMIT,
-	DEFAULT_READ_LIMIT,
 	DURABILITY_DEFAULT_MAX_ATTEMPTS,
 	DURABILITY_DEFAULT_TIMEOUT_MS,
-	decodeRunCursor,
-	encodeRunCursor,
 	FLUE_SCHEMA_VERSION,
-	formatOffset,
 	hydratePersistedSubmissionAttachments,
 	isSubmissionPayload,
 	LEASE_DURATION_MS,
-	MAX_LIST_LIMIT,
-	MAX_READ_LIMIT,
-	parseOffset,
 	submissionChunkOwner,
 } from '@flue/runtime/adapter';
 import { LibsqlAttachmentStore } from './libsql-attachment-store.ts';
@@ -152,8 +131,6 @@ export function libsql(runner: LibsqlRunner): PersistenceAdapter {
 				executionStore: {
 					submissions: new LibsqlSubmissionStore(runner),
 				},
-				runStore: new LibsqlRunStore(runner),
-				eventStreamStore: new LibsqlEventStreamStore(runner),
 				conversationStreamStore: createLibsqlConversationStreamStore(runner),
 				attachmentStore: new LibsqlAttachmentStore(runner),
 			};
@@ -262,59 +239,6 @@ async function ensureTables(runner: LibsqlRunner): Promise<void> {
 		`);
 
 		await tx.query(`
-			CREATE TABLE IF NOT EXISTS flue_runs (
-				run_id TEXT PRIMARY KEY,
-				workflow_name TEXT NOT NULL,
-				status TEXT NOT NULL,
-				started_at TEXT NOT NULL,
-				payload TEXT,
-				traceparent TEXT,
-				tracestate TEXT,
-				ended_at TEXT,
-				is_error INTEGER,
-				duration_ms INTEGER,
-				result TEXT,
-				error TEXT
-			)
-		`);
-		for (const statement of [
-			`ALTER TABLE flue_runs ADD COLUMN traceparent TEXT`,
-			`ALTER TABLE flue_runs ADD COLUMN tracestate TEXT`,
-		]) {
-			try {
-				await tx.query(statement);
-			} catch (error) {
-				if (!String(error).toLowerCase().includes('duplicate column')) throw error;
-			}
-		}
-
-		await tx.query(`
-			CREATE INDEX IF NOT EXISTS flue_runs_status_started_idx
-			ON flue_runs (status, started_at DESC, run_id DESC)
-		`);
-
-		await tx.query(`
-			CREATE INDEX IF NOT EXISTS flue_runs_workflow_started_idx
-			ON flue_runs (workflow_name, started_at DESC, run_id DESC)
-		`);
-
-		await tx.query(`
-			CREATE TABLE IF NOT EXISTS flue_event_streams (
-				path         TEXT PRIMARY KEY,
-				next_offset  INTEGER NOT NULL DEFAULT 0,
-				closed       INTEGER NOT NULL DEFAULT 0
-			)
-		`);
-
-		await tx.query(`
-			CREATE TABLE IF NOT EXISTS flue_event_stream_entries (
-				path    TEXT NOT NULL,
-				seq     INTEGER NOT NULL,
-				data    TEXT NOT NULL,
-				PRIMARY KEY (path, seq)
-			)
-		`);
-		await tx.query(`
 			CREATE TABLE IF NOT EXISTS flue_conversation_streams (
 				path TEXT PRIMARY KEY,
 				identity_json TEXT NOT NULL,
@@ -355,16 +279,6 @@ async function ensureTables(runner: LibsqlRunner): Promise<void> {
 		await tx.query(`
 			CREATE INDEX IF NOT EXISTS flue_attachments_conversation_idx
 			ON flue_attachments (stream_path, conversation_id, attachment_id)
-		`);
-		try {
-			await tx.query(`ALTER TABLE flue_event_stream_entries ADD COLUMN event_key TEXT`);
-		} catch (error) {
-			if (!String(error).toLowerCase().includes('duplicate column')) throw error;
-		}
-		await tx.query(`
-			CREATE UNIQUE INDEX IF NOT EXISTS flue_event_stream_entries_path_event_key_idx
-			ON flue_event_stream_entries (path, event_key)
-			WHERE event_key IS NOT NULL
 		`);
 	});
 }
@@ -978,342 +892,3 @@ function parseSubmission(row: SqlRow, chunks: readonly PersistedChunkRow[]): Age
 		leaseExpiresAt,
 	};
 }
-
-// ─── Run store ──────────────────────────────────────────────────────────────
-
-class LibsqlRunStore implements RunStore {
-	constructor(private runner: LibsqlRunner) {}
-
-	async createRun(input: CreateRunInput): Promise<void> {
-		// Idempotent first-writer-wins: a replayed runId must neither raise a
-		// unique violation nor resurrect a terminal record back to 'active'.
-		await this.runner.query(
-			`INSERT OR IGNORE INTO flue_runs
-			 (run_id, workflow_name, status, started_at, payload, traceparent, tracestate)
-			 VALUES (?, ?, 'active', ?, ?, ?, ?)`,
-			[
-				input.runId,
-				input.workflowName,
-				input.startedAt,
-				input.input !== undefined ? JSON.stringify(input.input) : null,
-				input.traceCarrier?.traceparent ?? null,
-				input.traceCarrier?.tracestate ?? null,
-			],
-		);
-	}
-
-	async endRun(input: EndRunInput): Promise<void> {
-		await this.runner.query(
-			`UPDATE flue_runs
-			 SET status = ?, ended_at = ?, is_error = ?, duration_ms = ?, result = ?, error = ?
-			 WHERE run_id = ?`,
-			[
-				input.isError ? 'errored' : 'completed',
-				input.endedAt,
-				input.isError ? 1 : 0,
-				input.durationMs,
-				input.result !== undefined ? JSON.stringify(input.result) : null,
-				input.error !== undefined ? JSON.stringify(input.error) : null,
-				input.runId,
-			],
-		);
-	}
-
-	async getRun(runId: string): Promise<RunRecord | null> {
-		const rows = await this.runner.query(
-			`SELECT run_id, workflow_name, status, started_at,
-			        payload, traceparent, tracestate, ended_at, is_error, duration_ms, result, error
-			 FROM flue_runs WHERE run_id = ? LIMIT 1`,
-			[runId],
-		);
-		const row = rows[0];
-		if (!row) return null;
-		return {
-			runId: String(row.run_id),
-			workflowName: String(row.workflow_name),
-			status: row.status as RunStatus,
-			startedAt: String(row.started_at),
-			...(row.payload != null ? { input: JSON.parse(String(row.payload)) } : {}),
-			...(typeof row.traceparent === 'string'
-				? {
-						traceCarrier: {
-							traceparent: row.traceparent,
-							...(typeof row.tracestate === 'string' ? { tracestate: row.tracestate } : {}),
-						},
-					}
-				: {}),
-			...(row.ended_at != null ? { endedAt: String(row.ended_at) } : {}),
-			...(row.is_error != null ? { isError: parseSqliteBoolean(row.is_error) } : {}),
-			...(row.duration_ms != null ? { durationMs: Number(row.duration_ms) } : {}),
-			...(row.result != null ? { result: JSON.parse(String(row.result)) } : {}),
-			...(row.error != null ? { error: JSON.parse(String(row.error)) } : {}),
-		};
-	}
-
-	async lookupRun(runId: string): Promise<WorkflowRunPointer | null> {
-		const rows = await this.runner.query(
-			`SELECT run_id, workflow_name
-			 FROM flue_runs WHERE run_id = ? LIMIT 1`,
-			[runId],
-		);
-		const row = rows[0];
-		if (!row) return null;
-		return { runId: String(row.run_id), workflowName: String(row.workflow_name) };
-	}
-
-	async listRuns(opts: ListRunsOpts = {}): Promise<ListRunsResponse> {
-		const limit = clampLimit(opts.limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
-		const cursor = decodeRunCursor(opts.cursor);
-
-		const conditions: string[] = [];
-		const params: LibsqlParameter[] = [];
-
-		if (opts.status) {
-			conditions.push(`status = ?`);
-			params.push(opts.status);
-		}
-		if (opts.workflowName) {
-			conditions.push(`workflow_name = ?`);
-			params.push(opts.workflowName);
-		}
-		if (cursor) {
-			conditions.push(`(started_at < ? OR (started_at = ? AND run_id < ?))`);
-			params.push(cursor.startedAt, cursor.startedAt, cursor.runId);
-		}
-
-		const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-		// Fetch one extra row to determine if there's a next page.
-		const fetchLimit = limit + 1;
-
-		const rows = await this.runner.query(
-			`SELECT run_id, workflow_name, status, started_at,
-			        ended_at, duration_ms, is_error
-			 FROM flue_runs
-			 ${where}
-			 ORDER BY started_at DESC, run_id DESC
-			 LIMIT ?`,
-			[...params, fetchLimit],
-		);
-
-		const hasNext = rows.length > limit;
-		const pageRows = hasNext ? rows.slice(0, limit) : rows;
-		const runs = pageRows.map(parseRunPointer);
-		const last = pageRows.at(-1);
-		const nextCursor = hasNext && last ? encodeRunCursor(parseRunPointer(last)) : undefined;
-		return { runs, nextCursor };
-	}
-}
-
-function parseSqliteBoolean(value: unknown): boolean {
-	const numeric = Number(value);
-	if (numeric !== 0 && numeric !== 1) {
-		throw new Error('[flue] Persisted SQLite boolean is malformed.');
-	}
-	return numeric === 1;
-}
-
-function parseRunPointer(row: SqlRow): RunPointer {
-	return {
-		runId: String(row.run_id),
-		workflowName: String(row.workflow_name),
-		status: row.status as RunStatus,
-		startedAt: String(row.started_at),
-		...(row.ended_at != null ? { endedAt: String(row.ended_at) } : {}),
-		...(row.duration_ms != null ? { durationMs: Number(row.duration_ms) } : {}),
-		...(row.is_error != null ? { isError: parseSqliteBoolean(row.is_error) } : {}),
-	};
-}
-
-// ─── Event stream store ─────────────────────────────────────────────────────
-
-class LibsqlEventStreamStore implements EventStreamStore {
-	private listeners = new Map<string, Set<() => void>>();
-	private pendingAppends = new Map<string, Promise<void>>();
-
-	constructor(private runner: LibsqlRunner) {}
-
-	async createStream(path: string): Promise<void> {
-		await this.runner.query(`INSERT OR IGNORE INTO flue_event_streams (path) VALUES (?)`, [path]);
-	}
-
-	async appendEvent(path: string, event: unknown): Promise<string> {
-		const previous = this.pendingAppends.get(path) ?? Promise.resolve();
-		const append = previous.then(async () => {
-			const data = JSON.stringify(event);
-			const offset = await this.runner.transaction(async (tx) => {
-				const updated = await tx.query(
-					`UPDATE flue_event_streams
-					 SET next_offset = next_offset + 1
-					 WHERE path = ? AND closed = 0
-					 RETURNING next_offset`,
-					[path],
-				);
-
-				if (updated.length === 0) {
-					const meta = await this.getStreamMetaFromRunner(tx, path);
-					if (!meta) {
-						throw new Error(`[flue] Event stream "${path}" does not exist.`);
-					}
-					throw new Error(`[flue] Event stream "${path}" is closed.`);
-				}
-
-				const seq = Number(updated[0]?.next_offset) - 1;
-				await tx.query(`INSERT INTO flue_event_stream_entries (path, seq, data) VALUES (?, ?, ?)`, [
-					path,
-					seq,
-					data,
-				]);
-				return seq;
-			});
-
-			this.notifyListeners(path);
-			return formatOffset(offset);
-		});
-		const settled = append.then(
-			() => undefined,
-			() => undefined,
-		);
-		this.pendingAppends.set(path, settled);
-		try {
-			return await append;
-		} finally {
-			if (this.pendingAppends.get(path) === settled) {
-				this.pendingAppends.delete(path);
-			}
-		}
-	}
-
-	async appendEventOnce(path: string, key: string, event: unknown): Promise<string> {
-		const data = JSON.stringify(event);
-		const offset = await this.runner.transaction(async (tx) => {
-			const existing = await tx.query(`SELECT seq, data FROM flue_event_stream_entries WHERE path = ? AND event_key = ? LIMIT 1`, [path, key]);
-			if (existing[0]) {
-				if (existing[0].data !== data) throw new TypeError(`Event key "${key}" has a conflicting payload.`);
-				return Number(existing[0].seq);
-			}
-			const updated = await tx.query(`UPDATE flue_event_streams SET next_offset = next_offset + 1 WHERE path = ? AND closed = 0 RETURNING next_offset`, [path]);
-			if (!updated[0]) {
-				const meta = await this.getStreamMetaFromRunner(tx, path);
-				throw new TypeError(meta ? `Event stream "${path}" is closed.` : `Event stream "${path}" does not exist.`);
-			}
-			const seq = Number(updated[0].next_offset) - 1;
-			await tx.query(`INSERT INTO flue_event_stream_entries (path, seq, data, event_key) VALUES (?, ?, ?, ?)`, [path, seq, data, key]);
-			return seq;
-		});
-		this.notifyListeners(path);
-		return formatOffset(offset);
-	}
-
-	async readEvents(
-		path: string,
-		opts?: { offset?: string; limit?: number },
-	): Promise<EventStreamReadResult> {
-		const meta = await this.getStreamMeta(path);
-		if (!meta) {
-			return { events: [], nextOffset: formatOffset(-1), upToDate: true, closed: false };
-		}
-
-		const rawOffset = opts?.offset ?? '-1';
-		const limit = clampLimit(opts?.limit, DEFAULT_READ_LIMIT, MAX_READ_LIMIT);
-
-		let startAfter: number;
-		if (rawOffset === '-1') {
-			startAfter = -1;
-		} else if (rawOffset === 'now') {
-			return {
-				events: [],
-				nextOffset: meta.nextOffset,
-				upToDate: true,
-				closed: meta.closed,
-			};
-		} else {
-			startAfter = parseOffset(rawOffset);
-		}
-
-		// Fetch one extra row so an exactly-limit page at the tail still
-		// reports up-to-date (mirrors SqliteEventStreamStore).
-		const rows = await this.runner.query(
-			`SELECT seq, data FROM flue_event_stream_entries
-			 WHERE path = ? AND seq > ?
-			 ORDER BY seq ASC
-			 LIMIT ?`,
-			[path, startAfter, limit + 1],
-		);
-		const page = rows.slice(0, limit);
-
-		const events = page.map((row) => ({
-			data: JSON.parse(row.data as string) as unknown,
-			offset: formatOffset(Number(row.seq)),
-		}));
-
-		const lastSeq = events.length > 0 ? Number(page.at(-1)?.seq) : -1;
-		const upToDate = rows.length <= limit;
-
-		const nextOffset = events.length > 0 ? formatOffset(lastSeq) : formatOffset(startAfter);
-
-		return {
-			events,
-			nextOffset,
-			upToDate,
-			closed: meta.closed,
-		};
-	}
-
-	async closeStream(path: string): Promise<void> {
-		await this.runner.query(`UPDATE flue_event_streams SET closed = 1 WHERE path = ?`, [path]);
-		this.notifyListeners(path);
-	}
-
-	async getStreamMeta(path: string): Promise<EventStreamMeta | null> {
-		return this.getStreamMetaFromRunner(this.runner, path);
-	}
-
-	private async getStreamMetaFromRunner(
-		runner: { query: LibsqlQuery },
-		path: string,
-	): Promise<EventStreamMeta | null> {
-		const rows = await runner.query(
-			`SELECT next_offset, closed FROM flue_event_streams WHERE path = ?`,
-			[path],
-		);
-
-		const row = rows[0];
-		if (!row) return null;
-		const writeHead = Number(row.next_offset);
-		return {
-			nextOffset: formatOffset(writeHead - 1),
-			closed: parseSqliteBoolean(row.closed),
-		};
-	}
-
-	subscribe(path: string, listener: () => void): () => void {
-		let bucket = this.listeners.get(path);
-		if (!bucket) {
-			bucket = new Set();
-			this.listeners.set(path, bucket);
-		}
-		bucket.add(listener);
-		const listeners = bucket;
-		return () => {
-			listeners.delete(listener);
-			if (listeners.size === 0) {
-				this.listeners.delete(path);
-			}
-		};
-	}
-
-	private notifyListeners(path: string): void {
-		const bucket = this.listeners.get(path);
-		if (bucket) {
-			for (const listener of [...bucket]) {
-				try {
-					listener();
-				} catch {
-					// Listener errors are silently dropped.
-				}
-			}
-		}
-	}
-}
-
-

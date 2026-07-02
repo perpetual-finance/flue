@@ -24,8 +24,6 @@ import type { DispatchInput } from '../runtime/dispatch-queue.ts';
 
 export { defineAttachmentStoreContractTests } from './define-attachment-store-contract-tests.ts';
 export { defineConversationStreamStoreContractTests } from './define-conversation-stream-store-contract-tests.ts';
-export { defineEventStreamStoreContractTests } from './define-event-stream-store-contract-tests.ts';
-export { defineRunStoreContractTests } from './define-run-store-contract-tests.ts';
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
