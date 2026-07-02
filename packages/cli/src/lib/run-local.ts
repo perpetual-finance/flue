@@ -7,8 +7,8 @@
  * bootstrap. The bootstrap itself (run-bootstrap.ts) is loaded THROUGH that
  * Vite server, not imported here, so its `@flue/runtime` imports resolve
  * inside the same single-runtime module graph as the user's agent module
- * (see `viteGeneratedEntryDependencyResolver` — module-scoped runtime
- * registries make dual copies a real hazard).
+ * (see `flueDependencyResolverPlugin` — module-scoped runtime registries
+ * make dual copies a real hazard).
  */
 
 import * as fs from 'node:fs';
@@ -22,8 +22,8 @@ import {
 	resolveFlueConfigPath,
 	resolveFlueProject,
 } from '@flue/runtime/config';
+import { flueDependencyResolverPlugin, importAttributePlugin } from '@flue/vite/internal';
 import { ulid } from 'ulidx';
-import { createSharedViteConfig, viteGeneratedEntryDependencyResolver } from './build.ts';
 import type {
 	FlueRunOutcome,
 	FlueRunSession,
@@ -260,8 +260,7 @@ interface ViteDevServerLike {
 }
 
 /**
- * Non-listening module server, per the loader pattern in
- * node-application-loader.ts: middleware mode with hmr disabled binds no
+ * Non-listening module server: middleware mode with hmr disabled binds no
  * port and starts no websocket. The dependency resolver keeps exactly ONE
  * copy of `@flue/runtime` in the graph (externalized to the project's
  * install); `@earendil-works/pi-ai` is forced external for the same
@@ -269,10 +268,8 @@ interface ViteDevServerLike {
  * copy, splitting the provider registry the runtime shares with it).
  */
 async function createRunModuleServer(root: string): Promise<ViteDevServerLike> {
-	const shared = createSharedViteConfig(root);
 	const { createServer } = await import('vite');
 	return await createServer({
-		...shared,
 		configFile: false,
 		root,
 		appType: 'custom',
@@ -290,8 +287,8 @@ async function createRunModuleServer(root: string): Promise<ViteDevServerLike> {
 			watch: null,
 		},
 		plugins: [
-			...shared.plugins,
-			viteGeneratedEntryDependencyResolver(root, { external: true, importers: [] }),
+			importAttributePlugin(),
+			flueDependencyResolverPlugin({ root, external: true, importers: [] }),
 		],
 	});
 }

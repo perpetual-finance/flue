@@ -1,8 +1,6 @@
 /**
- * Flue's attributed-import transform, moved from the CLI
- * (packages/cli/src/lib/vite-import-attribute-plugin.ts keeps an identical
- * copy for the legacy `flue dev`/`flue build` paths until Phase 6 deletes
- * them). Behavior is intentionally unchanged.
+ * Flue's attributed-import transform, moved from the CLI's legacy build
+ * pipeline. Behavior is intentionally unchanged.
  */
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';

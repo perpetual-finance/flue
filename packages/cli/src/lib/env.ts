@@ -6,7 +6,6 @@ export interface EnvLoader {
 	readonly file: string;
 	apply(): void;
 	restore(): void;
-	withApplied<T>(fn: () => Promise<T>): Promise<T>;
 }
 
 export function selectEnvFile(envFile: string | undefined, baseDir: string): string {
@@ -48,13 +47,5 @@ export function createEnvLoader(
 		file,
 		apply,
 		restore,
-		async withApplied<T>(fn: () => Promise<T>): Promise<T> {
-			apply();
-			try {
-				return await fn();
-			} finally {
-				restore();
-			}
-		},
 	};
 }

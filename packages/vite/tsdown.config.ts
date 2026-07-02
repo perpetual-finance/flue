@@ -3,6 +3,8 @@ import { defineConfig } from 'tsdown';
 export default defineConfig({
 	entry: {
 		index: 'src/index.ts',
+		// `@flue/vite/internal` — plumbing shared with `@flue/cli` (flue run).
+		internal: 'src/internal.ts',
 		'bootstrap/node-server': 'src/bootstrap/node-server.ts',
 		'bootstrap/node-entry': 'src/bootstrap/node-entry.ts',
 	},

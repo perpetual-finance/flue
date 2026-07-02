@@ -1,140 +1,58 @@
 #!/usr/bin/env node
-import { type ChildProcess, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ParseArgsOptionsConfig, parseArgs as parseNodeArgs } from 'node:util';
+import { resolveFlueConfigPath } from '@flue/runtime/config';
 import type { ConversationStreamChunk } from '@flue/sdk';
 import { determineAgent } from '@vercel/detect-agent';
 import MiniSearch from 'minisearch';
 import pc from 'picocolors';
-import { build } from '../src/lib/build.ts';
-import {
-	type FlueConfig,
-	resolveConfig,
-	resolveConfigPath,
-	type UserFlueConfig,
-} from '../src/lib/config.ts';
-import { resolveConfigCandidates } from '../src/lib/config-paths.ts';
 import {
 	type AbortableExecution,
 	closeExecutionForSignal,
 } from '../src/lib/console-shutdown.ts';
-import { DEFAULT_DEV_PORT, dev } from '../src/lib/dev.ts';
 import { createEnvLoader, type EnvLoader, selectEnvFile } from '../src/lib/env.ts';
 import { createLineEventPresenter } from '../src/lib/line-event-presenter.ts';
 import { createLocalAgentRun } from '../src/lib/run-local.ts';
 import { brand, brandRows, error as cliError, note, row, success } from '../src/lib/terminal.ts';
 import { BLUEPRINTS, KIND_ROOTS } from './_blueprints.generated.ts';
 
-interface ApplicationConfigArgs {
-	target?: 'node' | 'cloudflare';
-	explicitRoot: string | undefined;
-	explicitOutput: string | undefined;
-	configFile: string | undefined;
-	envFile: string | undefined;
-}
-
-function loadCliEnvironment(args: ApplicationConfigArgs): EnvLoader {
-	try {
-		const cwd = process.cwd();
-		const searchFrom = args.explicitRoot ?? cwd;
-		const configPath =
-			args.configFile !== undefined
-				? resolveConfigPath({ cwd, configFile: args.configFile })
-				: resolveConfigPath({ cwd: searchFrom, configFile: undefined });
-		const baseDir = configPath ? path.dirname(configPath) : searchFrom;
-		const envLoader = createEnvLoader(selectEnvFile(args.envFile, baseDir));
-		envLoader.apply();
-		return envLoader;
-	} catch (err) {
-		cliError(err instanceof Error ? err.message : String(err));
-		process.exit(1);
-	}
-}
-
-/** Resolve CLI flags, config file values, and defaults into one config. */
-async function resolveCliConfig(args: {
-	target?: 'node' | 'cloudflare';
-	explicitRoot: string | undefined;
-	explicitOutput: string | undefined;
-	configFile: string | undefined;
-}): Promise<{ cfg: FlueConfig; configPath?: string; viteConfig: import('vite').UserConfig }> {
-	const inline: UserFlueConfig = {};
-	if (args.target) inline.target = args.target;
-	if (args.explicitRoot) inline.root = args.explicitRoot;
-	if (args.explicitOutput) inline.output = args.explicitOutput;
-
-	try {
-		const { flueConfig, configPath, viteConfig } = await resolveConfig({
-			cwd: process.cwd(),
-			searchFrom: args.explicitRoot ?? process.cwd(),
-			configFile: args.configFile,
-			inline,
-		});
-		return { cfg: flueConfig, configPath, viteConfig };
-	} catch (err) {
-		cliError(err instanceof Error ? err.message : String(err));
-		process.exit(1);
-	}
-}
-
-async function resolveApplicationCommand(args: ApplicationConfigArgs): Promise<{
-	cfg: FlueConfig;
-	envLoader: EnvLoader;
-	configPath?: string;
-	viteConfig: import('vite').UserConfig;
-}> {
-	const envLoader = loadCliEnvironment(args);
-	const { cfg, configPath, viteConfig } = await resolveCliConfig(args);
-	return { cfg, envLoader, configPath, viteConfig };
-}
-
 // ─── Arg Parsing ────────────────────────────────────────────────────────────
 
 function printUsage(log: (message: string) => void = console.error) {
 	log(
 		'Usage:\n' +
-			'  flue dev   [--target <node|cloudflare>] [--root <path>] [--output <path>] [--config <path>] [--port <number>] [--env <path>]\n' +
-			'  flue run     <path> --message <text> [--id <conversation-id>] [--env <path>] [--json]\n' +
-			'  flue build   [--target <node|cloudflare>] [--root <path>] [--output <path>] [--config <path>] [--env <path>]\n' +
-			'  flue init  --target <node|cloudflare> [--root <path>] [--force]\n' +
-			'  flue add   [<kind> <name|url>] [--print]\n' +
+			'  flue run    <path> --message <text> [--id <conversation-id>] [--env <path>] [--json]\n' +
+			'  flue init   --target <node|cloudflare> [--root <path>] [--force]\n' +
+			'  flue add    [<kind> <name|url>] [--print]\n' +
 			'  flue update <kind> <name|url> [--print]\n' +
-			'  flue docs  [read <path> | search <query>]\n' +
+			'  flue docs   [read <path> | search <query>]\n' +
 			'\n' +
 			'Commands:\n' +
-			'  dev    Long-running watch-mode dev server. Rebuilds and reloads on file changes.\n' +
-			'  run      Run one agent module locally (transport-free, no HTTP), print its reply, then exit.\n' +
-			'  build    Build a deployable artifact to ./dist (production deploys).\n' +
+			'  run    Run one agent module locally (transport-free, no HTTP), print its reply, then exit.\n' +
 			'  init   Scaffold a starter flue.config.ts in the target directory.\n' +
 			'  add    Fetch a blueprint implementation guide for an AI coding agent to follow.\n' +
 			'  update Fetch an updated blueprint implementation guide for an AI coding agent to follow.\n' +
 			'  docs   Browse the Flue docs. No args lists pages; `read` prints a page as markdown; `search` prints JSON results.\n' +
 			'\n' +
+			'  Dev servers and production builds are owned by Vite (`vite dev` / `vite build`\n' +
+			'  with the `flue()` plugin from @flue/vite in vite.config.ts).\n' +
+			'\n' +
 			'Flags:\n' +
 			'  --message <text>     (flue run) The user message submitted to the agent. Required.\n' +
 			'  --id <id>            (flue run) Conversation id to create or continue. Default: a fresh id, printed.\n' +
 			'  --json               (flue run) Print a JSON result envelope to stdout instead of the message text.\n' +
-			'  --root <path>        (flue dev/build) Project root. Default: current working directory.\n' +
-			'  --output <path>      (flue dev/build) Where the build artifacts are written. Default: <root>/dist.\n' +
-			'  --config <path>      (flue dev/build) Path to a flue.config.{ts,mts,mjs,js,cjs,cts} file (relative to cwd).\n' +
-			'                       Default: search the root dir (or cwd) for `flue.config.*`.\n' +
-			'                       CLI flags always override values set in the config file.\n' +
-			`  --port <number>      Port for the dev server. Default: ${DEFAULT_DEV_PORT}\n` +
-			'  --env <path>         Select one alternate .env-format file for build/dev/run before config loads.\n' +
-			'                       Without --env, these commands load <project>/.env when present. Shell values win.\n' +
+			'  --env <path>         (flue run) Select one alternate .env-format file, loaded before the run.\n' +
+			'                       Without --env, `flue run` loads <project>/.env when present. Shell values win.\n' +
 			'  --print              (flue add/update) Print the raw blueprint Markdown to stdout regardless of whether the caller is an agent.\n' +
+			'  --target <t>         (flue init) Project target: node or cloudflare. Required.\n' +
+			'  --root <path>        (flue init) Directory to scaffold into. Default: current working directory.\n' +
 			'  --force              (flue init) Overwrite an existing flue.config.* in the target directory.\n' +
 			'\n' +
 			'Examples:\n' +
-			'  flue dev --target node\n' +
-			'  flue dev --target cloudflare --port 8787\n' +
 			'  flue run src/agents/hello.ts --message "Hi there"\n' +
 			'  flue run src/agents/hello.ts --message "And then?" --id support-4821 --env .env.staging\n' +
-			'  flue build --target node\n' +
-			'  flue build --target cloudflare --root ./my-app\n' +
-			'  flue build --target node --output ./build\n' +
 			'  flue init --target node\n' +
 			'  flue add\n' +
 			'  flue add sandbox daytona | claude\n' +
@@ -158,35 +76,6 @@ interface RunArgs {
 	message: string;
 	id: string | undefined;
 	json: boolean;
-	envFile: string | undefined;
-}
-
-interface BuildArgs {
-	command: 'build';
-	/** May be undefined if the user is relying on `flue.config.ts` for `target`. */
-	target: 'node' | 'cloudflare' | undefined;
-	/** Explicit --root value, or undefined to default to cwd. */
-	explicitRoot: string | undefined;
-	/** Explicit --output value, or undefined to default to <root>/dist. */
-	explicitOutput: string | undefined;
-	/** Explicit --config value, or undefined to auto-discover. */
-	configFile: string | undefined;
-	envFile: string | undefined;
-}
-
-interface DevArgs {
-	command: 'dev';
-	/** May be undefined if the user is relying on `flue.config.ts` for `target`. */
-	target: 'node' | 'cloudflare' | undefined;
-	/** Explicit --root value, or undefined to default to cwd. */
-	explicitRoot: string | undefined;
-	/** Explicit --output value, or undefined to default to <root>/dist. */
-	explicitOutput: string | undefined;
-	/** Explicit --config value, or undefined to auto-discover. */
-	configFile: string | undefined;
-	/** 0 = use the library default (DEFAULT_DEV_PORT). */
-	port: number;
-	/** Explicit --env file, or undefined to use the default project .env. */
 	envFile: string | undefined;
 }
 
@@ -221,7 +110,7 @@ interface InitArgs {
 	force: boolean;
 }
 
-type ParsedArgs = RunArgs | BuildArgs | DevArgs | BlueprintCommandArgs | DocsArgs | InitArgs;
+type ParsedArgs = RunArgs | BlueprintCommandArgs | DocsArgs | InitArgs;
 
 type ParsedOptionToken = Extract<
 	NonNullable<ReturnType<typeof parseNodeArgs>['tokens']>[number],
@@ -229,22 +118,6 @@ type ParsedOptionToken = Extract<
 >;
 type CliValue = string | boolean | Array<string | boolean> | undefined;
 type CliValues = Record<string, CliValue>;
-
-const SHARED_PARSE_OPTIONS = {
-	input: { type: 'string' },
-	id: { type: 'string' },
-	server: { type: 'string' },
-	header: { type: 'string', multiple: true },
-	target: { type: 'string' },
-	root: { type: 'string' },
-	output: { type: 'string' },
-	config: { type: 'string' },
-	port: { type: 'string' },
-	env: { type: 'string', multiple: true },
-} as const;
-
-/** Every flag `parseFlags` knows how to parse, across all commands that use it. */
-const SHARED_FLAGS = new Set(Object.keys(SHARED_PARSE_OPTIONS).map((name) => `--${name}`));
 
 function fail(message: string, usage = false): never {
 	console.error(message);
@@ -323,59 +196,6 @@ function targetFlag(value: string | undefined): 'node' | 'cloudflare' | undefine
 		fail(`Invalid target: "${value}". Supported targets: node, cloudflare`);
 	}
 	return value;
-}
-
-function parseFlags(
-	command: 'build' | 'dev' | 'run',
-	args: string[],
-	allowed: ReadonlySet<string>,
-): {
-	positionals: string[];
-	target?: 'node' | 'cloudflare';
-	explicitRoot: string | undefined;
-	explicitOutput: string | undefined;
-	configFile: string | undefined;
-	input: string | undefined;
-	id: string | undefined;
-	server: string | undefined;
-	headers: string[];
-	port: number;
-	envFile: string | undefined;
-} {
-	const { positionals, values } = parseCommandOptions(
-		command,
-		args,
-		SHARED_PARSE_OPTIONS,
-		allowed,
-		SHARED_FLAGS,
-	);
-	const envFiles = stringListFlag(values, 'env', 'Missing value for --env');
-	if (envFiles.length > 1) {
-		fail('`--env` accepts one file. Combine values into one file or provide shell overrides.');
-	}
-
-	const portStr = stringFlag(values, 'port', 'Invalid value for --port');
-	let port = 0;
-	if (portStr !== undefined) {
-		port = parseInt(portStr, 10);
-		if (Number.isNaN(port)) fail('Invalid value for --port');
-	}
-
-	return {
-		positionals,
-		target: targetFlag(stringFlag(values, 'target', 'Missing value for --target')),
-		explicitRoot: pathFlag(values, 'root', 'Missing value for --root'),
-		explicitOutput: pathFlag(values, 'output', 'Missing value for --output'),
-		// `--config` is intentionally NOT pre-resolved: the config loader
-		// resolves it vs. cwd at load time, mirroring how Vite handles `--config`.
-		configFile: stringFlag(values, 'config', 'Missing value for --config'),
-		input: stringFlag(values, 'input', 'Missing value for --input'),
-		id: stringFlag(values, 'id', 'Missing value for --id'),
-		server: stringFlag(values, 'server', 'Missing value for --server'),
-		headers: stringListFlag(values, 'header', 'Missing value for --header'),
-		port,
-		envFile: envFiles[0],
-	};
 }
 
 function pathFlag(values: CliValues, name: string, missingMessage: string): string | undefined {
@@ -594,50 +414,14 @@ function parseArgs(argv: string[]): ParsedArgs {
 		return parseInitArgs(rest);
 	}
 
-	// `--target` is optional at parse time — the config file may supply it.
-	// `resolveCliConfig` enforces it being set somewhere by the time we need it.
-
-	if (command === 'build') {
-		const flags = parseFlags(
-			'build',
-			rest,
-			new Set(['--target', '--root', '--output', '--config', '--env']),
-		);
-		if (flags.positionals.length > 0) {
-			console.error(`Unexpected argument for \`flue build\`: ${flags.positionals[0]}`);
-			printUsage();
-			process.exit(1);
-		}
-		return {
-			command: 'build',
-			target: flags.target,
-			explicitRoot: flags.explicitRoot,
-			explicitOutput: flags.explicitOutput,
-			configFile: flags.configFile,
-			envFile: flags.envFile,
-		};
+	// Dev servers and builds moved to Vite (the @flue/vite plugin owns both
+	// targets). The old commands hard-error with a pointer, never a wrapper.
+	if (command === 'dev') {
+		fail('flue dev was removed — run `vite dev` (see the migration guide)');
 	}
 
-	if (command === 'dev') {
-		const flags = parseFlags(
-			'dev',
-			rest,
-			new Set(['--target', '--root', '--output', '--config', '--port', '--env']),
-		);
-		if (flags.positionals.length > 0) {
-			console.error(`Unexpected argument for \`flue dev\`: ${flags.positionals[0]}`);
-			printUsage();
-			process.exit(1);
-		}
-		return {
-			command: 'dev',
-			target: flags.target,
-			explicitRoot: flags.explicitRoot,
-			explicitOutput: flags.explicitOutput,
-			configFile: flags.configFile,
-			port: flags.port,
-			envFile: flags.envFile,
-		};
+	if (command === 'build') {
+		fail('flue build was removed — run `vite build`');
 	}
 
 	if (command === 'run') {
@@ -650,156 +434,11 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 
-async function buildCommand(args: BuildArgs) {
-	const { cfg, configPath, envLoader } = await resolveApplicationCommand(args);
-	try {
-		await build({
-			root: cfg.root,
-			sourceRoot: cfg.sourceRoot,
-			output: cfg.output,
-			target: cfg.target,
-			configFile: configPath,
-			envFile: fs.existsSync(envLoader.file) ? envLoader.file : undefined,
-		});
-	} catch (err) {
-		cliError(`Build failed: ${err instanceof Error ? err.message : String(err)}`);
-		process.exit(1);
-	}
-}
-
-const INTERNAL_DEV_SESSION = 'FLUE_INTERNAL_DEV_SESSION';
-const INTERNAL_DEV_READY = 'ready';
-
 function readCliVersion(): string {
 	const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
 		version: string;
 	};
 	return pkg.version;
-}
-
-function devConfigFiles(args: DevArgs): string[] {
-	const cwd = process.cwd();
-	return resolveConfigCandidates({
-		cwd,
-		searchFrom: args.explicitRoot ?? cwd,
-		configFile: args.configFile,
-	});
-}
-
-async function devCommand(args: DevArgs) {
-	const { cfg, envLoader, configPath, viteConfig } = await resolveApplicationCommand(args);
-	try {
-		// dev() blocks until SIGINT/SIGTERM exits the process. We don't expect
-		// it to return; if it ever does, just exit cleanly.
-		await dev({
-			root: cfg.root,
-			sourceRoot: cfg.sourceRoot,
-			version: readCliVersion(),
-			output: cfg.output,
-			target: cfg.target,
-			port: args.port || undefined,
-			strictPort: args.port !== 0,
-			envFile: envLoader.file,
-			envLoader,
-			configFiles: devConfigFiles(args),
-			configFile: configPath,
-			viteConfig,
-			onReady: () => process.send?.(INTERNAL_DEV_READY),
-		});
-	} catch (err) {
-		cliError(`Dev server failed: ${err instanceof Error ? err.message : String(err)}`);
-		process.exit(1);
-	}
-}
-
-function superviseDevCommand(args: DevArgs) {
-	const configFiles = devConfigFiles(args);
-	const envLoader = loadCliEnvironment(args);
-	const envFile = envLoader.file;
-	envLoader.restore();
-	const watchedFiles = new Set([...configFiles, envFile]);
-	const configWatchInterval = 500;
-
-	let child: ChildProcess | undefined;
-	let restartTimer: NodeJS.Timeout | undefined;
-	let restartRequested = false;
-	let replacementSession = false;
-	let sessionReady = false;
-	let shuttingDown = false;
-
-	const closeWatchers = () => {
-		for (const file of watchedFiles) fs.unwatchFile(file);
-	};
-	const exit = (code: number) => {
-		closeWatchers();
-		process.exit(code);
-	};
-	const startSession = (replacement: boolean) => {
-		const cliPath = process.argv[1];
-		if (!cliPath) return exit(1);
-		restartRequested = false;
-		replacementSession = replacement;
-		sessionReady = false;
-		child = spawn(process.execPath, [cliPath, ...process.argv.slice(2)], {
-			stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
-			env: { ...process.env, [INTERNAL_DEV_SESSION]: '1' },
-		});
-		const session = child;
-		session.on('message', (message) => {
-			if (message === INTERNAL_DEV_READY) sessionReady = true;
-		});
-		session.once('exit', (code, signal) => {
-			if (child !== session) return;
-			child = undefined;
-			if (shuttingDown) exit(signal === 'SIGINT' ? 130 : signal === 'SIGTERM' ? 143 : (code ?? 1));
-			if (restartRequested) {
-				if (!restartTimer) startSession(true);
-				return;
-			}
-			if (replacementSession && !sessionReady) {
-				cliError('Dev server restart failed. Waiting for a configuration change...');
-				return;
-			}
-			exit(code ?? 1);
-		});
-	};
-	const restart = (file: string) => {
-		const kind = file === envFile ? 'env' : 'config';
-		console.error(`${pc.dim(kind)} ${file} changed; restarting`);
-		restartRequested = true;
-		if (restartTimer) clearTimeout(restartTimer);
-		restartTimer = setTimeout(() => {
-			restartTimer = undefined;
-			if (!child) startSession(true);
-		}, 150);
-		child?.kill('SIGTERM');
-	};
-
-	for (const file of watchedFiles) {
-		fs.watchFile(file, { interval: configWatchInterval }, (current, previous) => {
-			if (
-				current.mtimeMs === previous.mtimeMs &&
-				current.ctimeMs === previous.ctimeMs &&
-				current.size === previous.size &&
-				current.ino === previous.ino
-			)
-				return;
-			restart(file);
-		});
-	}
-
-	const shutdown = (signal: NodeJS.Signals) => {
-		if (shuttingDown) return;
-		shuttingDown = true;
-		if (restartTimer) clearTimeout(restartTimer);
-		closeWatchers();
-		if (!child) return exit(signal === 'SIGINT' ? 130 : 143);
-		child.kill(signal);
-	};
-	process.on('SIGINT', () => shutdown('SIGINT'));
-	process.on('SIGTERM', () => shutdown('SIGTERM'));
-	process.on('exit', () => child?.kill('SIGKILL'));
-	startSession(false);
 }
 
 function displayPath(root: string, filePath: string): string {
@@ -812,7 +451,7 @@ let activeExecution: AbortableExecution | undefined;
 function loadRunEnvironment(envFile: string | undefined): EnvLoader {
 	try {
 		const cwd = process.cwd();
-		const configPath = resolveConfigPath({ cwd, configFile: undefined });
+		const configPath = resolveFlueConfigPath({ cwd });
 		const baseDir = configPath ? path.dirname(configPath) : cwd;
 		const envLoader = createEnvLoader(selectEnvFile(envFile, baseDir));
 		envLoader.apply();
@@ -920,7 +559,7 @@ async function run(args: RunArgs) {
 
 function renderConfigTemplate(target: 'node' | 'cloudflare'): string {
 	return (
-		`import { defineConfig } from '@flue/cli/config';\n` +
+		`import { defineConfig } from '@flue/runtime/config';\n` +
 		`\n` +
 		`export default defineConfig({\n` +
 		`\ttarget: '${target}',\n` +
@@ -941,7 +580,7 @@ function initCommand(args: InitArgs) {
 	// etc. — not just `.ts`.
 	let existing: string | undefined;
 	try {
-		existing = resolveConfigPath({ cwd: targetDir, configFile: undefined });
+		existing = resolveFlueConfigPath({ cwd: targetDir });
 	} catch (err) {
 		cliError(err instanceof Error ? err.message : String(err));
 		process.exit(1);
@@ -967,7 +606,7 @@ function initCommand(args: InitArgs) {
 	console.error(brand(['flue init', `target ${args.target}`, `wrote ${relOut}`]));
 
 	// If --force overwrote a non-`.ts` variant, the new flue.config.ts will
-	// take precedence (CONFIG_BASENAMES priority), but the old file still
+	// take precedence (FLUE_CONFIG_BASENAMES priority), but the old file still
 	// sits on disk. Surface that so the user isn't surprised later.
 	if (existing && path.basename(existing) !== 'flue.config.ts') {
 		const relExisting = path.relative(process.cwd(), existing) || existing;
@@ -1410,31 +1049,20 @@ async function blueprintCommand(args: BlueprintCommandArgs) {
 
 const args = parseArgs(process.argv.slice(2));
 
-// `dev` manages its own supervisor shutdown, so it skips the hard-exit
-// handlers that would otherwise run first and preempt its graceful path.
-if (args.command !== 'dev') {
-	const shutdown = (signal: NodeJS.Signals) => {
-		if (activeExecution) {
-			void closeExecutionForSignal(signal, activeExecution).catch((error) => {
-				cliError(error instanceof Error ? error.message : String(error));
-			});
-		} else {
-			process.exitCode = signal === 'SIGINT' ? 130 : 143;
-		}
-	};
-	process.on('SIGINT', () => shutdown('SIGINT'));
-	process.on('SIGTERM', () => shutdown('SIGTERM'));
-}
+const shutdown = (signal: NodeJS.Signals) => {
+	if (activeExecution) {
+		void closeExecutionForSignal(signal, activeExecution).catch((error) => {
+			cliError(error instanceof Error ? error.message : String(error));
+		});
+	} else {
+		process.exitCode = signal === 'SIGINT' ? 130 : 143;
+	}
+};
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 async function main() {
-	if (args.command === 'build') {
-		await buildCommand(args);
-	} else if (args.command === 'dev') {
-		if (process.env[INTERNAL_DEV_SESSION] === '1') {
-			delete process.env[INTERNAL_DEV_SESSION];
-			await devCommand(args);
-		} else superviseDevCommand(args);
-	} else if (args.command === 'add' || args.command === 'update') {
+	if (args.command === 'add' || args.command === 'update') {
 		await blueprintCommand(args);
 	} else if (args.command === 'docs') {
 		docsCommand(args);

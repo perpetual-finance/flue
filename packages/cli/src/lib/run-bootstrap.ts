@@ -13,7 +13,8 @@
  * same reason.
  *
  * The bootstrap drives the REAL durable submission path — the exact
- * machinery the generated Node server entry uses (build-plugin-node.ts):
+ * machinery the generated Node server entry uses (@flue/vite's node
+ * bootstrap):
  * persistence adapter connect/migrate/validate, `createNodeAgentCoordinator`,
  * a durable direct admission, and settlement observed from the canonical
  * conversation stream. Nothing HTTP is created: no Hono app, no listener,
@@ -141,8 +142,8 @@ export async function createFlueRunSession(
 			}
 
 			// ── Persistence ─────────────────────────────────────────────────
-			// Ported from the generated Node entry (build-plugin-node.ts):
-			// connect() is awaited once at startup so an unreachable or
+			// Ported from the generated Node entry (now @flue/vite's node
+			// bootstrap): connect() is awaited once at startup so an unreachable or
 			// misconfigured database fails at boot, not mid-conversation.
 			let stores: Awaited<ReturnType<PersistenceAdapter['connect']>>;
 			if (userPersistenceAdapter) {

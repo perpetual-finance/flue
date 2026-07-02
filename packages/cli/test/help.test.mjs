@@ -37,10 +37,19 @@ describe('flue (top-level flags)', () => {
 	it('documents positional blueprint commands without the removed category flag', async () => {
 		const result = await runCli(['--help']);
 		assert.equal(result.code, 0);
-		assert.ok(result.stdout.includes('flue add   [<kind> <name|url>] [--print]'));
+		assert.ok(result.stdout.includes('flue add    [<kind> <name|url>] [--print]'));
 		assert.ok(result.stdout.includes('flue update <kind> <name|url> [--print]'));
 		assert.ok(result.stdout.includes('update Fetch an updated blueprint implementation guide'));
 		assert.ok(!result.stdout.includes('--category'));
+	});
+
+	it('no longer documents the removed dev and build commands', async () => {
+		const result = await runCli(['--help']);
+		assert.equal(result.code, 0);
+		assert.ok(!result.stdout.includes('flue dev '), result.stdout);
+		assert.ok(!result.stdout.includes('flue build '), result.stdout);
+		assert.ok(result.stdout.includes('vite dev'), result.stdout);
+		assert.ok(result.stdout.includes('vite build'), result.stdout);
 	});
 
 	it('prints the package version to stdout and exits 0 when invoked with --version or -v', async () => {

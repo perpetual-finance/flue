@@ -63,22 +63,26 @@ describe('flue (argument parsing)', () => {
 		assert.ok(!result.stderr.includes('Missing value for --message'), result.stderr);
 	});
 
-	it('rejects --input when passed to `flue build`', async () => {
-		const result = await runCli(['build', '--input', '{"x":1}']);
-		assert.equal(result.code, 1);
-		assert.ok(result.stderr.includes('`flue build` does not accept --input'), result.stderr);
+	it('redirects `flue dev` at `vite dev` and exits non-zero', async () => {
+		for (const invocation of [['dev'], ['dev', '--target', 'node']]) {
+			const result = await runCli(invocation);
+			assert.notEqual(result.code, 0, result.stderr);
+			assert.ok(
+				result.stderr.includes('flue dev was removed — run `vite dev` (see the migration guide)'),
+				result.stderr,
+			);
+		}
 	});
 
-	it('rejects --port when passed to `flue build`', async () => {
-		const result = await runCli(['build', '--port', '8080']);
-		assert.equal(result.code, 1);
-		assert.ok(result.stderr.includes('`flue build` does not accept --port'), result.stderr);
-	});
-
-	it('rejects --input when passed to `flue dev`', async () => {
-		const result = await runCli(['dev', '--input', '{}']);
-		assert.equal(result.code, 1);
-		assert.ok(result.stderr.includes('`flue dev` does not accept --input'), result.stderr);
+	it('redirects `flue build` at `vite build` and exits non-zero', async () => {
+		for (const invocation of [['build'], ['build', '--target', 'cloudflare']]) {
+			const result = await runCli(invocation);
+			assert.notEqual(result.code, 0, result.stderr);
+			assert.ok(
+				result.stderr.includes('flue build was removed — run `vite build`'),
+				result.stderr,
+			);
+		}
 	});
 
 	it('rejects a dropped legacy flag with a pointer at its replacement', async () => {
