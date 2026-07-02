@@ -1,7 +1,6 @@
 import { useNavigate } from '@tanstack/react-router'
 import { Composer } from '@/components/chat/composer'
 import { SidebarTrigger } from '@/components/ui/sidebar'
-import { parseAgentUrl } from '@/lib/flue-client'
 import { useConversations } from '@/state/conversations'
 import { useSettings } from '@/state/settings'
 
@@ -9,7 +8,6 @@ export function NewChat() {
   const navigate = useNavigate()
   const conversations = useConversations()
   const { connection, agentName } = useSettings()
-  const { baseUrl } = parseAgentUrl(connection.agentUrl)
 
   const start = (message: string) => {
     const conversation = conversations.create(agentName)
@@ -32,7 +30,7 @@ export function NewChat() {
             <p className="mb-8 text-sm text-muted-foreground">
               Talking to{' '}
               <span className="font-mono font-medium text-foreground">{agentName}</span> at{' '}
-              <span className="font-mono">{baseUrl}</span>
+              <span className="font-mono">{connection.agentUrl}</span>
             </p>
           ) : (
             <p className="mb-8 text-sm text-muted-foreground">

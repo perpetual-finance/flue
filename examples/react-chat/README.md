@@ -13,9 +13,9 @@ The server and the UI are two separate Vite builds:
   plain `vite dev` / `vite build` drive it. Emits `dist/server.mjs`.
 - `vite.config.ui.ts` — the plain React SPA build. Emits static assets into
   `dist/client`, which `src/app.ts` serves with `serveStatic` while mounting
-  the agents under `/api` (`/api/agents/<name>/<id>`, the shape
-  `createFlueClient({ baseUrl: '/api' })` + `useFlueAgent({ name, id })`
-  expect).
+  the agents under `/api`. The UI addresses each conversation by URL —
+  `useFlueAgent({ url: '/api/agents/assistant/<id>' })` — the mount path
+  app.ts chose plus a caller-chosen conversation id.
 
 Build order matters: the server build empties `dist/`, so it runs first and
 the UI build lands in `dist/client` afterwards (see the `build` script).

@@ -20,7 +20,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
-import { parseAgentUrl } from '@/lib/flue-client'
 import { useConversations } from '@/state/conversations'
 import { useSettings } from '@/state/settings'
 import { SettingsDialog } from './settings-dialog'
@@ -28,7 +27,6 @@ import { SettingsDialog } from './settings-dialog'
 export function AppSidebar() {
   const { conversations, remove } = useConversations()
   const { connection, agentName } = useSettings()
-  const { baseUrl } = parseAgentUrl(connection.agentUrl)
   const navigate = useNavigate()
   const params = useParams({ strict: false }) as { chatId?: string }
   const activeId = params.chatId
@@ -103,7 +101,7 @@ export function AppSidebar() {
                 <span className="truncate text-xs font-medium">
                   {agentName || 'No agent configured'}
                 </span>
-                <span className="truncate text-[0.7rem] text-muted-foreground">{baseUrl}</span>
+                <span className="truncate text-[0.7rem] text-muted-foreground">{connection.agentUrl}</span>
               </span>
             </Button>
           }

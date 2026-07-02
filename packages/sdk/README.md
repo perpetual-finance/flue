@@ -1,9 +1,10 @@
 # Flue — The Agent Harness Framework
 
-Not another SDK. Build autonomous agents and powerful AI workflows with Flue's programmable TypeScript harness.
+Not another SDK. Build autonomous agents with Flue's programmable TypeScript harness.
 
 ```ts
 // agents/triage.ts
+'use agent';
 import { defineAgent, type AgentRouteHandler } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 import triage from '../skills/triage/SKILL.md' with { type: 'skill' };
@@ -32,6 +33,25 @@ export default defineAgent(() => ({
 }));
 ```
 
+Talk to a deployed agent with `@flue/sdk`. Your application's route map decides where each agent lives (`app.route('/agents/triage', triage.route())`); a client addresses one conversation by URL — the mount URL plus a caller-chosen conversation id:
+
+```ts
+import { createFlueClient } from '@flue/sdk';
+
+const conversation = createFlueClient({
+  url: 'https://api.example.com/agents/triage/123456',
+});
+
+const admission = await conversation.send({
+  message: { kind: 'user', body: 'New bug report: checkout 500s on submit.' },
+});
+await conversation.wait(admission);           // resolves when the submission settles
+const { messages } = await conversation.history();
+
+conversation.observe();                       // history catch-up + live updates
+await conversation.abort();                   // abort in-flight/queued work
+```
+
 ## The framework for building the next generation of agents.
 
 The first agents were built with raw LLM API calls. This worked for simple chatbots and scripted tasks, but not much else.
@@ -45,7 +65,7 @@ Agents like Claude Code and Codex broke the mold. These were _real agents._ Auto
 Build agents that can safely take action, maintain continuity, and connect to the systems where work already happens.
 
 - **[Agents](https://flueframework.com/docs/guide/building-agents/)** — Build agents that can keep context across conversations and events as they autonomously work toward a goal.
-- **[Workflows](https://flueframework.com/docs/guide/workflows/)** — Run structured automations where your code guides agent reasoning from a clear input to a finished result.
+- **[Actions](https://flueframework.com/docs/guide/actions/)** — Give agents deterministic, model-callable jobs so structured automations run inside a durable conversation.
 - **[Sandboxes](https://flueframework.com/docs/guide/sandboxes/)** — Give agents a secure environment where they can use tools, modify files, and autonomously complete real work.
 - **[Durable Execution](https://flueframework.com/docs/guide/durable-execution/)** — Learn how agents preserve progress through failures and restarts with durable recovery for accepted work.
 - **[Subagents](https://flueframework.com/docs/guide/subagents/)** — Define specialized roles for different tasks, then let your agent delegate work to the right expert.
@@ -70,6 +90,6 @@ Build agents that can safely take action, maintain continuity, and connect to th
 | ----------------------------------------------- | ------------------------------------------------------ |
 | [`@flue/runtime`](packages/runtime)             | Runtime: harness, sessions, tools, sandbox             |
 | [`@flue/cli`](packages/cli)                     | CLI and build/dev tooling (`flue` binary)              |
-| [`@flue/sdk`](packages/sdk)                     | Client SDK for consuming deployed agents and workflows |
+| [`@flue/sdk`](packages/sdk)                     | Client SDK for consuming deployed agent conversations  |
 | [`@flue/opentelemetry`](packages/opentelemetry) | OpenTelemetry tracing adapter                          |
 | [`@flue/postgres`](packages/postgres)           | Postgres persistence adapter                           |

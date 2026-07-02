@@ -1,8 +1,7 @@
-import type { ConversationLiveMode, FlueClient } from '@flue/sdk';
+import { type ConversationLiveMode, createFlueClient, type FlueClient } from '@flue/sdk';
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { type AgentSnapshot, emptyAgentState } from './agent-reducer.ts';
 import { AgentSession, type SendMessageOptions } from './agent-session.ts';
-import { useResolvedFlueClient } from './provider.ts';
 
 const emptySnapshot: AgentSnapshot = {
 	messages: emptyAgentState.messages,
@@ -14,10 +13,20 @@ const emptySnapshot: AgentSnapshot = {
 const emptySubscribe = () => () => {};
 
 export interface UseFlueAgentOptions {
-	name: string;
-	id?: string;
-	live?: ConversationLiveMode;
+	/**
+	 * URL of one agent conversation: wherever the application mounts the
+	 * agent's routes plus the caller-chosen conversation id
+	 * (`/api/agents/triage/123`). Relative URLs resolve against the browser
+	 * origin. Omit (together with `client`) to keep the hook dormant.
+	 */
+	url?: string;
+	/**
+	 * Pre-configured conversation client, for custom headers, auth, or fetch
+	 * behavior (`createFlueClient({ url, headers })`). Takes precedence over
+	 * `url`. Memoize it — a new client instance replaces the session.
+	 */
 	client?: FlueClient;
+	live?: ConversationLiveMode;
 }
 
 export interface UseFlueAgentResult extends AgentSnapshot {
@@ -31,15 +40,20 @@ export interface UseFlueAgentResult extends AgentSnapshot {
 	refresh(): void;
 }
 
-export function useFlueAgent(options: UseFlueAgentOptions): UseFlueAgentResult {
-	const client = useResolvedFlueClient(options.client);
+export function useFlueAgent(options: UseFlueAgentOptions = {}): UseFlueAgentResult {
 	// Default to SSE: lower-latency token-by-token streaming for chat UIs.
 	// Safe because React consumes only via observe(), which dedupes redelivered
 	// chunks; the SDK transport falls back to long-poll if SSE can't stay open.
 	const live = options.live ?? 'sse';
+	const client = useMemo(
+		() =>
+			options.client ??
+			(options.url === undefined ? undefined : createFlueClient({ url: options.url })),
+		[options.client, options.url],
+	);
 	const session = useMemo(
-		() => (options.id ? new AgentSession(client, options.name, options.id, live) : undefined),
-		[client, options.name, options.id, live],
+		() => (client ? new AgentSession(client, live) : undefined),
+		[client, live],
 	);
 	useEffect(() => {
 		session?.start();
@@ -55,7 +69,7 @@ export function useFlueAgent(options: UseFlueAgentOptions): UseFlueAgentResult {
 		sendMessage: session
 			? session.sendMessage.bind(session)
 			: async () => {
-					throw new Error('useFlueAgent() cannot send without an agent id');
+					throw new Error('useFlueAgent() cannot send without a conversation url');
 				},
 		refresh: session ? session.refresh : () => {},
 	};

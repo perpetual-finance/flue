@@ -1,23 +1,22 @@
 import {
 	type FlueConversationMessage,
 	type FlueConversationPart,
-	FlueProvider,
 	useFlueAgent,
 } from '@flue/react';
-import { createFlueClient } from '@flue/sdk';
 import { type FormEvent, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
-const client = createFlueClient({ baseUrl: '/api' });
-
 function App() {
 	const [input, setInput] = useState('');
-	const [instanceId] = useState(() => crypto.randomUUID());
+	const [conversationId] = useState(() => crypto.randomUUID());
 	const [demoId] = useState(() => crypto.randomUUID());
 	const [actionError, setActionError] = useState<string>();
-	const agent = useFlueAgent({ name: 'assistant', id: instanceId });
-	const demo = useFlueAgent({ name: 'demo', id: demoId });
+	// A conversation is addressed by URL: the mount path app.ts chose for the
+	// agent (`app.route('/api/agents/assistant', ...)`) plus a caller-chosen
+	// conversation id. Relative URLs resolve against the browser origin.
+	const agent = useFlueAgent({ url: `/api/agents/assistant/${conversationId}` });
+	const demo = useFlueAgent({ url: `/api/agents/demo/${demoId}` });
 
 	async function submit(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
@@ -144,8 +143,4 @@ function partKey(part: FlueConversationPart): string {
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing React root element');
 
-createRoot(root).render(
-	<FlueProvider client={client}>
-		<App />
-	</FlueProvider>,
-);
+createRoot(root).render(<App />);

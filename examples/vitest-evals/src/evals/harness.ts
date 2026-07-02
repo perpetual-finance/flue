@@ -3,8 +3,14 @@ import { createFlueClient, type FlueConversationMessage } from '@flue/sdk';
 import { createHarness, type SimpleToolCallRecord } from 'vitest-evals';
 
 export interface FlueAgentHarnessOptions {
-	agentName: string;
-	baseUrl?: string;
+	/**
+	 * Absolute URL where the agent's routes are mounted (wherever the
+	 * application's app.ts mounts `agent.route()`). Each eval case runs in a
+	 * fresh conversation at `<agentUrl>/eval-<uuid>`.
+	 */
+	agentUrl: string;
+	/** Harness display name; defaults to the agent URL's last path segment. */
+	name?: string;
 	token?: string;
 	headers?: Record<string, string>;
 }
@@ -44,22 +50,25 @@ function collectToolCalls(messages: FlueConversationMessage[]): SimpleToolCallRe
 }
 
 export function createFlueAgentHarness(options: FlueAgentHarnessOptions) {
-	const client = createFlueClient({
-		baseUrl: options.baseUrl ?? process.env.FLUE_BASE_URL ?? 'http://127.0.0.1:3583',
-		token: options.token,
-		headers: options.headers,
-	});
+	const agentUrl = options.agentUrl.replace(/\/+$/, '');
+	const agentName = options.name ?? (agentUrl.split('/').at(-1) as string);
 
 	return createHarness<string, string>({
-		name: `flue-${options.agentName}-agent`,
+		name: `flue-${agentName}-agent`,
 		run: async ({ input, signal }) => {
-			const instanceId = `eval-${crypto.randomUUID()}`;
-			const admission = await client.agents.send(options.agentName, instanceId, {
+			// A fresh conversation per case: the caller constructs the URL by
+			// appending a new id to the agent's mount URL.
+			const conversation = createFlueClient({
+				url: `${agentUrl}/eval-${crypto.randomUUID()}`,
+				token: options.token,
+				headers: options.headers,
+			});
+			const admission = await conversation.send({
 				message: { kind: 'user', body: input },
 				signal,
 			});
-			await client.agents.wait(admission, { signal });
-			const history = await client.agents.history(options.agentName, instanceId, { signal });
+			await conversation.wait(admission, { signal });
+			const history = await conversation.history({ signal });
 			const reply = lastAssistantMessage(history.messages);
 			const usage = reply?.metadata?.usage;
 			const model = reply?.metadata?.model;

@@ -42,8 +42,7 @@ function ConsoleUi({ controller }: { controller: ConsoleController }) {
 		setDraft((value) => `${value}${text.replace(/[\r\n]+/g, ' ')}`);
 	});
 
-	const resourceId = snapshot.resource.kind === 'agent' ? snapshot.resource.instanceId : snapshot.id;
-	const subject = `${snapshot.resource.kind} ${snapshot.resource.name}${resourceId ? `  ${resourceId}` : ''}`;
+	const subject = snapshot.url;
 	const status = closing ? 'closing' : snapshot.active ? 'prompt active' : snapshot.status;
 
 	return (
@@ -58,24 +57,22 @@ function ConsoleUi({ controller }: { controller: ConsoleController }) {
 				<Text dimColor>  ·  </Text>
 				<Text color={snapshot.status === 'failed' ? 'red' : snapshot.active ? 'yellow' : 'green'}>{status}</Text>
 			</Box>
-			{snapshot.resource.kind === 'agent' ? (
-				<Box borderStyle="round" borderColor={snapshot.status === 'failed' ? 'red' : 'blue'} paddingX={1}>
-					<Text color="blue">› </Text>
-					{snapshot.composerEnabled && !closing ? (
-						<TextInput
-							value={draft}
-							onChange={(value) => setDraft(value.replace(/[\r\n]+/g, ' '))}
-							onSubmit={(value) => {
-								const message = value.trim();
-								if (!message) return;
-								setDraft('');
-								void controller.submit(message).catch(() => {});
-							}}
-							placeholder={snapshot.active ? 'Send another message' : 'Message agent'}
-						/>
-					) : <Text dimColor>{closing ? 'Closing' : 'Prompt active'}</Text>}
-				</Box>
-			) : null}
+			<Box borderStyle="round" borderColor={snapshot.status === 'failed' ? 'red' : 'blue'} paddingX={1}>
+				<Text color="blue">› </Text>
+				{snapshot.composerEnabled && !closing ? (
+					<TextInput
+						value={draft}
+						onChange={(value) => setDraft(value.replace(/[\r\n]+/g, ' '))}
+						onSubmit={(value) => {
+							const message = value.trim();
+							if (!message) return;
+							setDraft('');
+							void controller.submit(message).catch(() => {});
+						}}
+						placeholder={snapshot.active ? 'Send another message' : 'Message agent'}
+					/>
+				) : <Text dimColor>{closing ? 'Closing' : 'Prompt active'}</Text>}
+			</Box>
 		</>
 	);
 }

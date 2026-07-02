@@ -4,8 +4,13 @@ export type RequestHeaders =
 	| (() => Record<string, string> | Promise<Record<string, string>>);
 
 export interface HttpClientOptions {
-	/** URL where the public `flue()` sub-app is mounted, including any pathname. */
-	baseUrl: string;
+	/**
+	 * URL of one agent conversation: the URL where the agent's routes are
+	 * mounted plus the caller-chosen conversation id
+	 * (`https://host/agents/triage/123`). Relative URLs resolve against the
+	 * browser origin.
+	 */
+	url: string;
 	/** Custom HTTP implementation. Defaults to the global `fetch`. */
 	fetch?: typeof fetch;
 	/** Headers merged into each HTTP request. */
@@ -16,7 +21,8 @@ export interface HttpClientOptions {
 
 export interface JsonRequestOptions {
 	method?: string;
-	path: string;
+	/** Path suffix appended to the conversation URL (empty for the conversation itself). */
+	path?: string;
 	query?: Record<string, string | number | boolean | undefined>;
 	body?: unknown;
 	headers?: Record<string, string>;
@@ -39,13 +45,14 @@ export class FlueApiError extends Error {
 }
 
 export class HttpClient {
-	readonly baseUrl: string;
+	/** Fully resolved conversation URL (no trailing slash). */
+	readonly conversationUrl: string;
 	readonly fetchImpl: typeof fetch;
 	private headers: RequestHeaders | undefined;
 	private token: string | undefined;
 
 	constructor(options: HttpClientOptions) {
-		this.baseUrl = resolveBaseUrl(options.baseUrl).replace(/\/+$/, '');
+		this.conversationUrl = resolveConversationUrl(options.url).replace(/\/+$/, '');
 		// The global `fetch` must be called with `globalThis` as its receiver;
 		// browsers throw "Illegal invocation" if it's invoked as a method on
 		// another object (here, the HttpClient instance via `this.fetchImpl(...)`).
@@ -56,7 +63,7 @@ export class HttpClient {
 	}
 
 	async json<T>(options: JsonRequestOptions): Promise<T> {
-		const response = await this.fetchImpl(this.url(options.path, options.query), {
+		const response = await this.fetchImpl(this.url(options.path ?? '', options.query), {
 			method: options.method ?? 'GET',
 			headers: await this.requestHeaders(options.headers, options.body !== undefined),
 			body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -65,8 +72,9 @@ export class HttpClient {
 		return parseJsonResponse<T>(response);
 	}
 
+	/** Resolve a URL under the conversation: `''` for the conversation itself, or a `/suffix`. */
 	url(path: string, query?: Record<string, string | number | boolean | undefined>): string {
-		const url = new URL(path.replace(/^\/+/, ''), `${this.baseUrl}/`);
+		const url = new URL(`${this.conversationUrl}${path}`);
 		for (const [key, value] of Object.entries(query ?? {})) {
 			if (value !== undefined) url.searchParams.set(key, String(value));
 		}
@@ -109,15 +117,15 @@ export class HttpClient {
 	}
 }
 
-function resolveBaseUrl(baseUrl: string): string {
+function resolveConversationUrl(url: string): string {
 	try {
-		return new URL(baseUrl).toString();
+		return new URL(url).toString();
 	} catch {
 		const origin = globalThis.location?.origin;
 		if (!origin) {
-			throw new TypeError('relative baseUrl requires a browser; pass an absolute URL');
+			throw new TypeError('relative url requires a browser; pass an absolute URL');
 		}
-		return new URL(baseUrl, origin).toString();
+		return new URL(url, origin).toString();
 	}
 }
 

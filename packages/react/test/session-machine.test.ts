@@ -1,35 +1,20 @@
-import type { FlueClient, FlueEvent, FlueEventStream } from '@flue/sdk';
+import type { FlueClient } from '@flue/sdk';
 import { describe, expect, it, vi } from 'vitest';
 import { AgentSession } from '../src/agent-session.ts';
-import { WorkflowRun } from '../src/workflow-run.ts';
 import { conversation, createFakeObservation } from './fixtures/observation.ts';
 
-function streamFrom<T>(events: T[], offset = 'offset-1'): FlueEventStream<T> {
-	return {
-		offset,
-		cancel: vi.fn(),
-		async *[Symbol.asyncIterator]() {
-			for (const event of events) yield event;
-		},
-	};
-}
-
 function client(overrides: Partial<FlueClient>): FlueClient {
-	return overrides as FlueClient;
+	return { url: 'https://flue.test/agents/agent/id', ...overrides } as FlueClient;
 }
 
 describe('AgentSession', () => {
 	it('projects an observed snapshot before applying observed live updates', () => {
 		const observation = createFakeObservation();
 		const observe = vi.fn().mockReturnValue(observation);
-		const session = new AgentSession(
-			client({ agents: { observe } as unknown as FlueClient['agents'] }),
-			'agent',
-			'id',
-		);
+		const session = new AgentSession(client({ observe }));
 
 		session.start();
-		expect(observe).toHaveBeenCalledWith('agent', 'id', { live: 'sse' });
+		expect(observe).toHaveBeenCalledWith({ live: 'sse' });
 
 		observation.emit({
 			conversation: conversation([
@@ -80,11 +65,7 @@ describe('AgentSession', () => {
 	it('resumes the observation when refresh() is called for an absent conversation', () => {
 		const observation = createFakeObservation();
 		const observe = vi.fn().mockReturnValue(observation);
-		const session = new AgentSession(
-			client({ agents: { observe } as unknown as FlueClient['agents'] }),
-			'agent',
-			'id',
-		);
+		const session = new AgentSession(client({ observe }));
 
 		session.start();
 		observation.emit({ conversation: undefined, offset: undefined, phase: 'absent', error: undefined });
@@ -105,11 +86,7 @@ describe('AgentSession', () => {
 			offset: 'offset-history',
 			submissionId: 'submission-1',
 		});
-		const session = new AgentSession(
-			client({ agents: { observe, send } as unknown as FlueClient['agents'] }),
-			'agent',
-			'id',
-		);
+		const session = new AgentSession(client({ observe, send }));
 
 		session.start();
 		observation.emit({
@@ -120,6 +97,7 @@ describe('AgentSession', () => {
 		});
 		await session.sendMessage('hello');
 		expect(session.getSnapshot().status).toBe('submitted');
+		expect(send).toHaveBeenCalledWith({ message: { kind: 'user', body: 'hello' } });
 
 		observation.emit({
 			conversation: conversation([
@@ -140,31 +118,7 @@ describe('AgentSession', () => {
 		// The canonical user message adopts the optimistic local id, so the row is
 		// stable across the optimistic→confirmed swap.
 		expect(session.getSnapshot().messages).toHaveLength(1);
-		expect(session.getSnapshot().messages[0]?.id).toBe('local:agent:id:1');
+		expect(session.getSnapshot().messages[0]?.id).toBe('local:1');
 		session.dispose();
-	});
-});
-
-describe('WorkflowRun', () => {
-	it('streams workflow events without using conversation APIs', async () => {
-		const stream = vi.fn().mockReturnValue(
-			streamFrom<FlueEvent>([
-				{
-					v: 3,
-					type: 'run_end',
-					runId: 'run-1',
-					result: 'done',
-					isError: false,
-					durationMs: 1,
-					eventIndex: 0,
-					timestamp: '2026-06-26T00:00:00.000Z',
-				},
-			]),
-		);
-		const run = new WorkflowRun(client({ runs: { stream } as unknown as FlueClient['runs'] }), 'run-1');
-		run.start();
-		await Promise.resolve();
-		await Promise.resolve();
-		expect(run.getSnapshot()).toMatchObject({ status: 'completed', result: 'done' });
 	});
 });

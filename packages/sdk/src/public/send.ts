@@ -25,15 +25,15 @@ export type DeliveredMessage =
 			tagName?: string;
 	  };
 
-/** Options for one direct-agent prompt. */
+/** Options for delivering one message into the conversation. */
 export interface AgentPromptOptions {
 	message: DeliveredMessage;
 	signal?: AbortSignal;
 }
 
-/** Result of admitting one agent prompt. All fields are server-provided. */
+/** Result of admitting one message. All fields are server-provided. */
 export interface AgentSendResult {
-	/** Fully resolved DS-compatible stream URL for observing the agent instance's events. */
+	/** Fully resolved DS-compatible stream URL for observing the conversation's events. */
 	streamUrl: string;
 	/**
 	 * Opaque DS stream offset captured at admission. Reading `streamUrl` from
@@ -44,15 +44,13 @@ export interface AgentSendResult {
 	submissionId: string;
 }
 
-export async function sendAgent(
+/** `POST <conversation url>` — 202 admission of one delivered message. */
+export async function sendConversationMessage(
 	http: HttpClient,
-	name: string,
-	id: string,
 	options: AgentPromptOptions,
 ): Promise<AgentSendResult> {
 	return http.json<AgentSendResult>({
 		method: 'POST',
-		path: `/agents/${encodeURIComponent(name)}/${encodeURIComponent(id)}`,
 		body: options.message,
 		signal: options.signal,
 	});

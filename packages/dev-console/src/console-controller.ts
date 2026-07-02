@@ -1,20 +1,10 @@
-import type {
-	DeliveredAttachment,
-	ConversationStreamChunk,
-	FlueClient,
-	FlueEvent,
-	WorkflowRunResult,
-} from '@flue/sdk';
+import type { ConversationStreamChunk, DeliveredAttachment, FlueClient } from '@flue/sdk';
 import {
 	type ConsoleTranscript,
 	createConsoleTranscript,
 	reduceConsoleTranscript,
 	type TranscriptAction,
 } from './console-transcript.ts';
-
-export type ConsoleResource =
-	| { kind: 'agent'; name: string; instanceId: string }
-	| { kind: 'workflow'; name: string };
 
 type ConsoleStatus = 'ready' | 'active' | 'completed' | 'failed' | 'closing' | 'closed';
 
@@ -24,9 +14,8 @@ export interface ConsoleQueuedPrompt {
 }
 
 interface ConsoleSnapshot {
-	readonly resource: ConsoleResource;
-	readonly id?: string;
-	readonly server: string;
+	/** The conversation URL the console is attached to. */
+	readonly url: string;
 	readonly status: ConsoleStatus;
 	readonly active: boolean;
 	readonly composerEnabled: boolean;
@@ -36,8 +25,6 @@ interface ConsoleSnapshot {
 
 export interface ConsoleControllerOptions {
 	readonly client: FlueClient;
-	readonly resource: ConsoleResource;
-	readonly server: string;
 	readonly initialInput?: unknown;
 }
 
@@ -55,19 +42,13 @@ interface AgentInput {
 	images?: DeliveredAttachment[];
 }
 
-type ExecutionTarget =
-	| { kind: 'agent'; name: string; instanceId: string; input: AgentInput }
-	| { kind: 'workflow'; name: string; input?: unknown };
-
 export function createConsoleController(options: ConsoleControllerOptions): ConsoleController {
 	const listeners = new Set<() => void>();
 	let snapshot: ConsoleSnapshot = {
-		resource: options.resource,
-		id: options.resource.kind === 'agent' ? options.resource.instanceId : undefined,
-		server: options.server,
+		url: options.client.url,
 		status: 'ready',
 		active: false,
-		composerEnabled: options.resource.kind === 'agent',
+		composerEnabled: true,
 		queuedPrompts: [],
 		transcript: createConsoleTranscript(),
 	};
@@ -102,14 +83,8 @@ export function createConsoleController(options: ConsoleControllerOptions): Cons
 		},
 		submit(message) {
 			if (closing) throw new Error('Console is closing.');
-			if (options.resource.kind !== 'agent') throw new Error('Workflow consoles are read-only.');
 			const queuedPrompt = enqueuePrompt(message);
-			return trackExecution(execute({
-				kind: 'agent',
-				name: options.resource.name,
-				instanceId: options.resource.instanceId,
-				input: { message },
-			}, queuedPrompt));
+			return trackExecution(execute({ message }, queuedPrompt));
 		},
 		close() {
 			if (closePromise) return closePromise;
@@ -130,13 +105,10 @@ export function createConsoleController(options: ConsoleControllerOptions): Cons
 	return controller;
 
 	async function start(): Promise<void> {
-		if (options.resource.kind === 'agent' && options.initialInput !== undefined) {
-			const input = parseAgentInput(options.initialInput);
-			const queuedPrompt = enqueuePrompt(input.message);
-			await trackExecution(execute({ ...options.resource, input }, queuedPrompt));
-		} else if (options.resource.kind === 'workflow') {
-			await trackExecution(execute({ ...options.resource, input: options.initialInput }));
-		}
+		if (options.initialInput === undefined) return;
+		const input = parseAgentInput(options.initialInput);
+		const queuedPrompt = enqueuePrompt(input.message);
+		await trackExecution(execute(input, queuedPrompt));
 	}
 
 	function trackExecution(execution: Promise<void>): Promise<void> {
@@ -159,46 +131,39 @@ export function createConsoleController(options: ConsoleControllerOptions): Cons
 		return snapshot.queuedPrompts.filter((prompt) => prompt.id !== queuedPrompt.id);
 	}
 
-	async function execute(target: ExecutionTarget, queuedPrompt?: ConsoleQueuedPrompt): Promise<void> {
+	async function execute(input: AgentInput, queuedPrompt: ConsoleQueuedPrompt): Promise<void> {
 		if (closing) return;
 		const activeController = new AbortController();
 		activeControllers.add(activeController);
-		publish({ status: 'active', active: true, composerEnabled: target.kind === 'agent' });
+		publish({ status: 'active', active: true });
 		let failed = false;
 		let promptStarted = false;
-		const onEvent = (event: ConversationStreamChunk | FlueEvent): void => {
+		const onEvent = (event: ConversationStreamChunk): void => {
 			if (closing) return;
-			const id = !('conversationId' in event) && event.type === 'run_start' ? event.runId : snapshot.id;
-			if (queuedPrompt && !promptStarted) {
+			if (!promptStarted) {
 				promptStarted = true;
-				publish(
-					{ id, queuedPrompts: removeQueuedPrompt(queuedPrompt) },
-					{ type: 'prompt', message: queuedPrompt.message },
-				);
-				publish({ id }, { type: 'event', event });
-				return;
-			}
-			publish({ id }, { type: 'event', event });
-		};
-		try {
-			const result = target.kind === 'agent'
-				? await runAgentTarget(target, onEvent, activeController.signal)
-				: await runWorkflowTarget(target, onEvent, activeController.signal);
-			if (closing) return;
-			if (queuedPrompt && !promptStarted) {
 				publish(
 					{ queuedPrompts: removeQueuedPrompt(queuedPrompt) },
 					{ type: 'prompt', message: queuedPrompt.message },
 				);
 			}
-			const id = result.kind === 'workflow' ? result.runId : snapshot.id;
-			publish({ id });
+			publish({}, { type: 'event', event });
+		};
+		try {
+			await runPrompt(input, onEvent, activeController.signal);
+			if (closing) return;
+			if (!promptStarted) {
+				publish(
+					{ queuedPrompts: removeQueuedPrompt(queuedPrompt) },
+					{ type: 'prompt', message: queuedPrompt.message },
+				);
+			}
 		} catch (error) {
 			failed = !activeController.signal.aborted;
 			if (failed) batchFailed = true;
 			if (!closing && failed) {
 				publish(
-					queuedPrompt && !promptStarted ? { queuedPrompts: removeQueuedPrompt(queuedPrompt) } : {},
+					!promptStarted ? { queuedPrompts: removeQueuedPrompt(queuedPrompt) } : {},
 					{ type: 'error', error },
 				);
 			}
@@ -209,45 +174,30 @@ export function createConsoleController(options: ConsoleControllerOptions): Cons
 				publish({
 					status: active ? 'active' : batchFailed ? 'failed' : 'completed',
 					active,
-					composerEnabled: target.kind === 'agent',
 				});
 			}
 		}
 	}
 
-	async function runAgentTarget(
-		target: Extract<ExecutionTarget, { kind: 'agent' }>,
-		onEvent: (event: ConversationStreamChunk | FlueEvent) => void,
+	async function runPrompt(
+		input: AgentInput,
+		onEvent: (event: ConversationStreamChunk) => void,
 		signal: AbortSignal,
-	): Promise<{ kind: 'agent' }> {
+	): Promise<void> {
 		const admission = admissionQueue.then(() => {
 			signal.throwIfAborted();
-			return options.client.agents.send(target.name, target.instanceId, {
+			return options.client.send({
 				message: {
 					kind: 'user',
-					body: target.input.message,
-					...(target.input.images?.length ? { attachments: target.input.images } : {}),
+					body: input.message,
+					...(input.images?.length ? { attachments: input.images } : {}),
 				},
 				signal,
 			});
 		});
 		admissionQueue = admission.then(() => undefined, () => undefined);
 		const admitted = await admission;
-		await options.client.agents.wait(admitted, { onEvent, signal });
-		return { kind: 'agent' };
-	}
-
-	async function runWorkflowTarget(
-		target: Extract<ExecutionTarget, { kind: 'workflow' }>,
-		onEvent: (event: ConversationStreamChunk | FlueEvent) => void,
-		signal: AbortSignal,
-	): Promise<{ kind: 'workflow'; runId: string; result: unknown }> {
-		const completed: WorkflowRunResult = await options.client.workflows.run(target.name, {
-			input: target.input,
-			onEvent,
-			signal,
-		});
-		return { kind: 'workflow', runId: completed.runId, result: completed.result };
+		await options.client.wait(admitted, { onEvent, signal });
 	}
 }
 

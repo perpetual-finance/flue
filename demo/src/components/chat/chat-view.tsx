@@ -1,6 +1,7 @@
-import { useFlueAgent, useFlueClient } from '@flue/react'
+import { useFlueAgent } from '@flue/react'
 import { AlertCircle } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { createConversationClient } from '@/lib/flue-client'
 import { DEFAULT_TITLE, useConversations } from '@/state/conversations'
 import { useSettings } from '@/state/settings'
 import { ChatHeader } from '../chat-header'
@@ -14,12 +15,18 @@ function truncateTitle(message: string): string {
 
 export function ChatView({ conversationId }: { conversationId: string }) {
   const conversations = useConversations()
-  const client = useFlueClient()
   const { connection } = useSettings()
   const conversation = conversations.get(conversationId)
   const agentName = conversation?.agentName ?? ''
 
-  const agent = useFlueAgent({ name: agentName, id: conversationId, live: connection.live })
+  // One client per conversation URL: the configured agent mount URL plus this
+  // conversation's id. Recreate it only when the target or token changes.
+  const client = useMemo(
+    () => createConversationClient(connection, conversationId),
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+    [connection.agentUrl, connection.token, conversationId],
+  )
+  const agent = useFlueAgent({ client, live: connection.live })
   const busy = agent.status === 'submitted' || agent.status === 'streaming'
   const [canceling, setCanceling] = useState(false)
   const [cancelError, setCancelError] = useState<Error | undefined>()
@@ -44,7 +51,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     setCanceling(true)
     setCancelError(undefined)
     try {
-      const result = await client.agents.abort(agentName, conversationId)
+      const result = await client.abort()
       conversations.touch(conversationId)
       if (!result.aborted) setCanceling(false)
     } catch (error) {

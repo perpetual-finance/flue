@@ -1,12 +1,10 @@
-import type { FlueClient } from '@flue/sdk'
 import { createContext, type ReactNode, useContext, useMemo, useState } from 'react'
-import { createClientFor, DEFAULT_CONNECTION, parseAgentUrl } from '@/lib/flue-client'
+import { agentNameFromUrl, DEFAULT_CONNECTION } from '@/lib/flue-client'
 import { loadJSON, saveJSON, STORAGE_KEYS } from '@/lib/storage'
 import type { Connection } from '@/lib/types'
 
 interface SettingsContextValue {
   connection: Connection
-  client: FlueClient
   /** Agent name derived from the connection URL (the part after `/agents/`). */
   agentName: string
   setConnection: (connection: Connection) => void
@@ -43,23 +41,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     saveJSON(STORAGE_KEYS.connection, next)
   }
 
-  // Recreate the client only when the base URL or token actually changes; the
-  // transport (`live`) is applied per-observe, not baked into the client.
-  const client = useMemo(
-    () => createClientFor(connection),
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-    [connection.agentUrl, connection.token],
-  )
-
   const value = useMemo<SettingsContextValue>(
     () => ({
       connection,
-      client,
-      agentName: parseAgentUrl(connection.agentUrl).agentName,
+      agentName: agentNameFromUrl(connection.agentUrl),
       setConnection,
     }),
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-    [connection, client],
+    [connection],
   )
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>

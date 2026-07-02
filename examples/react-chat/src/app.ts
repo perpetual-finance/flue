@@ -1,9 +1,9 @@
 /**
- * The route map: every agent is mounted explicitly under /api, preserving the
- * URL shape the SDK/React client's `{ name, id }` addressing expects
- * (`/api/agents/<name>/<id>`). Static UI assets built by vite.config.ui.ts
- * are served from dist/client (paths relative to the process cwd — run the
- * server from this directory).
+ * The route map: every agent is mounted explicitly under /api. The UI's
+ * conversation URLs (`/api/agents/<name>/<id>`) are simply this app's chosen
+ * layout — the client addresses whatever URL the app mounts. Static UI assets
+ * built by vite.config.ui.ts are served from dist/client (paths relative to
+ * the process cwd — run the server from this directory).
  */
 import { registerProvider } from '@flue/runtime';
 import { serveStatic } from '@hono/node-server/serve-static';

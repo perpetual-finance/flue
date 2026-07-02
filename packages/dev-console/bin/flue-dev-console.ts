@@ -3,20 +3,20 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { createFlueClient } from '@flue/sdk';
 import { ulid } from 'ulidx';
-import {
-	type ConsoleResource,
-	createConsoleController,
-} from '../src/console-controller.ts';
+import { createConsoleController } from '../src/console-controller.ts';
 import { boundedShutdown } from '../src/console-shutdown.ts';
 import { openConsoleUi } from '../src/console-ui.tsx';
 
 const usage = `Usage:
-  flue-dev-console <agent:name|workflow:name> --server <url> [options]
+  flue-dev-console <agent-url> [options]
+
+The positional is the absolute URL where the agent's routes are mounted
+(wherever the application's app.ts mounts \`agent.route()\`). The console
+attaches to one conversation at <agent-url>/<id>.
 
 Options:
-  --server <url>         Absolute URL of the mounted Flue application
-  --id <id>              Agent instance ID; generated when omitted
-  --input <json>         Initial agent input or workflow input
+  --id <id>              Conversation id appended to the agent URL; generated when omitted
+  --input <json>         Initial message ({"message": "...", "images": [...]})
   --token <token>        Bearer token sent with every request
   --header 'Name: value' Repeatable request header
   --help                 Show usage
@@ -29,7 +29,6 @@ async function main(): Promise<void> {
 		allowPositionals: true,
 		strict: true,
 		options: {
-			server: { type: 'string' },
 			id: { type: 'string' },
 			input: { type: 'string' },
 			token: { type: 'string' },
@@ -47,13 +46,9 @@ async function main(): Promise<void> {
 		process.stdout.write(`${pkg.version}\n`);
 		return;
 	}
-	const resource = parseResource(positionals);
-	const server = parseServer(values.server);
-	if (resource.kind === 'workflow' && values.id !== undefined) {
-		throw new Error('--id is supported only for agents.');
-	}
+	const agentUrl = parseAgentUrl(positionals);
 	const initialInput = values.input === undefined ? undefined : parseJson(values.input);
-	if (resource.kind === 'agent' && initialInput !== undefined) validateAgentInput(initialInput);
+	if (initialInput !== undefined) validateAgentInput(initialInput);
 	const headers = parseHeaders(values.header ?? []);
 	if (values.token !== undefined && headers.authorization !== undefined) {
 		throw new Error('--token cannot be combined with an Authorization header.');
@@ -61,15 +56,13 @@ async function main(): Promise<void> {
 	if (!process.stdin.isTTY || !process.stderr.isTTY) {
 		throw new Error('flue-dev-console requires an interactive TTY.');
 	}
+	const id = values.id ?? ulid();
 	const client = createFlueClient({
-		baseUrl: server,
+		url: `${agentUrl}/${encodeURIComponent(id)}`,
 		headers,
 		token: values.token,
 	});
-	const attachedResource: ConsoleResource = resource.kind === 'agent'
-		? { ...resource, instanceId: values.id ?? ulid() }
-		: resource;
-	const controller = createConsoleController({ client, resource: attachedResource, server, initialInput });
+	const controller = createConsoleController({ client, initialInput });
 	const ui = openConsoleUi(controller);
 	let shutdownPromise: Promise<void> | undefined;
 	const shutdown = (exitCode: number) => {
@@ -85,45 +78,28 @@ async function main(): Promise<void> {
 	process.once('SIGINT', () => void shutdown(130));
 	process.once('SIGTERM', () => void shutdown(143));
 	try {
-		const starting = controller.start();
-		if (resource.kind === 'workflow') {
-			await starting;
-			if (controller.getSnapshot().status === 'failed') process.exitCode = 1;
-		}
+		void controller.start();
 		await ui.waitUntilExit();
 	} finally {
 		await shutdown(typeof process.exitCode === 'number' ? process.exitCode : 0);
 	}
 }
 
-function parseResource(positionals: readonly string[]):
-	| { kind: 'agent'; name: string }
-	| { kind: 'workflow'; name: string } {
+function parseAgentUrl(positionals: readonly string[]): string {
 	const [value, ...extra] = positionals;
-	if (!value) throw new Error('Missing resource. Expected agent:<name> or workflow:<name>.');
+	if (!value) throw new Error('Missing agent URL. Expected the absolute URL where the agent is mounted.');
 	if (extra.length > 0) throw new Error(`Unexpected argument: ${extra[0]}`);
-	const separator = value.indexOf(':');
-	const kind = value.slice(0, separator);
-	const name = value.slice(separator + 1);
-	if ((kind !== 'agent' && kind !== 'workflow') || !name) {
-		throw new Error('Resource must be qualified as agent:<name> or workflow:<name>.');
-	}
-	return { kind, name };
-}
-
-function parseServer(value: string | undefined): string {
-	if (!value) throw new Error('Missing required --server <url>.');
 	let url: URL;
 	try {
 		url = new URL(value);
 	} catch {
-		throw new Error(`--server must be an absolute URL: ${JSON.stringify(value)}.`);
+		throw new Error(`The agent URL must be absolute: ${JSON.stringify(value)}.`);
 	}
 	if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-		throw new Error(`--server must use http or https: ${JSON.stringify(value)}.`);
+		throw new Error(`The agent URL must use http or https: ${JSON.stringify(value)}.`);
 	}
-	if (url.search || url.hash) throw new Error('--server must not include a query string or fragment.');
-	return url.toString().replace(/\/$/, '');
+	if (url.search || url.hash) throw new Error('The agent URL must not include a query string or fragment.');
+	return url.toString().replace(/\/+$/, '');
 }
 
 function parseHeaders(values: readonly string[]): Record<string, string> {

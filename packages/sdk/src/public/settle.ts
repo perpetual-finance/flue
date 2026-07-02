@@ -1,11 +1,10 @@
 import type { BackoffOptions } from '@durable-streams/client';
 import type { HttpClient } from '../http.ts';
-import type { FlueEvent, RunRecord } from '../types.ts';
 import {
-	type ConversationStreamChunk,
 	assertConversationStreamChunk,
+	type ConversationStreamChunk,
 } from './conversation-stream.ts';
-import type { AgentSendResult } from './invoke.ts';
+import type { AgentSendResult } from './send.ts';
 import { createFlueEventStream } from './stream.ts';
 
 export interface AgentWaitOptions {
@@ -13,24 +12,12 @@ export interface AgentWaitOptions {
 	backoffOptions?: BackoffOptions;
 	/**
 	 * Invoked for each conversation stream chunk while waiting, for progress
-	 * rendering. Prefer `client.agents.observe()` for maintained UI state.
+	 * rendering. Prefer `observe()` for maintained UI state.
 	 */
 	onEvent?: (event: ConversationStreamChunk) => void | Promise<void>;
 }
 
-export interface WorkflowRunOptions {
-	input?: unknown;
-	signal?: AbortSignal;
-	backoffOptions?: BackoffOptions;
-	onEvent?: (event: FlueEvent) => void | Promise<void>;
-}
-
-export interface WorkflowRunResult<TResult = unknown> {
-	runId: string;
-	result: TResult;
-}
-
-export type FlueExecutionTarget = 'agent_submission' | 'workflow_run';
+export type FlueExecutionTarget = 'agent_submission';
 export type FlueExecutionFailure = 'failed' | 'aborted' | 'terminal_event_missing';
 
 export class FlueExecutionError extends Error {
@@ -93,78 +80,21 @@ export async function waitForAgentSubmission(
 	});
 }
 
-export async function runWorkflow<TResult>(
-	http: HttpClient,
-	name: string,
-	options: WorkflowRunOptions = {},
-): Promise<WorkflowRunResult<TResult>> {
-	const admission = await http.json<{ runId: string }>({
-		method: 'POST',
-		path: `/workflows/${encodeURIComponent(name)}`,
-		body: options.input,
-		signal: options.signal,
-	});
-	const stream = createFlueEventStream<FlueEvent>(
-		{ signal: options.signal, backoffOptions: options.backoffOptions },
-		{
-			url: http.url(`/runs/${encodeURIComponent(admission.runId)}`),
-			fetch: http.fetchWithHeaders.bind(http),
-		},
-	);
-
-	for await (const event of stream) {
-		await options.onEvent?.(event);
-		throwIfAborted(options.signal);
-		if (event.type !== 'run_end' || event.runId !== admission.runId) continue;
-		if (!event.isError) return { runId: admission.runId, result: event.result as TResult };
-		throw new FlueExecutionError({
-			target: 'workflow_run',
-			targetId: admission.runId,
-			failure: 'failed',
-			error: event.error,
-		});
-	}
-
-	throwIfAborted(options.signal);
-	const record = await http.json<RunRecord>({
-		path: `/runs/${encodeURIComponent(admission.runId)}?meta`,
-		signal: options.signal,
-	});
-	if (record.status === 'completed') {
-		return { runId: admission.runId, result: record.result as TResult };
-	}
-	if (record.status === 'errored') {
-		throw new FlueExecutionError({
-			target: 'workflow_run',
-			targetId: admission.runId,
-			failure: 'failed',
-			error: record.error,
-		});
-	}
-	throw new FlueExecutionError({
-		target: 'workflow_run',
-		targetId: admission.runId,
-		failure: 'terminal_event_missing',
-	});
-}
-
 function throwIfAborted(signal?: AbortSignal): void {
 	if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
 }
 
 function executionErrorMessage(options: {
-	target: FlueExecutionTarget;
 	targetId: string;
 	failure: FlueExecutionFailure;
 	error?: unknown;
 }): string {
-	const target = options.target === 'agent_submission' ? 'Agent submission' : 'Workflow run';
 	if (options.failure === 'terminal_event_missing') {
-		return `${target} ${options.targetId} ended without a terminal event`;
+		return `Agent submission ${options.targetId} ended without a terminal event`;
 	}
 	const message = errorMessage(options.error);
 	const verb = options.failure === 'aborted' ? 'was aborted' : 'failed';
-	return `${target} ${options.targetId} ${verb}${message ? `: ${message}` : ''}`;
+	return `Agent submission ${options.targetId} ${verb}${message ? `: ${message}` : ''}`;
 }
 
 function errorMessage(error: unknown): string | undefined {

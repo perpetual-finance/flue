@@ -1,19 +1,3 @@
-export type RunStatus = 'active' | 'completed' | 'errored';
-
-/** Persisted workflow-run record. Runs are workflow-only; `workflowName` identifies the owning workflow. */
-export interface RunRecord {
-	runId: string;
-	workflowName: string;
-	status: RunStatus;
-	startedAt: string;
-	endedAt?: string;
-	isError?: boolean;
-	durationMs?: number;
-	input?: unknown;
-	result?: unknown;
-	error?: unknown;
-}
-
 /**
  * Sentinel string that replaces raw image `data` in event payloads. Events
  * never carry raw image bytes; image content blocks keep their `mimeType`
@@ -167,7 +151,17 @@ export type AgentSubmissionSettledEvent = {
 	error?: FlueSerializedError;
 };
 
-/** Observable workflow-run event. */
+/**
+ * Observable runtime activity event.
+ *
+ * The conversation wire (`observe()`/`history()`/`wait()`) does not carry this
+ * union — it carries `ConversationStreamChunk`. The union is exported for
+ * first-party presenters that also consume runtime activity delivered outside
+ * HTTP (e.g. the `flue run` CLI presenter). It mirrors the runtime's event
+ * union exactly (pinned by the wire-conformance type tests); the residual
+ * `run_start`/`run_resume`/`run_end` variants disappear when the runtime's own
+ * post-workflow event-union cleanup lands.
+ */
 export type FlueEvent = (
 	| {
 			type: 'run_start';

@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { FlueConversationSnapshot } from '../src/public/conversation.ts';
 import {
-	type ConversationStreamChunk,
-	ConversationStreamError,
 	applyConversationChunk,
 	assertConversationStreamChunk,
+	type ConversationStreamChunk,
+	ConversationStreamError,
 	createConversationStreamState,
 } from '../src/public/conversation-stream.ts';
 

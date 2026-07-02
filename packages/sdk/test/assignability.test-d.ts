@@ -6,12 +6,9 @@ import {
 	type PromptUsage as RuntimePromptUsage,
 } from '@flue/runtime';
 import type {
-	AgentConversationSnapshot as RuntimeConversationSnapshot,
 	ConversationStreamChunk as RuntimeConversationChunk,
+	AgentConversationSnapshot as RuntimeConversationSnapshot,
 } from '@flue/runtime/internal';
-// `ConversationStreamChunk` is internal to the SDK (not public API), but the
-// wire-conformance assertions below must still pin it to the runtime shape.
-import type { ConversationStreamChunk as SdkConversationChunk } from '../src/public/conversation-stream.ts';
 import {
 	type FlueConversationSnapshot,
 	IMAGE_DATA_OMITTED as SDK_IMAGE_DATA_OMITTED,
@@ -20,6 +17,9 @@ import {
 	type ModelRequestInfo as SdkModelRequestInfo,
 	type PromptUsage as SdkPromptUsage,
 } from '../src/index.ts';
+// `ConversationStreamChunk` is internal to the SDK (not public API), but the
+// wire-conformance assertions below must still pin it to the runtime shape.
+import type { ConversationStreamChunk as SdkConversationChunk } from '../src/public/conversation-stream.ts';
 
 // The runtime projects its private canonical log onto the `history`/`updates`
 // wire as these shapes; the SDK reduces them behind observe()/history(). The

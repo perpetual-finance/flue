@@ -11,8 +11,7 @@ import type { FlueEventStream } from './stream.ts';
 /**
  * Live mode for conversation observation: `'long-poll'` (offset-resumed polling)
  * or `'sse'` (a long-lived stream for lower-latency token-by-token updates). For
- * a single point-in-time read with no live updates, use
- * `client.agents.history()` instead.
+ * a single point-in-time read with no live updates, use `history()` instead.
  *
  * Both modes are safe under at-least-once redelivery. The `message-delta`
  * protocol is append-style with no per-delta sequence, but every chunk carries a
@@ -53,7 +52,7 @@ export interface AgentConversationObservation {
 
 /**
  * Internal composition seam between SDK transport and the observation state
- * machine. Not exported from the package: `client.agents.observe()` is the only
+ * machine. Not exported from the package: the client's `observe()` is the only
  * supported way to construct an observation. Tests drive observation through a
  * fake {@link AgentConversationObservationSource}.
  */

@@ -116,7 +116,7 @@ export interface FlueConversationSettlement {
 /**
  * A complete materialized conversation read at a durable-stream offset.
  *
- * Returned by `client.agents.history()` and used to seed `observe()`. The
+ * Returned by the client's `history()` and used to seed `observe()`. The
  * `offset` is an opaque durable-stream checkpoint; pass it back only through
  * Flue's own observation machinery.
  */
@@ -135,7 +135,7 @@ export interface FlueConversationState {
 	settlements: FlueConversationSettlement[];
 }
 
-/** Options for one `client.agents.history()` read. */
+/** Options for one `history()` read. */
 export interface FlueConversationHistoryOptions {
 	signal?: AbortSignal;
 }
