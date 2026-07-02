@@ -28,6 +28,10 @@ describe('transformUseAgentModule', () => {
 		);
 		expect(result?.code).not.toContain('attachments:');
 		expect(result?.map).toBeDefined();
+		// The emitted map must be self-contained: source + original text, so
+		// composed sourcemaps never lose the authored module.
+		expect(result?.map.sources).toEqual([ID]);
+		expect(result?.map.sourcesContent?.[0]).toContain(`'use agent';`);
 	});
 
 	it('detects renamed export specifiers and export-from declarations', async () => {
@@ -45,10 +49,10 @@ describe('transformUseAgentModule', () => {
 		expect(result?.code).toContain('attachments: __flue_agent_module__.attachments');
 	});
 
-	it('throws when a marked module has no default export', async () => {
+	it('throws with the directive location when a marked module has no default export', async () => {
 		await expect(
 			transform([`'use agent';`, `export const route = async (_c, next) => next();`].join('\n')),
-		).rejects.toThrow(/must default-export defineAgent/);
+		).rejects.toThrow(`Agent module ${ID}:1:1 declares 'use agent' but has no default export`);
 	});
 
 	it('returns null when the directive text appears outside the directive prologue', async () => {

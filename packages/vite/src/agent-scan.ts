@@ -220,6 +220,7 @@ function comparePaths(a: string, b: string): number {
 interface ParsedStatement {
 	readonly type: string;
 	readonly directive?: string;
+	readonly start?: number;
 }
 
 /**
@@ -229,15 +230,36 @@ interface ParsedStatement {
  * module.
  */
 export function programBodyHasAgentDirective(body: readonly unknown[]): boolean {
+	return findAgentDirectiveStatement(body) !== undefined;
+}
+
+/** The `'use agent'` directive-prologue statement of a parsed program body, if any. */
+export function findAgentDirectiveStatement(
+	body: readonly unknown[],
+): ParsedStatement | undefined {
 	for (const entry of body) {
 		const statement = entry as ParsedStatement;
 		// The directive prologue ends at the first non-directive statement.
 		if (statement.type !== 'ExpressionStatement' || typeof statement.directive !== 'string') {
 			break;
 		}
-		if (statement.directive === AGENT_DIRECTIVE) return true;
+		if (statement.directive === AGENT_DIRECTIVE) return statement;
 	}
-	return false;
+	return undefined;
+}
+
+/** 1-based line/column of a character offset, for `file:line:column` diagnostics. */
+export function sourcePosition(code: string, offset: number): { line: number; column: number } {
+	const bounded = Math.max(0, Math.min(offset, code.length));
+	let line = 1;
+	let lineStart = 0;
+	for (let index = 0; index < bounded; index += 1) {
+		if (code.charCodeAt(index) === 10) {
+			line += 1;
+			lineStart = index + 1;
+		}
+	}
+	return { line, column: bounded - lineStart + 1 };
 }
 
 /**

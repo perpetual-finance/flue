@@ -44,9 +44,22 @@ export function importAttributePlugin(): Plugin {
 		configResolved(config) {
 			viteRoot = config.root;
 		},
-		async transform(code, id) {
-			if (!/\.[cm]?[jt]sx?(?:\?|$)/i.test(id)) return null;
-			const importerPath = id.split('?')[0] ?? id;
+		buildStart() {
+			// Vite app builds can run multiple build phases with fresh plugin
+			// drivers; per-build bookkeeping must not leak across phases.
+			trackedSkillDirectories.clear();
+		},
+		transform: {
+			// Only modules that could carry an attributed import (`with { … }`)
+			// or a dynamic SKILL.md import reach the handler, which type-strips
+			// and parses — by far this plugin's hottest path.
+			filter: {
+				id: { include: /\.[cm]?[jt]sx?(?:\?|$)/i },
+				code: { include: [/with\s*\{/, /SKILL\.md/] },
+			},
+			async handler(code, id) {
+				if (!/\.[cm]?[jt]sx?(?:\?|$)/i.test(id)) return null;
+				const importerPath = id.split('?')[0] ?? id;
 			const parseableCode = /\.[cm]?tsx?(?:\?|$)/i.test(id)
 				? (await transformWithOxc(code, importerPath, {})).code
 				: code;
@@ -117,6 +130,7 @@ export function importAttributePlugin(): Plugin {
 				transformed = `${transformed.slice(0, replacement.start)}${JSON.stringify(replacement.moduleId)}${transformed.slice(replacement.end)}`;
 			}
 			return { code: transformed, map: null };
+			},
 		},
 		resolveId(source, importer) {
 			if (source.startsWith(MARKDOWN_MODULE_PREFIX)) return source;

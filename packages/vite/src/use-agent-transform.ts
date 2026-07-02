@@ -17,7 +17,11 @@
  */
 import MagicString from 'magic-string';
 import { parseAstAsync } from 'vite';
-import { parserLangForFile, programBodyHasAgentDirective } from './agent-scan.ts';
+import {
+	findAgentDirectiveStatement,
+	parserLangForFile,
+	sourcePosition,
+} from './agent-scan.ts';
 
 /** Named exports the binding contract carries onto the definition. */
 const BOUND_NAMED_EXPORTS = ['route', 'attachments', 'description'] as const;
@@ -45,13 +49,15 @@ export async function transformUseAgentModule(options: {
 	const { code, id, filePath, identity } = options;
 	const program = await parseAstAsync(code, { lang: parserLangForFile(filePath) }, filePath);
 	const body = program.body as readonly unknown[];
-	if (!programBodyHasAgentDirective(body)) return null;
+	const directive = findAgentDirectiveStatement(body);
+	if (!directive) return null;
 
 	const exports = collectExportedNames(body);
 	if (!exports.hasDefault) {
+		const { line, column } = sourcePosition(code, directive.start ?? 0);
 		throw new Error(
-			`[flue] Agent module "${filePath}" must default-export defineAgent(...). ` +
-				`The 'use agent' directive marks the module as an agent, and its default export is the agent definition.`,
+			`[flue] Agent module ${filePath}:${line}:${column} declares 'use agent' but has no default export. ` +
+				`The directive marks the module as an agent, and its default export must be the defineAgent(...) definition.`,
 		);
 	}
 
@@ -72,7 +78,13 @@ export async function transformUseAgentModule(options: {
 			'',
 		].join('\n'),
 	);
-	return { code: ms.toString(), map: ms.generateMap({ hires: 'boundary' }) };
+	// `source` + `includeContent` keep the original module text in the emitted
+	// map; without them Vite's sourcemap composition can drop the original
+	// source and downstream consumers fall back to transformed code.
+	return {
+		code: ms.toString(),
+		map: ms.generateMap({ hires: 'boundary', source: id, includeContent: true }),
+	};
 }
 
 interface CollectedExports {

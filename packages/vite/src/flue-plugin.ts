@@ -403,13 +403,22 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 			return undefined;
 		},
 
-		async transform(code, id) {
-			const filePath = id.split('?')[0] ?? id;
-			if (!isAgentModulePath(filePath)) return null;
-			const scanned = state.agentsByPath.get(normalizePath(filePath));
-			if (!scanned) return null;
-			if (!code.includes(AGENT_DIRECTIVE)) return null;
-			return transformUseAgentModule({ code, id, filePath, identity: scanned.identity });
+		transform: {
+			// Hook-level filters keep the handler out of irrelevant modules
+			// entirely (evaluated natively by rolldown); the handler re-checks
+			// against the scanned set, which the filters cannot express.
+			filter: {
+				id: /\.(?:ts|mts|js|mjs)(?:\?|$)/,
+				code: /use agent/,
+			},
+			async handler(code, id) {
+				const filePath = id.split('?')[0] ?? id;
+				if (!isAgentModulePath(filePath)) return null;
+				const scanned = state.agentsByPath.get(normalizePath(filePath));
+				if (!scanned) return null;
+				if (!code.includes(AGENT_DIRECTIVE)) return null;
+				return transformUseAgentModule({ code, id, filePath, identity: scanned.identity });
+			},
 		},
 
 		configureServer(server) {
