@@ -57,6 +57,8 @@ async function startDev(fixture: Fixture) {
 		root: fixture.root,
 		configFile: false,
 		logLevel: 'error',
+		// Per-fixture dep-optimizer cache; see cloudflare-extensions test.
+		cacheDir: path.join(fixture.root, '.vite-cache'),
 		plugins: [flue(), cloudflare({ persistState: false, inspectorPort: false })],
 		server: { port, strictPort: true, host: '127.0.0.1' },
 	});

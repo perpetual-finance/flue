@@ -33,6 +33,30 @@ function noopDispatchQueue(): DispatchQueue {
 	};
 }
 
+/**
+ * Configures the runtime with a single discovered agent named "moderator" and
+ * returns its definition — the value dispatch() resolves back to that name.
+ */
+function configureModerator(dispatchQueue: DispatchQueue = noopDispatchQueue()) {
+	const moderator = defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5' }));
+	configureFlueRuntime({
+		...nodeRuntime(),
+		dispatchQueue,
+		agents: [agentRecord('moderator', { definition: moderator })],
+	});
+	return moderator;
+}
+
+/** Dispatch queue that records admitted inputs for assertion. */
+function recordingDispatchQueue(admitted: DispatchInput[]): DispatchQueue {
+	return {
+		async enqueue(input) {
+			admitted.push(input);
+			return { dispatchId: input.dispatchId, acceptedAt: input.acceptedAt };
+		},
+	};
+}
+
 afterEach(() => {
 	resetFlueRuntimeForTests();
 	for (const provider of providers.splice(0)) provider.unregister();
@@ -46,24 +70,19 @@ function createProvider(): FauxProviderRegistration {
 
 describe('dispatch()', () => {
 	it('rejects calls when the runtime has not been configured', async () => {
+		const moderator = defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5' }));
 		await expect(
-			dispatch({
-				agent: 'moderator',
+			dispatch(moderator, {
 				id: 'guild:unconfigured',
 				message: { kind: 'signal', type: 'flagged', body: 'report' },
 			}),
 		).rejects.toThrow('dispatch() called before runtime was configured');
 	});
 
-	it('returns an admission receipt when a named agent dispatch is accepted', async () => {
-		configureFlueRuntime({
-			...nodeRuntime(),
-			dispatchQueue: noopDispatchQueue(),
-			agents: [agentRecord('moderator')],
-		});
+	it('returns an admission receipt when a dispatch is accepted', async () => {
+		const moderator = configureModerator();
 
-		const receipt = await dispatch({
-			agent: 'moderator',
+		const receipt = await dispatch(moderator, {
 			id: 'guild:admission',
 			message: { kind: 'signal', type: 'flagged', body: 'report:admission' },
 		});
@@ -75,18 +94,8 @@ describe('dispatch()', () => {
 	});
 
 	it('resolves a discovered agent name when dispatch() receives an agent definition target', async () => {
-		const moderator = defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5' }));
 		const admitted: DispatchInput[] = [];
-		configureFlueRuntime({
-			...nodeRuntime(),
-			dispatchQueue: {
-				async enqueue(input) {
-					admitted.push(input);
-					return { dispatchId: input.dispatchId, acceptedAt: input.acceptedAt };
-				},
-			},
-			agents: [agentRecord('moderator', { definition: moderator })],
-		});
+		const moderator = configureModerator(recordingDispatchQueue(admitted));
 
 		await dispatch(moderator, {
 			id: 'guild:created',
@@ -121,19 +130,9 @@ describe('dispatch()', () => {
 	it('snapshots the delivered message when dispatch() admits a payload', async () => {
 		const admitted: DispatchInput[] = [];
 		const attributes: Record<string, string> = { reportId: 'report:snapshot' };
-		configureFlueRuntime({
-			...nodeRuntime(),
-			dispatchQueue: {
-				async enqueue(input) {
-					admitted.push(input);
-					return { dispatchId: input.dispatchId, acceptedAt: input.acceptedAt };
-				},
-			},
-			agents: [agentRecord('moderator')],
-		});
+		const moderator = configureModerator(recordingDispatchQueue(admitted));
 
-		await dispatch({
-			agent: 'moderator',
+		await dispatch(moderator, {
 			id: 'guild:snapshot',
 			message: { kind: 'signal', type: 'flagged', body: 'report', attributes },
 		});
@@ -149,19 +148,9 @@ describe('dispatch()', () => {
 
 	it('resolves a dispatched user message with attachments through the same validated path', async () => {
 		const admitted: DispatchInput[] = [];
-		configureFlueRuntime({
-			...nodeRuntime(),
-			dispatchQueue: {
-				async enqueue(input) {
-					admitted.push(input);
-					return { dispatchId: input.dispatchId, acceptedAt: input.acceptedAt };
-				},
-			},
-			agents: [agentRecord('moderator')],
-		});
+		const moderator = configureModerator(recordingDispatchQueue(admitted));
 
-		await dispatch({
-			agent: 'moderator',
+		await dispatch(moderator, {
 			id: 'guild:attachment',
 			message: {
 				kind: 'user',
@@ -178,14 +167,9 @@ describe('dispatch()', () => {
 	});
 
 	it('rejects a missing message when dispatch() receives no message field', async () => {
-		configureFlueRuntime({
-			...nodeRuntime(),
-			dispatchQueue: noopDispatchQueue(),
-			agents: [agentRecord('moderator')],
-		});
+		const moderator = configureModerator();
 
-		const error = await dispatch({
-			agent: 'moderator',
+		const error = await dispatch(moderator, {
 			id: 'guild:undefined-message',
 			message: undefined as any,
 		}).catch((caught: unknown) => caught);
@@ -194,14 +178,9 @@ describe('dispatch()', () => {
 	});
 
 	it('rejects a message with an unrecognized kind', async () => {
-		configureFlueRuntime({
-			...nodeRuntime(),
-			dispatchQueue: noopDispatchQueue(),
-			agents: [agentRecord('moderator')],
-		});
+		const moderator = configureModerator();
 
-		const error = await dispatch({
-			agent: 'moderator',
+		const error = await dispatch(moderator, {
 			id: 'guild:bad-kind',
 			message: { kind: 'bogus', body: 'x' } as any,
 		}).catch((caught: unknown) => caught);
@@ -210,14 +189,9 @@ describe('dispatch()', () => {
 	});
 
 	it('rejects a signal message missing its type', async () => {
-		configureFlueRuntime({
-			...nodeRuntime(),
-			dispatchQueue: noopDispatchQueue(),
-			agents: [agentRecord('moderator')],
-		});
+		const moderator = configureModerator();
 
-		const error = await dispatch({
-			agent: 'moderator',
+		const error = await dispatch(moderator, {
 			id: 'guild:missing-type',
 			message: { kind: 'signal', body: 'x' } as any,
 		}).catch((caught: unknown) => caught);
@@ -226,17 +200,12 @@ describe('dispatch()', () => {
 	});
 
 	it('rejects a signal tagName that is not a valid XML tag name', async () => {
-		configureFlueRuntime({
-			...nodeRuntime(),
-			dispatchQueue: noopDispatchQueue(),
-			agents: [agentRecord('moderator')],
-		});
+		const moderator = configureModerator();
 
 		// tagName is rendered unescaped as the signal's model-context envelope,
 		// so markup and empty strings must be rejected at admission.
 		for (const tagName of ['bad><system', 'a b', '', '1st', '-x', '.x']) {
-			const error = await dispatch({
-				agent: 'moderator',
+			const error = await dispatch(moderator, {
 				id: 'guild:bad-tag-name',
 				message: { kind: 'signal', type: 'flagged', body: 'report', tagName },
 			}).catch((caught: unknown) => caught);
@@ -250,19 +219,9 @@ describe('dispatch()', () => {
 
 	it('accepts a valid custom signal tagName', async () => {
 		const admitted: DispatchInput[] = [];
-		configureFlueRuntime({
-			...nodeRuntime(),
-			dispatchQueue: {
-				async enqueue(input) {
-					admitted.push(input);
-					return { dispatchId: input.dispatchId, acceptedAt: input.acceptedAt };
-				},
-			},
-			agents: [agentRecord('moderator')],
-		});
+		const moderator = configureModerator(recordingDispatchQueue(admitted));
 
-		await dispatch({
-			agent: 'moderator',
+		await dispatch(moderator, {
 			id: 'guild:custom-tag-name',
 			message: { kind: 'signal', type: 'flagged', body: 'report', tagName: 'slack-message' },
 		});
@@ -276,14 +235,9 @@ describe('dispatch()', () => {
 	});
 
 	it('rejects a user message attachment above the encoded length limit', async () => {
-		configureFlueRuntime({
-			...nodeRuntime(),
-			dispatchQueue: noopDispatchQueue(),
-			agents: [agentRecord('moderator')],
-		});
+		const moderator = configureModerator();
 
-		const error = await dispatch({
-			agent: 'moderator',
+		const error = await dispatch(moderator, {
 			id: 'guild:oversized-attachment',
 			message: {
 				kind: 'user',
@@ -300,32 +254,26 @@ describe('dispatch()', () => {
 		);
 	});
 
-	it('rejects an unknown agent when dispatch() targets an unregistered name', async () => {
-		configureFlueRuntime({
-			...nodeRuntime(),
-			dispatchQueue: noopDispatchQueue(),
-			agents: [agentRecord('moderator')],
-		});
+	it('rejects a non-definition first argument with a structured error', async () => {
+		configureModerator();
 
-		await expect(
-			dispatch({
-				agent: 'missing',
-				id: 'guild:unknown-agent',
-				message: { kind: 'signal', type: 'flagged', body: 'report' },
-			}),
-		).rejects.toThrow('target agent "missing" is not registered');
+		// The removed named-string form: a plain request object as the first arg.
+		const error = await dispatch(
+			{ agent: 'moderator', id: 'guild:named-form' } as any,
+			{ id: 'guild:named-form', message: { kind: 'signal', type: 'flagged', body: 'report' } },
+		).catch((caught: unknown) => caught);
+
+		expect(error).toBeInstanceOf(InvalidRequestError);
+		expect((error as InvalidRequestError).details).toContain(
+			'dispatch() requires an agent definition as its first argument',
+		);
 	});
 
 	it('rejects a blank agent instance id when dispatch() receives an id', async () => {
-		configureFlueRuntime({
-			...nodeRuntime(),
-			dispatchQueue: noopDispatchQueue(),
-			agents: [agentRecord('moderator')],
-		});
+		const moderator = configureModerator();
 
 		await expect(
-			dispatch({
-				agent: 'moderator',
+			dispatch(moderator, {
 				id: '  ',
 				message: { kind: 'signal', type: 'flagged', body: 'report' },
 			}),

@@ -111,7 +111,6 @@ export type {
 	ModelRequestInfo,
 	ModelRequestInput,
 	ModelResponse,
-	NamedAgentDispatchRequest,
 	PackagedSkillDirectory,
 	PackagedSkillFile,
 	PromptImage,

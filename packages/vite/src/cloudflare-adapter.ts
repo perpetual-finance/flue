@@ -19,8 +19,11 @@
  * `process.env` variables. Setting the variable in flue's `config` hook —
  * which runs before the sibling's because `flue()` precedes `cloudflare()`
  * in the plugin array (enforced with a diagnostic) — makes the sibling read
- * the generated file. Both files are written content-aware so unchanged
- * regenerations never trigger the sibling's config watcher.
+ * the generated file. The sibling reads the variable exactly once, so flue's
+ * `configResolved` restores the pre-handoff value, scoping the process-global
+ * mutation to the config resolution that made it. Both files are written
+ * content-aware so unchanged regenerations never trigger the sibling's
+ * config watcher.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';

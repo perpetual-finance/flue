@@ -6,6 +6,7 @@
  * `cloudflare.ts`, and the generated entry's runtime validation rejects the
  * shapes Flue reserves.
  */
+import * as path from 'node:path';
 import { cloudflare } from '@cloudflare/vite-plugin';
 import { createServer, type ViteDevServer } from 'vite';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -80,6 +81,13 @@ async function startDev(fixture: Fixture) {
 		root: fixture.root,
 		configFile: false,
 		logLevel: 'error',
+		// Per-fixture dep-optimizer cache: all fixtures here share a worker
+		// name, and without their own node_modules they would otherwise share
+		// `packages/vite/node_modules/.vite/deps_flue_cf_extensions` — which a
+		// leaked server from a rejected createServer() (Vite does not dispose
+		// the watcher/optimizer on configureServer failure) can rewrite under
+		// the next test, making it reject with a missing-optimized-dep error.
+		cacheDir: path.join(fixture.root, '.vite-cache'),
 		plugins: [flue(), cloudflare({ persistState: false, inspectorPort: false })],
 		server: { port, strictPort: true, host: '127.0.0.1' },
 	});

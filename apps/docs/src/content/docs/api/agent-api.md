@@ -39,7 +39,6 @@ import {
   type FlueSessions,
   type McpServerConnection,
   type McpServerOptions,
-  type NamedAgentDispatchRequest,
   type PromptImage,
   type PromptModel,
   type PromptOptions,
@@ -274,15 +273,9 @@ interface AgentDefinition<TEnv> {
 ```ts
 function dispatch(agent: AgentDefinition, request: AgentDispatchRequest): Promise<DispatchReceipt>;
 
-function dispatch(request: NamedAgentDispatchRequest): Promise<DispatchReceipt>;
-
 interface AgentDispatchRequest {
   id: string;
   message: DeliveredMessage;
-}
-
-interface NamedAgentDispatchRequest extends AgentDispatchRequest {
-  agent: string;
 }
 
 interface DispatchReceipt {
@@ -291,15 +284,14 @@ interface DispatchReceipt {
 }
 ```
 
-Delivers a message for asynchronous processing by a continuing agent instance. The agent-definition overload takes a registered agent definition (a `'use agent'` module's default export) — no HTTP mount is required. The named overload selects a registered agent by identity (the module file basename).
+Delivers a message for asynchronous processing by a continuing agent instance. The `agent` argument is a registered agent definition (a `'use agent'` module's default export) — no HTTP mount is required.
 
-| Field        | Description                                                              |
-| ------------ | ------------------------------------------------------------------------ |
-| `agent`      | Registered agent identity (module file basename) for the named overload. |
-| `id`         | Target agent instance id.                                                |
-| `message`    | The message delivered to the session. Flue snapshots it when accepted.   |
-| `dispatchId` | Generated delivery identifier returned in the receipt.                   |
-| `acceptedAt` | ISO timestamp assigned when dispatch admission begins.                   |
+| Field        | Description                                                             |
+| ------------ | ----------------------------------------------------------------------- |
+| `id`         | Target agent instance id.                                               |
+| `message`    | The message delivered to the session. Flue snapshots it when accepted.  |
+| `dispatchId` | Generated delivery identifier returned in the receipt.                  |
+| `acceptedAt` | ISO timestamp assigned when dispatch admission begins.                  |
 
 `await dispatch(...)` resolves when the current runtime accepts and queues the message. It does not wait for model processing, tool calls, or an agent reply. Dispatched activity belongs to the continuing agent instance and shares one accepted order with direct HTTP prompts to the same instance.
 

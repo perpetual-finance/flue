@@ -130,6 +130,14 @@ interface FluePluginState {
 	isPreview: boolean;
 	/** Whether the config hook prepared the Cloudflare inputs (entry + wrangler). */
 	cloudflarePrepared: boolean;
+	/**
+	 * The pre-handoff value of the wrangler-config-path env var, captured when
+	 * the `config` hook set it. `configResolved` restores it — by then the
+	 * sibling plugin has read the handoff — so the process-global mutation
+	 * stays scoped to config resolution instead of leaking a pointer to this
+	 * server's generated file into unrelated, later config resolutions.
+	 */
+	wranglerEnvRestore: { value: string | undefined } | undefined;
 	/** Serializes watcher-driven re-scans. */
 	watchQueue: Promise<void>;
 	resolved: FlueResolvedProjectInfo | undefined;
@@ -150,6 +158,7 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 		target: 'node',
 		isPreview: false,
 		cloudflarePrepared: false,
+		wranglerEnvRestore: undefined,
 		watchQueue: Promise.resolve(),
 		resolved: undefined,
 	};
@@ -170,6 +179,12 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 		},
 	};
 
+	// Servers whose (bound) close has begun. A queued restart of a closing
+	// server must never run: restarting re-executes every `config` hook, which
+	// re-resolves the project and re-sets the wrangler handoff env var — work
+	// that would race whatever replaced the server.
+	const closedServers = new WeakSet<ViteDevServer>();
+
 	// Serialized dev-server restarts. Vite's server.restart() returns the
 	// in-flight promise when one is already running, which would silently drop
 	// a flue.config edit landing mid-restart; queueing at plugin scope (the
@@ -177,11 +192,12 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 	let restartQueue = Promise.resolve();
 	let restartPending = false;
 	const requestRestart = (server: ViteDevServer): void => {
-		if (restartPending) return;
+		if (restartPending || closedServers.has(server)) return;
 		restartPending = true;
 		restartQueue = restartQueue
 			.then(async () => {
 				restartPending = false;
+				if (closedServers.has(server)) return;
 				await server.restart();
 			})
 			.catch((error) => {
@@ -246,6 +262,11 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 				// The documented handoff: the sibling plugin resolves its config
 				// path from `cloudflare({ configPath })` ?? this env var (via
 				// Vite's loadEnv, which includes matching process.env variables).
+				// The sibling reads it exactly once, in its own `config` hook;
+				// `configResolved` restores the captured previous value.
+				state.wranglerEnvRestore = {
+					value: process.env[CLOUDFLARE_WRANGLER_CONFIG_PATH_ENV],
+				};
 				process.env[CLOUDFLARE_WRANGLER_CONFIG_PATH_ENV] = prepared.wranglerConfigPath;
 				state.cloudflarePrepared = true;
 				// The dependency resolver stays inert (root unset): the generated
@@ -287,6 +308,16 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 		},
 
 		configResolved(resolved) {
+			// Every plugin's `config` hook has run by now, so the sibling has
+			// consumed the wrangler handoff env var — restore the pre-handoff
+			// value before anything else (including the throws below) so the
+			// process-global never outlives the resolution that set it.
+			if (state.wranglerEnvRestore) {
+				const { value } = state.wranglerEnvRestore;
+				state.wranglerEnvRestore = undefined;
+				if (value === undefined) delete process.env[CLOUDFLARE_WRANGLER_CONFIG_PATH_ENV];
+				else process.env[CLOUDFLARE_WRANGLER_CONFIG_PATH_ENV] = value;
+			}
 			if (resolved.plugins.filter((plugin) => plugin.name === 'flue').length > 1) {
 				throw new Error('[flue] flue() was added to the Vite config more than once.');
 			}
@@ -383,7 +414,24 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 
 		configureServer(server) {
 			if (state.target === 'cloudflare') {
-				setupCloudflareDevSupervision({ server, state, requestRestart, updateAgents });
+				const supervision = setupCloudflareDevSupervision({
+					server,
+					state,
+					requestRestart,
+					updateAgents,
+				});
+				// Stop supervising when THIS server closes: detach the watcher
+				// handler, drop queued refreshes, and settle in-flight refresh work
+				// before teardown — a late re-resolution would otherwise regenerate
+				// inputs (or log resolution errors) against a project that the
+				// server's owner may already be tearing down.
+				const originalClose = server.close.bind(server);
+				server.close = async () => {
+					closedServers.add(server);
+					supervision.stop();
+					await state.watchQueue.catch(() => undefined);
+					await originalClose();
+				};
 				return;
 			}
 			const controller = createNodeDevController({ server, root: state.root });
@@ -394,7 +442,9 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 			// this hook with a fresh controller — before closing the old one.
 			const originalClose = server.close.bind(server);
 			server.close = async () => {
+				closedServers.add(server);
 				await controller.close();
+				await state.watchQueue.catch(() => undefined);
 				await originalClose();
 			};
 
@@ -494,12 +544,23 @@ function setupCloudflareDevSupervision(options: {
 	state: FluePluginState;
 	requestRestart: (server: ViteDevServer) => void;
 	updateAgents: (agents: AgentScanResult[]) => void;
-}): void {
+}): { stop: () => void } {
 	const { server, state, requestRestart, updateAgents } = options;
 	const logger = server.config.logger;
 
+	let stopped = false;
+
 	const refresh = (): Promise<void> => {
 		const run = async () => {
+			if (stopped) return;
+			// The project root itself is gone (deleted out from under the dev
+			// server, or torn down while watcher events were still queued).
+			// There is nothing to regenerate — and every queued unlink would
+			// re-log a misleading resolution error — so stop supervising.
+			if (!fs.existsSync(state.root)) {
+				stop();
+				return;
+			}
 			let project: ResolvedFlueProject;
 			try {
 				project = resolveFlueProject({
@@ -524,6 +585,7 @@ function setupCloudflareDevSupervision(options: {
 				logger.error(`[flue] Agent scan failed: ${formatWatchError(error)}`);
 				return;
 			}
+			if (stopped) return;
 			state.project = project;
 			updateAgents(agents);
 			try {
@@ -537,7 +599,8 @@ function setupCloudflareDevSupervision(options: {
 	};
 
 	const normalizedRoot = normalizePath(state.root);
-	server.watcher.on('all', (event, file) => {
+	const onWatchEvent = (event: string, file: string): void => {
+		if (stopped) return;
 		const filePath = normalizePath(file);
 		// Never react to Flue's own generated outputs (or workerd state).
 		if (isGeneratedCloudflarePath(filePath, normalizedRoot)) return;
@@ -562,7 +625,14 @@ function setupCloudflareDevSupervision(options: {
 		) {
 			void refresh();
 		}
-	});
+	};
+	server.watcher.on('all', onWatchEvent);
+
+	const stop = (): void => {
+		stopped = true;
+		server.watcher.off('all', onWatchEvent);
+	};
+	return { stop };
 }
 
 function formatWatchError(error: unknown): string {

@@ -75,7 +75,7 @@ export type DeliveredMessage =
 			tagName?: string;
 	  };
 
-/** Input accepted by the agent-definition overload of `dispatch(...)`. */
+/** Input accepted by `dispatch(agent, request)`. */
 export interface AgentDispatchRequest {
 	/** Target agent instance id. Must be a non-empty string. */
 	id: string;
@@ -83,7 +83,11 @@ export interface AgentDispatchRequest {
 	message: DeliveredMessage;
 }
 
-/** Input accepted by the named-agent overload of `dispatch(...)`. */
+/**
+ * Internal queue wire shape: an {@link AgentDispatchRequest} resolved against a
+ * discovered agent name. Not part of the public API — `dispatch()` accepts an
+ * agent definition and resolves the name itself.
+ */
 export interface NamedAgentDispatchRequest extends AgentDispatchRequest {
 	/** Discovered agent module name. Must be a non-empty string. */
 	agent: string;

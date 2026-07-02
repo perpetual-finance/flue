@@ -8,7 +8,8 @@
  * documented `CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH` env var before the
  * sibling's `config` hook resolves (`cloudflare({ configPath }) ??
  * loadEnv(..., 'CLOUDFLARE_')`, and Vite's loadEnv includes matching
- * process.env variables).
+ * process.env variables), then restores the pre-handoff value in
+ * `configResolved` once the sibling has consumed it.
  *
  * Proof discriminator: the fixtures have NO authored wrangler.* file, so the
  * sibling has no fallback config to discover — a Worker environment (named
@@ -87,9 +88,13 @@ function expectHandoff({ root, environments, api }: HandoffExpectation): void {
 	// authored wrangler.* exists — it can only have read the generated file.
 	expect(Object.keys(environments)).toContain('handoff_proof');
 
+	// The handoff env var is config-resolution-scoped: flue's configResolved
+	// restores the pre-handoff value (unset here) once the sibling has
+	// consumed it, so nothing leaks into later config resolutions.
+	expect(process.env.CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH).toBeUndefined();
+
 	// The generated inputs exist and carry Flue's contributions.
 	const generatedWranglerPath = path.join(root, '.flue-vite.wrangler.jsonc');
-	expect(process.env.CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH).toBe(generatedWranglerPath);
 	const generated = JSON.parse(fs.readFileSync(generatedWranglerPath, 'utf8')) as {
 		name: string;
 		main: string;

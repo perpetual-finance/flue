@@ -1,5 +1,5 @@
 import type { MiddlewareHandler } from 'hono';
-import { configureErrorRendering } from '../errors.ts';
+import { configureErrorRendering, InvalidRequestError } from '../errors.ts';
 import type {
 	AgentDefinition,
 	AgentDispatchRequest,
@@ -68,9 +68,8 @@ export type FlueRuntime = NodeRuntime | CloudflareRuntime;
  * wait for model processing, tool calls, or an agent reply. The returned
  * `dispatchId` identifies delivery.
  *
- * The agent-definition overload requires a value default-exported by exactly one
- * registered `'use agent'` module. The named overload targets a registered
- * agent module by identity.
+ * The `agent` argument must be a value default-exported by exactly one
+ * registered `'use agent'` module.
  *
  * Delivery durability depends on the generated target. Node uses a
  * process-lifetime in-memory queue by default. Cloudflare durably admits work
@@ -78,14 +77,9 @@ export type FlueRuntime = NodeRuntime | CloudflareRuntime;
  * interruption. Cloudflare processing can therefore be at-least-once; design
  * external side effects to be idempotent.
  */
-export function dispatch(
+export async function dispatch(
 	agent: AgentDefinition,
 	request: AgentDispatchRequest,
-): Promise<DispatchReceipt>;
-export function dispatch(request: NamedAgentDispatchRequest): Promise<DispatchReceipt>;
-export async function dispatch(
-	agentOrRequest: AgentDefinition | NamedAgentDispatchRequest,
-	maybeRequest?: AgentDispatchRequest,
 ): Promise<DispatchReceipt> {
 	const rt = runtimeConfig;
 	if (!rt) {
@@ -94,18 +88,27 @@ export async function dispatch(
 				'This usually means it was used outside a Flue-built server entry.',
 		);
 	}
-	const request = isAgentDefinitionValue(agentOrRequest)
-		? resolveAgentDefinitionDispatchRequest(agentOrRequest, maybeRequest, rt)
-		: agentOrRequest;
-	return enqueueDispatch({ request, dispatchQueue: rt.dispatchQueue, rt });
+	if (!isAgentDefinitionValue(agent)) {
+		throw new InvalidRequestError({
+			reason:
+				'dispatch() requires an agent definition as its first argument. ' +
+				"Pass the default export of a 'use agent' module: dispatch(agent, { id, message }).",
+		});
+	}
+	return enqueueDispatch({
+		request: resolveAgentDefinitionDispatchRequest(agent, request, rt),
+		dispatchQueue: rt.dispatchQueue,
+		rt,
+	});
 }
 
-function isAgentDefinitionValue(
-	value: AgentDefinition | NamedAgentDispatchRequest,
-): value is AgentDefinition {
+function isAgentDefinitionValue(value: unknown): value is AgentDefinition {
 	return (
+		typeof value === 'object' &&
+		value !== null &&
 		'__flueAgentDefinition' in value &&
 		value.__flueAgentDefinition === true &&
+		'initialize' in value &&
 		typeof value.initialize === 'function'
 	);
 }
