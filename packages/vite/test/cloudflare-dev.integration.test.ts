@@ -116,6 +116,18 @@ describe('vite dev (cloudflare target)', () => {
 		const ping = await fetch(`${baseUrl}/api/ping`);
 		expect(await ping.text()).toBe('pong');
 
+		// Dev CORS matches the Node target: a separate-origin local client (the
+		// demo chat app) must see the reflected origin and the durable-stream
+		// coordination headers exposed.
+		const crossOrigin = await fetch(`${baseUrl}/api/ping`, {
+			headers: { Origin: 'http://localhost:5174' },
+		});
+		expect(crossOrigin.headers.get('access-control-allow-origin')).toBe('http://localhost:5174');
+		expect(crossOrigin.headers.get('access-control-allow-credentials')).toBe('true');
+		expect(crossOrigin.headers.get('access-control-expose-headers')).toContain(
+			'Stream-Next-Offset',
+		);
+
 		// Prompt admission + streamed conversation read against the agent's
 		// Durable Object (the fake provider in the test process produces the
 		// assistant turn — worker outbound fetch reaches loopback).

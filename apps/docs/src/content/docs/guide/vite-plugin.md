@@ -72,7 +72,7 @@ The built server listens on port `3000` by default; set `PORT` to change it. It 
 
 ### Preview
 
-`vite preview` serves the built artifact: it imports `dist/app.mjs` natively — no Vite transformation — so what preview serves is exactly what `node dist/server.mjs` would serve, including production persistence defaults and the real process environment. Run `vite build` first; preview fails with that guidance when no artifact exists.
+`vite preview` serves the built artifact: it imports `dist/app.mjs` natively — no Vite transformation — so what preview serves is exactly what `node dist/server.mjs` would serve, including production persistence defaults and the real process environment. Run `vite build` first; preview fails with that guidance when no artifact exists. One local-tooling difference from the raw artifact: preview defaults to the same permissive CORS policy as `vite dev` (override with Vite's `preview.cors`), so separate-origin local clients like the repo's demo chat app work against it; `node dist/server.mjs` has no CORS layer at all.
 
 ## The Cloudflare target
 
@@ -111,7 +111,7 @@ Class names derive from file basenames (`triage.ts` → `FlueTriageAgent`), so r
 
 ### Development
 
-`vite dev` runs your Worker in workerd via the Cloudflare plugin. Flue keeps the generated inputs fresh: marked-set changes (adding or removing a `'use agent'` file) and authored `wrangler.jsonc` edits regenerate the entry and merged config, and the Cloudflare plugin picks them up. Writes are content-aware — editing an agent's body regenerates nothing, so there are no restart loops. `vite preview` and deployment come from the Cloudflare plugin; see [Deploy on Cloudflare](/docs/ecosystem/deploy/cloudflare/).
+`vite dev` runs your Worker in workerd via the Cloudflare plugin, with the same permissive dev CORS defaults as the Node target (Vite's middleware stack applies them before workerd sees the request). Flue keeps the generated inputs fresh: marked-set changes (adding or removing a `'use agent'` file) and authored `wrangler.jsonc` edits regenerate the entry and merged config, and the Cloudflare plugin picks them up. Writes are content-aware — editing an agent's body regenerates nothing, so there are no restart loops. `vite preview` and deployment come from the Cloudflare plugin; see [Deploy on Cloudflare](/docs/ecosystem/deploy/cloudflare/).
 
 ## What the plugin does not do
 

@@ -33,29 +33,54 @@ Vite, React 19, TypeScript, Tailwind v4, shadcn/ui, TanStack Router, `streamdown
 
 ## Running it
 
-You need two processes: a Flue dev server (the backend) and this SPA.
+You need two processes: a Flue server (the backend) and this SPA. The SPA can talk to
+**any** of the three local server shapes — `vite dev` on the Node target, `vite dev` on
+the Cloudflare target (workerd), and `vite preview` over a built Node artifact. All
+three are covered because the `flue()` Vite plugin applies a permissive local CORS
+policy (reflected origin + the durable-stream coordination headers) to dev servers on
+both targets and to `vite preview`. A production `node dist/server.mjs` has **no** CORS
+layer — that's an application concern — so point the demo at dev/preview servers.
 
-### 1. Start a Flue example dev server
+### 1. Start a Flue backend
 
-CORS is required because the SPA runs on a different origin. The `flue()` Vite
-plugin enables a dev-only CORS layer automatically.
-
-The richest target is the `react-chat` example's `helper` agent, a real Anthropic model
-with a tool, reasoning, and a subagent. It needs `ANTHROPIC_API_KEY`:
+**Fastest credential-free target** — the `react-chat` example's faux echo `assistant`:
 
 ```sh
-# from the repo root, with ANTHROPIC_API_KEY in ./.env
+# from the repo root
 cd examples/react-chat
-set -a; source ../../.env; set +a
-pnpm dev --port 3583
+pnpm exec vite dev --port 3583
 ```
 
-`vite dev` reads the shell environment (it does not load `.env` into
-`process.env`), so export the key — or `source` an env file — before starting.
-`--port 3583` matches this SPA's default agent URL.
+`--port 3583` matches this SPA's default agent URL, so the demo connects with zero
+configuration.
 
-For a **credential-free** target, the same example exposes a faux echo `assistant`
-agent, and `hello-world` exposes `session-test`.
+**Richest target** — the same example's `helper` agent: a real Anthropic model with a
+tool, reasoning, and a subagent. Put `ANTHROPIC_API_KEY` in the example's `.env` (or
+export it) — `vite dev` loads the project's `.env` files automatically, shell-exported
+values winning:
+
+```sh
+cd examples/react-chat
+echo 'ANTHROPIC_API_KEY="sk-..."' > .env
+pnpm exec vite dev --port 3583
+```
+
+**Cloudflare target (workerd)** — any Cloudflare-target Flue app's `vite dev` works
+identically; the same CORS defaults apply through the workerd path. The repo's
+`examples/cloudflare` agents use real Workers AI bindings (Cloudflare credentials), so
+for a credential-free workerd check, scaffold a scratch project with a faux provider —
+the pattern in `packages/vite/test/helpers/cloudflare-fixture.ts` (an offline
+OpenAI-completions endpoint on the host loopback that workerd's outbound fetch can
+reach) is copy-pasteable.
+
+**Built artifact** — build the Node target and serve it with `vite preview`; preview
+imports the built `dist/app.mjs`, so this exercises exactly what production would run:
+
+```sh
+cd examples/react-chat
+pnpm exec vite build
+pnpm exec vite preview --port 3583
+```
 
 ### 2. Start the SPA
 
@@ -69,18 +94,23 @@ Open the printed URL (e.g. `http://localhost:5174`).
 
 ### 3. Connect
 
-Open **Settings** (the gear button, bottom-left) and set the **Agent URL** — the whole
-target is one URL: wherever the example's `app.ts` mounts the agent's routes
-(everything after `/agents/` is used as the display name):
+Open **Settings** (the agent-target button in the sidebar footer — it shows the current
+agent name + URL) and set the **Agent URL** — the whole target is one URL: wherever the
+app's `app.ts` mounts the agent's routes (everything after `/agents/` is used as the
+display name):
 
 | Target                          | Agent URL                                    | Needs key |
 | ------------------------------- | -------------------------------------------- | --------- |
-| hello-world (session-test)      | `http://localhost:3583/agents/session-test`  | yes       |
 | react-chat (assistant, faux)    | `http://localhost:3583/api/agents/assistant` | no        |
 | react-chat (helper, live model) | `http://localhost:3583/api/agents/helper`    | yes       |
+| hello-world (session-test)      | `http://localhost:3583/agents/session-test`  | yes       |
 
 The same dialog also selects the **live transport** (default live or explicit long-poll)
 and holds an optional **bearer token** for agents behind a `route` auth check.
+
+Switching the Agent URL while viewing a conversation from a different server leaves the
+old transcript unreachable (its history 404s on the new server) — start a new chat after
+switching.
 
 ## How it connects
 

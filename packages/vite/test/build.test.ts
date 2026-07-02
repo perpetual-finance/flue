@@ -194,6 +194,18 @@ export default defineConfig({ app: './src/server-main.ts' });
 			const ping = await fetch(`${baseUrl}/api/ping`);
 			expect(await ping.text()).toBe('pong');
 
+			// Preview defaults to the dev CORS policy so separate-origin local
+			// clients (the demo chat app) can read the stream headers.
+			const crossOrigin = await fetch(`${baseUrl}/api/ping`, {
+				headers: { Origin: 'http://localhost:5174' },
+			});
+			expect(crossOrigin.headers.get('access-control-allow-origin')).toBe(
+				'http://localhost:5174',
+			);
+			expect(crossOrigin.headers.get('access-control-expose-headers')).toContain(
+				'Stream-Next-Offset',
+			);
+
 			// The full durable admission path works against the artifact.
 			const admitted = await fetch(`${baseUrl}/agents/echo/preview-1`, {
 				method: 'POST',

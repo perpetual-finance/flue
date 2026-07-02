@@ -288,8 +288,15 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 			// built Worker output; Node: configurePreviewServer imports the built
 			// app chunk). Require no source state and generate nothing — but keep
 			// appType 'custom' so Vite's SPA fallback doesn't answer requests
-			// before the application middleware.
-			if (state.isPreview) return { appType: 'custom' } satisfies UserConfig;
+			// before the application middleware, and default preview CORS to the
+			// dev policy so separate-origin local clients (the demo chat app)
+			// can read the durable-stream coordination headers.
+			if (state.isPreview) {
+				return {
+					appType: 'custom',
+					preview: { cors: userConfig.preview?.cors ?? DEV_CORS },
+				} satisfies UserConfig;
+			}
 
 			if (!project.app) throw missingAppEntryError(project);
 			updateAgents(await scanAgents({ sourceRoot: project.sourceRoot, agents: project.agents }));
@@ -322,8 +329,14 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 				// The dependency resolver stays inert (root unset): the generated
 				// entry lives in the user's project, so its bare imports resolve
 				// from the user's node_modules natively, and externalization would
-				// break the workerd module graph.
-				return { resolve: { dedupe: RUNTIME_DEDUPE } } satisfies UserConfig;
+				// break the workerd module graph. Dev CORS matches the Node
+				// target: workerd requests flow through Vite's middleware stack,
+				// and separate-origin local clients need the durable-stream
+				// coordination headers exposed.
+				return {
+					resolve: { dedupe: RUNTIME_DEDUPE },
+					...(isBuild ? {} : { server: { cors: userConfig.server?.cors ?? DEV_CORS } }),
+				} satisfies UserConfig;
 			}
 
 			resolverState.root = root;
