@@ -12,12 +12,12 @@ import {
 	context,
 	type Meter,
 	metrics,
+	propagation,
 	type Span,
 	SpanKind,
 	SpanStatusCode,
 	type Tracer,
 	trace,
-	propagation,
 } from '@opentelemetry/api';
 import {
 	contentValue,
@@ -33,17 +33,17 @@ import {
 	systemInstructions,
 	toolDefinitions,
 } from './gen-ai-content.ts';
-import { type GenAILogger, emitInferenceException } from './logs.ts';
+import { emitInferenceException, type GenAILogger } from './logs.ts';
 import { createGenAIMetrics, recordTokenUsage } from './metrics.ts';
 import { ATTR, GEN_AI_SCHEMA_URL } from './semconv.ts';
 
+export type { GenAIContentPolicy, GenAIContentScope } from './content-policy.ts';
 export {
 	FLUE_TELEMETRY_EXTENSION_REVISION,
 	GEN_AI_PROJECTION_REVISION,
 	GEN_AI_SCHEMA_URL,
 	GEN_AI_SEMCONV_REVISION,
 } from './semconv.ts';
-export type { GenAIContentPolicy, GenAIContentScope } from './content-policy.ts';
 
 export interface OpenTelemetryInstrumentationOptions {
 	tracer?: Tracer;
@@ -75,7 +75,6 @@ export function createOpenTelemetryInstrumentation(
 	const meter =
 		options.meter ?? metrics.getMeter('@flue/opentelemetry', undefined, { schemaUrl: GEN_AI_SCHEMA_URL });
 	const instruments = createGenAIMetrics(meter);
-	const runs = new Map<string, TrackedSpan>();
 	const operations = new Map<string, TrackedSpan>();
 	const turns = new Map<string, TrackedSpan>();
 	const tools = new Map<string, TrackedSpan>();
@@ -86,48 +85,10 @@ export function createOpenTelemetryInstrumentation(
 	const observe: FlueObservationSubscriber = (event, ctx) => {
 		if (disposed) return;
 		const time = new Date(event.timestamp);
-		if (event.type === 'run_start' || event.type === 'run_resume') {
-			const key = runKey(event);
-			const existing = runs.get(key);
-			if (existing?.awaitingWorkflowObservation) {
-				existing.awaitingWorkflowObservation = false;
-				return;
-			}
-			if (event.type === 'run_start' && existing) return;
-			if (event.type === 'run_resume') {
-				const interrupted = existing;
-				if (interrupted) {
-					complete(interrupted.span, { type: 'interrupted' }, time);
-					runs.delete(key);
-				}
-				endDescendants(event, operations, turns, tools, tasks, compactions, time);
-			}
-			const span = startSpan(
-				tracer,
-				`invoke_workflow ${event.workflowName}`,
-				undefined,
-				event,
-				ctx,
-				options,
-				SpanKind.INTERNAL,
-				{
-					...identifiers(event),
-					[ATTR.operationName]: 'invoke_workflow',
-					[ATTR.workflowName]: event.workflowName,
-				},
-				event.type === 'run_start' ? new Date(event.startedAt) : time,
-			);
-			runs.set(runKey(event), {
-				...trackedSpan(span, event),
-				workflowName: event.workflowName,
-				startedAtMs: (event.type === 'run_start' ? new Date(event.startedAt) : time).getTime(),
-			});
-			return;
-		}
 		if (event.type === 'operation_start') {
 			if (event.operationKind === 'shell') return;
 			if (event.taskId && event.operationKind === 'prompt' && tasks.has(taskKey(event))) return;
-			const parent = parentSpan(event, operations, tasks, runs);
+			const parent = parentSpan(event, operations, tasks);
 			const isAgent = event.operationKind === 'prompt' || event.operationKind === 'skill';
 			const name = isAgent
 				? event.agentName
@@ -147,7 +108,7 @@ export function createOpenTelemetryInstrumentation(
 			return;
 		}
 		if (event.type === 'task_start') {
-			const parent = parentSpan(event, operations, tasks, runs);
+			const parent = parentSpan(event, operations, tasks);
 			const span = startSpan(
 				tracer,
 				event.agent ? `invoke_agent ${event.agent}` : 'invoke_agent',
@@ -172,7 +133,7 @@ export function createOpenTelemetryInstrumentation(
 			compactions.set(
 				compactionKey(event),
 				trackedSpan(
-					startSpan(tracer, 'flue.compaction', parentSpan(event, operations, tasks, runs), event, ctx, options, SpanKind.INTERNAL, {
+					startSpan(tracer, 'flue.compaction', parentSpan(event, operations, tasks), event, ctx, options, SpanKind.INTERNAL, {
 						...identifiers(event),
 						'flue.compaction.reason': event.reason,
 					}),
@@ -187,7 +148,7 @@ export function createOpenTelemetryInstrumentation(
 				tracer,
 				`chat ${request.requestedModel}`,
 				event.purpose === 'agent'
-					? parentSpan(event, operations, tasks, runs)
+					? parentSpan(event, operations, tasks)
 					: compactions.get(compactionKey(event))?.span,
 				event,
 				ctx,
@@ -232,7 +193,7 @@ export function createOpenTelemetryInstrumentation(
 			const span = startSpan(
 				tracer,
 				shell ? 'flue.operation shell' : `execute_tool ${event.toolName}`,
-				parentSpan(event, operations, tasks, runs),
+				parentSpan(event, operations, tasks),
 				event,
 				ctx,
 				options,
@@ -335,7 +296,7 @@ export function createOpenTelemetryInstrumentation(
 			return;
 		}
 		if (event.type === 'operation') {
-			endDescendants(event, operations, turns, tools, tasks, compactions, time);
+			endDescendants(event, turns, tools, tasks, compactions, time);
 			const key = operationKey(event);
 			const span = operations.get(key)?.span;
 			if (span && event.usage) span.setAttributes(usageAttributes(event.usage));
@@ -350,72 +311,18 @@ export function createOpenTelemetryInstrumentation(
 				}));
 			}
 			endSpan(operations, key, event.isError, event.errorInfo?.type, event.error, time, event, options);
-			return;
-		}
-		if (event.type === 'run_end') {
-			endDescendants(event, operations, turns, tools, tasks, compactions, time);
-			const key = runKey(event);
-			const tracked = runs.get(key);
-			if (tracked) recordSignal(options, 'metric_record_error', () => instruments.workflowDuration.record(
-				Math.max(0, time.getTime() - tracked.startedAtMs) / 1000,
-				{
-					...(tracked.workflowName ? { [ATTR.workflowName]: tracked.workflowName } : {}),
-					...(event.isError ? { [ATTR.errorType]: '_OTHER' } : {}),
-				},
-			));
-			endSpan(runs, key, event.isError, undefined, event.error, time, event, options);
 		}
 	};
 
 	const interceptor: FlueExecutionInterceptor = (operation, executionContext, next) => {
-		let span =
-			(operation.type === 'workflow'
-				? operation.phase === 'resume'
-					? undefined
-					: runs.get(runKey(operation))
-				: operation.type === 'agent'
-					? operations.get(operationKey({ ...executionContext, operationId: operation.operationId }))
-					: operation.type === 'model'
-						? turns.get(turnKey({ ...executionContext, turnId: operation.turnId }))
-						: operation.type === 'tool'
-							? tools.get(toolKey({ ...executionContext, toolCallId: operation.toolCallId }))
-							: tasks.get(taskKey({ ...executionContext, taskId: operation.taskId })))?.span;
-		if (!span && operation.type === 'workflow') {
-			const event: FlueObservation = operation.phase === 'start'
-				? {
-						v: 3,
-						type: 'run_start',
-						timestamp: new Date().toISOString(),
-						eventIndex: 0,
-						runId: operation.runId,
-						workflowName: operation.workflowName,
-						startedAt: operation.startedAt,
-						input: undefined,
-					}
-				: {
-						v: 3,
-						type: 'run_resume',
-						timestamp: new Date().toISOString(),
-						eventIndex: 0,
-						runId: operation.runId,
-						workflowName: operation.workflowName,
-						startedAt: operation.startedAt,
-					};
-			const eventContext = executionContext.eventContext;
-			const parentContext = executionContext.traceCarrier
-				? extractCarrier(executionContext.traceCarrier)
-				: context.active();
-			context.with(parentContext, () => observe(event, eventContext ?? {
-				id: operation.runId,
-				agentName: undefined,
-				env: {},
-				req: undefined,
-				log: { info() {}, warn() {}, error() {} },
-			}));
-			const tracked = runs.get(runKey(operation));
-			if (tracked) tracked.awaitingWorkflowObservation = true;
-			span = tracked?.span;
-		}
+		const span =
+			(operation.type === 'agent'
+				? operations.get(operationKey({ ...executionContext, operationId: operation.operationId }))
+				: operation.type === 'model'
+					? turns.get(turnKey({ ...executionContext, turnId: operation.turnId }))
+					: operation.type === 'tool'
+						? tools.get(toolKey({ ...executionContext, toolCallId: operation.toolCallId }))
+						: tasks.get(taskKey({ ...executionContext, taskId: operation.taskId })))?.span;
 		if (span) return context.with(trace.setSpan(context.active(), span), next);
 		if (executionContext.traceCarrier) {
 			return context.with(extractCarrier(executionContext.traceCarrier), next);
@@ -437,7 +344,7 @@ export function createOpenTelemetryInstrumentation(
 		dispose() {
 			if (disposed) return;
 			disposed = true;
-			for (const spans of [tools, turns, compactions, tasks, operations, runs]) {
+			for (const spans of [tools, turns, compactions, tasks, operations]) {
 				for (const tracked of spans.values()) complete(tracked.span, { type: 'interrupted' }, new Date());
 				spans.clear();
 			}
@@ -466,7 +373,6 @@ function startSpan(
 }
 
 interface ExecutionIdentity {
-	runId?: string;
 	instanceId?: string;
 	harness?: string;
 	conversationId?: string;
@@ -478,20 +384,14 @@ interface ExecutionIdentity {
 
 interface TrackedSpan {
 	span: Span;
-	runKey?: string;
 	operationKey?: string;
 	turnKey?: string;
-	workflowName?: string;
-	startedAtMs: number;
-	awaitingWorkflowObservation?: boolean;
 	clientAttributes?: Attributes;
 }
 
 function trackedSpan(span: Span, event: FlueObservation): TrackedSpan {
 	return {
 		span,
-		startedAtMs: new Date(event.timestamp).getTime(),
-		...(event.runId ? { runKey: runKey(event) } : {}),
 		...(event.operationId ? { operationKey: operationKey(event) } : {}),
 		...(event.turnId ? { turnKey: turnKey(event) } : {}),
 	};
@@ -501,19 +401,16 @@ function parentSpan(
 	event: FlueObservation,
 	operations: Map<string, TrackedSpan>,
 	tasks: Map<string, TrackedSpan>,
-	runs: Map<string, TrackedSpan>,
 ): Span | undefined {
 	return (
 		(event.taskId ? tasks.get(taskKey(event))?.span : undefined) ??
-		(event.operationId ? operations.get(operationKey(event))?.span : undefined) ??
-		(event.runId ? runs.get(runKey(event))?.span : undefined)
+		(event.operationId ? operations.get(operationKey(event))?.span : undefined)
 	);
 }
 
 function identifiers(event: FlueObservation): Attributes {
 	return Object.fromEntries(
 		Object.entries({
-			'flue.run.id': event.runId,
 			'flue.instance.id': event.instanceId,
 			'flue.submission.id': event.submissionId,
 			'flue.dispatch.id': event.dispatchId,
@@ -635,7 +532,6 @@ function complete(
 
 function endDescendants(
 	event: FlueObservation,
-	operations: Map<string, TrackedSpan>,
 	turns: Map<string, TrackedSpan>,
 	tools: Map<string, TrackedSpan>,
 	tasks: Map<string, TrackedSpan>,
@@ -643,19 +539,12 @@ function endDescendants(
 	time: Date,
 ): void {
 	const ownerOperationKey = event.operationId ? operationKey(event) : undefined;
-	const ownerRunKey = event.runId ? runKey(event) : undefined;
+	if (!ownerOperationKey) return;
 	for (const spans of [turns, tools, tasks, compactions]) {
 		for (const [key, tracked] of spans) {
-			if (ownerOperationKey ? tracked.operationKey !== ownerOperationKey : tracked.runKey !== ownerRunKey) continue;
+			if (tracked.operationKey !== ownerOperationKey) continue;
 			complete(tracked.span, { type: 'interrupted' }, time);
 			spans.delete(key);
-		}
-	}
-	if (!ownerOperationKey) {
-		for (const [key, tracked] of operations) {
-			if (tracked.runKey !== ownerRunKey) continue;
-			complete(tracked.span, { type: 'interrupted' }, time);
-			operations.delete(key);
 		}
 	}
 }
@@ -713,13 +602,8 @@ function identityKey(kind: string, fields: Array<string | undefined>): string {
 	return JSON.stringify([kind, ...fields.map((value) => value ?? null)]);
 }
 
-function runKey(value: { runId?: string }): string {
-	return identityKey('run', [value.runId]);
-}
-
 function operationKey(value: ExecutionIdentity): string {
 	return identityKey('operation', [
-		value.runId,
 		value.instanceId,
 		value.harness,
 		value.conversationId,
@@ -731,7 +615,6 @@ function operationKey(value: ExecutionIdentity): string {
 
 function turnKey(value: ExecutionIdentity): string {
 	return identityKey('turn', [
-		value.runId,
 		value.instanceId,
 		value.harness,
 		value.conversationId,
@@ -744,7 +627,6 @@ function turnKey(value: ExecutionIdentity): string {
 
 function taskKey(value: ExecutionIdentity): string {
 	return identityKey('task', [
-		value.runId,
 		value.instanceId,
 		value.harness,
 		value.conversationId,
@@ -755,7 +637,6 @@ function taskKey(value: ExecutionIdentity): string {
 
 function compactionKey(value: ExecutionIdentity): string {
 	return identityKey('compaction', [
-		value.runId,
 		value.instanceId,
 		value.harness,
 		value.conversationId,
@@ -767,7 +648,6 @@ function compactionKey(value: ExecutionIdentity): string {
 
 function toolKey(value: ExecutionIdentity & { toolCallId?: string }): string {
 	return identityKey('tool', [
-		value.runId,
 		value.instanceId,
 		value.harness,
 		value.conversationId,

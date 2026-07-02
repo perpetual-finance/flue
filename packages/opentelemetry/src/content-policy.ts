@@ -22,7 +22,6 @@ export interface GenAIContentPolicy {
 export interface GenAIContentScope {
 	contentType: GenAIContentType;
 	eventType: FlueObservation['type'];
-	runId?: string;
 	agentName?: string;
 	harness?: string;
 	session?: string;
@@ -160,7 +159,6 @@ function contentScope(event: FlueObservation, contentType: GenAIContentType): Ge
 	return {
 		contentType,
 		eventType: event.type,
-		...(event.runId ? { runId: event.runId } : {}),
 		...(event.agentName ? { agentName: event.agentName } : {}),
 		...(event.harness ? { harness: event.harness } : {}),
 		...(event.session ? { session: event.session } : {}),

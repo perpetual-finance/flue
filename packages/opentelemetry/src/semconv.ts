@@ -11,7 +11,6 @@ export const ATTR = {
 	responseId: 'gen_ai.response.id',
 	conversationId: 'gen_ai.conversation.id',
 	agentName: 'gen_ai.agent.name',
-	workflowName: 'gen_ai.workflow.name',
 	requestStream: 'gen_ai.request.stream',
 	reasoningLevel: 'gen_ai.request.reasoning.level',
 	maxTokens: 'gen_ai.request.max_tokens',

@@ -91,7 +91,7 @@ export interface NamedAgentDispatchRequest extends AgentDispatchRequest {
 
 /** Receipt returned after a dispatched input is accepted for delivery. */
 export interface DispatchReceipt {
-	/** Generated delivery identifier. This is not a workflow `runId`. */
+	/** Generated identifier for this accepted delivery. */
 	dispatchId: string;
 	/** ISO timestamp assigned when dispatch admission begins. */
 	acceptedAt: string;
@@ -925,19 +925,6 @@ type ToolOrigin = 'model' | 'caller' | 'framework' | 'adapter';
 type ToolSemanticType = 'function' | 'extension' | 'datastore';
 
 type FlueEventVariant =
-	| {
-			type: 'run_start';
-			runId: string;
-			workflowName: string;
-			startedAt: string;
-			input: unknown;
-	  }
-	| {
-			type: 'run_resume';
-			runId: string;
-			workflowName: string;
-			startedAt: string;
-	  }
 	| { type: 'agent_start' }
 	| { type: 'agent_end'; messages: AgentMessage[] }
 	| { type: 'turn_start'; turnId: string; purpose: LlmTurnPurpose }
@@ -1035,14 +1022,6 @@ type FlueEventVariant =
 				dev?: string;
 				meta?: Record<string, unknown>;
 			};
-	  }
-	| {
-			type: 'run_end';
-			runId: string;
-			result?: unknown;
-			isError: boolean;
-			error?: unknown;
-			durationMs: number;
 	  };
 
 /**
@@ -1055,7 +1034,6 @@ type FlueEventVariant =
  * {@link FlueEvent}.
  */
 export type FlueEventInput = FlueEventVariant & {
-	runId?: string;
 	instanceId?: string;
 	dispatchId?: string;
 	submissionId?: string;
@@ -1070,9 +1048,8 @@ export type FlueEventInput = FlueEventVariant & {
 };
 
 /**
- * Observable runtime activity. Workflow events carry `runId`; direct and
- * dispatched agent activity carries `instanceId` without becoming a workflow
- * run. Dispatched activity may also carry `dispatchId`.
+ * Observable runtime activity. Direct and dispatched agent activity carries
+ * `instanceId`. Dispatched activity may also carry `dispatchId`.
  *
  * Every delivered event carries the durable event-format version `v`, a
  * per-context `eventIndex`, and a `timestamp`. Harnesses and sessions add
@@ -1080,10 +1057,8 @@ export type FlueEventInput = FlueEventVariant & {
  * generated ids — those correlation fields are optional because they apply
  * only to the activity they describe.
  *
- * Persisted workflow events always carry `runId` and `eventIndex`; together they
- * form the immutable persisted identity for one workflow event. Attached-agent
- * streams and `observe()` from `@flue/runtime` deliver live activity; their
- * indexes are per-context ordering, not durable identity.
+ * Attached-agent streams and `observe()` from `@flue/runtime` deliver live
+ * activity; their indexes are per-context ordering, not durable identity.
  *
  * Recognized image content blocks in framework event payloads never carry raw
  * image bytes: their `data` is replaced with the exported
@@ -1103,15 +1078,10 @@ export const FLUE_EVENT_SCHEMA_REVISION = 3;
 export type FlueObservation = FlueEvent & FlueObservationDetail;
 
 /**
- * Live activity from a direct attached-agent interaction. Attached-agent events
- * require `instanceId`, omit workflow lifecycle events, and never carry
- * `runId`. They are not durable workflow history.
+ * Live activity from a direct attached-agent interaction. Attached-agent
+ * events always carry `instanceId`. They are not durable history.
  */
-export type AttachedAgentEvent = Exclude<
-	FlueEvent,
-	{ type: 'run_start' } | { type: 'run_resume' } | { type: 'run_end' }
-> & {
-	runId?: never;
+export type AttachedAgentEvent = FlueEvent & {
 	instanceId: string;
 };
 

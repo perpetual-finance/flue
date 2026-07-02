@@ -1,11 +1,4 @@
 export type FlueExecutionOperation =
-	| {
-			type: 'workflow';
-			runId: string;
-			workflowName: string;
-			phase: 'start' | 'resume';
-			startedAt: string;
-		}
 	| { type: 'agent'; operationId: string; operationKind: 'prompt' | 'skill' | 'task' }
 	| { type: 'model'; turnId: string }
 	| { type: 'tool'; toolCallId: string; toolName: string }
@@ -18,7 +11,6 @@ export interface FlueTraceCarrier {
 
 export interface FlueExecutionContext {
 	eventContext?: import('./types.ts').FlueEventContext;
-	runId?: string;
 	instanceId?: string;
 	submissionId?: string;
 	dispatchId?: string;

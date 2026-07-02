@@ -102,10 +102,6 @@ export function createAgent<TEnv = Record<string, any>>(
 	return defineAgent(initialize);
 }
 
-export function isAgentDefinition(value: unknown): value is AgentDefinition {
-	return Boolean(value && typeof value === 'object' && agentDefinitions.has(value));
-}
-
 export function assertResolvedAgentProfile(profile: AgentProfile, label: string): AgentProfile {
 	assertAgentProfile(profile, label, new WeakSet());
 	return profile;

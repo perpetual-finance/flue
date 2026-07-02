@@ -1,20 +1,13 @@
 /**
- * Shared channel HTTP surface.
+ * Channel HTTP surface.
  *
  * A channel is an object exposing a declarative `routes` array
- * (`{ method, path, handler }`). Two consumers serve those routes:
- *
- *   - the legacy `flue()` router (`/channels/:name/...`, flue-app.ts), which
- *     receives a pre-flattened `"METHOD /path" → handler` map from the
- *     generated entry, and
- *   - {@link createChannelRouter}, the mountable sub-app that channel
- *     packages expose as `channel.route()` for explicit `app.route(...)`
- *     mounting.
- *
- * Both share {@link dispatchChannelRequest} so error envelopes
+ * (`{ method, path, handler }`). {@link createChannelRouter} — the mountable
+ * sub-app that channel packages expose as `channel.route()` for explicit
+ * `app.route(...)` mounting — serves those routes through
+ * {@link dispatchChannelRequest}, which owns the error envelopes
  * (`method_not_allowed` with an `Allow` header, `route_not_found`),
- * cross-realm Response normalization, and runtime activity-lease retention
- * stay wire-identical.
+ * cross-realm Response normalization, and runtime activity-lease retention.
  */
 
 import type { Context, Env, Handler } from 'hono';
@@ -38,7 +31,7 @@ export interface MountableChannel<E extends Env = Env> {
 }
 
 /** Flattened dispatch map keyed by `"METHOD /path"`. */
-export type ChannelHandlerMap = Record<
+type ChannelHandlerMap = Record<
 	string,
 	(c: Context, next: () => Promise<void>) => unknown
 >;
@@ -136,17 +129,15 @@ function normalizeChannelRoutes<E extends Env>(
 }
 
 /**
- * Dispatch one request against a channel's flattened handler map. Shared by
- * the legacy `/channels/:name` router and {@link createChannelRouter}.
+ * Dispatch one request against a channel's flattened handler map on behalf of
+ * {@link createChannelRouter}.
  */
-export async function dispatchChannelRequest(options: {
+async function dispatchChannelRequest(options: {
 	c: Context;
 	/** Mount-relative path (leading slash), or '' for the bare mount root. */
 	suffix: string;
 	handlers: ChannelHandlerMap | undefined;
 	activityGate?: RuntimeActivityGate | undefined;
-	/** Channel wire name for diagnostics on the legacy path. */
-	label?: string;
 }): Promise<Response> {
 	const { c, suffix, handlers } = options;
 	if (!handlers || suffix.length === 0) {
@@ -181,9 +172,8 @@ export async function dispatchChannelRequest(options: {
 		throw error;
 	}
 	if (!response) {
-		const channel = options.label ? `Channel "${options.label}"` : 'Channel';
 		throw new TypeError(
-			`[flue] ${channel} handler for ${c.req.method} ${suffix} must return a Response.`,
+			`[flue] Channel handler for ${c.req.method} ${suffix} must return a Response.`,
 		);
 	}
 	return response;

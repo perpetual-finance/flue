@@ -1,5 +1,5 @@
 import type { FlueObservation } from '@flue/runtime';
-import { context, propagation, SpanKind, SpanStatusCode, type Meter, type Span, type SpanOptions, trace, type Tracer } from '@opentelemetry/api';
+import { context, type Meter, propagation, type Span, SpanKind, type SpanOptions, SpanStatusCode, type Tracer, trace } from '@opentelemetry/api';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import { W3CTraceContextPropagator } from '@opentelemetry/core';
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
@@ -290,7 +290,6 @@ describe('createOpenTelemetryInstrumentation()', () => {
 		expect(created).toEqual(expect.arrayContaining([
 			{ name: 'gen_ai.client.operation.duration', unit: 's' },
 			{ name: 'gen_ai.client.token.usage', unit: '{token}' },
-			{ name: 'gen_ai.workflow.duration', unit: 's' },
 			{ name: 'gen_ai.invoke_agent.duration', unit: 's' },
 			{ name: 'gen_ai.execute_tool.duration', unit: 's' },
 		]));
@@ -386,36 +385,29 @@ describe('createOpenTelemetryInstrumentation()', () => {
 		expect(tracer.spans[0]?.exceptions).toEqual([{ name: 'rate_limit' }]);
 	});
 
-	it('ends only spans owned by a workflow when that run ends during concurrent activity', () => {
+	it('ends only spans owned by an operation when that operation ends during concurrent activity', () => {
 		const tracer = new RecordingTracer();
 		const instrumentation = createOpenTelemetryInstrumentation({ tracer: tracer as unknown as Tracer });
 		for (const event of [
-			{ type: 'run_start', runId: 'run-a', workflowName: 'a', startedAt: '2026-06-22T00:00:00.000Z', input: null },
-			{ type: 'operation_start', runId: 'run-a', operationId: 'shared-operation', operationKind: 'prompt' },
-			{ type: 'turn_request', runId: 'run-a', operationId: 'shared-operation', turnId: 'shared-turn', purpose: 'agent', request: { providerId: 'p', providerName: 'p', requestedModel: 'm', api: 'a', input: { messages: [] } } },
-			{ type: 'run_start', runId: 'run-b', workflowName: 'b', startedAt: '2026-06-22T00:00:00.000Z', input: null },
-			{ type: 'operation_start', runId: 'run-b', operationId: 'shared-operation', operationKind: 'prompt' },
-			{ type: 'turn_request', runId: 'run-b', operationId: 'shared-operation', turnId: 'shared-turn', purpose: 'agent', request: { providerId: 'p', providerName: 'p', requestedModel: 'm', api: 'a', input: { messages: [] } } },
+			{ type: 'operation_start', instanceId: 'instance-a', operationId: 'shared-operation', operationKind: 'prompt' },
+			{ type: 'turn_request', instanceId: 'instance-a', operationId: 'shared-operation', turnId: 'shared-turn', purpose: 'agent', request: { providerId: 'p', providerName: 'p', requestedModel: 'm', api: 'a', input: { messages: [] } } },
+			{ type: 'operation_start', instanceId: 'instance-b', operationId: 'shared-operation', operationKind: 'prompt' },
+			{ type: 'turn_request', instanceId: 'instance-b', operationId: 'shared-operation', turnId: 'shared-turn', purpose: 'agent', request: { providerId: 'p', providerName: 'p', requestedModel: 'm', api: 'a', input: { messages: [] } } },
 			{ type: 'operation_start', instanceId: 'instance-direct', operationId: 'op-direct', operationKind: 'prompt' },
 		] satisfies Record<string, unknown>[]) instrumentation.observe(observation(event), ctx);
 
-		instrumentation.observe(observation({ type: 'run_end', runId: 'run-a', durationMs: 1, isError: false }), ctx);
+		instrumentation.observe(observation({ type: 'operation', instanceId: 'instance-a', operationId: 'shared-operation', operationKind: 'prompt', durationMs: 1, isError: false }), ctx);
 
-		const runSpan = (runId: string) => tracer.spans.find((candidate) =>
-			candidate.attributes['flue.run.id'] === runId && candidate.attributes['flue.operation.id'] === undefined,
+		const operationSpan = (instanceId: string) => tracer.spans.find((candidate) =>
+			candidate.attributes['flue.instance.id'] === instanceId && candidate.attributes['flue.operation.id'] === 'shared-operation' && candidate.attributes['flue.turn.id'] === undefined,
 		);
-		const operationSpan = (runId: string) => tracer.spans.find((candidate) =>
-			candidate.attributes['flue.run.id'] === runId && candidate.attributes['flue.operation.id'] === 'shared-operation' && candidate.attributes['flue.turn.id'] === undefined,
+		const turnSpan = (instanceId: string) => tracer.spans.find((candidate) =>
+			candidate.attributes['flue.instance.id'] === instanceId && candidate.attributes['flue.turn.id'] === 'shared-turn',
 		);
-		const turnSpan = (runId: string) => tracer.spans.find((candidate) =>
-			candidate.attributes['flue.run.id'] === runId && candidate.attributes['flue.turn.id'] === 'shared-turn',
-		);
-		expect(runSpan('run-a')?.ended).toBe(true);
-		expect(operationSpan('run-a')?.ended).toBe(true);
-		expect(turnSpan('run-a')?.ended).toBe(true);
-		expect(runSpan('run-b')?.ended).toBe(false);
-		expect(operationSpan('run-b')?.ended).toBe(false);
-		expect(turnSpan('run-b')?.ended).toBe(false);
+		expect(operationSpan('instance-a')?.ended).toBe(true);
+		expect(turnSpan('instance-a')?.ended).toBe(true);
+		expect(operationSpan('instance-b')?.ended).toBe(false);
+		expect(turnSpan('instance-b')?.ended).toBe(false);
 		expect(tracer.spans.find((candidate) => candidate.attributes['flue.operation.id'] === 'op-direct')?.ended).toBe(false);
 	});
 
@@ -474,81 +466,44 @@ describe('createOpenTelemetryInstrumentation()', () => {
 	it('activates the tool span matching complete execution identity', async () => {
 		const { exporter, tracer } = realTracer();
 		const instrumentation = createOpenTelemetryInstrumentation({ tracer });
-		for (const runId of ['run-a', 'run-b']) {
-			instrumentation.observe(observation({ type: 'run_start', runId, workflowName: runId, startedAt: '2026-06-22T00:00:00.000Z', input: null }), ctx);
-			instrumentation.observe(observation({ type: 'operation_start', runId, harness: 'default', conversationId: 'shared-conversation', session: 'default', operationId: `operation-${runId}`, operationKind: 'prompt' }), ctx);
-			instrumentation.observe(observation({ type: 'tool_start', runId, harness: 'default', conversationId: 'shared-conversation', session: 'default', operationId: `operation-${runId}`, turnId: `turn-${runId}`, toolCallId: 'shared-tool', toolName: 'lookup', origin: 'model' }), ctx);
+		for (const instanceId of ['instance-a', 'instance-b']) {
+			instrumentation.observe(observation({ type: 'operation_start', instanceId, harness: 'default', conversationId: 'shared-conversation', session: 'default', operationId: `operation-${instanceId}`, operationKind: 'prompt' }), ctx);
+			instrumentation.observe(observation({ type: 'tool_start', instanceId, harness: 'default', conversationId: 'shared-conversation', session: 'default', operationId: `operation-${instanceId}`, turnId: `turn-${instanceId}`, toolCallId: 'shared-tool', toolName: 'lookup', origin: 'model' }), ctx);
 		}
 
 		let activeSpanId: string | undefined;
 		await instrumentation.interceptor(
 			{ type: 'tool', toolCallId: 'shared-tool', toolName: 'lookup' },
-			{ runId: 'run-b', harness: 'default', conversationId: 'shared-conversation', session: 'default', operationId: 'operation-run-b', turnId: 'turn-run-b' },
+			{ instanceId: 'instance-b', harness: 'default', conversationId: 'shared-conversation', session: 'default', operationId: 'operation-instance-b', turnId: 'turn-instance-b' },
 			async () => {
 				activeSpanId = trace.getSpan(context.active())?.spanContext().spanId;
 			},
 		);
 		instrumentation.dispose();
 
-		const expected = exporter.getFinishedSpans().find((candidate) => candidate.attributes['flue.run.id'] === 'run-b' && candidate.name === 'execute_tool lookup');
+		const expected = exporter.getFinishedSpans().find((candidate) => candidate.attributes['flue.instance.id'] === 'instance-b' && candidate.name === 'execute_tool lookup');
 		expect(activeSpanId).toBe(expected?.spanContext().spanId);
 	});
 
-	it('parents and activates a workflow root span from admitted trace context', async () => {
-		const { exporter, tracer } = realTracer();
+	it('activates admitted trace context when no tracked span matches', async () => {
+		const { tracer } = realTracer();
 		const instrumentation = createOpenTelemetryInstrumentation({ tracer });
 		const carrier = { traceparent: '00-11111111111111111111111111111111-2222222222222222-01' };
-		let activeSpanId: string | undefined;
+		let active: { traceId: string; spanId: string } | undefined;
 
 		await instrumentation.interceptor(
-			{ type: 'workflow', runId: 'run-1', workflowName: 'test', phase: 'start', startedAt: '2026-06-22T00:00:00.000Z' },
-			{ runId: 'run-1', traceCarrier: carrier },
+			{ type: 'agent', operationId: 'op-untracked', operationKind: 'prompt' },
+			{ traceCarrier: carrier },
 			async () => {
-				activeSpanId = trace.getSpan(context.active())?.spanContext().spanId;
-				instrumentation.observe(
-					observation({ type: 'run_start', runId: 'run-1', workflowName: 'test', startedAt: '2026-06-22T00:00:00.000Z', input: null }),
-					ctx,
-				);
-				instrumentation.observe(observation({ type: 'run_end', runId: 'run-1', durationMs: 1, isError: false }), ctx);
+				const spanContext = trace.getSpan(context.active())?.spanContext();
+				active = spanContext ? { traceId: spanContext.traceId, spanId: spanContext.spanId } : undefined;
 			},
 		);
 
-		const span = exporter.getFinishedSpans().find((candidate) => candidate.name === 'invoke_workflow test');
-		expect(span?.spanContext().traceId).toBe('11111111111111111111111111111111');
-		expect(span?.parentSpanContext?.spanId).toBe('2222222222222222');
-		expect(activeSpanId).toBe(span?.spanContext().spanId);
-	});
-
-	it('replaces an interrupted workflow span with a recovered segment', async () => {
-		const { exporter, tracer } = realTracer();
-		const instrumentation = createOpenTelemetryInstrumentation({ tracer });
-		const carrier = { traceparent: '00-11111111111111111111111111111111-2222222222222222-01' };
-		instrumentation.observe(
-			observation({ type: 'run_start', runId: 'run-recovered', workflowName: 'test', startedAt: '2026-06-21T00:00:00.000Z', input: null }),
-			ctx,
-		);
-
-		await instrumentation.interceptor(
-			{ type: 'workflow', runId: 'run-recovered', workflowName: 'test', phase: 'resume', startedAt: '2026-06-21T00:00:00.000Z' },
-			{ runId: 'run-recovered', traceCarrier: carrier },
-			async () => {
-				instrumentation.observe(
-					observation({ type: 'run_resume', runId: 'run-recovered', workflowName: 'test', startedAt: '2026-06-21T00:00:00.000Z', timestamp: '2026-06-22T00:00:00.000Z' }),
-					ctx,
-				);
-				instrumentation.observe(
-					observation({ type: 'run_end', runId: 'run-recovered', durationMs: 86_400_000, isError: true, timestamp: '2026-06-22T00:00:00.010Z' }),
-					ctx,
-				);
-			},
-		);
-
-		const spans = exporter.getFinishedSpans().filter((candidate) => candidate.name === 'invoke_workflow test');
-		expect(spans).toHaveLength(2);
-		expect(spans[0]?.status.code).toBe(SpanStatusCode.ERROR);
-		expect(spans[1]?.spanContext().traceId).toBe('11111111111111111111111111111111');
-		expect(spans[1]?.parentSpanContext?.spanId).toBe('2222222222222222');
-		expect(Number(spans[1]?.duration[0])).toBeLessThan(1);
+		expect(active).toEqual({
+			traceId: '11111111111111111111111111111111',
+			spanId: '2222222222222222',
+		});
 	});
 
 	it('parents a direct agent root span to active durable trace context', async () => {

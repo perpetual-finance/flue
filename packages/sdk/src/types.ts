@@ -158,24 +158,9 @@ export type AgentSubmissionSettledEvent = {
  * union — it carries `ConversationStreamChunk`. The union is exported for
  * first-party presenters that also consume runtime activity delivered outside
  * HTTP (e.g. the `flue run` CLI presenter). It mirrors the runtime's event
- * union exactly (pinned by the wire-conformance type tests); the residual
- * `run_start`/`run_resume`/`run_end` variants disappear when the runtime's own
- * post-workflow event-union cleanup lands.
+ * union exactly (pinned by the wire-conformance type tests).
  */
 export type FlueEvent = (
-	| {
-			type: 'run_start';
-			runId: string;
-			workflowName: string;
-			startedAt: string;
-			input: unknown;
-	  }
-	| {
-			type: 'run_resume';
-			runId: string;
-			workflowName: string;
-			startedAt: string;
-	  }
 	| { type: 'agent_start' }
 	| { type: 'agent_end'; messages: unknown[] }
 	| { type: 'turn_start'; turnId: string; purpose: LlmTurnPurpose }
@@ -252,20 +237,11 @@ export type FlueEvent = (
 	  }
 	| { type: 'idle' }
 	| AgentSubmissionSettledEvent
-	| {
-			type: 'run_end';
-			runId: string;
-			result?: unknown;
-			isError: boolean;
-			error?: unknown;
-			durationMs: number;
-	  }
 ) & {
 	/** Durable event-format version. Readers branch on this when the format changes. */
 	v: 3;
 	eventIndex: number;
 	timestamp: string;
-	runId?: string;
 	instanceId?: string;
 	dispatchId?: string;
 	submissionId?: string;
@@ -279,11 +255,7 @@ export type FlueEvent = (
 	turnId?: string;
 };
 
-/** Direct-agent event attached to an agent instance rather than a workflow run. */
-export type AttachedAgentEvent = Exclude<
-	FlueEvent,
-	{ type: 'run_start' } | { type: 'run_resume' } | { type: 'run_end' }
-> & {
-	runId?: never;
+/** Direct-agent event attached to an agent instance. */
+export type AttachedAgentEvent = FlueEvent & {
 	instanceId: string;
 };

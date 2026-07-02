@@ -153,7 +153,6 @@ export function createLineEventPresenter(options: LineEventPresenterOptions): Li
 				case 'turn':
 				case 'idle':
 				case 'submission_settled':
-				case 'run_end':
 					flush();
 					break;
 			}
