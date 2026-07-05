@@ -26,11 +26,7 @@
 
 import type { MiddlewareHandler } from 'hono';
 import { Hono } from 'hono';
-import {
-	AttachmentsNotExposedError,
-	MethodNotAllowedError,
-	toHttpResponse,
-} from '../errors.ts';
+import { AttachmentsNotExposedError, MethodNotAllowedError, toHttpResponse } from '../errors.ts';
 import type { AgentModuleValue } from '../types.ts';
 import {
 	assertAgentInstanceId,
@@ -342,18 +338,29 @@ function assertAgentDefinitionValue(
 	value: unknown,
 	identity: string,
 ): asserts value is AgentModuleValue {
-	// A bare agent function is a valid module value; its shape is validated
-	// when it renders. Twin: `isAgentDefinitionValue` in flue-app.ts — keep in sync.
-	if (typeof value === 'function') return;
-	const candidate = value as { __flueAgentDefinition?: unknown; initialize?: unknown } | null;
-	if (
-		!candidate ||
-		typeof candidate !== 'object' ||
-		candidate.__flueAgentDefinition !== true ||
-		typeof candidate.initialize !== 'function'
-	) {
+	// Twin: `isAgentDefinitionValue` in flue-app.ts — keep in sync.
+	if (typeof value === 'function') {
+		// A bare capability function is the likeliest authoring mistake: it
+		// carries no model. Point at the wrapper.
 		throw new Error(
-			`[flue] Agent "${identity}" must default-export an agent function or defineAgent(...).`,
+			`[flue] Agent "${identity}" default-exports a bare function. Wrap it: defineAgent(${value.name || 'Agent'}, { model: 'provider-id/model-id' }).`,
+		);
+	}
+	const candidate = value as {
+		__flueAgentDefinition?: unknown;
+		initialize?: unknown;
+		__flueFunctionAgent?: unknown;
+	} | null;
+	const isLegacy =
+		!!candidate &&
+		typeof candidate === 'object' &&
+		candidate.__flueAgentDefinition === true &&
+		typeof candidate.initialize === 'function';
+	const isFunctionAgent =
+		!!candidate && typeof candidate === 'object' && candidate.__flueFunctionAgent === true;
+	if (!isLegacy && !isFunctionAgent) {
+		throw new Error(
+			`[flue] Agent "${identity}" must default-export defineAgent(...) — defineAgent(Agent, { model }) or a legacy initializer.`,
 		);
 	}
 }

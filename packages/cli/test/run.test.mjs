@@ -70,7 +70,7 @@ export default defineAgent(() => ({ model: 'faux/faux-model' }));
 function writeFunctionAgent(root, name = 'hooked') {
 	fs.writeFileSync(
 		path.join(root, 'src', 'agents', `${name}.mjs`),
-		`import { useInstruction, registerProvider } from '@flue/runtime';
+		`import { defineAgent, useInstruction, registerProvider } from '@flue/runtime';
 import { fauxAssistantMessage, registerFauxProvider } from '@earendil-works/pi-ai/compat';
 
 const faux = registerFauxProvider({ provider: 'faux', models: [{ id: 'faux-model' }] });
@@ -82,10 +82,11 @@ faux.setResponses([
 ]);
 registerProvider('faux', { api: faux.api, baseUrl: 'https://faux.invalid' });
 
-export default function ${name}() {
+function ${name}() {
 	useInstruction('Speak only in haiku.');
-	return { model: 'faux/faux-model', instruction: 'You are the ${name} agent.' };
+	return 'You are the ${name} agent.';
 }
+export default defineAgent(${name}, { model: 'faux/faux-model' });
 `,
 	);
 	return path.join('src', 'agents', `${name}.mjs`);
@@ -345,7 +346,7 @@ test('a module without an agent default export fails clearly', async () => {
 	assert.equal(result.code, 1);
 	assert.match(
 		result.stderr,
-		/Agent "bad" must default-export an agent function or defineAgent\(\.\.\.\)/,
+		/Agent "bad" must default-export defineAgent\(\.\.\.\)/,
 	);
 });
 

@@ -32,7 +32,7 @@ function createTool(name: string): ToolDefinition {
 
 describe('defineAgent()', () => {
 	it('rejects invalid input when it does not receive an initializer function', () => {
-		expect(() => defineAgent(null as never)).toThrow('requires an initializer function');
+		expect(() => defineAgent(null as never)).toThrow('requires a function');
 	});
 
 	it('invokes the initializer with id and env when a runner initializes the agent definition', async () => {

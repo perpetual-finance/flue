@@ -36,10 +36,7 @@ interface RuntimeBase {
 
 export interface NodeRuntime extends RuntimeBase {
 	target: 'node';
-	createAgentAdmission: (
-		agentName: string,
-		instanceId: string,
-	) => AttachedAgentSubmissionAdmission;
+	createAgentAdmission: (agentName: string, instanceId: string) => AttachedAgentSubmissionAdmission;
 	/**
 	 * Abort all in-flight and queued durable work for an agent instance.
 	 * Resolves `true` when there was unsettled work to abort. Terminal
@@ -103,12 +100,10 @@ export async function dispatch(
 }
 
 function isAgentDefinitionValue(value: unknown): value is AgentModuleValue {
-	// A bare agent function is a valid module value. Twin:
-	// `assertAgentDefinitionValue` in registration.ts — keep in sync.
-	if (typeof value === 'function') return true;
+	// Twin: `assertAgentDefinitionValue` in registration.ts — keep in sync.
+	if (typeof value !== 'object' || value === null) return false;
+	if ('__flueFunctionAgent' in value && value.__flueFunctionAgent === true) return true;
 	return (
-		typeof value === 'object' &&
-		value !== null &&
 		'__flueAgentDefinition' in value &&
 		value.__flueAgentDefinition === true &&
 		'initialize' in value &&

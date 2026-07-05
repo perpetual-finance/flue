@@ -1,5 +1,5 @@
 'use agent';
-import { defineTool, useTool } from '@flue/runtime';
+import { defineAgent, defineTool, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 
 const lookup = defineTool({
@@ -10,10 +10,9 @@ const lookup = defineTool({
 });
 
 /** A tool-using agent: tool calls show up as `tool` spans in Braintrust. */
-export default function tools() {
+function Tools() {
 	useTool(lookup);
-	return {
-		model: 'anthropic/claude-haiku-4-5',
-		instruction: 'Use the weather tool to report the current weather for the requested city.',
-	};
+	return 'Use the weather tool to report the current weather for the requested city.';
 }
+
+export default defineAgent(Tools, { model: 'anthropic/claude-haiku-4-5' });

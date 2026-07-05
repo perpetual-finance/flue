@@ -1,95 +1,68 @@
-import * as v from 'valibot';
 import { ToolNameConflictError } from '../errors.ts';
-import type { AgentFunction, AgentManifest, AgentRuntimeConfig } from '../types.ts';
+import type { AgentRuntimeConfig, Capability, FunctionAgentConfig } from '../types.ts';
 import {
-	type ComponentRecord,
+	type CapabilityRecord,
 	type RenderFrame,
 	type RenderStateContext,
 	renderWithFrame,
 } from './frame.ts';
 
-const AgentManifestSchema = v.strictObject(
-	{
-		model: v.optional(v.string()),
-		instruction: v.optional(v.string()),
-		thinkingLevel: v.optional(v.string()),
-		compaction: v.optional(v.union([v.literal(false), v.looseObject({})])),
-		durability: v.optional(v.looseObject({})),
-		cwd: v.optional(v.string()),
-	},
-	(issue) =>
-		issue.expected === 'never'
-			? `received unknown agent manifest field ${issue.received}`
-			: issue.message,
-);
-
 /**
- * Run one render of an agent function: invoke it inside a fresh frame,
- * validate the returned manifest, and map manifest + hook attachments onto
- * the internal runtime-config shape the initialization path consumes (the
- * same shape a `defineAgent` initializer returns). Field values beyond shape
- * (thinking levels, compaction/durability fields) are validated downstream by
- * the shared profile asserts, exactly as for `defineAgent`.
+ * Run one render of an agent's capability function: invoke it inside a fresh
+ * frame, validate the returned instruction, and map the static config + hook
+ * attachments onto the internal runtime-config shape the initialization path
+ * consumes (the same shape a legacy `defineAgent` initializer returns).
+ * Config field values beyond shape (thinking levels, compaction/durability
+ * fields) are validated downstream by the shared profile asserts.
  */
 export function renderAgentFunction(
-	fn: AgentFunction,
+	capability: Capability,
+	config: FunctionAgentConfig,
 	state?: RenderStateContext,
 ): AgentRuntimeConfig {
-	const { result, frame } = renderWithFrame(fn, state);
-	assertAgentManifest(result);
+	const { result, frame } = renderWithFrame(capability, state);
+	assertAgentInstruction(result);
 	assertUniqueToolNames(frame);
-	const instructions = composeAgentDocument(result.instruction, frame);
-	const tools = [...frame.root.tools, ...frame.components.flatMap((record) => record.tools)];
+	const instructions = composeAgentDocument(result, frame);
+	const tools = [...frame.root.tools, ...frame.capabilities.flatMap((record) => record.tools)];
 	return {
-		...(result.model !== undefined ? { model: result.model } : {}),
+		model: config.model,
 		...(instructions !== undefined ? { instructions } : {}),
 		...(tools.length > 0 ? { tools } : {}),
-		...(result.thinkingLevel !== undefined ? { thinkingLevel: result.thinkingLevel } : {}),
-		...(result.compaction !== undefined ? { compaction: result.compaction } : {}),
-		...(result.durability !== undefined ? { durability: result.durability } : {}),
-		...(result.cwd !== undefined ? { cwd: result.cwd } : {}),
+		...(config.thinkingLevel !== undefined ? { thinkingLevel: config.thinkingLevel } : {}),
+		...(config.compaction !== undefined ? { compaction: config.compaction } : {}),
+		...(config.durability !== undefined ? { durability: config.durability } : {}),
+		...(config.cwd !== undefined ? { cwd: config.cwd } : {}),
 	};
 }
 
 /**
- * The agent's instruction document: base instruction first, then ungrouped
- * `useInstruction` contributions in call order, then one uniform section per
- * mounted component under a Capabilities heading. The exact formatting is
- * internal and expected to iterate; the ordering above is the contract.
+ * The agent's instruction document, concatenated in composition order: the
+ * agent's returned instruction first, then root-level `useInstruction`
+ * contributions in call order, then each mounted capability's content (its
+ * returned instruction, then its in-body contributions) in mount order.
+ * Authors own all formatting — the runtime only joins with blank lines.
  */
 function composeAgentDocument(base: string | undefined, frame: RenderFrame): string | undefined {
 	const parts = [
-		...(base !== undefined ? [base] : []),
+		...(base !== undefined && base.length > 0 ? [base] : []),
 		...frame.root.instructions,
-		...(frame.components.length > 0 ? [renderCapabilities(frame.components)] : []),
+		...frame.capabilities.flatMap(capabilityParts),
 	];
 	if (parts.length === 0) return undefined;
 	return parts.join('\n\n');
 }
 
-function renderCapabilities(components: readonly ComponentRecord[]): string {
-	const sections = components.map((record) => {
-		const lines = [
-			`## ${record.key}`,
-			...(record.description !== undefined ? [record.description] : []),
-			...(record.instruction !== undefined ? [record.instruction] : []),
-			...record.instructions,
-			...(record.tools.length > 0
-				? [`Tools: ${record.tools.map((tool) => tool.name).join(', ')}`]
-				: []),
-		];
-		return lines.join('\n');
-	});
+function capabilityParts(record: CapabilityRecord): string[] {
 	return [
-		'# Capabilities',
-		'You have the following capabilities. Each lists its guidance and the tools it provides.',
-		...sections,
-	].join('\n\n');
+		...(record.instruction !== undefined ? [record.instruction] : []),
+		...record.instructions,
+	];
 }
 
 function assertUniqueToolNames(frame: RenderFrame): void {
 	const seen = new Set<string>();
-	const all = [...frame.root.tools, ...frame.components.flatMap((record) => record.tools)];
+	const all = [...frame.root.tools, ...frame.capabilities.flatMap((record) => record.tools)];
 	for (const tool of all) {
 		if (seen.has(tool.name)) {
 			throw new ToolNameConflictError({ name: tool.name, conflict: 'duplicate', source: 'custom' });
@@ -98,28 +71,15 @@ function assertUniqueToolNames(frame: RenderFrame): void {
 	}
 }
 
-function assertAgentManifest(value: unknown): asserts value is AgentManifest {
-	if (typeof value === 'string') {
-		throw new Error(
-			'[flue] Agent functions must return a manifest object ({ model, instruction, ... }); returning a string is not supported.',
-		);
-	}
+function assertAgentInstruction(value: unknown): asserts value is string | undefined {
 	if (isPromiseLike(value)) {
 		throw new Error(
-			'[flue] Agent functions must be synchronous. Move async work into tools, actions, or resource factories.',
+			'[flue] Agent capability functions must be synchronous. Move async work into tools, actions, or resource factories.',
 		);
 	}
-	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+	if (value !== undefined && typeof value !== 'string') {
 		throw new Error(
-			'[flue] Agent functions must return a manifest object ({ model, instruction, ... }).',
-		);
-	}
-	const parsed = v.safeParse(AgentManifestSchema, value);
-	if (!parsed.success) {
-		throw new Error(
-			`[flue] Agent function returned an invalid manifest: ${parsed.issues
-				.map((issue) => issue.message)
-				.join('; ')}.`,
+			'[flue] An agent returns its instruction string (or nothing). Model and settings belong in defineAgent(Agent, { model, ... }); everything else is composed with hooks in the body.',
 		);
 	}
 }

@@ -9,6 +9,7 @@ import {
 } from '@earendil-works/pi-ai/compat';
 import * as v from 'valibot';
 import { afterEach, describe, expect, it } from 'vitest';
+import { defineAgent } from '../src/agent-definition.ts';
 import type { ConversationRecord, StateWriteRecord } from '../src/conversation-records.ts';
 import {
 	createReducedInstanceState,
@@ -77,6 +78,8 @@ function makeDispatchInput(overrides: Partial<DispatchInput> = {}): DispatchInpu
 	};
 }
 
+const CONFIG = { model: 'faux/agent-state' };
+
 function renderStateContext(entries: [string, unknown][] = []) {
 	const snapshot = new Map(entries);
 	return { snapshot, store: createHookStateBuffer(snapshot) };
@@ -84,13 +87,16 @@ function renderStateContext(entries: [string, unknown][] = []) {
 
 describe('useState (render)', () => {
 	it('returns the default when nothing is persisted, undefined without one', () => {
-		renderAgentFunction(() => {
-			const [count] = useState({ name: 'count', default: 0 });
-			const [note] = useState({ name: 'note' });
-			expect(count).toBe(0);
-			expect(note).toBeUndefined();
-			return {};
-		}, renderStateContext());
+		renderAgentFunction(
+			() => {
+				const [count] = useState({ name: 'count', default: 0 });
+				const [note] = useState({ name: 'note' });
+				expect(count).toBe(0);
+				expect(note).toBeUndefined();
+			},
+			CONFIG,
+			renderStateContext(),
+		);
 	});
 
 	it('reads the persisted snapshot value over the default', () => {
@@ -98,8 +104,8 @@ describe('useState (render)', () => {
 			() => {
 				const [count] = useState({ name: 'count', schema: v.number(), default: 0 });
 				expect(count).toBe(7);
-				return {};
 			},
+			CONFIG,
 			renderStateContext([['count', 7]]),
 		);
 	});
@@ -107,20 +113,26 @@ describe('useState (render)', () => {
 	it('reads its own buffered writes over the snapshot (read-your-writes)', () => {
 		const state = renderStateContext([['count', 1]]);
 		state.store.write('count', 2);
-		renderAgentFunction(() => {
-			const [count] = useState({ name: 'count', default: 0 });
-			expect(count).toBe(2);
-			return {};
-		}, state);
+		renderAgentFunction(
+			() => {
+				const [count] = useState({ name: 'count', default: 0 });
+				expect(count).toBe(2);
+			},
+			CONFIG,
+			state,
+		);
 	});
 
 	it('throws on a duplicate name in one render', () => {
 		expect(() =>
-			renderAgentFunction(() => {
-				useState({ name: 'count' });
-				useState({ name: 'count' });
-				return {};
-			}, renderStateContext()),
+			renderAgentFunction(
+				() => {
+					useState({ name: 'count' });
+					useState({ name: 'count' });
+				},
+				CONFIG,
+				renderStateContext(),
+			),
 		).toThrow(/Duplicate useState name "count"/);
 	});
 
@@ -129,43 +141,54 @@ describe('useState (render)', () => {
 	});
 
 	it('throws when written during render', () => {
-		renderAgentFunction(() => {
-			const [, setCount] = useState({ name: 'count', default: 0 });
-			expect(() => setCount(1)).toThrow(/written during render/);
-			return {};
-		}, renderStateContext());
+		renderAgentFunction(
+			() => {
+				const [, setCount] = useState({ name: 'count', default: 0 });
+				expect(() => setCount(1)).toThrow(/written during render/);
+			},
+			CONFIG,
+			renderStateContext(),
+		);
 	});
 
 	it('throws on writes when the render has no durable runtime behind it', () => {
 		let setCount: StateSetter<number> | undefined;
 		renderAgentFunction(() => {
 			[, setCount] = useState({ name: 'count', default: 0 });
-			return {};
-		});
+		}, CONFIG);
 		expect(() => setCount?.(1)).toThrow(/no durable runtime/);
 	});
 
 	it('validates options: unknown fields and empty names throw', () => {
 		expect(() =>
-			renderAgentFunction(() => {
-				useState({ name: 'count', persist: true } as never);
-				return {};
-			}, renderStateContext()),
+			renderAgentFunction(
+				() => {
+					useState({ name: 'count', persist: true } as never);
+				},
+				CONFIG,
+				renderStateContext(),
+			),
 		).toThrow(/unknown useState option/);
 		expect(() =>
-			renderAgentFunction(() => {
-				useState({ name: '' });
-				return {};
-			}, renderStateContext()),
+			renderAgentFunction(
+				() => {
+					useState({ name: '' });
+				},
+				CONFIG,
+				renderStateContext(),
+			),
 		).toThrow(/useState\(\) options are invalid/);
 	});
 
 	it('validates the default against the schema', () => {
 		expect(() =>
-			renderAgentFunction(() => {
-				useState({ name: 'count', schema: v.number(), default: 'nope' as never });
-				return {};
-			}, renderStateContext()),
+			renderAgentFunction(
+				() => {
+					useState({ name: 'count', schema: v.number(), default: 'nope' as never });
+				},
+				CONFIG,
+				renderStateContext(),
+			),
 		).toThrow(/default does not match its schema/);
 	});
 
@@ -174,8 +197,8 @@ describe('useState (render)', () => {
 			renderAgentFunction(
 				() => {
 					useState({ name: 'count', schema: v.number(), default: 0 });
-					return {};
 				},
+				CONFIG,
 				renderStateContext([['count', 'legacy']]),
 			),
 		).toThrow(/Persisted value for state "count" does not match its schema/);
@@ -184,11 +207,14 @@ describe('useState (render)', () => {
 	it('rejects invalid, undefined, and non-serializable written values', () => {
 		let setCount: StateSetter<number> | undefined;
 		let setAny: StateSetter<unknown> | undefined;
-		renderAgentFunction(() => {
-			[, setCount] = useState({ name: 'count', schema: v.number(), default: 0 });
-			[, setAny] = useState({ name: 'anything' });
-			return {};
-		}, renderStateContext());
+		renderAgentFunction(
+			() => {
+				[, setCount] = useState({ name: 'count', schema: v.number(), default: 0 });
+				[, setAny] = useState({ name: 'anything' });
+			},
+			CONFIG,
+			renderStateContext(),
+		);
 		expect(() => setCount?.('x' as never)).toThrow(/does not match its schema/);
 		expect(() => setAny?.(undefined)).toThrow(/cannot be set to undefined/);
 		const circular: Record<string, unknown> = {};
@@ -302,15 +328,19 @@ describe('useState end to end (node coordinator, faux provider)', () => {
 					return 'ok';
 				},
 			});
-			return {
-				model: `${provider.getModel().provider}/${provider.getModel().id}`,
-				instruction: `count=${count}`,
-			};
+			return `count=${count}`;
 		}
 
 		const coordinator = createNodeAgentCoordinator({
 			submissions: executionStore.submissions,
-			agents: [{ name: 'assistant', definition: assistant }],
+			agents: [
+				{
+					name: 'assistant',
+					definition: defineAgent(assistant, {
+						model: `${provider.getModel().provider}/${provider.getModel().id}`,
+					}),
+				},
+			],
 			createContext: makeFauxCreateContext(provider),
 			conversationStreamStore,
 			attachmentStore,

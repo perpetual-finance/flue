@@ -15,6 +15,7 @@ import { agentStreamPath } from './runtime/stream-offsets.ts';
 import { createCwdSessionEnv } from './sandbox.ts';
 import type {
 	AgentConfig,
+	AgentDefinition,
 	AgentModuleValue,
 	AgentProfile,
 	AgentRuntimeConfig,
@@ -244,10 +245,13 @@ export async function initializeRootHarness(
 	config: FlueContextConfig,
 	emitEvent: (event: FlueEventInput, observation?: FlueObservationDetail) => void,
 ): Promise<Harness> {
-	// A bare agent function renders synchronously (Flue Hooks compose the
-	// config); a defineAgent value runs its initializer, as ever.
-	const isFunctionAgent = typeof agent === 'function';
-	const label = isFunctionAgent ? 'The agent function' : 'defineAgent()';
+	// A defineAgent(Capability, config) value renders synchronously (Flue
+	// Hooks compose the config); a legacy defineAgent value runs its
+	// initializer, as ever.
+	const functionAgent =
+		'__flueFunctionAgent' in agent && agent.__flueFunctionAgent === true ? agent : undefined;
+	const isFunctionAgent = functionAgent !== undefined;
+	const label = isFunctionAgent ? 'The agent' : 'defineAgent()';
 	if (!config.conversationWriter || !config.attachmentStore) {
 		throw new Error('[flue] Canonical conversation runtime is not configured.');
 	}
@@ -256,12 +260,18 @@ export async function initializeRootHarness(
 	// batch's append. One buffer per harness lifetime (one submission attempt).
 	let hookState: HookStateBuffer | undefined;
 	let resolvedOptions: AgentRuntimeConfig;
-	if (isFunctionAgent) {
+	if (functionAgent) {
 		const reduced = await config.conversationWriter.loadReducedState();
 		hookState = createHookStateBuffer(reduced.state);
-		resolvedOptions = renderAgentFunction(agent, { snapshot: reduced.state, store: hookState });
+		resolvedOptions = renderAgentFunction(functionAgent.capability, functionAgent.config, {
+			snapshot: reduced.state,
+			store: hookState,
+		});
 	} else {
-		resolvedOptions = await agent.initialize({ id: config.id, env: config.env });
+		resolvedOptions = await (agent as AgentDefinition).initialize({
+			id: config.id,
+			env: config.env,
+		});
 	}
 	const definition = assertResolvedAgentProfile(
 		extendAgentProfile(resolveAgentProfile(resolvedOptions), {}),
@@ -269,7 +279,7 @@ export async function initializeRootHarness(
 	);
 	if (typeof definition.model !== 'string') {
 		throw new Error(
-			`[flue] ${label} requires a model. Return { model: "provider-id/model-id" }${isFunctionAgent ? '' : ' or a profile with a model'}.`,
+			`[flue] ${label} requires a model. ${isFunctionAgent ? 'Pass { model: "provider-id/model-id" } to defineAgent(Agent, config)' : 'Return { model: "provider-id/model-id" } or a profile with a model'}.`,
 		);
 	}
 	const resolvedModel = config.agentConfig.resolveModel(definition.model);

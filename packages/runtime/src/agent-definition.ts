@@ -7,6 +7,9 @@ import type {
 	AgentInitializerContext,
 	AgentProfile,
 	AgentRuntimeConfig,
+	Capability,
+	FunctionAgentConfig,
+	FunctionAgentDefinition,
 	Skill,
 	ThinkingLevel,
 	ToolDefinition,
@@ -63,29 +66,88 @@ export function defineAgentProfile(profile: AgentProfile): AgentProfile {
 	return profile;
 }
 
+const FunctionAgentConfigSchema = v.strictObject(
+	{
+		model: v.pipe(v.string(), v.minLength(1)),
+		thinkingLevel: v.optional(v.string()),
+		compaction: v.optional(v.union([v.literal(false), v.looseObject({})])),
+		durability: v.optional(v.looseObject({})),
+		cwd: v.optional(v.string()),
+	},
+	(issue) =>
+		issue.expected === 'never'
+			? `received unknown agent config field ${issue.received}`
+			: issue.message,
+);
+
 /**
- * Defines an agent initializer. Default-export the returned value from a
- * `'use agent'` module to define an addressable agent.
+ * Defines an addressable agent. Default-export the returned value from a
+ * `'use agent'` module. Two forms:
  *
- * The initializer runs whenever a runner initializes a root harness from the
- * agent definition. Do not treat it as a one-time
- * constructor for a persistent agent instance id. Return a runtime config
- * object with `model: '<provider>/<model>'` or a profile with its own model
- * field.
+ * **`defineAgent(Capability, config)`** — an agent is a capability given a
+ * model. The capability function composes behavior with Flue Hooks and
+ * returns the agent's instruction string; `config` is the static identity
+ * (model, tuning) that never renders:
+ *
+ * ```ts
+ * function Support() {
+ *   useTool(lookupCase);
+ *   return 'Operator-facing support agent. Work only from verified evidence.';
+ * }
+ * export default defineAgent(Support, { model: 'anthropic/claude-sonnet-4-6' });
+ * ```
+ *
+ * **`defineAgent(initializer)`** (legacy) — an async initializer returning a
+ * static runtime config. Runs whenever a runner initializes a root harness;
+ * do not treat it as a one-time constructor for a persistent instance id.
  */
 export function defineAgent<TEnv = Record<string, any>>(
 	initialize: (
 		context: AgentInitializerContext<TEnv>,
 	) => AgentRuntimeConfig | Promise<AgentRuntimeConfig>,
-): AgentDefinition<TEnv> {
-	if (typeof initialize !== 'function') {
-		throw new Error('[flue] defineAgent() requires an initializer function.');
+): AgentDefinition<TEnv>;
+export function defineAgent(
+	agent: Capability,
+	config: FunctionAgentConfig,
+): FunctionAgentDefinition;
+export function defineAgent<TEnv = Record<string, any>>(
+	initializeOrAgent:
+		| ((context: AgentInitializerContext<TEnv>) => AgentRuntimeConfig | Promise<AgentRuntimeConfig>)
+		| Capability,
+	config?: FunctionAgentConfig,
+): AgentDefinition<TEnv> | FunctionAgentDefinition {
+	if (typeof initializeOrAgent !== 'function') {
+		throw new Error(
+			'[flue] defineAgent() requires a function: defineAgent(Capability, { model }) or defineAgent(initializer).',
+		);
 	}
+	if (config !== undefined) {
+		const parsed = v.safeParse(FunctionAgentConfigSchema, config);
+		if (!parsed.success) {
+			throw new Error(
+				`[flue] defineAgent() config is invalid: ${parsed.issues
+					.map((issue) => issue.message)
+					.join('; ')}.`,
+			);
+		}
+		const agent: FunctionAgentDefinition = {
+			__flueFunctionAgent: true as const,
+			capability: initializeOrAgent as Capability,
+			config,
+			// Pure router factory over the module's bound identity/metadata — see
+			// createAgentRouter for the served routes and resolution rules.
+			route: () => createAgentRouter(agent),
+		};
+		Object.freeze(agent);
+		agentDefinitions.add(agent);
+		return agent;
+	}
+	const initialize = initializeOrAgent as (
+		context: AgentInitializerContext<TEnv>,
+	) => AgentRuntimeConfig | Promise<AgentRuntimeConfig>;
 	const agent: AgentDefinition<TEnv> = {
 		__flueAgentDefinition: true as const,
 		initialize,
-		// Pure router factory over the module's bound identity/metadata — see
-		// createAgentRouter for the served routes and resolution rules.
 		route: () => createAgentRouter(agent as AgentDefinition),
 	};
 	Object.freeze(agent);
@@ -269,9 +331,7 @@ function assertTools(
 function assertActions(values: unknown[] | undefined, label: string): void {
 	for (const [index, value] of values?.entries() ?? []) {
 		if (!isActionDefinition(value)) {
-			throw new Error(
-				`[flue] ${label} actions[${index}] must be created with defineAction().`,
-			);
+			throw new Error(`[flue] ${label} actions[${index}] must be created with defineAction().`);
 		}
 	}
 }

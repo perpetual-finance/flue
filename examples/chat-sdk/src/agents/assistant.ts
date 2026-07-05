@@ -62,11 +62,9 @@ const replyToChatThread = defineTool({
 	},
 });
 
-export default function assistant() {
+function Assistant() {
 	useTool(replyToChatThread);
-	return {
-		model: 'chat-sdk-example/assistant',
-		instruction:
-			'When receiving a chat message, use reply_to_chat_thread to reply in the supplied thread.',
-	};
+	return 'When receiving a chat message, use reply_to_chat_thread to reply in the supplied thread.';
 }
+
+export default defineAgent(Assistant, { model: 'chat-sdk-example/assistant' });

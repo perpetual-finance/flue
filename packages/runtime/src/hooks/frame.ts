@@ -22,11 +22,13 @@ export interface AttachScope {
 	tools: ToolDefinition[];
 }
 
-/** One completed component: its manifest plus everything attached in its body. */
-export interface ComponentRecord {
-	key: string;
-	description?: string;
+/** One mounted capability: its returned instruction plus everything attached in its body. */
+export interface CapabilityRecord {
+	/** The capability function itself — identity for the structural-invariance guard. */
+	capability: (props?: never) => unknown;
+	/** The capability's returned instruction string, when it returned one. */
 	instruction?: string;
+	/** `useInstruction()` contributions made in the capability's body, in call order. */
 	instructions: string[];
 	tools: ToolDefinition[];
 }
@@ -52,9 +54,8 @@ export interface RenderFrame {
 	root: AttachScope;
 	/** Current attachment target is the last entry; the root sits at index 0. */
 	scopeStack: AttachScope[];
-	/** Completed components in mount order, flat (nested use() records here too). */
-	components: ComponentRecord[];
-	componentKeys: Set<string>;
+	/** Mounted capabilities in mount order, flat (nested use() records here too). */
+	capabilities: CapabilityRecord[];
 	/** `useState` names declared this render; duplicates throw. */
 	stateNames: Set<string>;
 	state: RenderStateContext | undefined;
@@ -97,8 +98,7 @@ export function renderWithFrame<T>(
 	const frame: RenderFrame = {
 		root,
 		scopeStack: [root],
-		components: [],
-		componentKeys: new Set(),
+		capabilities: [],
 		stateNames: new Set(),
 		state,
 	};

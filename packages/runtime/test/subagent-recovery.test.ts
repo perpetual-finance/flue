@@ -7,7 +7,7 @@ import {
 import * as v from 'valibot';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ConversationRecordWriter } from '../src/conversation-writer.ts';
-import { defineAgent, defineTool } from '../src/index.ts';
+import { type AgentDefinition, defineAgent, defineTool } from '../src/index.ts';
 import {
 	createFlueContext,
 	InMemoryAttachmentStore,
@@ -72,7 +72,7 @@ async function makeHarness(
 	provider: FauxProviderRegistration,
 	writer: ConversationRecordWriter,
 	attachmentStore: InMemoryAttachmentStore,
-	agent: ReturnType<typeof defineAgent>,
+	agent: AgentDefinition,
 ) {
 	const ctx = createFlueContext({
 		id: INSTANCE,

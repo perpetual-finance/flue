@@ -42,12 +42,14 @@ export interface Fetchable {
  * `'use agent'` directive (which binds the agent's identity).
  */
 export function agent(value: AgentModuleValue): { route(): Hono } {
-	if (
-		typeof value !== 'function' &&
-		(typeof value !== 'object' || value === null || value.__flueAgentDefinition !== true)
-	) {
+	const isDefinition =
+		typeof value === 'object' &&
+		value !== null &&
+		(('__flueAgentDefinition' in value && value.__flueAgentDefinition === true) ||
+			('__flueFunctionAgent' in value && value.__flueFunctionAgent === true));
+	if (!isDefinition) {
 		throw new Error(
-			"[flue] agent() requires a 'use agent' module's default export (an agent function or defineAgent(...) value).",
+			"[flue] agent() requires a 'use agent' module's default export (a defineAgent(...) value).",
 		);
 	}
 	return { route: () => createAgentRouter(value) };
