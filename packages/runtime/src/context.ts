@@ -185,7 +185,11 @@ export async function discoverSessionContext(
 	env: SessionEnv,
 	instructions?: string,
 	definitionSkills: readonly Skill[] = [],
-): Promise<{ systemPrompt: string; skills: Record<string, Skill> }> {
+): Promise<{
+	systemPrompt: string;
+	skills: Record<string, Skill>;
+	recompose: (instructions?: string) => string;
+}> {
 	const cwd = env.cwd;
 
 	const agentsMd = await readAgentsMd(env, cwd);
@@ -198,15 +202,19 @@ export async function discoverSessionContext(
 		// readdir failed (e.g., cwd doesn't exist yet) — skip silently
 	}
 
-	const systemPrompt = composeSystemPrompt(
-		agentsMd,
-		skills,
-		{
-			cwd,
-			directoryListing,
-		},
-		instructions,
-	);
+	// Rebuild the system prompt around new instructions without re-touching
+	// the filesystem — the per-turn re-render path recomposes with whatever
+	// the latest render returned, over the same discovered context.
+	const recompose = (nextInstructions?: string) =>
+		composeSystemPrompt(
+			agentsMd,
+			skills,
+			{
+				cwd,
+				directoryListing,
+			},
+			nextInstructions,
+		);
 
-	return { systemPrompt, skills };
+	return { systemPrompt: recompose(instructions), skills, recompose };
 }

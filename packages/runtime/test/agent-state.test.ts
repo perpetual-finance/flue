@@ -17,6 +17,7 @@ import {
 } from '../src/conversation-reducer.ts';
 import { renderAgentFunction } from '../src/hooks/render.ts';
 import { createHookStateBuffer, type StateSetter, useState } from '../src/hooks/state.ts';
+import { use } from '../src/hooks/use.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { createFlueContext, type DispatchInput } from '../src/internal.ts';
 import { createNodeAgentCoordinator } from '../src/node/agent-coordinator.ts';
@@ -378,5 +379,149 @@ describe('useState end to end (node coordinator, faux provider)', () => {
 		// the second dispatch read the persisted 1.
 		expect(renderedCounts[0]).toBe(0);
 		expect(renderedCounts.at(-1)).toBe(1);
+	});
+
+	it('re-renders per turn: mid-run writes reach the next model call (fresh closures + prompt)', async () => {
+		const dbPath = createTempDbPath();
+		const adapter = sqlite(dbPath);
+		await adapter.migrate?.();
+		const { executionStore, conversationStreamStore, attachmentStore } = await adapter.connect();
+		const provider = createFauxProvider();
+		const laterPrompts: string[] = [];
+		provider.setResponses([
+			// turn 1: bump the counter (writes count=1 mid-run)
+			fauxAssistantMessage(fauxToolCall('bump', {}, { id: 'tool:rt-bump' }), {
+				stopReason: 'toolUse',
+			}),
+			// turn 2: read the counter through the re-rendered closure; capture
+			// the recomposed system prompt this call actually ran with
+			(context) => {
+				laterPrompts.push(context.systemPrompt ?? '');
+				return fauxAssistantMessage(fauxToolCall('read_count', {}, { id: 'tool:rt-read' }), {
+					stopReason: 'toolUse',
+				});
+			},
+			fauxAssistantMessage('Done.'),
+		]);
+
+		function assistant() {
+			const [count, setCount] = useState({ name: 'count', schema: v.number(), default: 0 });
+			useTool({
+				name: 'bump',
+				description: 'Increment the counter.',
+				input: v.object({}),
+				run: () => {
+					setCount(count + 1);
+					return 'ok';
+				},
+			});
+			useTool({
+				name: 'read_count',
+				description: 'Read the counter.',
+				input: v.object({}),
+				run: () => String(count),
+			});
+			return `count=${count}`;
+		}
+
+		const coordinator = createNodeAgentCoordinator({
+			submissions: executionStore.submissions,
+			agents: [
+				{
+					name: 'assistant',
+					definition: defineAgent(assistant, {
+						model: `${provider.getModel().provider}/${provider.getModel().id}`,
+					}),
+				},
+			],
+			createContext: makeFauxCreateContext(provider),
+			conversationStreamStore,
+			attachmentStore,
+		});
+
+		await coordinator.admitDispatch(
+			makeDispatchInput({ dispatchId: 'dispatch:per-turn', id: 'instance-per-turn' }),
+		);
+		await coordinator.waitForIdle();
+		await coordinator.shutdown();
+
+		const records = (
+			await conversationStreamStore.read(agentStreamPath('assistant', 'instance-per-turn'))
+		).batches.flatMap((batch) => batch.records);
+		// The SAME submission's second turn read the value written in the first:
+		// the tool executed was a fresh closure from the per-turn re-render.
+		const read = records.find(
+			(record) => record.type === 'tool_outcome' && record.toolCallId === 'tool:rt-read',
+		);
+		expect(read).toMatchObject({ content: [{ type: 'text', text: '"1"' }] });
+		// And the second model call's prompt was recomposed with the new value.
+		expect(laterPrompts[0]).toContain('count=1');
+	});
+
+	it('fails the run when a render changes structure mid-run (conditional use)', async () => {
+		const dbPath = createTempDbPath();
+		const adapter = sqlite(dbPath);
+		await adapter.migrate?.();
+		const { executionStore, conversationStreamStore, attachmentStore } = await adapter.connect();
+		const provider = createFauxProvider();
+		provider.setResponses([
+			fauxAssistantMessage(fauxToolCall('bump', {}, { id: 'tool:inv-bump' }), {
+				stopReason: 'toolUse',
+			}),
+			fauxAssistantMessage('Should never be reached.'),
+		]);
+
+		function Extra() {
+			return 'Conditionally mounted — illegal.';
+		}
+		function assistant() {
+			const [count, setCount] = useState({ name: 'count', schema: v.number(), default: 0 });
+			if (count > 0) use(Extra);
+			useTool({
+				name: 'bump',
+				description: 'Increment the counter.',
+				input: v.object({}),
+				run: () => {
+					setCount(count + 1);
+					return 'ok';
+				},
+			});
+			return 'invariance test agent';
+		}
+
+		const coordinator = createNodeAgentCoordinator({
+			submissions: executionStore.submissions,
+			agents: [
+				{
+					name: 'assistant',
+					definition: defineAgent(assistant, {
+						model: `${provider.getModel().provider}/${provider.getModel().id}`,
+					}),
+				},
+			],
+			createContext: makeFauxCreateContext(provider),
+			conversationStreamStore,
+			attachmentStore,
+		});
+
+		await coordinator.admitDispatch(
+			makeDispatchInput({ dispatchId: 'dispatch:invariance', id: 'instance-invariance' }),
+		);
+		await coordinator.waitForIdle();
+		await coordinator.shutdown();
+
+		const records = (
+			await conversationStreamStore.read(agentStreamPath('assistant', 'instance-invariance'))
+		).batches.flatMap((batch) => batch.records);
+		// The invariance throw lands as pi's synthesized error-completed
+		// assistant message: the run stops, the scripted second reply is never
+		// requested, and the error names the violation.
+		const finalAssistant = records
+			.filter((record) => record.type === 'assistant_message_completed')
+			.at(-1);
+		expect(finalAssistant).toMatchObject({ stopReason: 'error' });
+		expect(JSON.stringify(finalAssistant)).toContain('changed structure between turns');
+		expect(JSON.stringify(finalAssistant)).toContain('Extra');
+		expect(JSON.stringify(records)).not.toContain('Should never be reached.');
 	});
 });

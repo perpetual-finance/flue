@@ -6,13 +6,19 @@ import {
 import { discoverSessionContext } from './context.ts';
 import { ConversationRecordWriter } from './conversation-writer.ts';
 import { Harness } from './harness.ts';
-import { renderAgentFunction } from './hooks/render.ts';
+import type { RenderStateContext } from './hooks/frame.ts';
+import {
+	type AgentRenderStructure,
+	assertRenderStructureInvariance,
+	renderAgentFunctionWithStructure,
+} from './hooks/render.ts';
 import { createHookStateBuffer, type HookStateBuffer } from './hooks/state.ts';
 import { type AttachmentStore, InMemoryAttachmentStore } from './runtime/attachment-store.ts';
 import { InMemoryConversationStreamStore } from './runtime/conversation-stream-store.ts';
 import { dispatchGlobalEvent } from './runtime/events.ts';
 import { agentStreamPath } from './runtime/stream-offsets.ts';
 import { createCwdSessionEnv } from './sandbox.ts';
+import type { SessionRerender } from './session.ts';
 import type {
 	AgentConfig,
 	AgentDefinition,
@@ -259,14 +265,20 @@ export async function initializeRootHarness(
 	// writes through this buffer, which the session drains into the tool
 	// batch's append. One buffer per harness lifetime (one submission attempt).
 	let hookState: HookStateBuffer | undefined;
+	let renderState: RenderStateContext | undefined;
+	let lastStructure: AgentRenderStructure | undefined;
 	let resolvedOptions: AgentRuntimeConfig;
 	if (functionAgent) {
 		const reduced = await config.conversationWriter.loadReducedState();
 		hookState = createHookStateBuffer(reduced.state);
-		resolvedOptions = renderAgentFunction(functionAgent.capability, functionAgent.config, {
-			snapshot: reduced.state,
-			store: hookState,
-		});
+		renderState = { snapshot: reduced.state, store: hookState };
+		const first = renderAgentFunctionWithStructure(
+			functionAgent.capability,
+			functionAgent.config,
+			renderState,
+		);
+		resolvedOptions = first.config;
+		lastStructure = first.structure;
 	} else {
 		resolvedOptions = await (agent as AgentDefinition).initialize({
 			id: config.id,
@@ -318,6 +330,29 @@ export async function initializeRootHarness(
 		compaction: definition.compaction ?? config.agentConfig.compaction,
 		durability: definition.durability,
 	};
+	// Per-turn re-render: fresh closures over the latest state values, the
+	// structural-invariance guard, and a recomposed system prompt. The session
+	// applies the result at each turn boundary, so mid-run state writes reach
+	// the very next model call (guards read current truth; interpolated text
+	// stays live).
+	let rerender: SessionRerender | undefined;
+	if (functionAgent && renderState && lastStructure) {
+		const state = renderState;
+		let previous = lastStructure;
+		rerender = () => {
+			const next = renderAgentFunctionWithStructure(
+				functionAgent.capability,
+				functionAgent.config,
+				state,
+			);
+			assertRenderStructureInvariance(previous, next.structure);
+			previous = next.structure;
+			return {
+				systemPrompt: localContext.recompose(next.config.instructions),
+				tools: next.config.tools ?? [],
+			};
+		};
+	}
 	return new Harness(
 		config.id,
 		'default',
@@ -335,6 +370,7 @@ export async function initializeRootHarness(
 		undefined,
 		undefined,
 		hookState,
+		rerender,
 	);
 }
 

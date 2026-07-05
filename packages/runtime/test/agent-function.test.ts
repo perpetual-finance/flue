@@ -6,7 +6,11 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
 import { InvalidRequestError } from '../src/errors.ts';
-import { renderAgentFunction } from '../src/hooks/render.ts';
+import {
+	assertRenderStructureInvariance,
+	renderAgentFunction,
+	renderAgentFunctionWithStructure,
+} from '../src/hooks/render.ts';
 import { use } from '../src/hooks/use.ts';
 import { useInstruction } from '../src/hooks/use-instruction.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
@@ -415,6 +419,62 @@ describe('use() capabilities', () => {
 			provider,
 		);
 		expect(systemPrompt).toContain('Use the weather tool when asked about weather.');
+	});
+});
+
+describe('assertRenderStructureInvariance()', () => {
+	const render = (agent: () => string | undefined) =>
+		renderAgentFunctionWithStructure(agent, { model: MODEL }).structure;
+
+	it('passes when consecutive renders are structurally identical', () => {
+		const Retention = () => 'Retention.';
+		const agent = () => {
+			use(Retention);
+			useTool({ name: 'lookup', description: 'Look up.', run: async () => 'ok' });
+			return 'Base.';
+		};
+		expect(() => assertRenderStructureInvariance(render(agent), render(agent))).not.toThrow();
+	});
+
+	it('names the delta when a capability is conditionally mounted', () => {
+		const Retention = () => 'Retention.';
+		const withIt = () => {
+			use(Retention);
+			return 'Base.';
+		};
+		const withoutIt = () => 'Base.';
+		expect(() => assertRenderStructureInvariance(render(withoutIt), render(withIt))).toThrow(
+			/mounted capabilities changed \(none → Retention\)/,
+		);
+	});
+
+	it('names added and removed tools and state', () => {
+		const a = () => {
+			useTool({ name: 'alpha', description: 'A.', run: async () => 'ok' });
+			return undefined;
+		};
+		const b = () => {
+			useTool({ name: 'beta', description: 'B.', run: async () => 'ok' });
+			return undefined;
+		};
+		expect(() => assertRenderStructureInvariance(render(a), render(b))).toThrow(
+			/tools added beta; removed alpha/,
+		);
+	});
+
+	it('tolerates schema changes on a stable tool name (tools compare by name)', () => {
+		let flip = false;
+		const agent = () => {
+			useTool({
+				name: 'stable',
+				description: flip ? 'Second description.' : 'First description.',
+				run: async () => 'ok',
+			});
+			return undefined;
+		};
+		const first = render(agent);
+		flip = true;
+		expect(() => assertRenderStructureInvariance(first, render(agent))).not.toThrow();
 	});
 });
 

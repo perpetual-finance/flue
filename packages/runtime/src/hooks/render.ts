@@ -20,20 +20,93 @@ export function renderAgentFunction(
 	config: FunctionAgentConfig,
 	state?: RenderStateContext,
 ): AgentRuntimeConfig {
+	return renderAgentFunctionWithStructure(capability, config, state).config;
+}
+
+/**
+ * The structural fingerprint of one render, for the invariance guard:
+ * capabilities are compared by function identity in mount order; tools by
+ * NAME only (schemas may legally vary with state — labels fetched at
+ * runtime, say — without counting as a structural change); state by name.
+ */
+export interface AgentRenderStructure {
+	capabilities: readonly ((props?: never) => unknown)[];
+	capabilityNames: readonly string[];
+	toolNames: readonly string[];
+	stateNames: readonly string[];
+}
+
+/** `renderAgentFunction` plus the render's structural fingerprint. */
+export function renderAgentFunctionWithStructure(
+	capability: Capability,
+	config: FunctionAgentConfig,
+	state?: RenderStateContext,
+): { config: AgentRuntimeConfig; structure: AgentRenderStructure } {
 	const { result, frame } = renderWithFrame(capability, state);
 	assertAgentInstruction(result);
 	assertUniqueToolNames(frame);
 	const instructions = composeAgentDocument(result, frame);
 	const tools = [...frame.root.tools, ...frame.capabilities.flatMap((record) => record.tools)];
 	return {
-		model: config.model,
-		...(instructions !== undefined ? { instructions } : {}),
-		...(tools.length > 0 ? { tools } : {}),
-		...(config.thinkingLevel !== undefined ? { thinkingLevel: config.thinkingLevel } : {}),
-		...(config.compaction !== undefined ? { compaction: config.compaction } : {}),
-		...(config.durability !== undefined ? { durability: config.durability } : {}),
-		...(config.cwd !== undefined ? { cwd: config.cwd } : {}),
+		config: {
+			model: config.model,
+			...(instructions !== undefined ? { instructions } : {}),
+			...(tools.length > 0 ? { tools } : {}),
+			...(config.thinkingLevel !== undefined ? { thinkingLevel: config.thinkingLevel } : {}),
+			...(config.compaction !== undefined ? { compaction: config.compaction } : {}),
+			...(config.durability !== undefined ? { durability: config.durability } : {}),
+			...(config.cwd !== undefined ? { cwd: config.cwd } : {}),
+		},
+		structure: {
+			capabilities: frame.capabilities.map((record) => record.capability),
+			capabilityNames: frame.capabilities.map((record) => record.capability.name || '(anonymous)'),
+			toolNames: tools.map((tool) => tool.name),
+			stateNames: [...frame.stateNames],
+		},
 	};
+}
+
+/**
+ * Renders must be structurally identical across an agent instance's life:
+ * `use()` and hook calls are never conditional. State informs the agent
+ * (values, props, guards, interpolated text) — it does not reshape it.
+ * Throws with the precise delta when consecutive renders disagree.
+ */
+export function assertRenderStructureInvariance(
+	previous: AgentRenderStructure,
+	next: AgentRenderStructure,
+): void {
+	const problems: string[] = [];
+	const sameCapabilities =
+		previous.capabilities.length === next.capabilities.length &&
+		previous.capabilities.every((fn, index) => fn === next.capabilities[index]);
+	if (!sameCapabilities) {
+		problems.push(
+			`mounted capabilities changed (${previous.capabilityNames.join(', ') || 'none'} → ${next.capabilityNames.join(', ') || 'none'})`,
+		);
+	}
+	const toolDelta = setDelta(previous.toolNames, next.toolNames);
+	if (toolDelta) problems.push(`tools ${toolDelta}`);
+	const stateDelta = setDelta(previous.stateNames, next.stateNames);
+	if (stateDelta) problems.push(`state ${stateDelta}`);
+	if (problems.length > 0) {
+		throw new Error(
+			`[flue] The agent's render changed structure between turns: ${problems.join('; ')}. ` +
+				'use() and hook calls must not be conditional — every render mounts the same capabilities, tools, and state. Drive behavior with state values, props, and tool guards instead.',
+		);
+	}
+}
+
+function setDelta(previous: readonly string[], next: readonly string[]): string | undefined {
+	const before = new Set(previous);
+	const after = new Set(next);
+	const added = [...after].filter((name) => !before.has(name));
+	const removed = [...before].filter((name) => !after.has(name));
+	if (added.length === 0 && removed.length === 0) return undefined;
+	return [
+		...(added.length > 0 ? [`added ${added.join(', ')}`] : []),
+		...(removed.length > 0 ? [`removed ${removed.join(', ')}`] : []),
+	].join('; ');
 }
 
 /**

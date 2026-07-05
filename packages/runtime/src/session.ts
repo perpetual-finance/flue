@@ -5,6 +5,7 @@
  */
 
 import type {
+	AgentLoopTurnUpdate,
 	AgentMessage,
 	AgentTool,
 	AgentToolResult,
@@ -353,7 +354,17 @@ interface SessionInitOptions {
 	 * durability of the tool batch that made it.
 	 */
 	hookState?: HookStateBuffer;
+	/**
+	 * Re-render the agent's capability function (function agents only).
+	 * Called at each turn boundary after the tool batch commits: the session
+	 * swaps in the fresh tools (closures over current state values) and the
+	 * recomposed system prompt, so the next model call sees them.
+	 */
+	rerender?: SessionRerender;
 }
+
+/** One re-render's session-facing output: what the next turn runs with. */
+export type SessionRerender = () => { systemPrompt: string; tools: ToolDefinition[] };
 
 interface CallOverrides {
 	tools: ToolDefinition[];
@@ -539,6 +550,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	private pendingToolPublications = new Map<string, () => void>();
 	private executionIdentity: FlueExecutionContext;
 	private hookState: HookStateBuffer | undefined;
+	private rerender: SessionRerender | undefined;
 
 	private emitTurnRequestAndStream: StreamFn = async (model, context, options) => {
 		if (this.activeTurnId === undefined) this.activeTurnId = generateTurnId();
@@ -592,6 +604,34 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	private async flushCanonical(): Promise<void> {
 		await this.conversationWriter.flush();
 		await Promise.all(this.pendingCanonicalWrites);
+	}
+
+	/**
+	 * Render-per-turn: re-render the agent's capability function and hand the
+	 * loop a replacement context for its next provider request. The wrapper's
+	 * `state.messages` tracks the run (every assistant/tool-result message got
+	 * a `message_end`), so the rebuilt context loses nothing. Also syncs the
+	 * wrapper state so later runs snapshot the fresh values. An invariance
+	 * violation (conditional use()/hook) throws here and fails the run.
+	 */
+	private prepareRerenderTurn(): AgentLoopTurnUpdate | undefined {
+		if (!this.rerender) return undefined;
+		const next = this.rerender();
+		this.agentTools = next.tools;
+		const tools = this.assembleModelTools(
+			this.createBuiltinToolGroups(this.env, []),
+			this.agentTools,
+			[],
+		);
+		this.agentLoop.state.tools = tools;
+		this.agentLoop.state.systemPrompt = next.systemPrompt;
+		return {
+			context: {
+				systemPrompt: next.systemPrompt,
+				messages: this.agentLoop.state.messages.slice(),
+				tools: this.agentLoop.state.tools,
+			},
+		};
 	}
 
 	/** Turn buffered `useState` writes into canonical records, in write order. */
@@ -712,6 +752,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		this.attachmentStore = options.attachmentStore;
 		this.executionIdentity = options.executionContext ?? {};
 		this.hookState = options.hookState;
+		this.rerender = options.rerender;
 
 		const systemPrompt = this.config.systemPrompt;
 
@@ -736,6 +777,10 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			streamFn: this.emitTurnRequestAndStream,
 			toolExecution: 'parallel',
 			sessionId: this.affinityKey,
+			// Render-per-turn (function agents): runs after the turn_end handler
+			// has committed the tool batch (state writes durable), so the next
+			// provider request gets fresh tool closures and a recomposed prompt.
+			...(options.rerender ? { prepareNextTurn: () => this.prepareRerenderTurn() } : {}),
 		});
 
 		this.eventCallback = options.onAgentEvent;
