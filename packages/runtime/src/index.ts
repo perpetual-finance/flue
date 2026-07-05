@@ -53,6 +53,7 @@ export { type StateSetter, useState } from './hooks/state.ts';
 export { use } from './hooks/use.ts';
 export { useInstruction } from './hooks/use-instruction.ts';
 export { useSandbox } from './hooks/use-sandbox.ts';
+export { useSkill } from './hooks/use-skill.ts';
 export { useTool } from './hooks/use-tool.ts';
 export { type FlueInstrumentation, instrument } from './instrumentation.ts';
 export type { McpServerConnection, McpServerOptions, McpTransport } from './mcp.ts';

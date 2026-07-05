@@ -36,6 +36,7 @@ export interface AgentRenderStructure {
 	capabilityNames: readonly string[];
 	toolNames: readonly string[];
 	stateNames: readonly string[];
+	skillNames: readonly string[];
 	hasSandbox: boolean;
 }
 
@@ -60,12 +61,14 @@ export function renderAgentFunctionWithStructure(
 			...(config.durability !== undefined ? { durability: config.durability } : {}),
 			...(config.cwd !== undefined ? { cwd: config.cwd } : {}),
 			...(frame.sandbox !== undefined ? { sandbox: frame.sandbox } : {}),
+			...(frame.skills.length > 0 ? { skills: frame.skills } : {}),
 		},
 		structure: {
 			capabilities: frame.capabilities.map((record) => record.capability),
 			capabilityNames: frame.capabilities.map((record) => record.capability.name || '(anonymous)'),
 			toolNames: tools.map((tool) => tool.name),
 			stateNames: [...frame.stateNames],
+			skillNames: frame.skills.map((skill) => skill.name),
 			hasSandbox: frame.sandbox !== undefined,
 		},
 	};
@@ -94,6 +97,8 @@ export function assertRenderStructureInvariance(
 	if (toolDelta) problems.push(`tools ${toolDelta}`);
 	const stateDelta = setDelta(previous.stateNames, next.stateNames);
 	if (stateDelta) problems.push(`state ${stateDelta}`);
+	const skillDelta = setDelta(previous.skillNames, next.skillNames);
+	if (skillDelta) problems.push(`skills ${skillDelta}`);
 	if (previous.hasSandbox !== next.hasSandbox) {
 		problems.push(`sandbox ${next.hasSandbox ? 'added' : 'removed'}`);
 	}
