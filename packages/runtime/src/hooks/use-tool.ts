@@ -1,5 +1,5 @@
-import type { ToolDefinition, ToolInputSchema, ToolOutputSchema } from '../tool-types.ts';
 import { assertToolDefinition } from '../tool.ts';
+import type { ToolDefinition, ToolInputSchema, ToolOutputSchema } from '../tool-types.ts';
 import { currentScope, requireRenderFrame } from './frame.ts';
 
 /**
@@ -12,14 +12,14 @@ import { currentScope, requireRenderFrame } from './frame.ts';
  *
  * ```ts
  * function RetentionIncentives() {
- *   addTool(offerCredit);
+ *   useTool(offerCredit);
  *   return { key: 'retention', instruction: 'You may offer retention incentives.' };
  * }
  * ```
  *
  * Duplicate active tool names across the whole render fail fast.
  */
-export function addTool<
+export function useTool<
 	const TInput extends ToolInputSchema | undefined = undefined,
 	const TOutput extends ToolOutputSchema | undefined = undefined,
 >(tool: {
@@ -29,7 +29,7 @@ export function addTool<
 	output?: TOutput;
 	run: ToolDefinition<TInput, TOutput>['run'];
 }): void {
-	const frame = requireRenderFrame('addTool');
-	assertToolDefinition(tool, 'addTool()');
+	const frame = requireRenderFrame('useTool');
+	assertToolDefinition(tool, 'useTool()');
 	currentScope(frame).tools.push(tool as unknown as ToolDefinition);
 }

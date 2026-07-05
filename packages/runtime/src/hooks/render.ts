@@ -45,7 +45,7 @@ export function renderAgentFunction(fn: AgentFunction): AgentRuntimeConfig {
 
 /**
  * The agent's instruction document: base instruction first, then ungrouped
- * `addInstruction` contributions in call order, then one uniform section per
+ * `useInstruction` contributions in call order, then one uniform section per
  * mounted component under a Capabilities heading. The exact formatting is
  * internal and expected to iterate; the ordering above is the contract.
  */

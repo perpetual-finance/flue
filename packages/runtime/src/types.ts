@@ -439,7 +439,9 @@ export interface AgentRuntimeConfig {
 /** Opaque agent initializer created by {@link defineAgent}. */
 export interface AgentDefinition<TEnv = Record<string, any>> {
 	readonly __flueAgentDefinition: true;
-	initialize(context: AgentInitializerContext<TEnv>): AgentRuntimeConfig | Promise<AgentRuntimeConfig>;
+	initialize(
+		context: AgentInitializerContext<TEnv>,
+	): AgentRuntimeConfig | Promise<AgentRuntimeConfig>;
 	/**
 	 * Build a mountable Hono sub-app serving this agent's HTTP routes,
 	 * relative to wherever the application mounts it:
@@ -468,14 +470,14 @@ export interface AgentDefinition<TEnv = Record<string, any>> {
  * The agent identity returned by an {@link AgentFunction}: the static,
  * runtime-affecting fields describing who the agent is. Capabilities are not
  * returned here — they are composed in the function body with Flue Hooks
- * (`addInstruction(...)`, with more to come), so they can appear and
+ * (`useInstruction(...)`, with more to come), so they can appear and
  * disappear as a function of state.
  */
 export interface AgentManifest {
 	/** Model specifier (`'<provider-id>/<model-id>'`). */
 	model?: string;
 	/**
-	 * Base instruction: who this agent is. `addInstruction()` contributions
+	 * Base instruction: who this agent is. `useInstruction()` contributions
 	 * are appended after it, in call order.
 	 */
 	instruction?: string;
@@ -500,7 +502,7 @@ export interface AgentManifest {
  * ```ts
  * 'use agent';
  * export default function support(): AgentManifest {
- *   addInstruction('Never promise refunds.');
+ *   useInstruction('Never promise refunds.');
  *   return { model: 'anthropic/claude-sonnet-4-6', instruction: '…' };
  * }
  * ```
@@ -540,7 +542,7 @@ export interface ComponentManifest {
 /**
  * A component: a function with the same shape as an agent, minus the model —
  * Flue Hooks in the body attach its implements; the returned manifest
- * describes it. Mount one with `add(Component, props?)`; Flue invokes it.
+ * describes it. Mount one with `use(Component, props?)`; Flue invokes it.
  */
 export type ComponentFunction<TProps = void> = TProps extends void
 	? () => ComponentManifest

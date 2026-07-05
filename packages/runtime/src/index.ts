@@ -49,6 +49,9 @@ export type {
 	FlueExecutionInterceptor,
 	FlueExecutionOperation,
 } from './execution-interceptor.ts';
+export { use } from './hooks/use.ts';
+export { useInstruction } from './hooks/use-instruction.ts';
+export { useTool } from './hooks/use-tool.ts';
 export { type FlueInstrumentation, instrument } from './instrumentation.ts';
 export type { McpServerConnection, McpServerOptions, McpTransport } from './mcp.ts';
 export { connectMcpServer } from './mcp.ts';
@@ -69,9 +72,6 @@ export {
 } from './runtime/providers.ts';
 export type { AgentModuleBinding } from './runtime/registration.ts';
 export { __flueBindAgentModule } from './runtime/registration.ts';
-export { add } from './hooks/add.ts';
-export { addInstruction } from './hooks/add-instruction.ts';
-export { addTool } from './hooks/add-tool.ts';
 export { bash, createSandboxSessionEnv, type SandboxApi } from './sandbox.ts';
 export { type DefineSkillOptions, defineSkill } from './skill-definition.ts';
 export { defineTool } from './tool.ts';

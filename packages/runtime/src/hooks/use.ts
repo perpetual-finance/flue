@@ -28,24 +28,24 @@ const ComponentManifestSchema = v.strictObject(
  * attachments made in its body are attributed to it:
  *
  * ```ts
- * if (sentiment === 'churn-risk') add(RetentionIncentives);
- * if (phase === 'gathering') add(GatheringPhase, { next: () => setPhase('drafting') });
+ * if (sentiment === 'churn-risk') use(RetentionIncentives);
+ * if (phase === 'gathering') use(GatheringPhase, { next: () => setPhase('drafting') });
  * ```
  *
  * Conditional mounting is the idiom: a component that is not added simply
- * isn't part of the agent this render. Components may add() other components;
+ * isn't part of the agent this render. Components may use() other components;
  * all mounts record flat, and a duplicate `key` in one render throws.
  */
-export function add(component: () => ComponentManifest): void;
-export function add<TProps>(component: (props: TProps) => ComponentManifest, props: TProps): void;
-export function add<TProps>(
+export function use(component: () => ComponentManifest): void;
+export function use<TProps>(component: (props: TProps) => ComponentManifest, props: TProps): void;
+export function use<TProps>(
 	component: (props?: TProps) => ComponentManifest,
 	props?: TProps,
 ): void {
-	const frame = requireRenderFrame('add');
+	const frame = requireRenderFrame('use');
 	if (typeof component !== 'function') {
 		throw new Error(
-			'[flue] add() requires a component function. Flue invokes components — pass the function itself (add(Retention)), not its result (add(Retention())).',
+			'[flue] use() requires a component function. Flue invokes components — pass the function itself (use(Retention)), not its result (use(Retention())).',
 		);
 	}
 	const scope = { instructions: [], tools: [] };

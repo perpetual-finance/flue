@@ -8,17 +8,17 @@ import type { ToolDefinition } from '../tool-types.ts';
  * empty (called from tools, events, or module scope).
  *
  * Attachments land in the *current scope*: the root scope for hooks called
- * directly in the agent body, or a component scope while `add()` runs a
- * component function. Scopes form a stack because components may add()
+ * directly in the agent body, or a component scope while `use()` runs a
+ * component function. Scopes form a stack because components may use()
  * other components; completed components are recorded flat, keyed by their
  * manifest `key`.
  */
 
 /** Attachments collected for one scope (the root, or one component render). */
 export interface AttachScope {
-	/** `addInstruction()` contributions, in call order. */
+	/** `useInstruction()` contributions, in call order. */
 	instructions: string[];
-	/** `addTool()` mounts, in call order. */
+	/** `useTool()` mounts, in call order. */
 	tools: ToolDefinition[];
 }
 
@@ -35,7 +35,7 @@ export interface RenderFrame {
 	root: AttachScope;
 	/** Current attachment target is the last entry; the root sits at index 0. */
 	scopeStack: AttachScope[];
-	/** Completed components in mount order, flat (nested add() records here too). */
+	/** Completed components in mount order, flat (nested use() records here too). */
 	components: ComponentRecord[];
 	componentKeys: Set<string>;
 }

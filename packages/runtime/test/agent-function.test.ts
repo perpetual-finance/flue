@@ -6,13 +6,13 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
 import { InvalidRequestError } from '../src/errors.ts';
-import { add } from '../src/hooks/add.ts';
-import { addInstruction } from '../src/hooks/add-instruction.ts';
-import { addTool } from '../src/hooks/add-tool.ts';
 import { renderAgentFunction } from '../src/hooks/render.ts';
-import { agent as agentRouteHelper } from '../src/routing.ts';
+import { use } from '../src/hooks/use.ts';
+import { useInstruction } from '../src/hooks/use-instruction.ts';
+import { useTool } from '../src/hooks/use-tool.ts';
 import { dispatch } from '../src/index.ts';
 import { configureFlueRuntime, createFlueContext, type DispatchInput } from '../src/internal.ts';
+import { agent as agentRouteHelper } from '../src/routing.ts';
 import {
 	type AgentSubmissionInput,
 	createAgentSubmissionSessionHandler,
@@ -79,12 +79,12 @@ async function processPromptCapturingSystemPrompt(
 }
 
 describe('agent functions (Flue Hooks)', () => {
-	it('processes a submission end-to-end with base instruction and addInstruction contributions in call order', async () => {
+	it('processes a submission end-to-end with base instruction and useInstruction contributions in call order', async () => {
 		const provider = createProvider();
 		const model = `${provider.getModel().provider}/${provider.getModel().id}`;
 		function writer(): AgentManifest {
-			addInstruction('First contribution.');
-			addInstruction('Second contribution.');
+			useInstruction('First contribution.');
+			useInstruction('Second contribution.');
 			return { model, instruction: 'Base identity instruction.' };
 		}
 
@@ -102,12 +102,12 @@ describe('agent functions (Flue Hooks)', () => {
 		const provider = createProvider();
 		const model = `${provider.getModel().provider}/${provider.getModel().id}`;
 		function useHouseVoice() {
-			addInstruction('Write in the house voice.');
+			useInstruction('Write in the house voice.');
 		}
 		function writer(): AgentManifest {
 			useHouseVoice();
 			if ((globalThis as { __unset?: boolean }).__unset) {
-				addInstruction('Never mounted.');
+				useInstruction('Never mounted.');
 			}
 			return { model, instruction: 'Base.' };
 		}
@@ -187,7 +187,7 @@ describe('renderAgentFunction()', () => {
 
 	it('appends contributions without a base instruction', () => {
 		const config = renderAgentFunction(() => {
-			addInstruction('Only contribution.');
+			useInstruction('Only contribution.');
 			return { model: 'anthropic/claude-haiku-4-5' };
 		});
 		expect(config.instructions).toBe('Only contribution.');
@@ -223,28 +223,28 @@ describe('renderAgentFunction()', () => {
 			}),
 		).toThrow('render exploded');
 		// The frame must not leak: hooks are unavailable again immediately after.
-		expect(() => addInstruction('outside')).toThrow('outside an agent function');
+		expect(() => useInstruction('outside')).toThrow('outside an agent function');
 	});
 });
 
-describe('addInstruction()', () => {
+describe('useInstruction()', () => {
 	it('throws when called outside an agent function render', () => {
-		expect(() => addInstruction('anywhere')).toThrow(
-			'addInstruction() was called outside an agent function',
+		expect(() => useInstruction('anywhere')).toThrow(
+			'useInstruction() was called outside an agent function',
 		);
 	});
 
 	it('rejects empty instruction text', () => {
 		expect(() =>
 			renderAgentFunction(() => {
-				addInstruction('   ');
+				useInstruction('   ');
 				return { model: 'anthropic/claude-haiku-4-5' };
 			}),
 		).toThrow('requires a non-empty string');
 	});
 });
 
-describe('add() components', () => {
+describe('use() components', () => {
 	const tool = (name: string) => ({
 		name,
 		description: `The ${name} tool.`,
@@ -253,8 +253,8 @@ describe('add() components', () => {
 
 	it('renders components as capability sections after base and ungrouped instructions', () => {
 		function Retention() {
-			addTool(tool('offer_credit'));
-			addInstruction('Prefer the smallest credit that resolves the concern.');
+			useTool(tool('offer_credit'));
+			useInstruction('Prefer the smallest credit that resolves the concern.');
 			return {
 				key: 'retention',
 				description: 'Offer retention incentives when the customer is weighing cancellation.',
@@ -262,8 +262,8 @@ describe('add() components', () => {
 			};
 		}
 		const config = renderAgentFunction(() => {
-			addInstruction('Ungrouped note.');
-			add(Retention);
+			useInstruction('Ungrouped note.');
+			use(Retention);
 			return { model: 'anthropic/claude-haiku-4-5', instruction: 'Base.' };
 		});
 
@@ -285,7 +285,7 @@ describe('add() components', () => {
 
 	it('passes props through and mounts conditionally', () => {
 		function Phase({ next }: { next: () => void }) {
-			addTool({
+			useTool({
 				name: 'begin_draft',
 				description: 'Advance.',
 				run: async () => {
@@ -297,8 +297,8 @@ describe('add() components', () => {
 		}
 		const config = renderAgentFunction(() => {
 			const phase = 'gathering' as string;
-			if (phase === 'gathering') add(Phase, { next: () => {} });
-			if (phase === 'drafting') add(Phase, { next: () => {} });
+			if (phase === 'gathering') use(Phase, { next: () => {} });
+			if (phase === 'drafting') use(Phase, { next: () => {} });
 			return { model: 'anthropic/claude-haiku-4-5' };
 		});
 		expect(config.instructions).toContain('## phase/gathering');
@@ -309,8 +309,8 @@ describe('add() components', () => {
 		const Dup = () => ({ key: 'dup' });
 		expect(() =>
 			renderAgentFunction(() => {
-				add(Dup);
-				add(Dup);
+				use(Dup);
+				use(Dup);
 				return { model: 'anthropic/claude-haiku-4-5' };
 			}),
 		).toThrow('Duplicate component key "dup"');
@@ -320,7 +320,7 @@ describe('add() components', () => {
 		const Retention = () => ({ key: 'retention' });
 		expect(() =>
 			renderAgentFunction(() => {
-				add(Retention() as never);
+				use(Retention() as never);
 				return { model: 'anthropic/claude-haiku-4-5' };
 			}),
 		).toThrow('pass the function itself');
@@ -329,13 +329,13 @@ describe('add() components', () => {
 	it('rejects invalid component manifests', () => {
 		expect(() =>
 			renderAgentFunction(() => {
-				add((() => ({ key: 'x', tools: [] })) as never);
+				use((() => ({ key: 'x', tools: [] })) as never);
 				return { model: 'anthropic/claude-haiku-4-5' };
 			}),
 		).toThrow('unknown component manifest field');
 		expect(() =>
 			renderAgentFunction(() => {
-				add((() => undefined) as never);
+				use((() => undefined) as never);
 				return { model: 'anthropic/claude-haiku-4-5' };
 			}),
 		).toThrow('must return a manifest object');
@@ -343,26 +343,26 @@ describe('add() components', () => {
 
 	it('fails fast on duplicate tool names across root and components', () => {
 		const A = () => {
-			addTool(tool('clash'));
+			useTool(tool('clash'));
 			return { key: 'a' };
 		};
 		expect(() =>
 			renderAgentFunction(() => {
-				addTool(tool('clash'));
-				add(A);
+				useTool(tool('clash'));
+				use(A);
 				return { model: 'anthropic/claude-haiku-4-5' };
 			}),
 		).toThrow(/clash/);
 	});
 
-	it('supports nested add() calls, recorded flat', () => {
+	it('supports nested use() calls, recorded flat', () => {
 		const Inner = () => ({ key: 'inner', instruction: 'Inner prose.' });
 		const Outer = () => {
-			add(Inner);
+			use(Inner);
 			return { key: 'outer', instruction: 'Outer prose.' };
 		};
 		const config = renderAgentFunction(() => {
-			add(Outer);
+			use(Outer);
 			return { model: 'anthropic/claude-haiku-4-5' };
 		});
 		expect(config.instructions).toContain('## outer');
@@ -373,7 +373,7 @@ describe('add() components', () => {
 		const provider = createProvider();
 		const model = `${provider.getModel().provider}/${provider.getModel().id}`;
 		function Weather() {
-			addTool({
+			useTool({
 				name: 'lookup_weather',
 				description: 'Look up current weather for a city.',
 				run: async () => 'sunny',
@@ -381,7 +381,7 @@ describe('add() components', () => {
 			return { key: 'weather', instruction: 'Use the weather tool when asked about weather.' };
 		}
 		const systemPrompt = await processPromptCapturingSystemPrompt(() => {
-			add(Weather);
+			use(Weather);
 			return { model, instruction: 'Base.' };
 		}, provider);
 		expect(systemPrompt).toContain('## weather');

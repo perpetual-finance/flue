@@ -5,7 +5,7 @@ import {
 	fauxToolCall,
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
-import { addTool, defineTool } from '@flue/runtime';
+import { defineTool, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { bot } from '../chat.ts';
 
@@ -63,7 +63,7 @@ const replyToChatThread = defineTool({
 });
 
 export default function assistant() {
-	addTool(replyToChatThread);
+	useTool(replyToChatThread);
 	return {
 		model: 'chat-sdk-example/assistant',
 		instruction:

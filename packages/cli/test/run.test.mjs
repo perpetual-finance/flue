@@ -23,7 +23,11 @@ function createFixtureRoot() {
 	fixtureRoots.push(root);
 	const flueScope = path.join(root, 'node_modules', '@flue');
 	fs.mkdirSync(flueScope, { recursive: true });
-	fs.symlinkSync(path.join(repositoryRoot, 'packages', 'runtime'), path.join(flueScope, 'runtime'), 'dir');
+	fs.symlinkSync(
+		path.join(repositoryRoot, 'packages', 'runtime'),
+		path.join(flueScope, 'runtime'),
+		'dir',
+	);
 	// The faux model provider lives in pi-ai; agents under test register it
 	// in-process. It must resolve to the same install the runtime uses.
 	const piScope = path.join(root, 'node_modules', '@earendil-works');
@@ -61,12 +65,12 @@ export default defineAgent(() => ({ model: 'faux/faux-model' }));
 
 /**
  * A hooks-form agent (bare function default export) whose faux model reports
- * whether the composed system prompt carried its `addInstruction` text.
+ * whether the composed system prompt carried its `useInstruction` text.
  */
 function writeFunctionAgent(root, name = 'hooked') {
 	fs.writeFileSync(
 		path.join(root, 'src', 'agents', `${name}.mjs`),
-		`import { addInstruction, registerProvider } from '@flue/runtime';
+		`import { useInstruction, registerProvider } from '@flue/runtime';
 import { fauxAssistantMessage, registerFauxProvider } from '@earendil-works/pi-ai/compat';
 
 const faux = registerFauxProvider({ provider: 'faux', models: [{ id: 'faux-model' }] });
@@ -79,7 +83,7 @@ faux.setResponses([
 registerProvider('faux', { api: faux.api, baseUrl: 'https://faux.invalid' });
 
 export default function ${name}() {
-	addInstruction('Speak only in haiku.');
+	useInstruction('Speak only in haiku.');
 	return { model: 'faux/faux-model', instruction: 'You are the ${name} agent.' };
 }
 `,
@@ -271,7 +275,13 @@ test('--json prints a machine-readable envelope to stdout', async () => {
 	const result = await runCli(root, [agent, '--message', 'hi', '--id', 'json-conv', '--json']);
 	assert.equal(result.code, 0, result.stderr);
 	const envelope = JSON.parse(result.stdout);
-	assert.deepEqual(Object.keys(envelope).sort(), ['agent', 'id', 'message', 'outcome', 'submissionId']);
+	assert.deepEqual(Object.keys(envelope).sort(), [
+		'agent',
+		'id',
+		'message',
+		'outcome',
+		'submissionId',
+	]);
 	assert.equal(envelope.id, 'json-conv');
 	assert.equal(envelope.agent, 'hello');
 	assert.equal(envelope.outcome, 'completed');
