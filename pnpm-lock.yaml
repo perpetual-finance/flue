@@ -967,6 +967,28 @@ importers:
         specifier: ^4.1.6
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(happy-dom@18.0.1)(vite@8.1.0(@types/node@22.19.19)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
 
+  examples/support-desk:
+    dependencies:
+      '@flue/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.22
+      valibot:
+        specifier: ^1.0.0
+        version: 1.4.0(typescript@6.0.3)
+    devDependencies:
+      '@flue/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
+      '@flue/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.2(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
+
   examples/teams-channel:
     dependencies:
       '@flue/runtime':

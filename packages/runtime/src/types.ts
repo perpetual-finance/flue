@@ -477,13 +477,18 @@ export interface AgentDefinition<TEnv = Record<string, any>> {
  * capability given a model: `defineAgent(Capability, { model })`.
  *
  * ```ts
- * function Retention({ check }: { check: () => string | null }) {
- *   useTool(guarded(check, offerCredit));
- *   return 'Customer is weighing cancellation. You may offer retention incentives.';
+ * function Retention({ active }: { active: () => boolean }) {
+ *   useTool({
+ *     ...offerCredit,
+ *     run: (ctx) => (active() ? offerCredit.run(ctx) : 'Refused: no churn risk on record.'),
+ *   });
+ *   return 'Only while the customer is weighing cancellation: you may offer retention incentives.';
  * }
  * ```
  *
- * Capabilities must return synchronously — async work lives in tools,
+ * Capabilities stay mounted for the agent's whole life (`use()` is never
+ * conditional); guards like the one above, not mounting, scope when a tool
+ * may act. They must return synchronously — async work lives in tools,
  * actions, and resource factories.
  */
 export type Capability<TProps = void> = TProps extends void

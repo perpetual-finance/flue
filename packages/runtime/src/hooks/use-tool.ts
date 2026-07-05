@@ -7,13 +7,13 @@ import { currentScope, requireRenderFrame } from './frame.ts';
  *
  * Accepts a `defineTool(...)` value or an inline definition object (same
  * validation, applied here; `run`'s input is typed from the `input` schema).
- * Called directly in the agent body the tool is ungrouped; called inside a
- * component it belongs to that component's capability section:
+ * Called directly in the agent body or inside a capability — either way the
+ * tool joins the render's single flat tool set:
  *
  * ```ts
- * function RetentionIncentives() {
+ * function Retention() {
  *   useTool(offerCredit);
- *   return { key: 'retention', instruction: 'You may offer retention incentives.' };
+ *   return 'You may offer retention incentives.';
  * }
  * ```
  *
