@@ -31,7 +31,7 @@ import {
 	MethodNotAllowedError,
 	toHttpResponse,
 } from '../errors.ts';
-import type { AgentDefinition } from '../types.ts';
+import type { AgentModuleValue } from '../types.ts';
 import {
 	assertAgentInstanceId,
 	executeAgentAbort,
@@ -79,10 +79,10 @@ export interface AgentModuleBinding {
 
 /** One registered agent: a definition joined to its identity and module metadata. */
 export interface FlueAgentRegistration extends AgentModuleBinding {
-	definition: AgentDefinition;
+	definition: AgentModuleValue;
 }
 
-let moduleBindings = new WeakMap<AgentDefinition, AgentModuleBinding>();
+let moduleBindings = new WeakMap<AgentModuleValue, AgentModuleBinding>();
 let registeredAgents = new Map<string, FlueAgentRegistration>();
 
 /**
@@ -97,7 +97,7 @@ let registeredAgents = new Map<string, FlueAgentRegistration>();
  * Returns the definition so the transform may also use it in expression
  * position.
  */
-export function __flueBindAgentModule<TDefinition extends AgentDefinition>(
+export function __flueBindAgentModule<TDefinition extends AgentModuleValue>(
 	definition: TDefinition,
 	binding: AgentModuleBinding,
 ): TDefinition {
@@ -174,7 +174,7 @@ export function getRegisteredFlueAgents(): readonly FlueAgentRegistration[] {
  * registered record (app membership) over the module binding.
  */
 export function resolveAgentModuleBinding(
-	definition: AgentDefinition,
+	definition: AgentModuleValue,
 ): AgentModuleBinding | undefined {
 	const binding = moduleBindings.get(definition);
 	if (!binding) return undefined;
@@ -207,7 +207,7 @@ export function resetFlueAgentRegistrationForTests(): void {
  * through the same machinery as the legacy name-addressed router, so both
  * surfaces share storage keying and wire behavior.
  */
-export function createAgentRouter(definition: AgentDefinition): Hono {
+export function createAgentRouter(definition: AgentModuleValue): Hono {
 	// Fail fast at build/mount time when the module was never marked — but
 	// request-time resolution below stays authoritative, so calling `.route()`
 	// before the generated bootstrap registers the scanned set is fine.
@@ -317,7 +317,7 @@ export function createAgentRouter(definition: AgentDefinition): Hono {
 	return app;
 }
 
-function requireBinding(definition: AgentDefinition): AgentModuleBinding {
+function requireBinding(definition: AgentModuleValue): AgentModuleBinding {
 	const binding = resolveAgentModuleBinding(definition);
 	if (!binding) {
 		throw new Error(
@@ -341,15 +341,20 @@ function requireRuntime() {
 function assertAgentDefinitionValue(
 	value: unknown,
 	identity: string,
-): asserts value is AgentDefinition {
-	const candidate = value as Partial<AgentDefinition> | null | undefined;
+): asserts value is AgentModuleValue {
+	// A bare agent function is a valid module value; its shape is validated
+	// when it renders. Twin: `isAgentDefinitionValue` in flue-app.ts — keep in sync.
+	if (typeof value === 'function') return;
+	const candidate = value as { __flueAgentDefinition?: unknown; initialize?: unknown } | null;
 	if (
 		!candidate ||
 		typeof candidate !== 'object' ||
 		candidate.__flueAgentDefinition !== true ||
 		typeof candidate.initialize !== 'function'
 	) {
-		throw new Error(`[flue] Agent "${identity}" must default-export defineAgent(...).`);
+		throw new Error(
+			`[flue] Agent "${identity}" must default-export an agent function or defineAgent(...).`,
+		);
 	}
 }
 

@@ -16,7 +16,7 @@ import {
 } from '../errors.ts';
 import { type FlueTraceCarrier, interceptExecution } from '../execution-interceptor.ts';
 import { getInternalSession } from '../session.ts';
-import type { AgentDefinition, CallHandle, DeliveredMessage } from '../types.ts';
+import type { AgentModuleValue, CallHandle, DeliveredMessage } from '../types.ts';
 import { type AttachmentStore, createAttachmentRef } from './attachment-store.ts';
 import type { DispatchInput } from './dispatch-queue.ts';
 import { agentStreamPath } from './stream-offsets.ts';
@@ -142,7 +142,7 @@ export function createDirectAgentSubmissionInput(options: {
  */
 export async function materializeAgentSubmissionSession(
 	ctx: FlueContextInternal,
-	agent: AgentDefinition,
+	agent: AgentModuleValue,
 	input: AgentSubmissionInput,
 	attachmentStore?: AttachmentStore,
 ): Promise<void> {
@@ -170,7 +170,7 @@ export async function materializeAgentSubmissionSession(
 }
 
 export function createAgentSubmissionSessionHandler(
-	agent: AgentDefinition,
+	agent: AgentModuleValue,
 	input: AgentSubmissionInput,
 	execute: (session: AgentSubmissionSession) => Promise<unknown> | unknown,
 ): (ctx: FlueContextInternal) => Promise<unknown> {
@@ -202,7 +202,7 @@ export function agentSubmissionDispatchId(input: AgentSubmissionInput): string |
 export async function reconcileInterruptedSubmission(
 	submissions: AgentSubmissionStore,
 	submission: AgentSubmission,
-	agent: AgentDefinition,
+	agent: AgentModuleValue,
 	createContext: (dispatchId: string | undefined) => FlueContextInternal,
 	lease?: { ownerId: string; leaseExpiresAt: number },
 	conversationWriter?: ConversationRecordWriter,
@@ -422,7 +422,7 @@ export interface ProcessSubmissionOptions {
 	/** The claimed submission to process. */
 	submission: AgentSubmission;
 	/** Resolve an agent definition by name. Must throw if absent. */
-	resolveAgent: (name: string) => AgentDefinition;
+	resolveAgent: (name: string) => AgentModuleValue;
 	/** Build a context for this submission. */
 	createContext: (dispatchId: string | undefined) => FlueContextInternal;
 	conversationWriter?: ConversationRecordWriter;
@@ -623,7 +623,7 @@ async function failInterruptedSubmission(
 	submissions: AgentSubmissionStore,
 	submission: AgentSubmission,
 	attempt: SubmissionAttemptRef,
-	agent: AgentDefinition,
+	agent: AgentModuleValue,
 	reason: AgentSubmissionInterruption['reason'],
 	createError: (interruptedTools?: ReadonlyArray<InterruptedToolCallRef>) => Error,
 	createContext: (dispatchId: string | undefined) => FlueContextInternal,
@@ -688,7 +688,7 @@ async function settleAbortedWithContext(
 	submissions: AgentSubmissionStore,
 	submission: AgentSubmission,
 	attempt: SubmissionAttemptRef,
-	agent: AgentDefinition,
+	agent: AgentModuleValue,
 	ctx: FlueContextInternal,
 	conversationWriter?: ConversationRecordWriter,
 ): Promise<void> {
@@ -836,7 +836,7 @@ function submissionAttemptRef(submission: AgentSubmission): SubmissionAttemptRef
 
 async function openAgentSubmissionSession(
 	ctx: FlueContextInternal,
-	agent: AgentDefinition,
+	agent: AgentModuleValue,
 	_input: AgentSubmissionInput,
 ): Promise<AgentSubmissionSession> {
 	const harness = await ctx.initializeRootHarness(agent);

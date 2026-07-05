@@ -462,6 +462,90 @@ export interface AgentDefinition<TEnv = Record<string, any>> {
 	route(): Hono;
 }
 
+// ─── Agent Function (Flue Hooks) ────────────────────────────────────────────
+
+/**
+ * The agent identity returned by an {@link AgentFunction}: the static,
+ * runtime-affecting fields describing who the agent is. Capabilities are not
+ * returned here — they are composed in the function body with Flue Hooks
+ * (`addInstruction(...)`, with more to come), so they can appear and
+ * disappear as a function of state.
+ */
+export interface AgentManifest {
+	/** Model specifier (`'<provider-id>/<model-id>'`). */
+	model?: string;
+	/**
+	 * Base instruction: who this agent is. `addInstruction()` contributions
+	 * are appended after it, in call order.
+	 */
+	instruction?: string;
+	/** Default reasoning effort. Individual operations may override this value. */
+	thinkingLevel?: ThinkingLevel;
+	/**
+	 * Automatic conversation-compaction configuration. `false` disables
+	 * threshold compaction; overflow recovery and explicit `session.compact()`
+	 * calls still compact when needed.
+	 */
+	compaction?: false | CompactionConfig;
+	/** Durability configuration for durable agent submissions. */
+	durability?: DurabilityConfig;
+	/** Working directory inside the initialized environment. */
+	cwd?: string;
+}
+
+/**
+ * An agent authored as a plain synchronous function. Default-export it from a
+ * `'use agent'` module to define an addressable agent:
+ *
+ * ```ts
+ * 'use agent';
+ * export default function support(): AgentManifest {
+ *   addInstruction('Never promise refunds.');
+ *   return { model: 'anthropic/claude-sonnet-4-6', instruction: '…' };
+ * }
+ * ```
+ *
+ * The function is a description, not a script: the runtime invokes it to
+ * compose the agent, and Flue Hooks called in its body contribute
+ * capabilities for that composition. It must return synchronously — async
+ * work lives in tools, actions, and resource factories.
+ */
+export type AgentFunction = () => AgentManifest;
+
+/**
+ * A value accepted wherever an agent is addressed: the default export of a
+ * `'use agent'` module — either a {@link defineAgent} value or a bare
+ * {@link AgentFunction}.
+ */
+export type AgentModuleValue = AgentDefinition | AgentFunction;
+
+/**
+ * The manifest a component returns: who this capability is. Attachments
+ * (tools, instructions) are composed in the component body with Flue Hooks;
+ * the manifest is pure description.
+ */
+export interface ComponentManifest {
+	/**
+	 * Stable identity for tracking the capability across renders (prompt
+	 * section, change narration). Unique per render; namespacing like
+	 * `'phase/drafting'` is encouraged.
+	 */
+	key: string;
+	/** One-line summary, used for the capability catalog and change messages. */
+	description?: string;
+	/** The teaching prose rendered in this capability's section. */
+	instruction?: string;
+}
+
+/**
+ * A component: a function with the same shape as an agent, minus the model —
+ * Flue Hooks in the body attach its implements; the returned manifest
+ * describes it. Mount one with `add(Component, props?)`; Flue invokes it.
+ */
+export type ComponentFunction<TProps = void> = TProps extends void
+	? () => ComponentManifest
+	: (props: TProps) => ComponentManifest;
+
 // ─── Flue Event Context ────────────────────────────────────────────────────
 
 /** Event context for the agent interaction that emitted an event. */

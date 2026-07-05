@@ -1,8 +1,8 @@
 import type { MiddlewareHandler } from 'hono';
 import { configureErrorRendering, InvalidRequestError } from '../errors.ts';
 import type {
-	AgentDefinition,
 	AgentDispatchRequest,
+	AgentModuleValue,
 	DispatchReceipt,
 	NamedAgentDispatchRequest,
 } from '../types.ts';
@@ -15,7 +15,7 @@ import type { RuntimeActivityGate } from './runtime-activity-gate.ts';
 
 export interface AgentRecord {
 	name: string;
-	definition: AgentDefinition;
+	definition: AgentModuleValue;
 	description?: string;
 	route?: MiddlewareHandler;
 	/**
@@ -78,7 +78,7 @@ export type FlueRuntime = NodeRuntime | CloudflareRuntime;
  * external side effects to be idempotent.
  */
 export async function dispatch(
-	agent: AgentDefinition,
+	agent: AgentModuleValue,
 	request: AgentDispatchRequest,
 ): Promise<DispatchReceipt> {
 	const rt = runtimeConfig;
@@ -102,7 +102,10 @@ export async function dispatch(
 	});
 }
 
-function isAgentDefinitionValue(value: unknown): value is AgentDefinition {
+function isAgentDefinitionValue(value: unknown): value is AgentModuleValue {
+	// A bare agent function is a valid module value. Twin:
+	// `assertAgentDefinitionValue` in registration.ts — keep in sync.
+	if (typeof value === 'function') return true;
 	return (
 		typeof value === 'object' &&
 		value !== null &&
@@ -114,7 +117,7 @@ function isAgentDefinitionValue(value: unknown): value is AgentDefinition {
 }
 
 function resolveAgentDefinitionDispatchRequest(
-	agent: AgentDefinition,
+	agent: AgentModuleValue,
 	request: AgentDispatchRequest | undefined,
 	rt: FlueRuntime,
 ): NamedAgentDispatchRequest {

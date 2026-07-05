@@ -6,6 +6,7 @@ import {
 import { discoverSessionContext } from './context.ts';
 import { ConversationRecordWriter } from './conversation-writer.ts';
 import { Harness } from './harness.ts';
+import { renderAgentFunction } from './hooks/render.ts';
 import { type AttachmentStore, InMemoryAttachmentStore } from './runtime/attachment-store.ts';
 import { InMemoryConversationStreamStore } from './runtime/conversation-stream-store.ts';
 import { dispatchGlobalEvent } from './runtime/events.ts';
@@ -13,7 +14,7 @@ import { agentStreamPath } from './runtime/stream-offsets.ts';
 import { createCwdSessionEnv } from './sandbox.ts';
 import type {
 	AgentConfig,
-	AgentDefinition,
+	AgentModuleValue,
 	AgentProfile,
 	AgentRuntimeConfig,
 	FlueEvent,
@@ -52,7 +53,7 @@ export interface FlueContextConfig {
 
 /** Extends FlueEventContext with server-only methods. */
 export interface FlueContextInternal extends FlueEventContext {
-	initializeRootHarness(agent: AgentDefinition): Promise<Harness>;
+	initializeRootHarness(agent: AgentModuleValue): Promise<Harness>;
 	createEvent(event: FlueEventInput): FlueEvent;
 	publishEvent(event: FlueEvent): void;
 	emitEvent(event: FlueEventInput, observation?: FlueObservationDetail): FlueEvent;
@@ -136,7 +137,7 @@ export function createFlueContext(config: FlueContextConfig): FlueContextInterna
 			return config.req;
 		},
 
-		async initializeRootHarness(agent: AgentDefinition): Promise<Harness> {
+		async initializeRootHarness(agent: AgentModuleValue): Promise<Harness> {
 			if (!conversationWriter || !attachmentStore) {
 				localConversationRuntime ??= createLocalConversationRuntime(config);
 				const local = await localConversationRuntime;
@@ -232,23 +233,29 @@ async function createLocalConversationRuntime(config: FlueContextConfig): Promis
 }
 
 export async function initializeRootHarness(
-	agent: AgentDefinition,
+	agent: AgentModuleValue,
 	config: FlueContextConfig,
 	emitEvent: (event: FlueEventInput, observation?: FlueObservationDetail) => void,
 ): Promise<Harness> {
-	const resolvedOptions = await agent.initialize({ id: config.id, env: config.env });
+	// A bare agent function renders synchronously (Flue Hooks compose the
+	// config); a defineAgent value runs its initializer, as ever.
+	const isFunctionAgent = typeof agent === 'function';
+	const label = isFunctionAgent ? 'The agent function' : 'defineAgent()';
+	const resolvedOptions = isFunctionAgent
+		? renderAgentFunction(agent)
+		: await agent.initialize({ id: config.id, env: config.env });
 	const definition = assertResolvedAgentProfile(
 		extendAgentProfile(resolveAgentProfile(resolvedOptions), {}),
-		'defineAgent()',
+		label,
 	);
 	if (typeof definition.model !== 'string') {
 		throw new Error(
-			'[flue] defineAgent() requires a model. Return { model: "provider-id/model-id" } or a profile with a model.',
+			`[flue] ${label} requires a model. Return { model: "provider-id/model-id" }${isFunctionAgent ? '' : ' or a profile with a model'}.`,
 		);
 	}
 	const resolvedModel = config.agentConfig.resolveModel(definition.model);
 	if (!resolvedModel) {
-		throw new Error(`[flue] defineAgent() model "${definition.model}" could not be resolved.`);
+		throw new Error(`[flue] ${label} model "${definition.model}" could not be resolved.`);
 	}
 	const { env: baseEnv, toolFactory } = await resolveSessionEnv(
 		config.id,

@@ -51,12 +51,12 @@ describe('registerFlueAgents()', () => {
 		expect(getRegisteredFlueAgents().map((record) => record.identity)).toEqual(['second']);
 	});
 
-	it('rejects a value that is not a defineAgent(...) product', () => {
+	it('rejects a value that is neither an agent function nor a defineAgent(...) product', () => {
 		expect(() =>
 			registerFlueAgents([
 				{ definition: { initialize: () => ({}) } as unknown as AgentDefinition, identity: 'bogus' },
 			]),
-		).toThrow('Agent "bogus" must default-export defineAgent(...)');
+		).toThrow('Agent "bogus" must default-export an agent function or defineAgent(...)');
 	});
 
 	it('rejects duplicate identities', () => {

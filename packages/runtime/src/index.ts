@@ -69,13 +69,19 @@ export {
 } from './runtime/providers.ts';
 export type { AgentModuleBinding } from './runtime/registration.ts';
 export { __flueBindAgentModule } from './runtime/registration.ts';
+export { add } from './hooks/add.ts';
+export { addInstruction } from './hooks/add-instruction.ts';
+export { addTool } from './hooks/add-tool.ts';
 export { bash, createSandboxSessionEnv, type SandboxApi } from './sandbox.ts';
 export { type DefineSkillOptions, defineSkill } from './skill-definition.ts';
 export { defineTool } from './tool.ts';
 export type {
 	AgentDefinition,
 	AgentDispatchRequest,
+	AgentFunction,
 	AgentInitializerContext,
+	AgentManifest,
+	AgentModuleValue,
 	AgentProfile,
 	AgentRouteHandler,
 	AgentRuntimeConfig,
@@ -84,6 +90,8 @@ export type {
 	BashLike,
 	CallHandle,
 	CompactionConfig,
+	ComponentFunction,
+	ComponentManifest,
 	DeliveredAttachment,
 	DeliveredMessage,
 	DispatchReceipt,

@@ -5,17 +5,23 @@ import {
 	fauxToolCall,
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
-import { defineAgent, defineTool } from '@flue/runtime';
+import { addTool, defineTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { bot } from '../chat.ts';
 
-export default defineAgent(() => {
-	const faux = registerFauxProvider({
-		api: 'chat-sdk-example',
-		provider: 'chat-sdk-example',
-		models: [{ id: 'assistant' }],
-	});
-	faux.setResponses([
+// The scripted (faux, keyless) model this offline example runs against.
+// Module scope, not the agent body: the agent function is a render that may
+// re-run, so one-time setup lives outside it.
+const faux = registerFauxProvider({
+	api: 'chat-sdk-example',
+	provider: 'chat-sdk-example',
+	models: [{ id: 'assistant' }],
+});
+// Faux responses are consumed one per model call, so the two-step script
+// (tool call, then final text) re-queues itself after each completed
+// exchange: one scripted exchange per dispatched chat message, indefinitely.
+function queueExchange(): void {
+	faux.appendResponses([
 		(context) => {
 			const input = context.messages.at(-1);
 			const text =
@@ -35,25 +41,32 @@ export default defineAgent(() => {
 				{ stopReason: 'toolUse' },
 			);
 		},
-		fauxAssistantMessage(fauxText('Reply sent.')),
+		() => {
+			queueExchange();
+			return fauxAssistantMessage(fauxText('Reply sent.'));
+		},
 	]);
+}
+queueExchange();
+
+const replyToChatThread = defineTool({
+	name: 'reply_to_chat_thread',
+	description: 'Post a response into the originating Chat SDK thread.',
+	input: v.object({
+		threadId: v.string(),
+		text: v.string(),
+	}),
+	async run({ input }) {
+		await bot.thread(input.threadId).post(input.text);
+		return 'Reply sent.';
+	},
+});
+
+export default function assistant() {
+	addTool(replyToChatThread);
 	return {
 		model: 'chat-sdk-example/assistant',
-		instructions:
+		instruction:
 			'When receiving a chat message, use reply_to_chat_thread to reply in the supplied thread.',
-		tools: [
-			defineTool({
-				name: 'reply_to_chat_thread',
-				description: 'Post a response into the originating Chat SDK thread.',
-				input: v.object({
-					threadId: v.string(),
-					text: v.string(),
-				}),
-				async run({ input }) {
-					await bot.thread(input.threadId).post(input.text);
-					return 'Reply sent.';
-				},
-			}),
-		],
 	};
-});
+}

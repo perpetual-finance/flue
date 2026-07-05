@@ -69,6 +69,7 @@
  */
 
 import { type FlueEvent, observe } from '@flue/runtime';
+import { agent } from '@flue/runtime/routing';
 import * as Sentry from '@sentry/node';
 import { Hono } from 'hono';
 import boom from './agents/boom.ts';
@@ -196,8 +197,8 @@ function safeStringify(value: unknown): string {
 // ─── 3. Mount the app's agents ──────────────────────────────────────────────
 
 const app = new Hono();
-app.route('/agents/hello', hello.route());
-app.route('/agents/boom', boom.route());
-app.route('/agents/explicit', explicit.route());
+app.route('/agents/hello', agent(hello).route());
+app.route('/agents/boom', agent(boom).route());
+app.route('/agents/explicit', agent(explicit).route());
 
 export default app;

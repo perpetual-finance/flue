@@ -5,12 +5,12 @@ import type {
 	CloudflareRuntime,
 	NodeRuntime,
 } from '../../src/runtime/flue-app.ts';
-import type { AgentDefinition } from '../../src/types.ts';
+import type { AgentModuleValue } from '../../src/types.ts';
 
 export function agentRecord(
 	name: string,
 	options: {
-		definition?: AgentDefinition;
+		definition?: AgentModuleValue;
 		description?: string;
 		route?: AgentRecord['route'];
 	} = {},

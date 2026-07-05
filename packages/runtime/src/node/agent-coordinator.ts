@@ -27,7 +27,7 @@ import type { RuntimeActivityGate, RuntimeActivityLease } from '../runtime/runti
 import { agentStreamPath } from '../runtime/stream-offsets.ts';
 import { createSessionStorageKey } from '../session-identity.ts';
 import type {
-	AgentDefinition,
+	AgentModuleValue,
 	DeliveredMessage,
 	DispatchReceipt,
 } from '../types.ts';
@@ -105,7 +105,7 @@ export function createNodeDispatchQueue(coordinator: NodeAgentCoordinator): Disp
 
 export function createNodeAgentCoordinator(options: {
 	submissions: AgentSubmissionStore;
-	agents: ReadonlyArray<{ name: string; definition: AgentDefinition }>;
+	agents: ReadonlyArray<{ name: string; definition: AgentModuleValue }>;
 	createContext: CreateAgentContextFn;
 	conversationStreamStore?: ConversationStreamStore;
 	attachmentStore?: AttachmentStore;
@@ -216,7 +216,7 @@ export function createNodeAgentCoordinator(options: {
 
 	function materializeSubmissionConversation(
 		input: AgentSubmissionInput,
-		agent: AgentDefinition,
+		agent: AgentModuleValue,
 	): Promise<void> {
 		const path = agentStreamPath(input.agent, input.id);
 		const previous = conversationMaterializations.get(path) ?? Promise.resolve();
@@ -241,7 +241,7 @@ export function createNodeAgentCoordinator(options: {
 		return materialized;
 	}
 
-	function resolveAgent(name: string): AgentDefinition {
+	function resolveAgent(name: string): AgentModuleValue {
 		const agent = agents.find((record) => record.name === name)?.definition;
 		if (!agent) throw new Error(`[flue] submission target agent "${name}" has no agent definition.`);
 		return agent;

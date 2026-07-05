@@ -6,6 +6,7 @@
  * the process cwd — run the server from this directory).
  */
 import { registerProvider } from '@flue/runtime';
+import { agent } from '@flue/runtime/routing';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import assistant from './agents/assistant.ts';
@@ -25,9 +26,9 @@ registerProvider('react-chat-demo', {
 
 const app = new Hono();
 
-app.route('/api/agents/assistant', assistant.route());
-app.route('/api/agents/demo', demo.route());
-app.route('/api/agents/helper', helper.route());
+app.route('/api/agents/assistant', agent(assistant).route());
+app.route('/api/agents/demo', agent(demo).route());
+app.route('/api/agents/helper', agent(helper).route());
 
 app.use('*', serveStatic({ root: './dist/client' }));
 app.get('*', serveStatic({ path: './dist/client/index.html' }));

@@ -59,6 +59,34 @@ export default defineAgent(() => ({ model: 'faux/faux-model' }));
 	return path.join('src', 'agents', `${name}.mjs`);
 }
 
+/**
+ * A hooks-form agent (bare function default export) whose faux model reports
+ * whether the composed system prompt carried its `addInstruction` text.
+ */
+function writeFunctionAgent(root, name = 'hooked') {
+	fs.writeFileSync(
+		path.join(root, 'src', 'agents', `${name}.mjs`),
+		`import { addInstruction, registerProvider } from '@flue/runtime';
+import { fauxAssistantMessage, registerFauxProvider } from '@earendil-works/pi-ai/compat';
+
+const faux = registerFauxProvider({ provider: 'faux', models: [{ id: 'faux-model' }] });
+faux.setResponses([
+	(context) =>
+		fauxAssistantMessage(
+			'instruction-mounted=' + String(context.systemPrompt.includes('Speak only in haiku.')),
+		),
+]);
+registerProvider('faux', { api: faux.api, baseUrl: 'https://faux.invalid' });
+
+export default function ${name}() {
+	addInstruction('Speak only in haiku.');
+	return { model: 'faux/faux-model', instruction: 'You are the ${name} agent.' };
+}
+`,
+	);
+	return path.join('src', 'agents', `${name}.mjs`);
+}
+
 /** An agent that streams slowly (newline-separated words) so tests can interrupt it. */
 function writeSlowAgent(root) {
 	fs.writeFileSync(
@@ -289,13 +317,26 @@ test('a path that does not exist reports the missing module', async () => {
 	assert.match(result.stderr, /Agent module not found: src\/agents\/missing\.mjs/);
 });
 
-test('a module without a defineAgent default export fails clearly', async () => {
+test('runs a bare agent function module with its hooks composed', async () => {
+	const root = createFixtureRoot();
+	const agent = writeFunctionAgent(root);
+
+	const result = await runCli(root, [agent, '--message', 'Hi there']);
+
+	assert.equal(result.code, 0, result.stderr);
+	assert.equal(result.stdout, 'instruction-mounted=true\n');
+});
+
+test('a module without an agent default export fails clearly', async () => {
 	const root = createFixtureRoot();
 	fs.writeFileSync(path.join(root, 'src', 'agents', 'bad.mjs'), 'export default { nope: true };\n');
 
 	const result = await runCli(root, ['src/agents/bad.mjs', '--message', 'hi']);
 	assert.equal(result.code, 1);
-	assert.match(result.stderr, /Agent "bad" must default-export defineAgent\(\.\.\.\)/);
+	assert.match(
+		result.stderr,
+		/Agent "bad" must default-export an agent function or defineAgent\(\.\.\.\)/,
+	);
 });
 
 test('a module importing cloudflare:* APIs points at vite dev with the import chain', async () => {
