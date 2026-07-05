@@ -254,6 +254,21 @@ export interface SubmissionSettledRecord extends ConversationRecordEnvelope {
 	error?: unknown;
 }
 
+/**
+ * One durable write to the agent instance's hook state (`useState`). The
+ * record log is the source of truth: the current value of a state name is the
+ * `value` of its last `state_write` in stream order, reduced across every
+ * conversation in the instance's stream. Writes made by tools land in the same
+ * append batch as their batch's `tool_results_committed` record, so a state
+ * write shares the durability of the tool batch that made it.
+ */
+export interface StateWriteRecord extends ConversationRecordEnvelope {
+	type: 'state_write';
+	name: string;
+	value: unknown;
+	previousValue?: unknown;
+}
+
 export type ConversationRecord =
 	| ConversationCreatedRecord
 	| UserMessageRecord
@@ -271,8 +286,8 @@ export type ConversationRecord =
 	| ToolResultsCommittedRecord
 	| CompactionRecord
 	| ChildSessionRetainedRecord
-	| SubmissionSettledRecord;
-
+	| SubmissionSettledRecord
+	| StateWriteRecord;
 
 export function generateConversationRecordId(): string {
 	return `record_${crypto.randomUUID()}`;

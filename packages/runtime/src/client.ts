@@ -7,6 +7,7 @@ import { discoverSessionContext } from './context.ts';
 import { ConversationRecordWriter } from './conversation-writer.ts';
 import { Harness } from './harness.ts';
 import { renderAgentFunction } from './hooks/render.ts';
+import { createHookStateBuffer, type HookStateBuffer } from './hooks/state.ts';
 import { type AttachmentStore, InMemoryAttachmentStore } from './runtime/attachment-store.ts';
 import { InMemoryConversationStreamStore } from './runtime/conversation-stream-store.ts';
 import { dispatchGlobalEvent } from './runtime/events.ts';
@@ -74,10 +75,12 @@ export function createFlueContext(config: FlueContextConfig): FlueContextInterna
 	let submissionId: string | undefined;
 	let conversationWriter = config.conversationWriter;
 	let attachmentStore = config.attachmentStore;
-	let localConversationRuntime: Promise<{
-		writer: ConversationRecordWriter;
-		attachments: AttachmentStore;
-	}> | undefined;
+	let localConversationRuntime:
+		| Promise<{
+				writer: ConversationRecordWriter;
+				attachments: AttachmentStore;
+		  }>
+		| undefined;
 
 	const createEvent = (event: FlueEventInput): FlueEvent => ({
 		...event,
@@ -144,7 +147,11 @@ export function createFlueContext(config: FlueContextConfig): FlueContextInterna
 				conversationWriter ??= local.writer;
 				attachmentStore ??= local.attachments;
 			}
-			return initializeRootHarness(agent, { ...config, conversationWriter, attachmentStore }, emitEvent);
+			return initializeRootHarness(
+				agent,
+				{ ...config, conversationWriter, attachmentStore },
+				emitEvent,
+			);
 		},
 
 		log: {
@@ -241,9 +248,21 @@ export async function initializeRootHarness(
 	// config); a defineAgent value runs its initializer, as ever.
 	const isFunctionAgent = typeof agent === 'function';
 	const label = isFunctionAgent ? 'The agent function' : 'defineAgent()';
-	const resolvedOptions = isFunctionAgent
-		? renderAgentFunction(agent)
-		: await agent.initialize({ id: config.id, env: config.env });
+	if (!config.conversationWriter || !config.attachmentStore) {
+		throw new Error('[flue] Canonical conversation runtime is not configured.');
+	}
+	// useState reads the instance's reduced state snapshot at render time and
+	// writes through this buffer, which the session drains into the tool
+	// batch's append. One buffer per harness lifetime (one submission attempt).
+	let hookState: HookStateBuffer | undefined;
+	let resolvedOptions: AgentRuntimeConfig;
+	if (isFunctionAgent) {
+		const reduced = await config.conversationWriter.loadReducedState();
+		hookState = createHookStateBuffer(reduced.state);
+		resolvedOptions = renderAgentFunction(agent, { snapshot: reduced.state, store: hookState });
+	} else {
+		resolvedOptions = await agent.initialize({ id: config.id, env: config.env });
+	}
 	const definition = assertResolvedAgentProfile(
 		extendAgentProfile(resolveAgentProfile(resolvedOptions), {}),
 		label,
@@ -279,7 +298,9 @@ export async function initializeRootHarness(
 		actions: definition.actions,
 		subagents: Object.fromEntries(
 			(definition.subagents ?? [])
-				.filter((candidate): candidate is AgentProfile & { name: string } => candidate.name !== undefined)
+				.filter(
+					(candidate): candidate is AgentProfile & { name: string } => candidate.name !== undefined,
+				)
 				.map((candidate) => [candidate.name, candidate]),
 		),
 		model: resolvedModel,
@@ -287,9 +308,6 @@ export async function initializeRootHarness(
 		compaction: definition.compaction ?? config.agentConfig.compaction,
 		durability: definition.durability,
 	};
-	if (!config.conversationWriter || !config.attachmentStore) {
-		throw new Error('[flue] Canonical conversation runtime is not configured.');
-	}
 	return new Harness(
 		config.id,
 		'default',
@@ -302,6 +320,11 @@ export async function initializeRootHarness(
 		config.attachmentStore,
 		definition.actions,
 		{ instanceId: config.id },
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+		hookState,
 	);
 }
 

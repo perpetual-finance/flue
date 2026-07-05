@@ -1,7 +1,12 @@
 import * as v from 'valibot';
 import { ToolNameConflictError } from '../errors.ts';
 import type { AgentFunction, AgentManifest, AgentRuntimeConfig } from '../types.ts';
-import { type ComponentRecord, type RenderFrame, renderWithFrame } from './frame.ts';
+import {
+	type ComponentRecord,
+	type RenderFrame,
+	type RenderStateContext,
+	renderWithFrame,
+} from './frame.ts';
 
 const AgentManifestSchema = v.strictObject(
 	{
@@ -26,8 +31,11 @@ const AgentManifestSchema = v.strictObject(
  * (thinking levels, compaction/durability fields) are validated downstream by
  * the shared profile asserts, exactly as for `defineAgent`.
  */
-export function renderAgentFunction(fn: AgentFunction): AgentRuntimeConfig {
-	const { result, frame } = renderWithFrame(fn);
+export function renderAgentFunction(
+	fn: AgentFunction,
+	state?: RenderStateContext,
+): AgentRuntimeConfig {
+	const { result, frame } = renderWithFrame(fn, state);
 	assertAgentManifest(result);
 	assertUniqueToolNames(frame);
 	const instructions = composeAgentDocument(result.instruction, frame);

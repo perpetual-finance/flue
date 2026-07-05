@@ -31,6 +31,23 @@ export interface ComponentRecord {
 	tools: ToolDefinition[];
 }
 
+/**
+ * Durable hook state made available to one render: the reduced snapshot to
+ * read values from, and the store setters write through. Absent when there is
+ * no durable runtime behind the render (direct `renderAgentFunction` calls in
+ * tests/tooling) — `useState` then reads defaults and its setters throw.
+ */
+export interface RenderStateContext {
+	snapshot: ReadonlyMap<string, unknown>;
+	store: HookStateStore | undefined;
+}
+
+/** The write channel `useState` setters push into; drained by the session. */
+export interface HookStateStore {
+	write(name: string, value: unknown): void;
+	current(name: string): { value: unknown } | undefined;
+}
+
 export interface RenderFrame {
 	root: AttachScope;
 	/** Current attachment target is the last entry; the root sits at index 0. */
@@ -38,9 +55,17 @@ export interface RenderFrame {
 	/** Completed components in mount order, flat (nested use() records here too). */
 	components: ComponentRecord[];
 	componentKeys: Set<string>;
+	/** `useState` names declared this render; duplicates throw. */
+	stateNames: Set<string>;
+	state: RenderStateContext | undefined;
 }
 
 let currentFrame: RenderFrame | undefined;
+
+/** Whether an agent render is currently on the stack (setters must throw then). */
+export function isRendering(): boolean {
+	return currentFrame !== undefined;
+}
 
 /** Resolve the active render frame, or throw the outside-render error. */
 export function requireRenderFrame(hookName: string): RenderFrame {
@@ -59,7 +84,10 @@ export function currentScope(frame: RenderFrame): AttachScope {
 }
 
 /** Run one synchronous render inside a fresh frame; always clears the slot. */
-export function renderWithFrame<T>(render: () => T): { result: T; frame: RenderFrame } {
+export function renderWithFrame<T>(
+	render: () => T,
+	state?: RenderStateContext,
+): { result: T; frame: RenderFrame } {
 	if (currentFrame) {
 		throw new Error(
 			'[flue] Re-entrant agent render. An agent function must not invoke another agent function directly; compose shared behavior with components instead.',
@@ -71,6 +99,8 @@ export function renderWithFrame<T>(render: () => T): { result: T; frame: RenderF
 		scopeStack: [root],
 		components: [],
 		componentKeys: new Set(),
+		stateNames: new Set(),
+		state,
 	};
 	currentFrame = frame;
 	try {

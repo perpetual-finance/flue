@@ -4,14 +4,11 @@ import { discoverSessionContext } from './context.ts';
 import type { ConversationRecordWriter } from './conversation-writer.ts';
 import { SessionAlreadyExistsError, SessionNotFoundError } from './errors.ts';
 import type { FlueExecutionContext } from './execution-interceptor.ts';
+import type { HookStateBuffer } from './hooks/state.ts';
 import type { AttachmentStore } from './runtime/attachment-store.ts';
 import { generateConversationId, generateSessionAffinityKey } from './runtime/ids.ts';
 import { createCwdSessionEnv, createFlueFs } from './sandbox.ts';
-import {
-	type CreateTaskSessionOptions,
-	createPublicSession,
-	Session,
-} from './session.ts';
+import { type CreateTaskSessionOptions, createPublicSession, Session } from './session.ts';
 import {
 	assertPublicSessionName,
 	createActionScopeName,
@@ -75,6 +72,12 @@ export class Harness implements FlueHarness {
 			harness: string,
 		) => Promise<void>,
 		scopeSignal?: AbortSignal,
+		/**
+		 * `useState` write buffer from this harness's render, when the agent was
+		 * authored as a function. Handed to the sessions this harness opens
+		 * directly (never task/action children) so their tool batches drain it.
+		 */
+		private hookState?: HookStateBuffer,
 	) {
 		this.fs = createFlueFs(env);
 		if (scopeSignal) {
@@ -164,16 +167,18 @@ export class Harness implements FlueHarness {
 		if (!conversation) {
 			const identity = createConversationIdentity();
 			if (this.retainSession) await this.retainSession(sessionName, identity, harnessScope);
-			else await this.conversationWriter.ensureConversation({
-				kind: 'root',
-				conversationId: identity.conversationId,
-				harness: harnessScope,
-				session: sessionName,
-				affinityKey: identity.affinityKey,
-				createdAt: identity.createdAt,
-			});
+			else
+				await this.conversationWriter.ensureConversation({
+					kind: 'root',
+					conversationId: identity.conversationId,
+					harness: harnessScope,
+					session: sessionName,
+					affinityKey: identity.affinityKey,
+					createdAt: identity.createdAt,
+				});
 			conversation = await this.conversationWriter.findConversation(harnessScope, sessionName);
-			if (!conversation) throw new SessionNotFoundError({ session: sessionName, harness: this.name });
+			if (!conversation)
+				throw new SessionNotFoundError({ session: sessionName, harness: this.name });
 		}
 
 		const session = new Session({
@@ -193,6 +198,7 @@ export class Harness implements FlueHarness {
 			conversationWriter: this.conversationWriter,
 			attachmentStore: this.attachmentStore,
 			executionContext: { ...this.executionContext, harness: harnessScope },
+			hookState: this.hookState,
 		});
 		await session.initializeCanonicalContext();
 		this.openSessions.set(sessionName, session);
@@ -213,9 +219,10 @@ export class Harness implements FlueHarness {
 		const instructions = taskAgent ? taskAgent.instructions : this.config.instructions;
 		const definitionSkills = taskAgent ? taskAgent.skills : this.config.definitionSkills;
 		const localContext = await discoverSessionContext(taskEnv, instructions, definitionSkills);
-		const taskModel = taskAgent?.model !== undefined
-			? this.config.resolveModel(taskAgent.model)
-			: this.config.model;
+		const taskModel =
+			taskAgent?.model !== undefined
+				? this.config.resolveModel(taskAgent.model)
+				: this.config.model;
 		if (!taskModel) {
 			throw new Error(`[flue] Subagent model "${taskAgent?.model}" could not be resolved.`);
 		}
@@ -247,12 +254,15 @@ export class Harness implements FlueHarness {
 			(await this.createChildConversation(options, harnessScope, sessionName, taskAgent));
 		const eventCallback: FlueEventInputCallback | undefined = this.eventCallback
 			? (event, observation) => {
-					this.eventCallback?.({
-						...event,
-						harness: event.harness ?? this.name,
-						parentSession: event.parentSession ?? options.parentSession,
-						taskId: event.taskId ?? options.taskId,
-					}, observation);
+					this.eventCallback?.(
+						{
+							...event,
+							harness: event.harness ?? this.name,
+							parentSession: event.parentSession ?? options.parentSession,
+							taskId: event.taskId ?? options.taskId,
+						},
+						observation,
+					);
 				}
 			: undefined;
 

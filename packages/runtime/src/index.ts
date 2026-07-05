@@ -49,6 +49,7 @@ export type {
 	FlueExecutionInterceptor,
 	FlueExecutionOperation,
 } from './execution-interceptor.ts';
+export { type StateSetter, useState } from './hooks/state.ts';
 export { use } from './hooks/use.ts';
 export { useInstruction } from './hooks/use-instruction.ts';
 export { useTool } from './hooks/use-tool.ts';
@@ -57,10 +58,7 @@ export type { McpServerConnection, McpServerOptions, McpTransport } from './mcp.
 export { connectMcpServer } from './mcp.ts';
 export type { FlueObservationSubscriber } from './observation.ts';
 export { ResultUnavailableError } from './result.ts';
-export type {
-	ChannelRouteDefinition,
-	MountableChannel,
-} from './runtime/channel-routes.ts';
+export type { ChannelRouteDefinition, MountableChannel } from './runtime/channel-routes.ts';
 export { createChannelRouter } from './runtime/channel-routes.ts';
 export { type FlueEventSubscriber, observe } from './runtime/events.ts';
 export { dispatch } from './runtime/flue-app.ts';

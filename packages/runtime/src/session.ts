@@ -89,6 +89,7 @@ import {
 	redactObservationDetailImages,
 } from './event-redaction.ts';
 import { type FlueExecutionContext, interceptExecution } from './execution-interceptor.ts';
+import type { HookStateBuffer, HookStateWrite } from './hooks/state.ts';
 import { renderSignalMessage } from './message-rendering.ts';
 import { assertImagesWithinLimit } from './persisted-images.ts';
 import {
@@ -165,7 +166,10 @@ const MAX_DELEGATION_DEPTH = 4;
 const MAX_TRANSIENT_MODEL_RETRIES = 3;
 const TRANSIENT_MODEL_RETRY_BASE_DELAY_MS = 2_000;
 
-type TurnInputMessage = Extract<FlueEvent, { type: 'turn_request' }>['request']['input']['messages'][number];
+type TurnInputMessage = Extract<
+	FlueEvent,
+	{ type: 'turn_request' }
+>['request']['input']['messages'][number];
 type TurnInputTool = NonNullable<
 	Extract<FlueEvent, { type: 'turn_request' }>['request']['input']['tools']
 >[number];
@@ -342,6 +346,13 @@ interface SessionInitOptions {
 	conversationWriter: ConversationRecordWriter;
 	attachmentStore: AttachmentStore;
 	executionContext?: FlueExecutionContext;
+	/**
+	 * `useState` write buffer from the harness's render (function agents
+	 * only). Buffered writes drain into the same append batch as each tool
+	 * batch's `tool_results_committed` record, so a state write shares the
+	 * durability of the tool batch that made it.
+	 */
+	hookState?: HookStateBuffer;
 }
 
 interface CallOverrides {
@@ -401,7 +412,8 @@ function wrapProviderStream<T extends AsyncIterable<unknown> & { result(): Promi
 					? () => interceptExecution(operation, executionContext, returnIterator)
 					: undefined,
 				throw: throwIterator
-					? (error: unknown) => interceptExecution(operation, executionContext, () => throwIterator(error))
+					? (error: unknown) =>
+							interceptExecution(operation, executionContext, () => throwIterator(error))
 					: undefined,
 			};
 		},
@@ -411,7 +423,9 @@ function wrapProviderStream<T extends AsyncIterable<unknown> & { result(): Promi
 	} as T;
 }
 
-function parseProviderEndpoint(value: string | undefined): { address: string; port?: number } | undefined {
+function parseProviderEndpoint(
+	value: string | undefined,
+): { address: string; port?: number } | undefined {
 	if (!value) return undefined;
 	try {
 		const url = new URL(value);
@@ -424,7 +438,12 @@ function parseProviderEndpoint(value: string | undefined): { address: string; po
 	}
 }
 
-function classifyError(error: unknown): { type: string; name?: string; code?: string; message?: string } {
+function classifyError(error: unknown): {
+	type: string;
+	name?: string;
+	code?: string;
+	message?: string;
+} {
 	if (error instanceof DOMException && error.name === 'AbortError') {
 		return { type: 'AbortError', name: error.name, message: error.message };
 	}
@@ -432,7 +451,7 @@ function classifyError(error: unknown): { type: string; name?: string; code?: st
 		const value = error as { name?: unknown; code?: unknown; type?: unknown; message?: unknown };
 		const name = typeof value.name === 'string' ? value.name : undefined;
 		const code = typeof value.code === 'string' ? value.code : undefined;
-		const type = typeof value.type === 'string' ? value.type : code ?? name ?? '_OTHER';
+		const type = typeof value.type === 'string' ? value.type : (code ?? name ?? '_OTHER');
 		return {
 			type,
 			...(name === undefined ? {} : { name }),
@@ -508,7 +527,10 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		| {
 				messageId: string;
 				parentId: string | null;
-				blocks: Map<number, { id: string; type: 'text' | 'reasoning'; deltaCount: number; completed: boolean }>;
+				blocks: Map<
+					number,
+					{ id: string; type: 'text' | 'reasoning'; deltaCount: number; completed: boolean }
+				>;
 		  }
 		| undefined;
 	private canonicalToolRequestMessageId: string | undefined;
@@ -516,6 +538,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	private pendingCanonicalWrites = new Set<Promise<void>>();
 	private pendingToolPublications = new Map<string, () => void>();
 	private executionIdentity: FlueExecutionContext;
+	private hookState: HookStateBuffer | undefined;
 
 	private emitTurnRequestAndStream: StreamFn = async (model, context, options) => {
 		if (this.activeTurnId === undefined) this.activeTurnId = generateTurnId();
@@ -558,7 +581,9 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	}
 
 	private enqueueCanonical(records: readonly ConversationRecord[], publish: () => void): void {
-		const pending = this.conversationWriter.enqueue(records, this.canonicalAppendOptions()).then(() => publish());
+		const pending = this.conversationWriter
+			.enqueue(records, this.canonicalAppendOptions())
+			.then(() => publish());
 		let tracked: Promise<void>;
 		tracked = pending.finally(() => this.pendingCanonicalWrites.delete(tracked));
 		this.pendingCanonicalWrites.add(tracked);
@@ -569,7 +594,22 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		await Promise.all(this.pendingCanonicalWrites);
 	}
 
-	private modelRequestInfo(model: Model<any> | undefined, options?: SimpleStreamOptions): ModelRequestInfo {
+	/** Turn buffered `useState` writes into canonical records, in write order. */
+	private drainHookStateRecords(): ConversationRecord[] {
+		if (!this.hookState) return [];
+		return this.hookState.drain().map((write: HookStateWrite) => ({
+			...this.canonicalEnvelope('state_write'),
+			type: 'state_write' as const,
+			name: write.name,
+			value: write.value,
+			...(write.previousValue !== undefined ? { previousValue: write.previousValue } : {}),
+		}));
+	}
+
+	private modelRequestInfo(
+		model: Model<any> | undefined,
+		options?: SimpleStreamOptions,
+	): ModelRequestInfo {
 		if (!model) throw new Error('[flue] Missing configured model for turn telemetry.');
 		const providerTelemetry = getProviderTelemetry(model.provider);
 		const parsedEndpoint = parseProviderEndpoint(model.baseUrl);
@@ -583,7 +623,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			reasoningLevel: options?.reasoning,
 			maxTokens: options?.maxTokens,
 			temperature: options?.temperature,
-
 		};
 	}
 
@@ -648,7 +687,9 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					: {}),
 			},
 			isError:
-				error !== undefined || response?.stopReason === 'error' || response?.stopReason === 'aborted',
+				error !== undefined ||
+				response?.stopReason === 'error' ||
+				response?.stopReason === 'aborted',
 		});
 	}
 
@@ -670,6 +711,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		this.conversationWriter = options.conversationWriter;
 		this.attachmentStore = options.attachmentStore;
 		this.executionIdentity = options.executionContext ?? {};
+		this.hookState = options.hookState;
 
 		const systemPrompt = this.config.systemPrompt;
 
@@ -711,18 +753,29 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					this.activeTurnId = turnId;
 					if (event.message.role === 'assistant') {
 						const messageId = generateConversationEntryId();
-						const parentId = await this.conversationWriter.getConversationLeaf(this.conversationId) ?? null;
+						const parentId =
+							(await this.conversationWriter.getConversationLeaf(this.conversationId)) ?? null;
 						this.canonicalAssistant = { messageId, parentId, blocks: new Map() };
 						this.canonicalToolRequestMessageId = undefined;
 						this.canonicalToolResultParentId = undefined;
-						const { role: _role, content: _content, stopReason: _stopReason, errorMessage: _errorMessage, timestamp: _timestamp, usage: _usage, ...modelInfo } = event.message;
-						await this.appendCanonical([{
-							...this.canonicalEnvelope('assistant_message_started'),
-							type: 'assistant_message_started',
-							messageId,
-							parentId,
-							modelInfo,
-						}]);
+						const {
+							role: _role,
+							content: _content,
+							stopReason: _stopReason,
+							errorMessage: _errorMessage,
+							timestamp: _timestamp,
+							usage: _usage,
+							...modelInfo
+						} = event.message;
+						await this.appendCanonical([
+							{
+								...this.canonicalEnvelope('assistant_message_started'),
+								type: 'assistant_message_started',
+								messageId,
+								parentId,
+								modelInfo,
+							},
+						]);
 					}
 					this.emit({ type: 'message_start', message: event.message, turnId });
 					break;
@@ -732,73 +785,154 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					const assistant = this.canonicalAssistant;
 					if (assistant && aEvent.type === 'text_start') {
 						const blockId = `block_${crypto.randomUUID()}`;
-						assistant.blocks.set(aEvent.contentIndex, { id: blockId, type: 'text', deltaCount: 0, completed: false });
-						await this.appendCanonical([{
-							...this.canonicalEnvelope('assistant_text_started'), type: 'assistant_text_started',
-							messageId: assistant.messageId, blockId, blockIndex: aEvent.contentIndex,
-						}]);
+						assistant.blocks.set(aEvent.contentIndex, {
+							id: blockId,
+							type: 'text',
+							deltaCount: 0,
+							completed: false,
+						});
+						await this.appendCanonical([
+							{
+								...this.canonicalEnvelope('assistant_text_started'),
+								type: 'assistant_text_started',
+								messageId: assistant.messageId,
+								blockId,
+								blockIndex: aEvent.contentIndex,
+							},
+						]);
 					} else if (assistant && aEvent.type === 'text_delta') {
 						const block = assistant.blocks.get(aEvent.contentIndex);
-						if (!block || block.type !== 'text') throw new Error('[flue] Canonical text delta has no started block.');
-						this.enqueueCanonical([{
-							...this.canonicalEnvelope('assistant_text_delta'), type: 'assistant_text_delta',
-							messageId: assistant.messageId, blockId: block.id, sequence: block.deltaCount++, delta: aEvent.delta,
-						}], () => this.emit({ type: 'text_delta', text: aEvent.delta }));
+						if (!block || block.type !== 'text')
+							throw new Error('[flue] Canonical text delta has no started block.');
+						this.enqueueCanonical(
+							[
+								{
+									...this.canonicalEnvelope('assistant_text_delta'),
+									type: 'assistant_text_delta',
+									messageId: assistant.messageId,
+									blockId: block.id,
+									sequence: block.deltaCount++,
+									delta: aEvent.delta,
+								},
+							],
+							() => this.emit({ type: 'text_delta', text: aEvent.delta }),
+						);
 					} else if (assistant && aEvent.type === 'text_end') {
 						const block = assistant.blocks.get(aEvent.contentIndex);
-						if (!block || block.type !== 'text') throw new Error('[flue] Canonical text completion has no started block.');
+						if (!block || block.type !== 'text')
+							throw new Error('[flue] Canonical text completion has no started block.');
 						const content = aEvent.partial.content[aEvent.contentIndex];
 						await this.flushCanonical();
-						await this.appendCanonical([{
-							...this.canonicalEnvelope('assistant_text_completed'), type: 'assistant_text_completed',
-							messageId: assistant.messageId, blockId: block.id, deltaCount: block.deltaCount,
-							...(content?.type === 'text' && content.textSignature ? { textSignature: content.textSignature } : {}),
-						}]);
+						await this.appendCanonical([
+							{
+								...this.canonicalEnvelope('assistant_text_completed'),
+								type: 'assistant_text_completed',
+								messageId: assistant.messageId,
+								blockId: block.id,
+								deltaCount: block.deltaCount,
+								...(content?.type === 'text' && content.textSignature
+									? { textSignature: content.textSignature }
+									: {}),
+							},
+						]);
 						block.completed = true;
 					} else if (assistant && aEvent.type === 'thinking_start') {
 						const blockId = `block_${crypto.randomUUID()}`;
-						assistant.blocks.set(aEvent.contentIndex, { id: blockId, type: 'reasoning', deltaCount: 0, completed: false });
-						await this.appendCanonical([{
-							...this.canonicalEnvelope('assistant_reasoning_started'), type: 'assistant_reasoning_started',
-							messageId: assistant.messageId, blockId, blockIndex: aEvent.contentIndex,
-						}]);
+						assistant.blocks.set(aEvent.contentIndex, {
+							id: blockId,
+							type: 'reasoning',
+							deltaCount: 0,
+							completed: false,
+						});
+						await this.appendCanonical([
+							{
+								...this.canonicalEnvelope('assistant_reasoning_started'),
+								type: 'assistant_reasoning_started',
+								messageId: assistant.messageId,
+								blockId,
+								blockIndex: aEvent.contentIndex,
+							},
+						]);
 						this.emit({ type: 'thinking_start', contentIndex: aEvent.contentIndex });
 					} else if (assistant && aEvent.type === 'thinking_delta') {
 						const block = assistant.blocks.get(aEvent.contentIndex);
-						if (!block || block.type !== 'reasoning') throw new Error('[flue] Canonical reasoning delta has no started block.');
-						this.enqueueCanonical([{
-							...this.canonicalEnvelope('assistant_reasoning_delta'), type: 'assistant_reasoning_delta',
-							messageId: assistant.messageId, blockId: block.id, sequence: block.deltaCount++, delta: aEvent.delta,
-						}], () => this.emit({ type: 'thinking_delta', contentIndex: aEvent.contentIndex, delta: aEvent.delta }));
+						if (!block || block.type !== 'reasoning')
+							throw new Error('[flue] Canonical reasoning delta has no started block.');
+						this.enqueueCanonical(
+							[
+								{
+									...this.canonicalEnvelope('assistant_reasoning_delta'),
+									type: 'assistant_reasoning_delta',
+									messageId: assistant.messageId,
+									blockId: block.id,
+									sequence: block.deltaCount++,
+									delta: aEvent.delta,
+								},
+							],
+							() =>
+								this.emit({
+									type: 'thinking_delta',
+									contentIndex: aEvent.contentIndex,
+									delta: aEvent.delta,
+								}),
+						);
 					} else if (assistant && aEvent.type === 'thinking_end') {
 						const block = assistant.blocks.get(aEvent.contentIndex);
-						if (!block || block.type !== 'reasoning') throw new Error('[flue] Canonical reasoning completion has no started block.');
+						if (!block || block.type !== 'reasoning')
+							throw new Error('[flue] Canonical reasoning completion has no started block.');
 						const content = aEvent.partial.content[aEvent.contentIndex];
 						await this.flushCanonical();
-						await this.appendCanonical([{
-							...this.canonicalEnvelope('assistant_reasoning_completed'), type: 'assistant_reasoning_completed',
-							messageId: assistant.messageId, blockId: block.id, deltaCount: block.deltaCount,
-							...(content?.type === 'thinking' && content.thinkingSignature ? { encrypted: content.thinkingSignature } : {}),
-							...(content?.type === 'thinking' && content.redacted ? { redacted: true } : {}),
-						}]);
+						await this.appendCanonical([
+							{
+								...this.canonicalEnvelope('assistant_reasoning_completed'),
+								type: 'assistant_reasoning_completed',
+								messageId: assistant.messageId,
+								blockId: block.id,
+								deltaCount: block.deltaCount,
+								...(content?.type === 'thinking' && content.thinkingSignature
+									? { encrypted: content.thinkingSignature }
+									: {}),
+								...(content?.type === 'thinking' && content.redacted ? { redacted: true } : {}),
+							},
+						]);
 						block.completed = true;
-						this.emit({ type: 'thinking_end', contentIndex: aEvent.contentIndex, content: aEvent.content });
+						this.emit({
+							type: 'thinking_end',
+							contentIndex: aEvent.contentIndex,
+							content: aEvent.content,
+						});
 					} else if (assistant && aEvent.type === 'toolcall_end') {
-						await this.appendCanonical([{
-							...this.canonicalEnvelope('assistant_tool_call'), type: 'assistant_tool_call',
-							messageId: assistant.messageId, blockId: `block_${crypto.randomUUID()}`,
-							blockIndex: aEvent.contentIndex, toolCallId: aEvent.toolCall.id,
-							name: aEvent.toolCall.name, arguments: aEvent.toolCall.arguments,
-							...(aEvent.toolCall.thoughtSignature ? { thoughtSignature: aEvent.toolCall.thoughtSignature } : {}),
-						}]);
+						await this.appendCanonical([
+							{
+								...this.canonicalEnvelope('assistant_tool_call'),
+								type: 'assistant_tool_call',
+								messageId: assistant.messageId,
+								blockId: `block_${crypto.randomUUID()}`,
+								blockIndex: aEvent.contentIndex,
+								toolCallId: aEvent.toolCall.id,
+								name: aEvent.toolCall.name,
+								arguments: aEvent.toolCall.arguments,
+								...(aEvent.toolCall.thoughtSignature
+									? { thoughtSignature: aEvent.toolCall.thoughtSignature }
+									: {}),
+							},
+						]);
 					} else if (aEvent.type === 'text_delta') {
 						this.emit({ type: 'text_delta', text: aEvent.delta });
 					} else if (aEvent.type === 'thinking_start') {
 						this.emit({ type: 'thinking_start', contentIndex: aEvent.contentIndex });
 					} else if (aEvent.type === 'thinking_delta') {
-						this.emit({ type: 'thinking_delta', contentIndex: aEvent.contentIndex, delta: aEvent.delta });
+						this.emit({
+							type: 'thinking_delta',
+							contentIndex: aEvent.contentIndex,
+							delta: aEvent.delta,
+						});
 					} else if (aEvent.type === 'thinking_end') {
-						this.emit({ type: 'thinking_end', contentIndex: aEvent.contentIndex, content: aEvent.content });
+						this.emit({
+							type: 'thinking_end',
+							contentIndex: aEvent.contentIndex,
+							content: aEvent.content,
+						});
 					}
 					break;
 				}
@@ -811,23 +945,35 @@ export class Session implements FlueSession, AgentSubmissionSession {
 							await this.flushCanonical();
 							for (const block of canonical.blocks.values()) {
 								if (block.completed) continue;
-								await this.appendCanonical([block.type === 'text'
-									? {
-										...this.canonicalEnvelope('assistant_text_completed'), type: 'assistant_text_completed',
-										messageId: canonical.messageId, blockId: block.id, deltaCount: block.deltaCount,
-									}
-									: {
-										...this.canonicalEnvelope('assistant_reasoning_completed'), type: 'assistant_reasoning_completed',
-										messageId: canonical.messageId, blockId: block.id, deltaCount: block.deltaCount,
-									}]);
+								await this.appendCanonical([
+									block.type === 'text'
+										? {
+												...this.canonicalEnvelope('assistant_text_completed'),
+												type: 'assistant_text_completed',
+												messageId: canonical.messageId,
+												blockId: block.id,
+												deltaCount: block.deltaCount,
+											}
+										: {
+												...this.canonicalEnvelope('assistant_reasoning_completed'),
+												type: 'assistant_reasoning_completed',
+												messageId: canonical.messageId,
+												blockId: block.id,
+												deltaCount: block.deltaCount,
+											},
+								]);
 								block.completed = true;
 							}
-							await this.appendCanonical([{
-								...this.canonicalEnvelope('assistant_message_completed'), type: 'assistant_message_completed',
-								messageId: canonical.messageId, stopReason: event.message.stopReason,
-								usage: event.message.usage,
-								...(event.message.errorMessage ? { error: event.message.errorMessage } : {}),
-							}]);
+							await this.appendCanonical([
+								{
+									...this.canonicalEnvelope('assistant_message_completed'),
+									type: 'assistant_message_completed',
+									messageId: canonical.messageId,
+									stopReason: event.message.stopReason,
+									usage: event.message.usage,
+									...(event.message.errorMessage ? { error: event.message.errorMessage } : {}),
+								},
+							]);
 							this.canonicalToolRequestMessageId = event.message.content.some(
 								(content) => content.type === 'toolCall',
 							)
@@ -835,7 +981,8 @@ export class Session implements FlueSession, AgentSubmissionSession {
 								: undefined;
 							this.canonicalAssistant = undefined;
 						}
-						const request = this.modelRequests.get(turnId) ?? this.modelRequestInfo(this.agentLoop.state.model);
+						const request =
+							this.modelRequests.get(turnId) ?? this.modelRequestInfo(this.agentLoop.state.model);
 						this.emitTurn(turnId, 'agent', event.message, request);
 						this.modelRequests.delete(turnId);
 						this.modelRequestStartTimes.delete(turnId);
@@ -844,7 +991,9 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					break;
 				}
 				case 'tool_execution_start': {
-					const tool = this.agentLoop.state.tools.find((candidate) => candidate.name === event.toolName);
+					const tool = this.agentLoop.state.tools.find(
+						(candidate) => candidate.name === event.toolName,
+					);
 					this.activeToolCalls.set(event.toolCallId, {
 						startedAt: Date.now(),
 						toolName: event.toolName,
@@ -873,33 +1022,45 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					const result = event.result as AgentToolResult<any>;
 					const images = result.content.flatMap((content, index) =>
 						content.type === 'image'
-							? [{ id: `att_${messageId}_${index}`, mimeType: content.mimeType, data: content.data }]
+							? [
+									{
+										id: `att_${messageId}_${index}`,
+										mimeType: content.mimeType,
+										data: content.data,
+									},
+								]
 							: [],
 					);
 					const refs = await this.persistCanonicalAttachments(images);
 					let imageIndex = 0;
 					const details = result.details as { output?: unknown } | undefined;
 					const hasStructuredOutput =
-						!event.isError && typeof details === 'object' && details !== null && 'output' in details;
+						!event.isError &&
+						typeof details === 'object' &&
+						details !== null &&
+						'output' in details;
 					// Measure once and reuse for both the durable record and the
 					// ephemeral `tool` event so the two can never disagree.
 					const toolDurationMs = durationSince(call.startedAt);
-					await this.appendCanonical([{
-						...this.canonicalEnvelope('tool_outcome', `record_tool_outcome_${outcomeKey}`),
-						type: 'tool_outcome',
-						assistantMessageId,
-						toolCallId: event.toolCallId,
-						toolName: event.toolName,
-						isError: event.isError,
-						content: result.content.map((content) => {
-							if (content.type === 'text') return { type: 'text' as const, text: content.text };
-							const attachment = refs[imageIndex++];
-							if (!attachment) throw new Error('[flue] Canonical tool outcome attachment is missing.');
-							return { type: 'attachment' as const, attachment };
-						}),
-						...(hasStructuredOutput ? { output: details?.output } : {}),
-						durationMs: toolDurationMs,
-					}]);
+					await this.appendCanonical([
+						{
+							...this.canonicalEnvelope('tool_outcome', `record_tool_outcome_${outcomeKey}`),
+							type: 'tool_outcome',
+							assistantMessageId,
+							toolCallId: event.toolCallId,
+							toolName: event.toolName,
+							isError: event.isError,
+							content: result.content.map((content) => {
+								if (content.type === 'text') return { type: 'text' as const, text: content.text };
+								const attachment = refs[imageIndex++];
+								if (!attachment)
+									throw new Error('[flue] Canonical tool outcome attachment is missing.');
+								return { type: 'attachment' as const, attachment };
+							}),
+							...(hasStructuredOutput ? { output: details?.output } : {}),
+							durationMs: toolDurationMs,
+						},
+					]);
 					if (!call.startEmitted) {
 						this.emit(
 							{
@@ -934,23 +1095,39 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					const turnId = this.activeTurnId ?? generateTurnId();
 					const committedToolResults = event.toolResults.length > 0;
 					if (committedToolResults) {
-						const parentId = this.canonicalToolResultParentId ?? await this.conversationWriter.getConversationLeaf(this.conversationId);
-						if (!parentId) throw new Error('[flue] Canonical tool results have no assistant parent.');
+						const parentId =
+							this.canonicalToolResultParentId ??
+							(await this.conversationWriter.getConversationLeaf(this.conversationId));
+						if (!parentId)
+							throw new Error('[flue] Canonical tool results have no assistant parent.');
 						const assistantMessageId = this.canonicalToolRequestMessageId;
-						if (!assistantMessageId) throw new Error('[flue] Canonical tool results have no assistant request.');
+						if (!assistantMessageId)
+							throw new Error('[flue] Canonical tool results have no assistant request.');
 						const conversation = await this.requireConversation();
 						const outcomeIds = event.toolResults.map((toolResult) => {
-							const outcome = conversation.toolOutcomes.get(toolOutcomeKey(assistantMessageId, toolResult.toolCallId));
+							const outcome = conversation.toolOutcomes.get(
+								toolOutcomeKey(assistantMessageId, toolResult.toolCallId),
+							);
 							if (!outcome) throw new Error('[flue] Canonical tool result has no durable outcome.');
 							return outcome.recordId;
 						});
-						await this.appendCanonical([{
-							...this.canonicalEnvelope('tool_results_committed', `record_tool_results_committed_${encodeCanonicalId(assistantMessageId)}`),
-							type: 'tool_results_committed',
-							assistantMessageId,
-							parentId,
-							outcomeIds,
-						}]);
+						// Buffered useState writes land in the same append batch as the
+						// commit marker — one store.append, one durability point. If
+						// recovery settles this batch as interrupted, the writes never
+						// happened, exactly like the tool side effects they rode with.
+						await this.appendCanonical([
+							...this.drainHookStateRecords(),
+							{
+								...this.canonicalEnvelope(
+									'tool_results_committed',
+									`record_tool_results_committed_${encodeCanonicalId(assistantMessageId)}`,
+								),
+								type: 'tool_results_committed',
+								assistantMessageId,
+								parentId,
+								outcomeIds,
+							},
+						]);
 						for (const toolResult of event.toolResults) {
 							this.pendingToolPublications.get(toolResult.toolCallId)?.();
 							this.pendingToolPublications.delete(toolResult.toolCallId);
@@ -963,8 +1140,16 @@ export class Session implements FlueSession, AgentSubmissionSession {
 								reason: 'A committed canonical tool-result batch must contain at least one result.',
 							});
 						}
-						this.canonicalToolResultParentId = toolResultEntryId(assistantMessageId, finalToolResult.toolCallId);
+						this.canonicalToolResultParentId = toolResultEntryId(
+							assistantMessageId,
+							finalToolResult.toolCallId,
+						);
 						this.canonicalToolRequestMessageId = undefined;
+					} else {
+						// No tool batch this turn: persist any stray buffered writes on
+						// their own so nothing sits in memory past the turn boundary.
+						const stateWrites = this.drainHookStateRecords();
+						if (stateWrites.length > 0) await this.appendCanonical(stateWrites);
 					}
 					this.emit({
 						type: 'turn_messages',
@@ -1035,11 +1220,11 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	async inspectSubmissionInput(input: AgentSubmissionInput): Promise<AgentSubmissionInspection> {
 		const conversation = await this.conversationWriter.getConversation(this.conversationId);
 		if (!conversation?.entries.has(this.canonicalInputEntryId(input))) return 'absent';
-		return this.inspectCanonicalState(classifyConversationSubmission(
-			conversation,
-			this.canonicalInputEntryId(input),
-			{ contextWindow: this.agentLoop.state.model?.contextWindow ?? 0 },
-		));
+		return this.inspectCanonicalState(
+			classifyConversationSubmission(conversation, this.canonicalInputEntryId(input), {
+				contextWindow: this.agentLoop.state.model?.contextWindow ?? 0,
+			}),
+		);
 	}
 
 	processSubmissionInput(
@@ -1070,7 +1255,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		const conversation = await this.requireConversation();
 		const following = getActiveConversationPathSince(conversation, inputEntryId);
 		if (!following) return;
-		const messages = following.flatMap((entry) => entry.type === 'message' ? [entry] : []);
+		const messages = following.flatMap((entry) => (entry.type === 'message' ? [entry] : []));
 		const partial = findTrailingPartialToolBatch(messages);
 		if (!partial) return;
 		// Subagent recovery (Model B): resolve any unresolved `task` calls in this
@@ -1102,7 +1287,11 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	 */
 	private async resumeUnresolvedTaskCalls(
 		conversation: ReducedConversationState,
-		partial: { entryId: string; assistant: AssistantMessage; toolCalls: ReadonlyArray<{ id: string; name: string }> },
+		partial: {
+			entryId: string;
+			assistant: AssistantMessage;
+			toolCalls: ReadonlyArray<{ id: string; name: string }>;
+		},
 		signal: AbortSignal,
 	): Promise<Map<string, ConversationRecord>> {
 		const resolved = new Map<string, ConversationRecord>();
@@ -1116,7 +1305,13 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			if (!ref) continue;
 			resolved.set(
 				toolCall.id,
-				await this.resumeChildTaskCall(partial.entryId, partial.assistant, toolCall.id, ref, signal),
+				await this.resumeChildTaskCall(
+					partial.entryId,
+					partial.assistant,
+					toolCall.id,
+					ref,
+					signal,
+				),
 			);
 		}
 		return resolved;
@@ -1164,7 +1359,9 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				depth: this.delegationDepth + 1,
 				existing: { conversationId: ref.conversationId },
 				...(ref.parentToolCallId ? { parentToolCallId: ref.parentToolCallId } : {}),
-				...(ref.parentAssistantEntryId ? { parentAssistantEntryId: ref.parentAssistantEntryId } : {}),
+				...(ref.parentAssistantEntryId
+					? { parentAssistantEntryId: ref.parentAssistantEntryId }
+					: {}),
 			});
 			// Registering with activeTasks lets the parent operation's abort reach
 			// the child (runOperation.onAbort aborts every active task).
@@ -1222,10 +1419,15 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			toolCallId,
 			toolName: 'task',
 			isError: true,
-			content: [{ type: 'text', text: JSON.stringify({
-				type: 'subagent_unavailable',
-				message: error.message,
-			}) }],
+			content: [
+				{
+					type: 'text',
+					text: JSON.stringify({
+						type: 'subagent_unavailable',
+						message: error.message,
+					}),
+				},
+			],
 		};
 	}
 
@@ -1274,24 +1476,31 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				toolCallId: toolCall.id,
 				toolName: toolCall.name,
 				isError: true,
-				content: [{ type: 'text', text: JSON.stringify({
-					type: 'interrupted',
-					message: 'Tool execution was interrupted before completion. The outcome is unknown.',
-				}) }],
+				content: [
+					{
+						type: 'text',
+						text: JSON.stringify({
+							type: 'interrupted',
+							message: 'Tool execution was interrupted before completion. The outcome is unknown.',
+						}),
+					},
+				],
 			});
 			outcomeIds.push(recordId);
 		}
 		if (outcomeRecords.length > 0) await this.appendCanonical(outcomeRecords);
-		await this.appendCanonical([{
-			...this.canonicalEnvelope(
-				'tool_results_committed',
-				`record_tool_repair_commit_${encodeCanonicalId(assistantEntryId)}`,
-			),
-			type: 'tool_results_committed',
-			assistantMessageId: assistantEntryId,
-			parentId: assistantEntryId,
-			outcomeIds,
-		}]);
+		await this.appendCanonical([
+			{
+				...this.canonicalEnvelope(
+					'tool_results_committed',
+					`record_tool_repair_commit_${encodeCanonicalId(assistantEntryId)}`,
+				),
+				type: 'tool_results_committed',
+				assistantMessageId: assistantEntryId,
+				parentId: assistantEntryId,
+				outcomeIds,
+			},
+		]);
 		await this.rebuildCanonicalContext();
 	}
 
@@ -1320,12 +1529,15 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				const conversation = await this.conversationWriter.getConversation(this.conversationId);
 				const partial = conversation
 					? getActiveConversationPath(conversation).findLast(
-						(entry) => entry.type === 'message' &&
-							entry.submissionId === attempt?.submissionId &&
-							entry.message.role === 'assistant' &&
-							entry.message.stopReason === 'aborted' &&
-							entry.message.content.some((block) => block.type === 'text' && block.text.length > 0),
-					)
+							(entry) =>
+								entry.type === 'message' &&
+								entry.submissionId === attempt?.submissionId &&
+								entry.message.role === 'assistant' &&
+								entry.message.stopReason === 'aborted' &&
+								entry.message.content.some(
+									(block) => block.type === 'text' && block.text.length > 0,
+								),
+						)
 					: undefined;
 				if (!partial) return false;
 				const continuedEntryId = `entry_recovery_${partial.id}_stream_continued`;
@@ -1347,9 +1559,10 @@ export class Session implements FlueSession, AgentSubmissionSession {
 						messageId,
 						parentId,
 						signalType,
-						content: signalType === 'stream_interrupted'
-							? 'The previous assistant stream was interrupted.'
-							: 'Continue from the durable partial assistant response.',
+						content:
+							signalType === 'stream_interrupted'
+								? 'The previous assistant stream was interrupted.'
+								: 'Continue from the durable partial assistant response.',
 					});
 					parentId = messageId;
 				}
@@ -1358,9 +1571,12 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				return true;
 			}
 			const blocks = [...inProgress.blocks.values()];
-			const continuable = !blocks.some((block) => block.type === 'tool_call') &&
-				blocks.some((block) =>
-					(block.type === 'text' || block.type === 'reasoning') && block.deltas.join('').length > 0,
+			const continuable =
+				!blocks.some((block) => block.type === 'tool_call') &&
+				blocks.some(
+					(block) =>
+						(block.type === 'text' || block.type === 'reasoning') &&
+						block.deltas.join('').length > 0,
 				);
 			const records = this.materializeInProgressStreamRecords(inProgress);
 			if (!continuable) {
@@ -1372,14 +1588,18 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			for (const signalType of ['stream_interrupted', 'stream_continued'] as const) {
 				const messageId = `entry_recovery_${inProgress.messageId}_${signalType}`;
 				records.push({
-					...this.canonicalEnvelope('signal', `record_recovery_${inProgress.messageId}_${signalType}`),
+					...this.canonicalEnvelope(
+						'signal',
+						`record_recovery_${inProgress.messageId}_${signalType}`,
+					),
 					type: 'signal',
 					messageId,
 					parentId,
 					signalType,
-					content: signalType === 'stream_interrupted'
-						? 'The previous assistant stream was interrupted.'
-						: 'Continue from the durable partial assistant response.',
+					content:
+						signalType === 'stream_interrupted'
+							? 'The previous assistant stream was interrupted.'
+							: 'Continue from the durable partial assistant response.',
 				});
 				parentId = messageId;
 			}
@@ -1404,25 +1624,36 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		const records: ConversationRecord[] = [];
 		for (const block of inProgress.blocks.values()) {
 			if ((block.type === 'text' || block.type === 'reasoning') && !block.completed) {
-				records.push(block.type === 'text'
-					? {
-						...this.canonicalEnvelope('assistant_text_completed', `record_recovery_${inProgress.messageId}_${block.blockId}_completed`),
-						type: 'assistant_text_completed',
-						messageId: inProgress.messageId,
-						blockId: block.blockId,
-						deltaCount: block.deltas.length,
-					}
-					: {
-						...this.canonicalEnvelope('assistant_reasoning_completed', `record_recovery_${inProgress.messageId}_${block.blockId}_completed`),
-						type: 'assistant_reasoning_completed',
-						messageId: inProgress.messageId,
-						blockId: block.blockId,
-						deltaCount: block.deltas.length,
-					});
+				records.push(
+					block.type === 'text'
+						? {
+								...this.canonicalEnvelope(
+									'assistant_text_completed',
+									`record_recovery_${inProgress.messageId}_${block.blockId}_completed`,
+								),
+								type: 'assistant_text_completed',
+								messageId: inProgress.messageId,
+								blockId: block.blockId,
+								deltaCount: block.deltas.length,
+							}
+						: {
+								...this.canonicalEnvelope(
+									'assistant_reasoning_completed',
+									`record_recovery_${inProgress.messageId}_${block.blockId}_completed`,
+								),
+								type: 'assistant_reasoning_completed',
+								messageId: inProgress.messageId,
+								blockId: block.blockId,
+								deltaCount: block.deltas.length,
+							},
+				);
 			}
 		}
 		records.push({
-			...this.canonicalEnvelope('assistant_message_completed', `record_recovery_${inProgress.messageId}_aborted`),
+			...this.canonicalEnvelope(
+				'assistant_message_completed',
+				`record_recovery_${inProgress.messageId}_aborted`,
+			),
 			type: 'assistant_message_completed',
 			messageId: inProgress.messageId,
 			stopReason: 'aborted',
@@ -1532,11 +1763,16 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			toolCallId,
 			toolName: 'task',
 			isError: true,
-			content: [{ type: 'text', text: JSON.stringify({
-				type: 'interrupted',
-				message: 'Tool execution was interrupted before completion. The outcome is unknown.',
-				childConversationId,
-			}) }],
+			content: [
+				{
+					type: 'text',
+					text: JSON.stringify({
+						type: 'interrupted',
+						message: 'Tool execution was interrupted before completion. The outcome is unknown.',
+						childConversationId,
+					}),
+				},
+			],
 		};
 	}
 
@@ -1564,22 +1800,24 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		const recordId = `record_${slug}_${input.submissionId}`;
 		if (await this.conversationWriter.hasRecord(recordId)) return interruptedTools;
 		const parentId = await this.conversationWriter.getConversationLeaf(this.conversationId);
-		await this.appendCanonical([{
-			...this.canonicalEnvelope('signal', recordId),
-			type: 'signal',
-			messageId: `entry_${slug}_${input.submissionId}`,
-			parentId,
-			signalType,
-			content: body,
-			attributes: {
-				submissionId: input.submissionId,
-				kind: input.kind,
-				reason: input.reason,
-				...(interruptedTools.length > 0
-					? { interruptedTools: JSON.stringify(interruptedTools) }
-					: {}),
+		await this.appendCanonical([
+			{
+				...this.canonicalEnvelope('signal', recordId),
+				type: 'signal',
+				messageId: `entry_${slug}_${input.submissionId}`,
+				parentId,
+				signalType,
+				content: body,
+				attributes: {
+					submissionId: input.submissionId,
+					kind: input.kind,
+					reason: input.reason,
+					...(interruptedTools.length > 0
+						? { interruptedTools: JSON.stringify(interruptedTools) }
+						: {}),
+				},
 			},
-		}]);
+		]);
 		await this.rebuildCanonicalContext();
 		return interruptedTools;
 	}
@@ -1889,7 +2127,10 @@ export class Session implements FlueSession, AgentSubmissionSession {
 							content: [
 								{
 									type: 'text' as const,
-									text: await preparedToolAdapter.execute(params as Record<string, unknown>, signal),
+									text: await preparedToolAdapter.execute(
+										params as Record<string, unknown>,
+										signal,
+									),
 								},
 							],
 							details: { customTool: toolDef.name },
@@ -1924,11 +2165,13 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				name: action.name,
 				label: action.name,
 				description: action.description,
-				parameters: (action.input ? valibotToJsonSchema(action.input) : {
-					type: 'object',
-					properties: {},
-					additionalProperties: false,
-				}) as any,
+				parameters: (action.input
+					? valibotToJsonSchema(action.input)
+					: {
+							type: 'object',
+							properties: {},
+							additionalProperties: false,
+						}) as any,
 				execute: async () => {
 					throw new Error('unreachable');
 				},
@@ -2080,17 +2323,19 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			group.source === 'custom' || group.source === 'action'
 				? group.tools
 				: group.tools.map((tool) =>
-					group.source === 'result'
-						? this.wrapModelTool(tool, group.source, (toolCallId, params, signal) => {
-							if (signal?.aborted) throw abortErrorFor(signal);
-							return prepareResultTool(tool, params) ?? {
-								args: params,
-								run: () => tool.execute(toolCallId, params, signal),
-								result: toolResultText,
-							};
-						})
-						: this.wrapModelTool(tool, group.source),
-				),
+						group.source === 'result'
+							? this.wrapModelTool(tool, group.source, (toolCallId, params, signal) => {
+									if (signal?.aborted) throw abortErrorFor(signal);
+									return (
+										prepareResultTool(tool, params) ?? {
+											args: params,
+											run: () => tool.execute(toolCallId, params, signal),
+											result: toolResultText,
+										}
+									);
+								})
+							: this.wrapModelTool(tool, group.source),
+					),
 		);
 	}
 
@@ -2302,24 +2547,27 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					: {}),
 			});
 			this.activeTasks.add(child);
-			this.emit({
-				type: 'task_start',
-				taskId,
-				prompt: text,
-				agent: taskAgent?.name,
-				cwd: options?.cwd,
-				parentSession: this.name,
-				session: child.name,
-				conversationId: child.conversationId,
-			}, {
-				agentInput: {
-					text: buildPromptText(text, options?.result),
-					...(options?.images?.length
-						? { images: options.images.map((image) => ({ mimeType: image.mimeType })) }
-						: {}),
+			this.emit(
+				{
+					type: 'task_start',
+					taskId,
+					prompt: text,
+					agent: taskAgent?.name,
+					cwd: options?.cwd,
+					parentSession: this.name,
+					session: child.name,
+					conversationId: child.conversationId,
 				},
-				...(options?.toolCallId ? { toolCallId: options.toolCallId } : {}),
-			});
+				{
+					agentInput: {
+						text: buildPromptText(text, options?.result),
+						...(options?.images?.length
+							? { images: options.images.map((image) => ({ mimeType: image.mimeType })) }
+							: {}),
+					},
+					...(options?.toolCallId ? { toolCallId: options.toolCallId } : {}),
+				},
+			);
 
 			// Aborts during sandbox bring-up — child.prompt's own
 			// runOperation handles the in-flight case.
@@ -2360,29 +2608,35 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				agent: taskAgent?.name,
 				cwd: options?.cwd,
 			};
-			this.emit({
-				type: 'task',
-				taskId,
-				agent: taskAgent?.name,
-				isError: false,
-				result: taskResult.text,
-				durationMs: durationSince(taskStartMs),
-				parentSession: this.name,
-				session: child.name,
-				conversationId: child.conversationId,
-			}, { agentOutput: child.agentInvocationOutput(output) });
+			this.emit(
+				{
+					type: 'task',
+					taskId,
+					agent: taskAgent?.name,
+					isError: false,
+					result: taskResult.text,
+					durationMs: durationSince(taskStartMs),
+					parentSession: this.name,
+					session: child.name,
+					conversationId: child.conversationId,
+				},
+				{ agentOutput: child.agentInvocationOutput(output) },
+			);
 			return taskResult;
 		} catch (error) {
-			this.emit({
-				type: 'task',
-				taskId,
-				agent: taskAgent?.name,
-				isError: true,
-				result: getErrorMessage(error),
-				durationMs: durationSince(taskStartMs),
-				parentSession: this.name,
-				...(child ? { session: child.name, conversationId: child.conversationId } : {}),
-			}, { errorInfo: classifyError(error) });
+			this.emit(
+				{
+					type: 'task',
+					taskId,
+					agent: taskAgent?.name,
+					isError: true,
+					result: getErrorMessage(error),
+					durationMs: durationSince(taskStartMs),
+					parentSession: this.name,
+					...(child ? { session: child.name, conversationId: child.conversationId } : {}),
+				},
+				{ errorInfo: classifyError(error) },
+			);
 			throw error;
 		} finally {
 			if (signal && abortListener) signal.removeEventListener('abort', abortListener);
@@ -2433,31 +2687,37 @@ export class Session implements FlueSession, AgentSubmissionSession {
 								execute,
 							)
 						: await execute();
-				this.emit({
-					type: 'operation',
-					operationId,
-					operationKind: operation,
-					durationMs: durationSince(startedAt),
-					isError: false,
-					result,
-					usage: usageFromResult(result),
-				}, operation === 'prompt' || operation === 'skill'
-					? { agentInput: this.activeAgentInput, agentOutput: this.agentInvocationOutput(result) }
-					: undefined);
+				this.emit(
+					{
+						type: 'operation',
+						operationId,
+						operationKind: operation,
+						durationMs: durationSince(startedAt),
+						isError: false,
+						result,
+						usage: usageFromResult(result),
+					},
+					operation === 'prompt' || operation === 'skill'
+						? { agentInput: this.activeAgentInput, agentOutput: this.agentInvocationOutput(result) }
+						: undefined,
+				);
 				return result;
 			} catch (error) {
 				// Normalize post-abort fallout to a single AbortError for callers.
 				const surfaced = operationSignal?.aborted ? abortErrorFor(operationSignal) : error;
-				this.emit({
-					type: 'operation',
-					operationId,
-					operationKind: operation,
-					durationMs: durationSince(startedAt),
-					isError: true,
-					error: serializeError(surfaced),
-				}, operation === 'prompt' || operation === 'skill'
-					? { agentInput: this.activeAgentInput, errorInfo: classifyError(surfaced) }
-					: undefined);
+				this.emit(
+					{
+						type: 'operation',
+						operationId,
+						operationKind: operation,
+						durationMs: durationSince(startedAt),
+						isError: true,
+						error: serializeError(surfaced),
+					},
+					operation === 'prompt' || operation === 'skill'
+						? { agentInput: this.activeAgentInput, errorInfo: classifyError(surfaced) }
+						: undefined,
+				);
 				throw surfaced;
 			} finally {
 				operationSignal?.removeEventListener('abort', onAbort);
@@ -2529,7 +2789,11 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				attachmentId: id,
 			});
 			if (!stored) throw new AttachmentNotAvailableError({ attachmentId: id });
-			images.push({ type: 'image', data: encodeBase64(stored.bytes), mimeType: attachment.mimeType });
+			images.push({
+				type: 'image',
+				data: encodeBase64(stored.bytes),
+				mimeType: attachment.mimeType,
+			});
 		}
 		return images;
 	}
@@ -2583,9 +2847,17 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		const assistantMessageId = generateConversationEntryId();
 		const resultMessageId = toolResultEntryId(assistantMessageId, toolCallId);
 		const refs = await this.persistCanonicalAttachments(
-				toolResult.content.flatMap((content, index) => content.type === 'image'
-					? [{ id: `att_${resultMessageId}_${index}`, mimeType: content.mimeType, data: content.data }]
-					: []),
+			toolResult.content.flatMap((content, index) =>
+				content.type === 'image'
+					? [
+							{
+								id: `att_${resultMessageId}_${index}`,
+								mimeType: content.mimeType,
+								data: content.data,
+							},
+						]
+					: [],
+			),
 		);
 		let imageIndex = 0;
 		const attachmentContent = () => {
@@ -2594,55 +2866,67 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			return { type: 'attachment' as const, attachment };
 		};
 		await this.appendCanonical([
-				{
-					...this.canonicalEnvelope('user_message'),
-					type: 'user_message',
-					messageId: userMessageId,
-					parentId,
-					content: [{ type: 'text', text: `Run this shell command:\n\n\`\`\`bash\n${String(args.command)}\n\`\`\`` }],
-				},
-				{
-					...this.canonicalEnvelope('assistant_message_started'),
-					type: 'assistant_message_started',
-					messageId: assistantMessageId,
-					parentId: userMessageId,
-					modelInfo: { api: 'flue-shell', provider: 'flue', model: '' },
-				},
-				{
-					...this.canonicalEnvelope('assistant_tool_call'),
-					type: 'assistant_tool_call',
-					messageId: assistantMessageId,
-					blockId: `block_${crypto.randomUUID()}`,
-					blockIndex: 0,
-					toolCallId,
-					name: 'bash',
-					arguments: args,
-				},
-				{
-					...this.canonicalEnvelope('assistant_message_completed'),
-					type: 'assistant_message_completed',
-					messageId: assistantMessageId,
-					stopReason: 'toolUse',
-					usage: zeroProviderUsage(),
-				},
-				{
-					...this.canonicalEnvelope('tool_outcome', `record_tool_outcome_${encodeCanonicalId(assistantMessageId)}_${encodeCanonicalId(toolCallId)}`),
-					type: 'tool_outcome',
-					assistantMessageId,
-					toolCallId,
-					toolName: 'bash',
-					isError,
-					content: toolResult.content.map((content) => content.type === 'text'
+			{
+				...this.canonicalEnvelope('user_message'),
+				type: 'user_message',
+				messageId: userMessageId,
+				parentId,
+				content: [
+					{
+						type: 'text',
+						text: `Run this shell command:\n\n\`\`\`bash\n${String(args.command)}\n\`\`\``,
+					},
+				],
+			},
+			{
+				...this.canonicalEnvelope('assistant_message_started'),
+				type: 'assistant_message_started',
+				messageId: assistantMessageId,
+				parentId: userMessageId,
+				modelInfo: { api: 'flue-shell', provider: 'flue', model: '' },
+			},
+			{
+				...this.canonicalEnvelope('assistant_tool_call'),
+				type: 'assistant_tool_call',
+				messageId: assistantMessageId,
+				blockId: `block_${crypto.randomUUID()}`,
+				blockIndex: 0,
+				toolCallId,
+				name: 'bash',
+				arguments: args,
+			},
+			{
+				...this.canonicalEnvelope('assistant_message_completed'),
+				type: 'assistant_message_completed',
+				messageId: assistantMessageId,
+				stopReason: 'toolUse',
+				usage: zeroProviderUsage(),
+			},
+			{
+				...this.canonicalEnvelope(
+					'tool_outcome',
+					`record_tool_outcome_${encodeCanonicalId(assistantMessageId)}_${encodeCanonicalId(toolCallId)}`,
+				),
+				type: 'tool_outcome',
+				assistantMessageId,
+				toolCallId,
+				toolName: 'bash',
+				isError,
+				content: toolResult.content.map((content) =>
+					content.type === 'text'
 						? { type: 'text' as const, text: content.text }
-						: attachmentContent()),
-				},
-				{
-					...this.canonicalEnvelope('tool_results_committed'),
-					type: 'tool_results_committed',
-					assistantMessageId,
-					parentId: assistantMessageId,
-					outcomeIds: [`record_tool_outcome_${encodeCanonicalId(assistantMessageId)}_${encodeCanonicalId(toolCallId)}`],
-				},
+						: attachmentContent(),
+				),
+			},
+			{
+				...this.canonicalEnvelope('tool_results_committed'),
+				type: 'tool_results_committed',
+				assistantMessageId,
+				parentId: assistantMessageId,
+				outcomeIds: [
+					`record_tool_outcome_${encodeCanonicalId(assistantMessageId)}_${encodeCanonicalId(toolCallId)}`,
+				],
+			},
 		]);
 		await this.rebuildCanonicalContext();
 	}
@@ -2887,7 +3171,8 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				: sessionModel;
 
 			const canonicalConversation = await this.requireConversation();
-			const resolvedAttachments = await this.resolveCanonicalContextAttachments(canonicalConversation);
+			const resolvedAttachments =
+				await this.resolveCanonicalContextAttachments(canonicalConversation);
 			const contextEntries = projectConversationModelContextEntries(canonicalConversation, {
 				resolveAttachment: (attachment) => {
 					const image = resolvedAttachments.get(attachment.id);
@@ -2954,7 +3239,10 @@ export class Session implements FlueSession, AgentSubmissionSession {
 						),
 					end: (purpose, handle, _model, response, error): void => {
 						const request = this.modelRequests.get(handle.turnId);
-						if (!request) throw new Error(`[flue] Missing model request telemetry for turn "${handle.turnId}".`);
+						if (!request)
+							throw new Error(
+								`[flue] Missing model request telemetry for turn "${handle.turnId}".`,
+							);
 						this.emitTurn(handle.turnId, purpose, response, request, error);
 						this.modelRequests.delete(handle.turnId);
 						this.modelRequestStartTimes.delete(handle.turnId);
@@ -2981,18 +3269,20 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				const conversation = await this.requireConversation();
 				const sourceLeafId = conversation.activeLeafId;
 				if (!sourceLeafId) throw new Error('[flue] Canonical compaction has no source leaf.');
-				await this.appendCanonical([{
-					...this.canonicalEnvelope('compaction'),
-					type: 'compaction',
-					entryId: generateConversationEntryId(),
-					parentId: sourceLeafId,
-					summary: result.summary,
-					firstKeptEntryId: firstKeptEntry.id,
-					sourceLeafId,
-					tokensBefore: result.tokensBefore,
-					details: result.details,
-					usage: result.usage,
-				}]);
+				await this.appendCanonical([
+					{
+						...this.canonicalEnvelope('compaction'),
+						type: 'compaction',
+						entryId: generateConversationEntryId(),
+						parentId: sourceLeafId,
+						summary: result.summary,
+						firstKeptEntryId: firstKeptEntry.id,
+						sourceLeafId,
+						tokensBefore: result.tokensBefore,
+						details: result.details,
+						usage: result.usage,
+					},
+				]);
 			}
 			await this.rebuildCanonicalContext();
 
@@ -3066,7 +3356,10 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	 * assistant turn before retry).
 	 */
 	private async aggregateCanonicalUsageSince(beforeLeafId: string | null): Promise<PromptUsage> {
-		return aggregateConversationUsageSince(await this.requireConversation(), beforeLeafId) ?? emptyUsage();
+		return (
+			aggregateConversationUsageSince(await this.requireConversation(), beforeLeafId) ??
+			emptyUsage()
+		);
 	}
 
 	private agentInvocationOutput(result: unknown): FlueObservationDetail['agentOutput'] {
@@ -3112,7 +3405,9 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		return submissionEntryId(input.kind, input.submissionId);
 	}
 
-	private inspectCanonicalState(state: ReturnType<typeof classifyConversationSubmission>): AgentSubmissionInspection {
+	private inspectCanonicalState(
+		state: ReturnType<typeof classifyConversationSubmission>,
+	): AgentSubmissionInspection {
 		switch (state.kind) {
 			case 'absent':
 				return 'absent';
@@ -3128,7 +3423,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				return 'uncertain';
 		}
 	}
-
 
 	/**
 	 * Build the canonical `user_message` or `signal` record for a delivered
@@ -3150,7 +3444,11 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				? {
 						text: message.body,
 						...(message.attachments?.length
-							? { images: message.attachments.map((attachment) => ({ mimeType: attachment.mimeType })) }
+							? {
+									images: message.attachments.map((attachment) => ({
+										mimeType: attachment.mimeType,
+									})),
+								}
 							: {}),
 					}
 				: {
@@ -3369,7 +3667,9 @@ export class Session implements FlueSession, AgentSubmissionSession {
 
 	private async runPersistedContextInput(options: {
 		inputEntryId: string;
-		createCanonicalInput: (parentId: string | null) => Promise<ConversationRecord> | ConversationRecord;
+		createCanonicalInput: (
+			parentId: string | null,
+		) => Promise<ConversationRecord> | ConversationRecord;
 		startedAt?: number;
 		timeoutAt?: number;
 		errorLabel: string;
@@ -3467,16 +3767,18 @@ export class Session implements FlueSession, AgentSubmissionSession {
 						data: image.data,
 					})),
 				);
-				await this.appendCanonical([{
-					...this.canonicalEnvelope('user_message'),
-					type: 'user_message',
-					messageId,
-					parentId: beforeLeafId,
-					content: [
-						{ type: 'text', text: args.promptText },
-						...refs.map((attachment) => ({ type: 'attachment' as const, attachment })),
-					],
-				}]);
+				await this.appendCanonical([
+					{
+						...this.canonicalEnvelope('user_message'),
+						type: 'user_message',
+						messageId,
+						parentId: beforeLeafId,
+						content: [
+							{ type: 'text', text: args.promptText },
+							...refs.map((attachment) => ({ type: 'attachment' as const, attachment })),
+						],
+					},
+				]);
 				await this.rebuildCanonicalContext();
 				const projectedPrompt = this.agentLoop.state.messages.pop();
 				if (projectedPrompt?.role !== 'user') {
@@ -3486,7 +3788,9 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					? projectedPrompt.content
 					: [{ type: 'text' as const, text: projectedPrompt.content }];
 				const projectedText = projectedContent
-					.filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
+					.filter(
+						(block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text',
+					)
 					.map((block) => block.text)
 					.join('\n');
 				const projectedImages = projectedContent.filter(
@@ -3546,10 +3850,11 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		for (let attempt = 0; attempt <= MAX_FOLLOWUPS; attempt++) {
 			if (signal.aborted) throw abortErrorFor(signal);
 			await this.runModelTurnWithRecovery({
-				start: () => this.agentLoop.prompt(
-					attempt === 0 ? initialPrompt : buildResultFollowUpPrompt(),
-					attempt === 0 ? initialImages : undefined,
-				),
+				start: () =>
+					this.agentLoop.prompt(
+						attempt === 0 ? initialPrompt : buildResultFollowUpPrompt(),
+						attempt === 0 ? initialImages : undefined,
+					),
 				signal,
 			});
 			this.throwIfError(errorLabel);

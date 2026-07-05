@@ -156,6 +156,13 @@ export interface ReducedInstanceState {
 	conversations: Map<string, ReducedConversationState>;
 	conversationScopes: Map<string, string>;
 	recordsById: Map<string, ConversationRecord>;
+	/**
+	 * Hook state (`useState`) snapshot: last-write-wins per name across every
+	 * `state_write` record in the instance's stream, in stream order. Scoped to
+	 * the agent instance (its whole stream), not to one conversation — this is
+	 * the agent's durable memory, readable by any render of the instance.
+	 */
+	state: Map<string, unknown>;
 }
 
 export interface ConversationProjectionOptions {
@@ -173,6 +180,7 @@ export function createReducedInstanceState(): ReducedInstanceState {
 		conversations: new Map(),
 		conversationScopes: new Map(),
 		recordsById: new Map(),
+		state: new Map(),
 	};
 }
 
@@ -192,6 +200,7 @@ function cloneReducedInstanceState(state: ReducedInstanceState): ReducedInstance
 		recordsThroughOffset: state.recordsThroughOffset,
 		conversationScopes: new Map(state.conversationScopes),
 		recordsById: new Map(state.recordsById),
+		state: new Map(state.state),
 		conversations: new Map(
 			[...state.conversations].map(([id, conversation]) => [
 				id,
@@ -202,11 +211,11 @@ function cloneReducedInstanceState(state: ReducedInstanceState): ReducedInstance
 							entryId,
 							entry.type === 'message'
 								? {
-									...entry,
-									attachmentRefs: entry.attachmentRefs
-										? new Map(entry.attachmentRefs)
-										: undefined,
-								}
+										...entry,
+										attachmentRefs: entry.attachmentRefs
+											? new Map(entry.attachmentRefs)
+											: undefined,
+									}
 								: { ...entry },
 						]),
 					),
@@ -316,9 +325,15 @@ export function applyConversationRecord(
 		case 'assistant_message_started':
 			assertParent(conversation, record, record.parentId);
 			if (record.parentId !== conversation.activeLeafId) {
-				fail(record, `Assistant parent "${String(record.parentId)}" is not the conversation tail. Appends are linear.`);
+				fail(
+					record,
+					`Assistant parent "${String(record.parentId)}" is not the conversation tail. Appends are linear.`,
+				);
 			}
-			if (conversation.entries.has(record.messageId) || conversation.inProgressMessages.has(record.messageId)) {
+			if (
+				conversation.entries.has(record.messageId) ||
+				conversation.inProgressMessages.has(record.messageId)
+			) {
 				fail(record, `Assistant entry "${record.messageId}" already exists.`);
 			}
 			conversation.inProgressMessages.set(record.messageId, {
@@ -451,12 +466,21 @@ export function applyConversationRecord(
 			) {
 				fail(record, `Committed tool results require a completed tool-use assistant.`);
 			}
-			if (record.parentId !== record.assistantMessageId || record.parentId !== conversation.activeLeafId) {
+			if (
+				record.parentId !== record.assistantMessageId ||
+				record.parentId !== conversation.activeLeafId
+			) {
 				fail(record, `Committed tool results must extend their active assistant parent.`);
 			}
 			const calls = assistant.message.content.filter((block) => block.type === 'toolCall');
-			if (record.outcomeIds.length !== calls.length || new Set(record.outcomeIds).size !== calls.length) {
-				fail(record, `Committed tool results must reference every assistant tool call exactly once.`);
+			if (
+				record.outcomeIds.length !== calls.length ||
+				new Set(record.outcomeIds).size !== calls.length
+			) {
+				fail(
+					record,
+					`Committed tool results must reference every assistant tool call exactly once.`,
+				);
 			}
 			const outcomes = record.outcomeIds.map((outcomeId, index) => {
 				const outcomeRecord = state.recordsById.get(outcomeId);
@@ -470,7 +494,8 @@ export function applyConversationRecord(
 					outcomeRecord.assistantMessageId !== record.assistantMessageId ||
 					outcomeRecord.toolCallId !== call.id ||
 					outcomeRecord.toolName !== call.name ||
-					conversation.toolOutcomes.get(toolOutcomeKey(record.assistantMessageId, call.id))?.recordId !== outcomeId
+					conversation.toolOutcomes.get(toolOutcomeKey(record.assistantMessageId, call.id))
+						?.recordId !== outcomeId
 				) {
 					fail(record, `Committed tool outcome references do not match assistant tool-call order.`);
 				}
@@ -502,10 +527,17 @@ export function applyConversationRecord(
 			if (!conversation.entries.has(record.sourceLeafId)) {
 				fail(record, `Compaction source leaf "${record.sourceLeafId}" does not exist.`);
 			}
-			if (record.sourceLeafId !== record.parentId || record.sourceLeafId !== conversation.activeLeafId) {
+			if (
+				record.sourceLeafId !== record.parentId ||
+				record.sourceLeafId !== conversation.activeLeafId
+			) {
 				fail(record, `Compaction source leaf must be its active parent.`);
 			}
-			if (!pathToLeaf(conversation, record.sourceLeafId).some((entry) => entry.id === record.firstKeptEntryId)) {
+			if (
+				!pathToLeaf(conversation, record.sourceLeafId).some(
+					(entry) => entry.id === record.firstKeptEntryId,
+				)
+			) {
 				fail(record, `Compaction first-kept entry is not on the source path.`);
 			}
 			appendEntry(conversation, record, {
@@ -526,9 +558,10 @@ export function applyConversationRecord(
 			validateChildReference(record);
 			const child = state.conversations.get(record.child.conversationId);
 			if (!child) fail(record, `Retained child conversation does not exist.`);
-			const identityMatches = record.child.type === 'task'
-				? child.kind === 'task' && child.taskId === record.child.taskId
-				: child.kind === 'action' && child.actionInvocationId === record.child.invocationId;
+			const identityMatches =
+				record.child.type === 'task'
+					? child.kind === 'task' && child.taskId === record.child.taskId
+					: child.kind === 'action' && child.actionInvocationId === record.child.invocationId;
 			if (
 				child.parentConversationId !== conversation.conversationId ||
 				child.harness !== record.child.harness ||
@@ -550,6 +583,9 @@ export function applyConversationRecord(
 			break;
 		}
 		case 'submission_settled':
+			break;
+		case 'state_write':
+			state.state.set(record.name, record.value);
 			break;
 	}
 	state.recordsById.set(record.id, record);
@@ -583,7 +619,10 @@ function validateConversationCreation(
 		}
 		const parent = state.conversations.get(value.parentConversationId);
 		if (!parent) return;
-		if (record.harness !== parent.harness || record.session !== createTaskSessionName(parent.session, value.taskId)) {
+		if (
+			record.harness !== parent.harness ||
+			record.session !== createTaskSessionName(parent.session, value.taskId)
+		) {
 			fail(record, `Task conversation scope does not match its derived parent identity.`);
 		}
 		return;
@@ -618,7 +657,8 @@ function validateChildReference(
 			child.invocationId !== undefined ||
 			!isUuid(child.taskId) ||
 			(child.parentToolCallId !== undefined && typeof child.parentToolCallId !== 'string') ||
-			(child.parentAssistantEntryId !== undefined && typeof child.parentAssistantEntryId !== 'string')
+			(child.parentAssistantEntryId !== undefined &&
+				typeof child.parentAssistantEntryId !== 'string')
 		) {
 			fail(record, `Task child reference has invalid discriminated identity.`);
 		}
@@ -793,10 +833,7 @@ function assertEntryAppend(
 	}
 }
 
-function commitEntry(
-	conversation: ReducedConversationState,
-	entry: ReducedEntry,
-): void {
+function commitEntry(conversation: ReducedConversationState, entry: ReducedEntry): void {
 	conversation.entries.set(entry.id, entry);
 	conversation.activeLeafId = entry.id;
 }
@@ -828,10 +865,7 @@ function assertParent(
 	}
 }
 
-function pathToLeaf(
-	conversation: ReducedConversationState,
-	leafId: string,
-): ReducedEntry[] {
+function pathToLeaf(conversation: ReducedConversationState, leafId: string): ReducedEntry[] {
 	const path: ReducedEntry[] = [];
 	let current = conversation.entries.get(leafId);
 	while (current) {
@@ -914,7 +948,10 @@ function completeBlock(
 	if (!block || block.type !== type) fail(record, `Block "${record.blockId}" is not ${type}.`);
 	if (block.completed) fail(record, `Block "${record.blockId}" is already complete.`);
 	if (record.deltaCount !== block.deltas.length) {
-		fail(record, `Completion expected ${record.deltaCount} deltas but replay has ${block.deltas.length}.`);
+		fail(
+			record,
+			`Completion expected ${record.deltaCount} deltas but replay has ${block.deltas.length}.`,
+		);
 	}
 	block.completed = true;
 	return block;
@@ -996,7 +1033,10 @@ function resolveMessageAttachments(
 	options: ConversationProjectionOptions,
 ): AgentMessage {
 	const message = entry.message;
-	if ((message.role !== 'user' && message.role !== 'toolResult') || !Array.isArray(message.content)) {
+	if (
+		(message.role !== 'user' && message.role !== 'toolResult') ||
+		!Array.isArray(message.content)
+	) {
 		return message;
 	}
 	const attachments = [...(entry.attachmentRefs?.values() ?? [])];
