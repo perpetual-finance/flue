@@ -27,13 +27,16 @@ export function renderAgentFunction(
  * The structural fingerprint of one render, for the invariance guard:
  * capabilities are compared by function identity in mount order; tools by
  * NAME only (schemas may legally vary with state — labels fetched at
- * runtime, say — without counting as a structural change); state by name.
+ * runtime, say — without counting as a structural change); state by name;
+ * the sandbox by presence (the environment is built once at initialization,
+ * so only a conditional `useSandbox` counts as a structural change).
  */
 export interface AgentRenderStructure {
 	capabilities: readonly ((props?: never) => unknown)[];
 	capabilityNames: readonly string[];
 	toolNames: readonly string[];
 	stateNames: readonly string[];
+	hasSandbox: boolean;
 }
 
 /** `renderAgentFunction` plus the render's structural fingerprint. */
@@ -56,12 +59,14 @@ export function renderAgentFunctionWithStructure(
 			...(config.compaction !== undefined ? { compaction: config.compaction } : {}),
 			...(config.durability !== undefined ? { durability: config.durability } : {}),
 			...(config.cwd !== undefined ? { cwd: config.cwd } : {}),
+			...(frame.sandbox !== undefined ? { sandbox: frame.sandbox } : {}),
 		},
 		structure: {
 			capabilities: frame.capabilities.map((record) => record.capability),
 			capabilityNames: frame.capabilities.map((record) => record.capability.name || '(anonymous)'),
 			toolNames: tools.map((tool) => tool.name),
 			stateNames: [...frame.stateNames],
+			hasSandbox: frame.sandbox !== undefined,
 		},
 	};
 }
@@ -89,6 +94,9 @@ export function assertRenderStructureInvariance(
 	if (toolDelta) problems.push(`tools ${toolDelta}`);
 	const stateDelta = setDelta(previous.stateNames, next.stateNames);
 	if (stateDelta) problems.push(`state ${stateDelta}`);
+	if (previous.hasSandbox !== next.hasSandbox) {
+		problems.push(`sandbox ${next.hasSandbox ? 'added' : 'removed'}`);
+	}
 	if (problems.length > 0) {
 		throw new Error(
 			`[flue] The agent's render changed structure between turns: ${problems.join('; ')}. ` +

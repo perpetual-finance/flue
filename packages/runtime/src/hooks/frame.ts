@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '../tool-types.ts';
+import type { SandboxFactory } from '../types.ts';
 
 /**
  * The render frame: the module-global slot Flue Hooks resolve against while
@@ -58,6 +59,8 @@ export interface RenderFrame {
 	capabilities: CapabilityRecord[];
 	/** `useState` names declared this render; duplicates throw. */
 	stateNames: Set<string>;
+	/** The render's `useSandbox` attachment; at most one per render. */
+	sandbox: SandboxFactory | undefined;
 	state: RenderStateContext | undefined;
 }
 
@@ -100,6 +103,7 @@ export function renderWithFrame<T>(
 		scopeStack: [root],
 		capabilities: [],
 		stateNames: new Set(),
+		sandbox: undefined,
 		state,
 	};
 	currentFrame = frame;

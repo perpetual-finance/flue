@@ -125,10 +125,12 @@ describe('defineTool()', () => {
 		});
 
 		await expect(validateAndRunTool(tool, {})).resolves.toBe(10);
-		expect(run).toHaveBeenCalledWith({
-			input: { limit: 10 },
-			signal: undefined,
-		});
+		expect(run).toHaveBeenCalledWith(
+			expect.objectContaining({
+				input: { limit: 10 },
+				signal: undefined,
+			}),
+		);
 	});
 
 	it('throws structured issues when input validation fails', async () => {

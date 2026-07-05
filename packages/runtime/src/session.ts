@@ -130,7 +130,12 @@ import {
 	findTrailingPartialToolBatch,
 	isRetryableModelError,
 } from './submission-state.ts';
-import { assertToolDefinition, parseToolInput, validateToolOutput } from './tool.ts';
+import {
+	assertToolDefinition,
+	parseToolInput,
+	type ToolRuntime,
+	validateToolOutput,
+} from './tool.ts';
 import { getPreparedToolAdapter } from './tool-adapter.ts';
 import type {
 	AgentConfig,
@@ -2148,6 +2153,24 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		return wrapped;
 	}
 
+	/**
+	 * The `ctx.shell`/`ctx.fs` surface for one custom-tool call: raw access to
+	 * the session's environment (no conversation record — the tool result is
+	 * the record), with the tool call's AbortSignal composed into every exec.
+	 */
+	private createToolRuntime(signal?: AbortSignal): ToolRuntime {
+		return {
+			shell: (command, options) =>
+				this.env.exec(command, {
+					cwd: options?.cwd,
+					env: options?.env,
+					timeoutMs: options?.timeoutMs,
+					signal,
+				}),
+			fs: this.fs,
+		};
+	}
+
 	private createCustomTools(tools: ToolDefinition[]): AgentTool<any>[] {
 		return tools.map((toolDef): AgentTool<any> => {
 			const preparedToolAdapter = getPreparedToolAdapter(toolDef);
@@ -2183,7 +2206,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 						result: toolResultText,
 					};
 				}
-				const parsed = parseToolInput(toolDef, params, signal);
+				const parsed = parseToolInput(toolDef, params, signal, this.createToolRuntime(signal));
 				return {
 					args: parsed.input,
 					run: async () => {

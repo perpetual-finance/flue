@@ -7,6 +7,7 @@ import {
 import { cloneJsonSerializable } from './json-snapshot.ts';
 import { isTopLevelObjectSchema, isValibotSchema, parseValibot } from './schema.ts';
 import type {
+	ToolContext,
 	ToolDefinition,
 	ToolInputSchema,
 	ToolOutput,
@@ -61,20 +62,54 @@ export function assertToolDefinition(
 	}
 }
 
+/** The environment surface the executing session injects into `ToolContext`. */
+export interface ToolRuntime {
+	shell: ToolContext<undefined>['shell'];
+	fs: ToolContext<undefined>['fs'];
+}
+
 export function parseToolInput<TTool extends ToolDefinition>(
 	tool: TTool,
 	input?: unknown,
 	signal?: AbortSignal,
+	runtime?: ToolRuntime,
 ): { context: Parameters<TTool['run']>[0]; input: unknown } {
-	if (!tool.input)
-		return { context: { signal } as Parameters<TTool['run']>[0], input: undefined };
+	const env = runtime ?? createDetachedToolRuntime(tool.name);
+	const base = { signal, shell: env.shell, fs: env.fs };
+	if (!tool.input) return { context: base as Parameters<TTool['run']>[0], input: undefined };
 	const parsedInput = parseValibot(tool.input, input === undefined ? {} : input);
 	if (!parsedInput.success) {
 		throw new ToolInputValidationError({ tool: tool.name, issues: parsedInput.issues });
 	}
 	return {
-		context: { input: parsedInput.output, signal } as Parameters<TTool['run']>[0],
+		context: { ...base, input: parsedInput.output } as Parameters<TTool['run']>[0],
 		input: parsedInput.output,
+	};
+}
+
+/**
+ * `ctx.shell`/`ctx.fs` for a tool run with no session behind it (standalone
+ * `validateAndRunTool` calls): every member throws on use, so tools that never
+ * touch the environment still run standalone unchanged.
+ */
+function createDetachedToolRuntime(toolName: string): ToolRuntime {
+	const unavailable = (surface: string): never => {
+		throw new Error(
+			`[flue] Tool "${toolName}" used ctx.${surface} outside an agent session. The runtime injects shell/fs when it executes the tool; a standalone run has no environment.`,
+		);
+	};
+	return {
+		shell: () => unavailable('shell()'),
+		fs: {
+			readFile: () => unavailable('fs.readFile()'),
+			readFileBuffer: () => unavailable('fs.readFileBuffer()'),
+			writeFile: () => unavailable('fs.writeFile()'),
+			stat: () => unavailable('fs.stat()'),
+			readdir: () => unavailable('fs.readdir()'),
+			exists: () => unavailable('fs.exists()'),
+			mkdir: () => unavailable('fs.mkdir()'),
+			rm: () => unavailable('fs.rm()'),
+		},
 	};
 }
 

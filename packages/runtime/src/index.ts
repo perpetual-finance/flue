@@ -52,6 +52,7 @@ export type {
 export { type StateSetter, useState } from './hooks/state.ts';
 export { use } from './hooks/use.ts';
 export { useInstruction } from './hooks/use-instruction.ts';
+export { useSandbox } from './hooks/use-sandbox.ts';
 export { useTool } from './hooks/use-tool.ts';
 export { type FlueInstrumentation, instrument } from './instrumentation.ts';
 export type { McpServerConnection, McpServerOptions, McpTransport } from './mcp.ts';
@@ -141,6 +142,7 @@ export type {
 	ToolInputSchema,
 	ToolOutput,
 	ToolOutputSchema,
+	ToolShellOptions,
 } from './types.ts';
 export { FLUE_EVENT_SCHEMA_REVISION } from './types.ts';
 
