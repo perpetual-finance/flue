@@ -77,6 +77,12 @@ interface ConversationSignalDescriptor {
 }
 
 export interface ConversationUiMessage {
+	/**
+	 * Stable message identity. An assistant message represents one whole
+	 * response: every model step of a tracked submission folds into the
+	 * submission's first assistant message (parts accumulate across steps in
+	 * record order), so `id` is the first step's message id.
+	 */
 	id: string;
 	role: ConversationMessageRole;
 	/** Stable semantic classification; see {@link ConversationMessagePurpose}. */
@@ -177,10 +183,22 @@ export function projectConversationUi(
 ): ConversationUiSnapshot {
 	const messages: ConversationUiMessage[] = [];
 	const byId = new Map<string, ConversationUiMessage>();
+	// One UI message per assistant response (the UIMessage ecosystem shape):
+	// every assistant step of a tracked submission folds into the submission's
+	// first assistant message, parts accumulating across steps in record order.
+	const responseBySubmission = new Map<string, ConversationUiMessage>();
 	for (const entry of getActiveConversationPath(conversation)) {
 		if (entry.type !== 'message') continue;
 		const projected = projectCompletedMessage(entry);
 		if (projected) {
+			if (projected.role === 'assistant' && projected.submissionId) {
+				const open = responseBySubmission.get(projected.submissionId);
+				if (open) {
+					mergeAssistantContinuation(open, projected);
+					continue;
+				}
+				responseBySubmission.set(projected.submissionId, projected);
+			}
 			messages.push(projected);
 			byId.set(projected.id, projected);
 			continue;
@@ -203,9 +221,39 @@ export function projectConversationUi(
 	}
 	for (const inProgress of conversation.inProgressMessages.values()) {
 		const projected = projectInProgressMessage(inProgress);
-		if (projected && !byId.has(projected.id)) messages.push(projected);
+		if (!projected || byId.has(projected.id)) continue;
+		// A live continuation stream (parented on the current leaf) extends its
+		// submission's open response message. Anything else — e.g. a ghost
+		// partial from an interrupted attempt awaiting terminalization —
+		// projects standalone, as before.
+		const open =
+			projected.submissionId && inProgress.parentId === conversation.activeLeafId
+				? responseBySubmission.get(projected.submissionId)
+				: undefined;
+		if (open) {
+			mergeAssistantContinuation(open, projected);
+			continue;
+		}
+		messages.push(projected);
 	}
 	return { conversationId: conversation.conversationId, streamOffset, messages };
+}
+
+/**
+ * Fold a later assistant step of the same submission into its response
+ * message: parts append in record order; usage sums across steps; identity
+ * fields (id, timestamp, model, turnId) stay the first step's.
+ */
+function mergeAssistantContinuation(
+	open: ConversationUiMessage,
+	continuation: ConversationUiMessage,
+): void {
+	open.parts.push(...continuation.parts);
+	const usage = continuation.metadata?.usage;
+	if (usage) {
+		const current = open.metadata?.usage;
+		open.metadata = { ...open.metadata, usage: current ? addUsage(current, usage) : usage };
+	}
 }
 
 export function getActiveConversationPathSince(

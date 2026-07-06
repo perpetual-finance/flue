@@ -125,6 +125,43 @@ describe('applyConversationChunk()', () => {
 		});
 	});
 
+	it('assembles a multi-step response into one message when later steps reuse the message id', () => {
+		const stepUsage = {
+			input: 10,
+			output: 2,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 12,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		// The runtime addresses every step of a submission at the response
+		// message id, so the second message-started is a no-op and step 2's parts
+		// accumulate after step 1's tool call. Usage sums across completions.
+		const conversation = reduce([
+			{ type: 'message-started', conversationId: 'c1', messageId: 'a1', submissionId: 's1' },
+			{ type: 'message-delta', conversationId: 'c1', messageId: 'a1', kind: 'text', delta: 'Looking. ' },
+			{ type: 'tool-input', conversationId: 'c1', messageId: 'a1', toolCallId: 'call_1', toolName: 'lookup', input: {} },
+			{ type: 'message-completed', conversationId: 'c1', messageId: 'a1', usage: stepUsage },
+			{ type: 'tool-output', conversationId: 'c1', toolCallId: 'call_1', output: 'found it' },
+			{ type: 'message-started', conversationId: 'c1', messageId: 'a1', submissionId: 's1' },
+			{ type: 'message-delta', conversationId: 'c1', messageId: 'a1', kind: 'text', delta: 'Done.' },
+			{ type: 'message-completed', conversationId: 'c1', messageId: 'a1', usage: stepUsage },
+		]);
+
+		expect(conversation.messages).toHaveLength(1);
+		expect(conversation.messages[0]?.parts).toEqual([
+			{ type: 'text', text: 'Looking. ', state: 'done' },
+			{ type: 'dynamic-tool', toolName: 'lookup', toolCallId: 'call_1', state: 'output-available', input: {}, output: 'found it', errorText: undefined },
+			{ type: 'text', text: 'Done.', state: 'done' },
+		]);
+		expect(conversation.messages[0]?.metadata?.usage).toEqual({
+			...stepUsage,
+			input: 20,
+			output: 4,
+			totalTokens: 24,
+		});
+	});
+
 	it('opens a new part when the delta kind changes from reasoning to text', () => {
 		const conversation = reduce([
 			{ type: 'message-started', conversationId: 'c1', messageId: 'a1' },

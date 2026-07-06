@@ -7,6 +7,7 @@ import {
 	projectConversationModelContextEntries,
 	projectConversationUi,
 } from '../src/conversation-projections.ts';
+import { projectAgentConversationBatch } from '../src/conversation-public.ts';
 import type { ConversationRecord } from '../src/conversation-records.ts';
 import {
 	applyConversationRecord,
@@ -14,6 +15,7 @@ import {
 	createReducedInstanceState,
 	getActiveConversationPath,
 	reduceConversationRecords,
+	toolResultEntryId,
 } from '../src/conversation-reducer.ts';
 import { ConversationRecordInvariantError } from '../src/errors.ts';
 
@@ -112,6 +114,175 @@ function canonicalConversation(): ConversationRecord[] {
 			type: 'assistant_message_completed',
 			timestamp: '2026-06-25T00:00:02.500Z',
 			messageId: 'entry_assistant',
+			stopReason: 'stop',
+			usage,
+		},
+	];
+}
+
+/**
+ * One tracked submission spanning two model steps: step 1 streams text and
+ * requests a tool, the batch commits, step 2 streams the closing text. Every
+ * record carries the submission id, as the session stamps them in production.
+ */
+function multiStepSubmission(): ConversationRecord[] {
+	const sub = { submissionId: 'submission_ms' };
+	return [
+		{
+			...scope,
+			id: 'record_created',
+			type: 'conversation_created',
+			kind: 'root',
+			timestamp: '2026-06-25T00:00:00.000Z',
+			affinityKey: 'aff_01',
+			createdAt: '2026-06-25T00:00:00.000Z',
+		},
+		{
+			...scope,
+			...sub,
+			id: 'record_user',
+			type: 'user_message',
+			timestamp: '2026-06-25T00:00:01.000Z',
+			messageId: 'entry_user',
+			parentId: null,
+			content: [{ type: 'text', text: 'Hello' }],
+		},
+		{
+			...scope,
+			...sub,
+			id: 'record_a1_start',
+			type: 'assistant_message_started',
+			timestamp: '2026-06-25T00:00:02.000Z',
+			messageId: 'entry_a1',
+			parentId: 'entry_user',
+			turnId: 'turn_01',
+			modelInfo: { api: 'test', provider: 'test', model: 'test-model' },
+		},
+		{
+			...scope,
+			...sub,
+			id: 'record_a1_text_start',
+			type: 'assistant_text_started',
+			timestamp: '2026-06-25T00:00:02.100Z',
+			messageId: 'entry_a1',
+			blockId: 'block_t1',
+			blockIndex: 0,
+		},
+		{
+			...scope,
+			...sub,
+			id: 'record_a1_text_delta',
+			type: 'assistant_text_delta',
+			timestamp: '2026-06-25T00:00:02.200Z',
+			messageId: 'entry_a1',
+			blockId: 'block_t1',
+			sequence: 0,
+			delta: 'Looking. ',
+		},
+		{
+			...scope,
+			...sub,
+			id: 'record_a1_text_complete',
+			type: 'assistant_text_completed',
+			timestamp: '2026-06-25T00:00:02.300Z',
+			messageId: 'entry_a1',
+			blockId: 'block_t1',
+			deltaCount: 1,
+		},
+		{
+			...scope,
+			...sub,
+			id: 'record_a1_tool_call',
+			type: 'assistant_tool_call',
+			timestamp: '2026-06-25T00:00:02.400Z',
+			messageId: 'entry_a1',
+			blockId: 'block_tool',
+			blockIndex: 1,
+			toolCallId: 'call_1',
+			name: 'lookup',
+			arguments: {},
+		},
+		{
+			...scope,
+			...sub,
+			id: 'record_a1_complete',
+			type: 'assistant_message_completed',
+			timestamp: '2026-06-25T00:00:02.500Z',
+			messageId: 'entry_a1',
+			stopReason: 'toolUse',
+			usage,
+		},
+		{
+			...scope,
+			...sub,
+			id: 'record_tool_outcome',
+			type: 'tool_outcome',
+			timestamp: '2026-06-25T00:00:02.600Z',
+			assistantMessageId: 'entry_a1',
+			toolCallId: 'call_1',
+			toolName: 'lookup',
+			isError: false,
+			content: [{ type: 'text', text: 'found it' }],
+		},
+		{
+			...scope,
+			...sub,
+			id: 'record_tool_commit',
+			type: 'tool_results_committed',
+			timestamp: '2026-06-25T00:00:02.700Z',
+			assistantMessageId: 'entry_a1',
+			parentId: 'entry_a1',
+			outcomeIds: ['record_tool_outcome'],
+		},
+		{
+			...scope,
+			...sub,
+			id: 'record_a2_start',
+			type: 'assistant_message_started',
+			timestamp: '2026-06-25T00:00:03.000Z',
+			messageId: 'entry_a2',
+			parentId: toolResultEntryId('entry_a1', 'call_1'),
+			turnId: 'turn_02',
+			modelInfo: { api: 'test', provider: 'test', model: 'test-model' },
+		},
+		{
+			...scope,
+			...sub,
+			id: 'record_a2_text_start',
+			type: 'assistant_text_started',
+			timestamp: '2026-06-25T00:00:03.100Z',
+			messageId: 'entry_a2',
+			blockId: 'block_t2',
+			blockIndex: 0,
+		},
+		{
+			...scope,
+			...sub,
+			id: 'record_a2_text_delta',
+			type: 'assistant_text_delta',
+			timestamp: '2026-06-25T00:00:03.200Z',
+			messageId: 'entry_a2',
+			blockId: 'block_t2',
+			sequence: 0,
+			delta: 'Done.',
+		},
+		{
+			...scope,
+			...sub,
+			id: 'record_a2_text_complete',
+			type: 'assistant_text_completed',
+			timestamp: '2026-06-25T00:00:03.300Z',
+			messageId: 'entry_a2',
+			blockId: 'block_t2',
+			deltaCount: 1,
+		},
+		{
+			...scope,
+			...sub,
+			id: 'record_a2_complete',
+			type: 'assistant_message_completed',
+			timestamp: '2026-06-25T00:00:03.400Z',
+			messageId: 'entry_a2',
 			stopReason: 'stop',
 			usage,
 		},
@@ -539,6 +710,69 @@ describe('reduceConversationRecords()', () => {
 				},
 			],
 		});
+	});
+
+	it('folds every assistant step of one submission into a single response message', () => {
+		const state = reduceConversationRecords(createReducedInstanceState(), multiStepSubmission(), '15');
+		const messages = projectConversationUi(required(state.conversations.get('conv_01')), '15').messages;
+
+		expect(messages).toHaveLength(2);
+		expect(messages[1]).toMatchObject({
+			id: 'entry_a1',
+			role: 'assistant',
+			submissionId: 'submission_ms',
+			turnId: 'turn_01',
+			parts: [
+				{ type: 'text', text: 'Looking. ', state: 'done' },
+				{
+					type: 'dynamic-tool',
+					toolCallId: 'call_1',
+					state: 'output-available',
+					output: 'found it',
+				},
+				{ type: 'text', text: 'Done.', state: 'done' },
+			],
+		});
+		// Identity metadata stays the first step's; usage sums across steps.
+		expect(messages[1]?.metadata).toEqual({
+			timestamp: '2026-06-25T00:00:02.000Z',
+			usage: { ...usage, input: 20, output: 4, totalTokens: 24 },
+			model: { provider: 'test', id: 'test-model' },
+		});
+	});
+
+	it('streams a live continuation step into the open response message', () => {
+		// Through step 2's first delta: the second assistant message is still in
+		// progress and must extend the response, not appear as a second message.
+		const state = reduceConversationRecords(
+			createReducedInstanceState(),
+			multiStepSubmission().slice(0, 13),
+			'13',
+		);
+		const messages = projectConversationUi(required(state.conversations.get('conv_01')), '13').messages;
+
+		expect(messages).toHaveLength(2);
+		expect(messages[1]?.id).toBe('entry_a1');
+		expect(messages[1]?.parts.at(-1)).toEqual({ type: 'text', text: 'Done.', state: 'streaming' });
+	});
+
+	it('encodes continuation-step chunks onto the response message id', () => {
+		const records = multiStepSubmission();
+		const state = reduceConversationRecords(createReducedInstanceState(), records, '15');
+		const chunks = projectAgentConversationBatch({
+			state,
+			records: records.slice(10),
+			batchOrdinal: 3,
+		});
+
+		// Step 2's records all address the submission's response message — the
+		// first step's id — so the live stream accumulates parts on one message,
+		// matching the snapshot projection.
+		expect(chunks.map((chunk) => ({ type: chunk.type, ...('messageId' in chunk ? { messageId: chunk.messageId } : {}) }))).toEqual([
+			{ type: 'message-started', messageId: 'entry_a1' },
+			{ type: 'message-delta', messageId: 'entry_a1' },
+			{ type: 'message-completed', messageId: 'entry_a1' },
+		]);
 	});
 
 	it('preserves submission identity across a completed projected turn when records carry the same submission', () => {

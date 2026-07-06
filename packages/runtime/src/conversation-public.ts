@@ -8,7 +8,8 @@ import type {
 	ConversationRecord,
 	SubmissionSettledRecord,
 } from './conversation-records.ts';
-import type { ReducedInstanceState } from './conversation-reducer.ts';
+import type { ReducedConversationState, ReducedInstanceState } from './conversation-reducer.ts';
+import { getActiveConversationPath } from './conversation-reducer.ts';
 import { toolResultOutput, toolResultText } from './message-rendering.ts';
 import type { PromptUsage } from './types.ts';
 
@@ -150,10 +151,34 @@ export function projectAgentConversationBatch(options: {
 			: [];
 	}
 
+	const responseIds = buildResponseMessageIndex(conversation);
 	return withPositions(
-		relevant.flatMap((record) => encodeRecord(record, conversationId, options.state)),
+		relevant.flatMap((record) => encodeRecord(record, conversationId, options.state, responseIds)),
 		options.batchOrdinal,
 	);
+}
+
+/**
+ * Map each tracked submission to its response message id — the first
+ * assistant messageId recorded for the submission. Chunk encoding rewrites
+ * every assistant-scoped record onto this id so the live stream assembles the
+ * same one-message-per-response shape the snapshot projection produces (a
+ * later step's `message-started` then dedupes client-side and its parts
+ * accumulate on the open message).
+ */
+function buildResponseMessageIndex(conversation: ReducedConversationState): Map<string, string> {
+	const first = new Map<string, string>();
+	for (const entry of getActiveConversationPath(conversation)) {
+		if (entry.type !== 'message' || entry.message.role !== 'assistant' || !entry.submissionId) {
+			continue;
+		}
+		if (!first.has(entry.submissionId)) first.set(entry.submissionId, entry.id);
+	}
+	for (const message of conversation.inProgressMessages.values()) {
+		if (!message.submissionId || first.has(message.submissionId)) continue;
+		first.set(message.submissionId, message.messageId);
+	}
+	return first;
 }
 
 /**
@@ -177,7 +202,12 @@ function encodeRecord(
 	record: ConversationRecord,
 	conversationId: string,
 	state: ReducedInstanceState,
+	responseIds: Map<string, string>,
 ): ConversationStreamChunkBody[] {
+	// Assistant records of a tracked submission address the submission's
+	// response message, not the per-step canonical message.
+	const uiMessageId = (messageId: string): string =>
+		(record.submissionId ? responseIds.get(record.submissionId) : undefined) ?? messageId;
 	switch (record.type) {
 		case 'user_message':
 			return [
@@ -237,7 +267,7 @@ function encodeRecord(
 				{
 					type: 'message-started',
 					conversationId,
-					messageId: record.messageId,
+					messageId: uiMessageId(record.messageId),
 					timestamp: record.timestamp,
 					...(record.submissionId ? { submissionId: record.submissionId } : {}),
 					...(record.turnId ? { turnId: record.turnId } : {}),
@@ -247,20 +277,20 @@ function encodeRecord(
 				},
 			];
 		case 'assistant_text_delta':
-			return [{ type: 'message-delta', conversationId, messageId: record.messageId, kind: 'text', delta: record.delta }];
+			return [{ type: 'message-delta', conversationId, messageId: uiMessageId(record.messageId), kind: 'text', delta: record.delta }];
 		case 'assistant_reasoning_delta':
-			return [{ type: 'message-delta', conversationId, messageId: record.messageId, kind: 'reasoning', delta: record.delta }];
+			return [{ type: 'message-delta', conversationId, messageId: uiMessageId(record.messageId), kind: 'reasoning', delta: record.delta }];
 		// Block lifecycle (`assistant_text_started`/`assistant_*_completed`) carries no
 		// UI-visible payload: the first delta opens a streaming part, a `kind` change or
 		// `message-completed` closes it. So those records project to no chunk.
 		case 'assistant_tool_call':
-			return [{ type: 'tool-input', conversationId, messageId: record.messageId, toolCallId: record.toolCallId, toolName: record.name, input: record.arguments }];
+			return [{ type: 'tool-input', conversationId, messageId: uiMessageId(record.messageId), toolCallId: record.toolCallId, toolName: record.name, input: record.arguments }];
 		case 'assistant_message_completed':
 			return [
 				{
 					type: 'message-completed',
 					conversationId,
-					messageId: record.messageId,
+					messageId: uiMessageId(record.messageId),
 					...(record.usage ? { usage: record.usage as PromptUsage } : {}),
 				},
 			];

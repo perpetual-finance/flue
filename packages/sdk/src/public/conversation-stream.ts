@@ -20,7 +20,10 @@ import type {
  *
  * Streaming assistant content is carried by `message-delta`: a delta appends to
  * the message's current streaming part of the same `kind`, opening a new part on
- * the first delta or on a `kind` change. Each chunk carries a monotonic
+ * the first delta or on a `kind` change. An assistant message is one whole
+ * response: the runtime addresses every step of a multi-step submission at the
+ * same message id, so a later step's `message-started` finds the message
+ * already present (a no-op) and its parts accumulate there. Each chunk carries a monotonic
  * `position`; `observe()` applies chunks in order and drops any at or below the
  * last applied position, so a redelivered batch (e.g. an SSE reconnect) never
  * double-applies.
@@ -339,10 +342,33 @@ function completeMessage(
 			parts: message.parts.map((part) =>
 				part.type === 'text' || part.type === 'reasoning' ? { ...part, state: 'done' } : part,
 			),
-			...(usage ? { metadata: { ...message.metadata, usage } } : {}),
+			// A multi-step response completes once per step; usage accumulates so
+			// the message ends with the whole response's total, matching the
+			// snapshot projection.
+			...(usage
+				? { metadata: { ...message.metadata, usage: addUsage(message.metadata?.usage, usage) } }
+				: {}),
 		};
 		return next;
 	});
+}
+
+function addUsage(current: PromptUsage | undefined, next: PromptUsage): PromptUsage {
+	if (!current) return next;
+	return {
+		input: current.input + next.input,
+		output: current.output + next.output,
+		cacheRead: current.cacheRead + next.cacheRead,
+		cacheWrite: current.cacheWrite + next.cacheWrite,
+		totalTokens: current.totalTokens + next.totalTokens,
+		cost: {
+			input: current.cost.input + next.cost.input,
+			output: current.cost.output + next.cost.output,
+			cacheRead: current.cost.cacheRead + next.cost.cacheRead,
+			cacheWrite: current.cost.cacheWrite + next.cost.cacheWrite,
+			total: current.cost.total + next.cost.total,
+		},
+	};
 }
 
 function applySettlement(

@@ -75,8 +75,15 @@ interface FlueConversationSignalDescriptor {
 	attributes?: Record<string, string>;
 }
 
-/** One message in a materialized conversation. */
+/**
+ * One message in a materialized conversation. An assistant message is one
+ * whole response: every model step of a tracked submission (text, tool calls,
+ * tool results, more text) accumulates as parts of a single message, in
+ * stream order — the same one-message-per-response shape as the AI SDK's
+ * `UIMessage`.
+ */
 export interface FlueConversationMessage {
+	/** Stable message identity; for an assistant response, the first step's message id. */
 	id: string;
 	role: FlueConversationMessageRole;
 	/** Stable semantic classification; see {@link FlueConversationMessagePurpose}. */

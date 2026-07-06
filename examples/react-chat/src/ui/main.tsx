@@ -103,8 +103,9 @@ function Message({ message }: { message: FlueConversationMessage }) {
 	return (
 		<article className={`message ${message.role}`}>
 			<strong>{message.role}</strong>
-			{message.parts.map((part) => (
-				<MessagePart key={partKey(part)} part={part} />
+			{message.parts.map((part, index) => (
+				// biome-ignore lint/suspicious/noArrayIndexKey: parts are append-only within a message, so position is a stable identity (content-based keys collide when steps repeat text)
+				<MessagePart key={`${index}:${partKey(part)}`} part={part} />
 			))}
 		</article>
 	);
