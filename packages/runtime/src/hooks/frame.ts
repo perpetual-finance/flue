@@ -1,6 +1,6 @@
 import type { AgentOutputChannel, MessageMetadataProducers } from '../message-output.ts';
 import type { ToolDefinition } from '../tool-types.ts';
-import type { SandboxFactory, Skill, SubagentDefinition } from '../types.ts';
+import type { DeliveredMessage, SandboxFactory, Skill, SubagentDefinition } from '../types.ts';
 
 /**
  * The render frame: the module-global slot Flue Hooks resolve against while
@@ -50,6 +50,14 @@ export interface RenderStateContext {
 	 * data writers then throw on call.
 	 */
 	output?: AgentOutputChannel;
+	/**
+	 * The delivered message that triggered the run this render belongs to —
+	 * identical for a direct HTTP prompt and a `dispatch()` call, and constant
+	 * across every render of one submission attempt (the harness is initialized
+	 * per attempt with the durable submission input). Absent when no delivered
+	 * message triggered the run (tests/tooling renders, delegated operations).
+	 */
+	delivery?: DeliveredMessage;
 }
 
 /** The write channel `useState` setters push into; drained by the session. */

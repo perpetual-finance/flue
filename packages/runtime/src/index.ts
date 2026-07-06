@@ -51,6 +51,7 @@ export type {
 } from './execution-interceptor.ts';
 export { type StateSetter, useState } from './hooks/state.ts';
 export { use } from './hooks/use.ts';
+export { useDelivery } from './hooks/use-delivery.ts';
 export { useInstruction } from './hooks/use-instruction.ts';
 export { useMessageData } from './hooks/use-message-data.ts';
 export { useMessageMetadata } from './hooks/use-message-metadata.ts';

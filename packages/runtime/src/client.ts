@@ -26,6 +26,7 @@ import type {
 	AgentModuleValue,
 	AgentProfile,
 	AgentRuntimeConfig,
+	DeliveredMessage,
 	FlueEvent,
 	FlueEventCallback,
 	FlueEventContext,
@@ -62,7 +63,11 @@ export interface FlueContextConfig {
 
 /** Extends FlueEventContext with server-only methods. */
 export interface FlueContextInternal extends FlueEventContext {
-	initializeRootHarness(agent: AgentModuleValue): Promise<Harness>;
+	/**
+	 * `delivery` is the submission's delivered message; renders read it via
+	 * `useDelivery()`. Omit for invocations no delivered message triggered.
+	 */
+	initializeRootHarness(agent: AgentModuleValue, delivery?: DeliveredMessage): Promise<Harness>;
 	createEvent(event: FlueEventInput): FlueEvent;
 	publishEvent(event: FlueEvent): void;
 	emitEvent(event: FlueEventInput, observation?: FlueObservationDetail): FlueEvent;
@@ -148,7 +153,10 @@ export function createFlueContext(config: FlueContextConfig): FlueContextInterna
 			return config.req;
 		},
 
-		async initializeRootHarness(agent: AgentModuleValue): Promise<Harness> {
+		async initializeRootHarness(
+			agent: AgentModuleValue,
+			delivery?: DeliveredMessage,
+		): Promise<Harness> {
 			if (!conversationWriter || !attachmentStore) {
 				localConversationRuntime ??= createLocalConversationRuntime(config);
 				const local = await localConversationRuntime;
@@ -159,6 +167,7 @@ export function createFlueContext(config: FlueContextConfig): FlueContextInterna
 				agent,
 				{ ...config, conversationWriter, attachmentStore },
 				emitEvent,
+				delivery,
 			);
 		},
 
@@ -251,6 +260,7 @@ export async function initializeRootHarness(
 	agent: AgentModuleValue,
 	config: FlueContextConfig,
 	emitEvent: (event: FlueEventInput, observation?: FlueObservationDetail) => void,
+	delivery?: DeliveredMessage,
 ): Promise<Harness> {
 	// A defineAgent(Capability, config) value renders synchronously (Flue
 	// Hooks compose the config); a legacy defineAgent value runs its
@@ -274,7 +284,10 @@ export async function initializeRootHarness(
 		const reduced = await config.conversationWriter.loadReducedState();
 		hookState = createHookStateBuffer(reduced.state);
 		outputChannel = createAgentOutputChannel();
-		renderState = { snapshot: reduced.state, store: hookState, output: outputChannel };
+		// The delivery is constant for the harness lifetime (one submission
+		// attempt), so the first render and every per-turn re-render read the
+		// same triggering input through `useDelivery()`.
+		renderState = { snapshot: reduced.state, store: hookState, output: outputChannel, delivery };
 		const first = renderAgentFunctionWithStructure(
 			functionAgent.capability,
 			functionAgent.config,

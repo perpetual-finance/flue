@@ -837,9 +837,12 @@ function submissionAttemptRef(submission: AgentSubmission): SubmissionAttemptRef
 async function openAgentSubmissionSession(
 	ctx: FlueContextInternal,
 	agent: AgentModuleValue,
-	_input: AgentSubmissionInput,
+	input: AgentSubmissionInput,
 ): Promise<AgentSubmissionSession> {
-	const harness = await ctx.initializeRootHarness(agent);
+	// The submission's delivered message rides into the harness so renders can
+	// read it via `useDelivery()` — the durable input, so re-attempts see the
+	// same value.
+	const harness = await ctx.initializeRootHarness(agent, input.message);
 	// External submissions always target the default session of the default
 	// harness. `harness.session()` hands out the public FlueSession facade;
 	// unwrap it to reach the internal durable submission executor surface.
