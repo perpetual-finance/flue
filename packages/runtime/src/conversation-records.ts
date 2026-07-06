@@ -100,6 +100,13 @@ export interface AssistantMessageStartedRecord extends ConversationRecordEnvelop
 	messageId: string;
 	parentId: string | null;
 	modelInfo: AssistantModelInfo;
+	/**
+	 * Custom response metadata from the render's `useMessageMetadata('start')`
+	 * producers. Stamped only on a submission's first assistant message (the
+	 * response message); merged with any later `message_metadata` records in
+	 * stream order.
+	 */
+	responseMetadata?: Record<string, unknown>;
 }
 
 interface AssistantTextStartedRecord extends ConversationRecordEnvelope {
@@ -269,6 +276,29 @@ export interface StateWriteRecord extends ConversationRecordEnvelope {
 	previousValue?: unknown;
 }
 
+/**
+ * One write to a named, client-facing data part (`useMessageData`). Scoped to
+ * the submission in the envelope: the part renders on the submission's
+ * response message, anchored after the assistant step that had completed when
+ * the write was made. The name is the part's identity within the response —
+ * a later write to the same name updates the part in place.
+ */
+interface MessageDataWriteRecord extends ConversationRecordEnvelope {
+	type: 'message_data_write';
+	name: string;
+	data: unknown;
+}
+
+/**
+ * Custom response metadata produced at a lifecycle point after the response
+ * started (`useMessageMetadata('finish')`). Scoped to the submission in the
+ * envelope; deep-merged with the response's earlier metadata in stream order.
+ */
+interface MessageMetadataRecord extends ConversationRecordEnvelope {
+	type: 'message_metadata';
+	metadata: Record<string, unknown>;
+}
+
 export type ConversationRecord =
 	| ConversationCreatedRecord
 	| UserMessageRecord
@@ -287,7 +317,9 @@ export type ConversationRecord =
 	| CompactionRecord
 	| ChildSessionRetainedRecord
 	| SubmissionSettledRecord
-	| StateWriteRecord;
+	| StateWriteRecord
+	| MessageDataWriteRecord
+	| MessageMetadataRecord;
 
 export function generateConversationRecordId(): string {
 	return `record_${crypto.randomUUID()}`;

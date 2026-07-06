@@ -13,6 +13,7 @@ import {
 	renderAgentFunctionWithStructure,
 } from './hooks/render.ts';
 import { createHookStateBuffer, type HookStateBuffer } from './hooks/state.ts';
+import { type AgentOutputChannel, createAgentOutputChannel } from './message-output.ts';
 import { type AttachmentStore, InMemoryAttachmentStore } from './runtime/attachment-store.ts';
 import { InMemoryConversationStreamStore } from './runtime/conversation-stream-store.ts';
 import { dispatchGlobalEvent } from './runtime/events.ts';
@@ -265,13 +266,15 @@ export async function initializeRootHarness(
 	// writes through this buffer, which the session drains into the tool
 	// batch's append. One buffer per harness lifetime (one submission attempt).
 	let hookState: HookStateBuffer | undefined;
+	let outputChannel: AgentOutputChannel | undefined;
 	let renderState: RenderStateContext | undefined;
 	let lastStructure: AgentRenderStructure | undefined;
 	let resolvedOptions: AgentRuntimeConfig;
 	if (functionAgent) {
 		const reduced = await config.conversationWriter.loadReducedState();
 		hookState = createHookStateBuffer(reduced.state);
-		renderState = { snapshot: reduced.state, store: hookState };
+		outputChannel = createAgentOutputChannel();
+		renderState = { snapshot: reduced.state, store: hookState, output: outputChannel };
 		const first = renderAgentFunctionWithStructure(
 			functionAgent.capability,
 			functionAgent.config,
@@ -371,6 +374,7 @@ export async function initializeRootHarness(
 		undefined,
 		hookState,
 		rerender,
+		outputChannel,
 	);
 }
 

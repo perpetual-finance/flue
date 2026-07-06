@@ -51,6 +51,21 @@ type ConversationStreamChunkBody =
 			/** Server-authored generation-start time as an ISO 8601 string. */
 			timestamp?: string;
 			model?: { provider: string; id: string };
+			/** Custom response metadata from `useMessageMetadata('start')` producers. */
+			metadata?: Record<string, unknown>;
+	  }
+	| {
+			type: 'message-metadata';
+			conversationId: string;
+			messageId: string;
+			metadata: Record<string, unknown>;
+	  }
+	| {
+			type: 'data-part';
+			conversationId: string;
+			messageId: string;
+			name: string;
+			data: unknown;
 	  }
 	| {
 			type: 'message-delta';
@@ -274,8 +289,21 @@ function encodeRecord(
 					...(typeof record.modelInfo.provider === 'string' && typeof record.modelInfo.model === 'string'
 						? { model: { provider: record.modelInfo.provider, id: record.modelInfo.model } }
 						: {}),
+					...(record.responseMetadata ? { metadata: record.responseMetadata } : {}),
 				},
 			];
+		case 'message_metadata': {
+			const messageId = record.submissionId ? responseIds.get(record.submissionId) : undefined;
+			return messageId
+				? [{ type: 'message-metadata', conversationId, messageId, metadata: record.metadata }]
+				: [];
+		}
+		case 'message_data_write': {
+			const messageId = record.submissionId ? responseIds.get(record.submissionId) : undefined;
+			return messageId
+				? [{ type: 'data-part', conversationId, messageId, name: record.name, data: record.data }]
+				: [];
+		}
 		case 'assistant_text_delta':
 			return [{ type: 'message-delta', conversationId, messageId: uiMessageId(record.messageId), kind: 'text', delta: record.delta }];
 		case 'assistant_reasoning_delta':

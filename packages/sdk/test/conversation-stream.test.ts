@@ -162,6 +162,65 @@ describe('applyConversationChunk()', () => {
 		});
 	});
 
+	it('appends a data part at the live end and updates it in place on rewrite', () => {
+		const conversation = reduce([
+			{ type: 'message-started', conversationId: 'c1', messageId: 'a1', submissionId: 's1' },
+			{ type: 'message-delta', conversationId: 'c1', messageId: 'a1', kind: 'text', delta: 'Working. ' },
+			{ type: 'tool-input', conversationId: 'c1', messageId: 'a1', toolCallId: 'call_1', toolName: 'load_case', input: {} },
+			{ type: 'message-completed', conversationId: 'c1', messageId: 'a1' },
+			{ type: 'data-part', conversationId: 'c1', messageId: 'a1', name: 'caseCard', data: { status: 'loading' } },
+			{ type: 'tool-output', conversationId: 'c1', toolCallId: 'call_1', output: 'ok' },
+			{ type: 'message-started', conversationId: 'c1', messageId: 'a1', submissionId: 's1' },
+			{ type: 'message-delta', conversationId: 'c1', messageId: 'a1', kind: 'text', delta: 'Done.' },
+			// The rewrite reconciles by name: same part, same position, new data.
+			{ type: 'data-part', conversationId: 'c1', messageId: 'a1', name: 'caseCard', data: { status: 'loaded' } },
+			{ type: 'message-completed', conversationId: 'c1', messageId: 'a1' },
+		]);
+
+		expect(conversation.messages).toHaveLength(1);
+		expect(conversation.messages[0]?.parts).toMatchObject([
+			{ type: 'text', text: 'Working. ' },
+			{ type: 'dynamic-tool', toolCallId: 'call_1', state: 'output-available' },
+			{ type: 'data-caseCard', data: { status: 'loaded' } },
+			{ type: 'text', text: 'Done.', state: 'done' },
+		]);
+	});
+
+	it('merges custom metadata under the server-authored keys', () => {
+		const stepUsage = {
+			input: 1,
+			output: 1,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 2,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		const conversation = reduce([
+			{
+				type: 'message-started',
+				conversationId: 'c1',
+				messageId: 'a1',
+				timestamp: '2026-06-25T00:00:02.000Z',
+				metadata: { createdAt: 111, timestamp: 'CUSTOM-MUST-LOSE' },
+			},
+			{ type: 'message-delta', conversationId: 'c1', messageId: 'a1', kind: 'text', delta: 'hi' },
+			{ type: 'message-completed', conversationId: 'c1', messageId: 'a1', usage: stepUsage },
+			{
+				type: 'message-metadata',
+				conversationId: 'c1',
+				messageId: 'a1',
+				metadata: { finishedAt: 222, usage: 'CUSTOM-MUST-LOSE' },
+			},
+		]);
+
+		expect(conversation.messages[0]?.metadata).toEqual({
+			createdAt: 111,
+			finishedAt: 222,
+			timestamp: '2026-06-25T00:00:02.000Z',
+			usage: stepUsage,
+		});
+	});
+
 	it('opens a new part when the delta kind changes from reasoning to text', () => {
 		const conversation = reduce([
 			{ type: 'message-started', conversationId: 'c1', messageId: 'a1' },

@@ -1,3 +1,4 @@
+import type { AgentOutputChannel, MessageMetadataProducers } from '../message-output.ts';
 import type { ToolDefinition } from '../tool-types.ts';
 import type { SandboxFactory, Skill, SubagentDefinition } from '../types.ts';
 
@@ -43,6 +44,12 @@ export interface CapabilityRecord {
 export interface RenderStateContext {
 	snapshot: ReadonlyMap<string, unknown>;
 	store: HookStateStore | undefined;
+	/**
+	 * The client-facing output channel (`useMessageData` writes, metadata
+	 * producers). Absent when there is no durable runtime behind the render —
+	 * data writers then throw on call.
+	 */
+	output?: AgentOutputChannel;
 }
 
 /** The write channel `useState` setters push into; drained by the session. */
@@ -66,6 +73,10 @@ export interface RenderFrame {
 	capabilities: CapabilityRecord[];
 	/** `useState` names declared this render; duplicates throw. */
 	stateNames: Set<string>;
+	/** `useMessageData` names declared this render; duplicates throw. */
+	messageDataNames: Set<string>;
+	/** `useMessageMetadata` producers declared this render, in call order per point. */
+	metadataProducers: MessageMetadataProducers;
 	/** The render's `useSandbox` attachment; at most one per render. */
 	sandbox: SandboxFactory | undefined;
 	/** `useSkill` mounts across the whole render, in call order; names unique. */
@@ -116,6 +127,8 @@ export function renderWithFrame<T>(
 		scopeStack: [root],
 		capabilities: [],
 		stateNames: new Set(),
+		messageDataNames: new Set(),
+		metadataProducers: { start: [], finish: [] },
 		sandbox: undefined,
 		skills: [],
 		subagents: [],

@@ -50,6 +50,23 @@ export type ConversationStreamChunk =
 			/** Server-authored generation-start time as an ISO 8601 string. */
 			timestamp?: string;
 			model?: { provider: string; id: string };
+			/** Custom response metadata from `useMessageMetadata('start')` producers. */
+			metadata?: Record<string, unknown>;
+			position: ConversationChunkPosition;
+	  }
+	| {
+			type: 'message-metadata';
+			conversationId: string;
+			messageId: string;
+			metadata: Record<string, unknown>;
+			position: ConversationChunkPosition;
+	  }
+	| {
+			type: 'data-part';
+			conversationId: string;
+			messageId: string;
+			name: string;
+			data: unknown;
 			position: ConversationChunkPosition;
 	  }
 	| {
@@ -100,6 +117,8 @@ const CHUNK_TYPES = new Set<ConversationStreamChunk['type']>([
 	'message-appended',
 	'message-started',
 	'message-delta',
+	'message-metadata',
+	'data-part',
 	'tool-input',
 	'tool-output',
 	'tool-output-error',
@@ -157,7 +176,11 @@ export function applyConversationChunk(
 			return mutateMessages(state, (messages) => upsertMessage(messages, chunk.message));
 		case 'message-started':
 			return mutateMessages(state, (messages) => {
+				// A started chunk whose message already exists is a continuation
+				// step of the same response — a no-op here; its parts accumulate on
+				// the open message.
 				if (messages.some((message) => message.id === chunk.messageId)) return messages;
+				const custom = chunk.metadata ? stripReservedMetadataKeys(chunk.metadata) : undefined;
 				return [
 					...messages,
 					{
@@ -168,9 +191,10 @@ export function applyConversationChunk(
 						...(chunk.submissionId ? { submissionId: chunk.submissionId } : {}),
 						...(chunk.turnId ? { turnId: chunk.turnId } : {}),
 						parts: [],
-						...(chunk.timestamp || chunk.model
+						...(chunk.timestamp || chunk.model || custom
 							? {
 									metadata: {
+										...custom,
 										...(chunk.timestamp ? { timestamp: chunk.timestamp } : {}),
 										...(chunk.model ? { model: chunk.model } : {}),
 									},
@@ -178,6 +202,43 @@ export function applyConversationChunk(
 							: {}),
 					},
 				];
+			});
+		case 'message-metadata':
+			return mutateMessages(state, (messages) => {
+				const index = messages.findIndex((message) => message.id === chunk.messageId);
+				if (index < 0) return messages;
+				const message = messages[index] as FlueConversationMessage;
+				const next = [...messages];
+				// Custom metadata deep-merges under the server-authored keys: the
+				// reserved keys the message already carries always win.
+				next[index] = {
+					...message,
+					metadata: {
+						...deepMergeMetadata(message.metadata ?? {}, stripReservedMetadataKeys(chunk.metadata)),
+						...(message.metadata?.timestamp !== undefined ? { timestamp: message.metadata.timestamp } : {}),
+						...(message.metadata?.usage !== undefined ? { usage: message.metadata.usage } : {}),
+						...(message.metadata?.model !== undefined ? { model: message.metadata.model } : {}),
+					},
+				};
+				return next;
+			});
+		case 'data-part':
+			return mutateMessages(state, (messages) => {
+				const index = messages.findIndex((message) => message.id === chunk.messageId);
+				if (index < 0) return messages;
+				const message = messages[index] as FlueConversationMessage;
+				const partType = `data-${chunk.name}` as const;
+				const partIndex = message.parts.findIndex((part) => part.type === partType);
+				// The name is the part's identity within the response: the first
+				// write appends at the live end; a rewrite updates the part in
+				// place, keeping its position.
+				const parts =
+					partIndex < 0
+						? [...message.parts, { type: partType, data: chunk.data }]
+						: message.parts.map((part, i) => (i === partIndex ? { type: partType, data: chunk.data } : part));
+				const next = [...messages];
+				next[index] = { ...message, parts };
+				return next;
 			});
 		case 'message-delta':
 			return appendDelta(state, chunk);
@@ -351,6 +412,37 @@ function completeMessage(
 		};
 		return next;
 	});
+}
+
+/** Message-metadata keys the runtime authors; custom metadata never overrides them. */
+const RESERVED_METADATA_KEYS = ['timestamp', 'usage', 'model'];
+
+function stripReservedMetadataKeys(metadata: Record<string, unknown>): Record<string, unknown> {
+	return Object.fromEntries(
+		Object.entries(metadata).filter(([key]) => !RESERVED_METADATA_KEYS.includes(key)),
+	);
+}
+
+/** Deep-merge metadata: later values win, plain objects merge recursively, proto keys dropped. */
+function deepMergeMetadata(
+	base: Record<string, unknown>,
+	next: Record<string, unknown>,
+): Record<string, unknown> {
+	const merged: Record<string, unknown> = { ...base };
+	for (const [key, value] of Object.entries(next)) {
+		if (value === undefined) continue;
+		if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+		const current = merged[key];
+		merged[key] =
+			isPlainObject(current) && isPlainObject(value) ? deepMergeMetadata(current, value) : value;
+	}
+	return merged;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+	const proto = Object.getPrototypeOf(value);
+	return proto === Object.prototype || proto === null;
 }
 
 function addUsage(current: PromptUsage | undefined, next: PromptUsage): PromptUsage {

@@ -92,6 +92,10 @@ import {
 import { type FlueExecutionContext, interceptExecution } from './execution-interceptor.ts';
 import { resolveSubagentDefinition } from './hooks/render.ts';
 import type { HookStateBuffer, HookStateWrite } from './hooks/state.ts';
+import {
+	type AgentOutputChannel,
+	runMessageMetadataProducers,
+} from './message-output.ts';
 import { renderSignalMessage } from './message-rendering.ts';
 import { assertImagesWithinLimit } from './persisted-images.ts';
 import {
@@ -163,7 +167,7 @@ import type {
 	ToolDefinition,
 } from './types.ts';
 import { isSubagentDefinition } from './types.ts';
-import { emptyUsage, fromProviderUsage } from './usage.ts';
+import { addUsage, emptyUsage, fromProviderUsage } from './usage.ts';
 
 const MAX_DELEGATION_DEPTH = 4;
 const MAX_TRANSIENT_MODEL_RETRIES = 3;
@@ -363,6 +367,13 @@ interface SessionInitOptions {
 	 * recomposed system prompt, so the next model call sees them.
 	 */
 	rerender?: SessionRerender;
+	/**
+	 * Client-facing output channel from the harness's render (function agents
+	 * only): `useMessageData` writes flow through its sink into immediate
+	 * durable appends, and `useMessageMetadata` producers are read off it at
+	 * the response's start/finish points.
+	 */
+	output?: AgentOutputChannel;
 }
 
 /** One re-render's session-facing output: what the next turn runs with. */
@@ -553,6 +564,17 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	private executionIdentity: FlueExecutionContext;
 	private hookState: HookStateBuffer | undefined;
 	private rerender: SessionRerender | undefined;
+	private outputChannel: AgentOutputChannel | undefined;
+	/** First assistant messageId of the active submission (the response message). */
+	private responseMessageId: string | undefined;
+	/** Whether the active submission has a durably completed assistant step (the data-write anchor). */
+	private responseHasCompletedStep = false;
+	/** Aggregate usage across the active submission's completed assistant steps. */
+	private responseUsage: PromptUsage | undefined;
+	/** Merged `useMessageMetadata('start')` output, stamped onto the response's first started record. */
+	private responseStartMetadata: Record<string, unknown> | undefined;
+	/** Ordered append chain for `useMessageData` writes; awaited before the response settles. */
+	private outputWriteQueue: Promise<unknown> = Promise.resolve();
 
 	private emitTurnRequestAndStream: StreamFn = async (model, context, options) => {
 		if (this.activeTurnId === undefined) this.activeTurnId = generateTurnId();
@@ -634,6 +656,84 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				tools: this.agentLoop.state.tools,
 			},
 		};
+	}
+
+	/**
+	 * Sink for `useMessageData` writers. Unlike `useState` writes (buffered,
+	 * batch-atomic), data writes append immediately — live client progress is
+	 * their whole point. The writer API is synchronous, so appends chain on an
+	 * ordered queue; the queue is awaited before the response settles, and an
+	 * append failure there fails the submission (fail fast, never silent).
+	 */
+	private enqueueMessageDataWrite(name: string, data: unknown): void {
+		if (!this.activeSubmissionId || !this.responseHasCompletedStep) {
+			throw new Error(
+				`[flue] Message data "${name}" can only be written while the agent is responding — write from tool run functions (and other callbacks that run during a submission).`,
+			);
+		}
+		const record: ConversationRecord = {
+			...this.canonicalEnvelope('message_data_write'),
+			type: 'message_data_write',
+			name,
+			data,
+		};
+		const pending = this.outputWriteQueue.then(() => this.appendCanonical([record]));
+		this.outputWriteQueue = pending;
+		// The queue is consumed by flushResponseOutput; this handler only keeps
+		// an interim rejection from surfacing as an unhandled-rejection warning.
+		pending.catch(() => {});
+	}
+
+	/**
+	 * Begin the response's client-facing output: reset per-submission tracking
+	 * and run the `useMessageMetadata('start')` producers (fail-fast — a throw
+	 * fails the submission before the first model call). A resume re-entry
+	 * whose response already has durable assistant steps adopts them instead:
+	 * start producers ran on the original attempt.
+	 */
+	private async beginResponseOutput(): Promise<void> {
+		this.responseMessageId = undefined;
+		this.responseHasCompletedStep = false;
+		this.responseUsage = undefined;
+		this.responseStartMetadata = undefined;
+		this.outputWriteQueue = Promise.resolve();
+		if (!this.activeSubmissionId || !this.outputChannel) return;
+		const conversation = await this.conversationWriter.getConversation(this.conversationId);
+		const durableAnchor = conversation?.lastAssistantEntryBySubmission.get(this.activeSubmissionId);
+		if (durableAnchor) {
+			this.responseMessageId = durableAnchor;
+			this.responseHasCompletedStep = true;
+			return;
+		}
+		const producers = this.outputChannel.producers.start;
+		if (producers.length === 0) return;
+		this.responseStartMetadata = runMessageMetadataProducers(producers, {
+			point: 'start',
+			submissionId: this.activeSubmissionId,
+		});
+	}
+
+	/**
+	 * Settle the response's client-facing output: wait for queued data writes
+	 * (surfacing any append failure) and run the `useMessageMetadata('finish')`
+	 * producers, appending their merged result. Runs inside the submission's
+	 * normal execution path, so a throw here settles the submission `failed` —
+	 * no retry, no recovery.
+	 */
+	private async flushResponseOutput(): Promise<void> {
+		await this.outputWriteQueue;
+		if (!this.activeSubmissionId || !this.outputChannel || !this.responseMessageId) return;
+		const producers = this.outputChannel.producers.finish;
+		if (producers.length === 0) return;
+		const metadata = runMessageMetadataProducers(producers, {
+			point: 'finish',
+			submissionId: this.activeSubmissionId,
+			usage: this.responseUsage ?? emptyUsage(),
+		});
+		if (!metadata) return;
+		await this.appendCanonical([
+			{ ...this.canonicalEnvelope('message_metadata'), type: 'message_metadata', metadata },
+		]);
 	}
 
 	/** Turn buffered `useState` writes into canonical records, in write order. */
@@ -755,6 +855,8 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		this.executionIdentity = options.executionContext ?? {};
 		this.hookState = options.hookState;
 		this.rerender = options.rerender;
+		this.outputChannel = options.output;
+		this.outputChannel?.connect((name, data) => this.enqueueMessageDataWrite(name, data));
 
 		const systemPrompt = this.config.systemPrompt;
 
@@ -814,6 +916,12 @@ export class Session implements FlueSession, AgentSubmissionSession {
 							usage: _usage,
 							...modelInfo
 						} = event.message;
+						// The submission's first assistant message is its response
+						// message: it carries the precomputed start metadata (producers
+						// already ran, safely, before the model call).
+						const isResponseFirstMessage =
+							this.activeSubmissionId !== undefined && this.responseMessageId === undefined;
+						if (isResponseFirstMessage) this.responseMessageId = messageId;
 						await this.appendCanonical([
 							{
 								...this.canonicalEnvelope('assistant_message_started'),
@@ -821,6 +929,9 @@ export class Session implements FlueSession, AgentSubmissionSession {
 								messageId,
 								parentId,
 								modelInfo,
+								...(isResponseFirstMessage && this.responseStartMetadata
+									? { responseMetadata: this.responseStartMetadata }
+									: {}),
 							},
 						]);
 					}
@@ -1021,6 +1132,15 @@ export class Session implements FlueSession, AgentSubmissionSession {
 									...(event.message.errorMessage ? { error: event.message.errorMessage } : {}),
 								},
 							]);
+							if (this.activeSubmissionId) {
+								this.responseHasCompletedStep = true;
+								const stepUsage = fromProviderUsage(event.message.usage);
+								if (stepUsage) {
+									this.responseUsage = this.responseUsage
+										? addUsage(this.responseUsage, stepUsage)
+										: stepUsage;
+								}
+							}
 							this.canonicalToolRequestMessageId = event.message.content.some(
 								(content) => content.type === 'toolCall',
 							)
@@ -3825,11 +3945,13 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					}
 					await this.rebuildCanonicalContext();
 					await options.onInputApplied?.(durability);
+					await this.beginResponseOutput();
 					await this.resumeConversationToCompletion({
 						inputEntryId: options.inputEntryId,
 						errorLabel: options.errorLabel,
 						signal: options.signal,
 					});
+					await this.flushResponseOutput();
 				} finally {
 					this.activeSubmissionId = undefined;
 					this.activeSubmissionAttemptId = undefined;

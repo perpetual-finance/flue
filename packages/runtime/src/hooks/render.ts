@@ -42,6 +42,7 @@ export interface AgentRenderStructure {
 	capabilityNames: readonly string[];
 	toolNames: readonly string[];
 	stateNames: readonly string[];
+	messageDataNames: readonly string[];
 	skillNames: readonly string[];
 	subagentNames: readonly string[];
 	hasSandbox: boolean;
@@ -56,6 +57,15 @@ export function renderAgentFunctionWithStructure(
 	const { result, frame } = renderWithFrame(capability, state);
 	assertAgentInstruction(result);
 	assertUniqueToolNames(frame);
+	// Hand the render's metadata producers to the session through the shared
+	// output channel — replaced wholesale each render, so per-turn re-renders
+	// refresh the closures the same way tools and instructions refresh.
+	if (state?.output) {
+		state.output.producers = {
+			start: [...frame.metadataProducers.start],
+			finish: [...frame.metadataProducers.finish],
+		};
+	}
 	const instructions = composeAgentDocument(result, frame);
 	const tools = [...frame.root.tools, ...frame.capabilities.flatMap((record) => record.tools)];
 	return {
@@ -76,6 +86,7 @@ export function renderAgentFunctionWithStructure(
 			capabilityNames: frame.capabilities.map((record) => record.capability.name || '(anonymous)'),
 			toolNames: tools.map((tool) => tool.name),
 			stateNames: [...frame.stateNames],
+			messageDataNames: [...frame.messageDataNames],
 			skillNames: frame.skills.map((skill) => skill.name),
 			subagentNames: frame.subagents.map((subagent) => subagent.name),
 			hasSandbox: frame.sandbox !== undefined,
@@ -137,6 +148,8 @@ export function assertRenderStructureInvariance(
 	if (toolDelta) problems.push(`tools ${toolDelta}`);
 	const stateDelta = setDelta(previous.stateNames, next.stateNames);
 	if (stateDelta) problems.push(`state ${stateDelta}`);
+	const messageDataDelta = setDelta(previous.messageDataNames, next.messageDataNames);
+	if (messageDataDelta) problems.push(`message data ${messageDataDelta}`);
 	const skillDelta = setDelta(previous.skillNames, next.skillNames);
 	if (skillDelta) problems.push(`skills ${skillDelta}`);
 	const subagentDelta = setDelta(previous.subagentNames, next.subagentNames);

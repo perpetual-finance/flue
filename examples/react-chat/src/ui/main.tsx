@@ -128,17 +128,21 @@ function MessagePart({ part }: { part: FlueConversationPart }) {
 			<a href={part.url}>{part.filename ?? 'Attachment'}</a>
 		);
 	}
-	return (
-		<pre>
-			{part.toolName}: {part.state}
-		</pre>
-	);
+	if (part.type === 'dynamic-tool') {
+		return (
+			<pre>
+				{part.toolName}: {part.state}
+			</pre>
+		);
+	}
+	return <pre className="data-part">{JSON.stringify(part.data)}</pre>;
 }
 
 function partKey(part: FlueConversationPart): string {
 	if (part.type === 'dynamic-tool') return `tool:${part.toolCallId}`;
 	if (part.type === 'file') return `file:${part.id ?? part.url ?? part.mediaType}`;
-	return `${part.type}:${part.text}`;
+	if (part.type === 'text' || part.type === 'reasoning') return `${part.type}:${part.text}`;
+	return part.type;
 }
 
 const root = document.getElementById('root');

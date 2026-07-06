@@ -52,6 +52,8 @@ export type {
 export { type StateSetter, useState } from './hooks/state.ts';
 export { use } from './hooks/use.ts';
 export { useInstruction } from './hooks/use-instruction.ts';
+export { useMessageData } from './hooks/use-message-data.ts';
+export { useMessageMetadata } from './hooks/use-message-metadata.ts';
 export { useSandbox } from './hooks/use-sandbox.ts';
 export { useSkill } from './hooks/use-skill.ts';
 export { useSubagent } from './hooks/use-subagent.ts';
@@ -59,6 +61,11 @@ export { useTool } from './hooks/use-tool.ts';
 export { type FlueInstrumentation, instrument } from './instrumentation.ts';
 export type { McpServerConnection, McpServerOptions, McpTransport } from './mcp.ts';
 export { connectMcpServer } from './mcp.ts';
+export type {
+	MessageMetadataEvent,
+	MessageMetadataPoint,
+	MessageMetadataProducer,
+} from './message-output.ts';
 export type { FlueObservationSubscriber } from './observation.ts';
 export { ResultUnavailableError } from './result.ts';
 export type { ChannelRouteDefinition, MountableChannel } from './runtime/channel-routes.ts';

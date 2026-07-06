@@ -12,6 +12,7 @@ import {
 	buildConversationContextEntries,
 	getActiveConversationPath,
 } from './conversation-reducer.ts';
+import { stripReservedMetadataKeys } from './message-output.ts';
 import { toolResultOutput, toolResultText } from './message-rendering.ts';
 import type { SubmissionState } from './submission-state.ts';
 import { classifySubmissionState } from './submission-state.ts';
@@ -27,6 +28,9 @@ import { addUsage, emptyUsage, fromProviderUsage } from './usage.ts';
 type ConversationUiPart =
 	| { type: 'text'; text: string; state: 'streaming' | 'done' }
 	| { type: 'reasoning'; text: string; state: 'streaming' | 'done' }
+	// A named client-facing data part (`useMessageData`), AI SDK convention:
+	// the part type is `data-<name>` and the payload rides `data`.
+	| { type: `data-${string}`; data: unknown }
 	// `url` mirrors the SDK shape but is never set server-side (the runtime does
 	// not know the HTTP mount/baseUrl); the SDK fills it in for consumers.
 	| { type: 'file'; mediaType: string; id?: string; size?: number; url?: string; filename?: string }
@@ -104,6 +108,8 @@ export interface ConversationUiMessage {
 		timestamp?: string;
 		usage?: PromptUsage;
 		model?: { provider: string; id: string };
+		/** Custom response metadata from `useMessageMetadata` producers. */
+		[key: string]: unknown;
 	};
 }
 
@@ -195,9 +201,12 @@ export function projectConversationUi(
 				const open = responseBySubmission.get(projected.submissionId);
 				if (open) {
 					mergeAssistantContinuation(open, projected);
+					appendAnchoredDataParts(open, conversation, projected.submissionId, projected.id);
 					continue;
 				}
 				responseBySubmission.set(projected.submissionId, projected);
+				appendAnchoredDataParts(projected, conversation, projected.submissionId, projected.id);
+				applyResponseMetadata(projected, conversation);
 			}
 			messages.push(projected);
 			byId.set(projected.id, projected);
@@ -254,6 +263,43 @@ function mergeAssistantContinuation(
 		const current = open.metadata?.usage;
 		open.metadata = { ...open.metadata, usage: current ? addUsage(current, usage) : usage };
 	}
+}
+
+/**
+ * Append the response's data parts anchored to one assistant step, right
+ * after that step's own parts — the position a live client saw them stream
+ * into. First-write order within a step; a rewrite updated `data` in place.
+ */
+function appendAnchoredDataParts(
+	message: ConversationUiMessage,
+	conversation: ReducedConversationState,
+	submissionId: string,
+	anchorEntryId: string,
+): void {
+	const parts = conversation.responseDataParts.get(submissionId);
+	if (!parts) return;
+	for (const part of parts) {
+		if (part.anchorEntryId !== anchorEntryId) continue;
+		message.parts.push({ type: `data-${part.name}`, data: part.data });
+	}
+}
+
+/**
+ * Combine custom response metadata (`useMessageMetadata`) with the
+ * server-authored fields. Server keys are reserved and win; everything else
+ * the producers wrote survives as-is.
+ */
+function applyResponseMetadata(
+	message: ConversationUiMessage,
+	conversation: ReducedConversationState,
+): void {
+	if (!message.submissionId) return;
+	const custom = conversation.responseMetadata.get(message.submissionId);
+	if (!custom) return;
+	message.metadata = {
+		...stripReservedMetadataKeys(custom),
+		...message.metadata,
+	};
 }
 
 export function getActiveConversationPathSince(

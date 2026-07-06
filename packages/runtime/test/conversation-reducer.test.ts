@@ -775,6 +775,147 @@ describe('reduceConversationRecords()', () => {
 		]);
 	});
 
+	it('anchors data parts after the step that wrote them and reconciles rewrites by name', () => {
+		const sub = { submissionId: 'submission_ms' };
+		const records = multiStepSubmission();
+		const dataWrite = (id: string, name: string, data: unknown): ConversationRecord => ({
+			...scope,
+			...sub,
+			id,
+			type: 'message_data_write',
+			timestamp: '2026-06-25T00:00:04.000Z',
+			name,
+			data,
+		});
+		const state = reduceConversationRecords(
+			createReducedInstanceState(),
+			[
+				...records.slice(0, 10), // through the tool batch commit (step 1 completed)
+				dataWrite('record_dw1', 'caseCard', { status: 'loading' }),
+				...records.slice(10), // step 2
+				// Rewrites update the part in place (anchor and position kept);
+				// a new name after step 2 anchors after step 2's parts.
+				dataWrite('record_dw2', 'caseCard', { status: 'loaded' }),
+				dataWrite('record_dw3', 'summary', { done: true }),
+			],
+			'18',
+		);
+		const messages = projectConversationUi(required(state.conversations.get('conv_01')), '18').messages;
+
+		expect(messages).toHaveLength(2);
+		expect(messages[1]?.parts).toMatchObject([
+			{ type: 'text', text: 'Looking. ' },
+			{ type: 'dynamic-tool', toolCallId: 'call_1' },
+			{ type: 'data-caseCard', data: { status: 'loaded' } },
+			{ type: 'text', text: 'Done.' },
+			{ type: 'data-summary', data: { done: true } },
+		]);
+	});
+
+	it('merges custom response metadata under the server-authored keys', () => {
+		const records = multiStepSubmission().map((record) =>
+			record.type === 'assistant_message_started' && record.messageId === 'entry_a1'
+				? {
+						...record,
+						// `usage` is server-reserved: the producer's value must never
+						// override the summed server usage.
+						responseMetadata: { createdAt: 111, usage: 'CUSTOM-MUST-LOSE' },
+					}
+				: record,
+		);
+		const state = reduceConversationRecords(
+			createReducedInstanceState(),
+			[
+				...records,
+				{
+					...scope,
+					submissionId: 'submission_ms',
+					id: 'record_mm_finish',
+					type: 'message_metadata',
+					timestamp: '2026-06-25T00:00:04.000Z',
+					metadata: { finishedAt: 222, op: { nested: true } },
+				},
+			],
+			'16',
+		);
+		const messages = projectConversationUi(required(state.conversations.get('conv_01')), '16').messages;
+
+		expect(messages[1]?.metadata).toEqual({
+			createdAt: 111,
+			finishedAt: 222,
+			op: { nested: true },
+			timestamp: '2026-06-25T00:00:02.000Z',
+			usage: { ...usage, input: 20, output: 4, totalTokens: 24 },
+			model: { provider: 'test', id: 'test-model' },
+		});
+	});
+
+	it('rejects data writes outside a tracked submission or before an assistant step completes', () => {
+		const records = multiStepSubmission();
+		const untracked: ConversationRecord = {
+			...scope,
+			id: 'record_dw_untracked',
+			type: 'message_data_write',
+			timestamp: '2026-06-25T00:00:04.000Z',
+			name: 'caseCard',
+			data: {},
+		};
+		expect(() =>
+			reduceConversationRecords(createReducedInstanceState(), [...records, untracked], '16'),
+		).toThrow(ConversationRecordInvariantError);
+
+		const early: ConversationRecord = {
+			...scope,
+			submissionId: 'submission_ms',
+			id: 'record_dw_early',
+			type: 'message_data_write',
+			timestamp: '2026-06-25T00:00:01.500Z',
+			name: 'caseCard',
+			data: {},
+		};
+		expect(() =>
+			reduceConversationRecords(createReducedInstanceState(), [...records.slice(0, 2), early], '3'),
+		).toThrow(ConversationRecordInvariantError);
+	});
+
+	it('encodes output records onto the response message id', () => {
+		const records = multiStepSubmission();
+		const outputRecords: ConversationRecord[] = [
+			{
+				...scope,
+				submissionId: 'submission_ms',
+				id: 'record_dw_live',
+				type: 'message_data_write',
+				timestamp: '2026-06-25T00:00:04.000Z',
+				name: 'caseCard',
+				data: { status: 'loaded' },
+			},
+			{
+				...scope,
+				submissionId: 'submission_ms',
+				id: 'record_mm_live',
+				type: 'message_metadata',
+				timestamp: '2026-06-25T00:00:04.100Z',
+				metadata: { finishedAt: 222 },
+			},
+		];
+		const state = reduceConversationRecords(
+			createReducedInstanceState(),
+			[...records, ...outputRecords],
+			'17',
+		);
+		const chunks = projectAgentConversationBatch({
+			state,
+			records: outputRecords,
+			batchOrdinal: 5,
+		});
+
+		expect(chunks).toMatchObject([
+			{ type: 'data-part', messageId: 'entry_a1', name: 'caseCard', data: { status: 'loaded' } },
+			{ type: 'message-metadata', messageId: 'entry_a1', metadata: { finishedAt: 222 } },
+		]);
+	});
+
 	it('preserves submission identity across a completed projected turn when records carry the same submission', () => {
 		const records = canonicalConversation().map((record) => {
 			if (record.type === 'user_message' || record.type === 'assistant_message_started') {

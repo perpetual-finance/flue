@@ -10,6 +10,7 @@ import type {
 	ConversationRecord,
 } from './conversation-records.ts';
 import { AttachmentNotAvailableError, ConversationRecordInvariantError } from './errors.ts';
+import { deepMergeMetadata } from './message-output.ts';
 import { createUserContextMessage, renderSignalMessage } from './message-rendering.ts';
 import {
 	createActionScopeName,
@@ -124,6 +125,28 @@ interface ReducedConversationStateBase {
 	inProgressMessages: Map<string, InProgressAssistantMessage>;
 	toolOutcomes: Map<string, ReducedToolOutcome>;
 	childConversations: Map<string, CanonicalChildSessionRef>;
+	/**
+	 * Custom response metadata per submission: `responseMetadata` from the
+	 * response's first `assistant_message_started` plus every later
+	 * `message_metadata` record, deep-merged in stream order. Projected onto
+	 * the response message under the server-authored keys.
+	 */
+	responseMetadata: Map<string, Record<string, unknown>>;
+	/**
+	 * Client-facing data parts per submission (`message_data_write`), in
+	 * first-write order. Each part is anchored after the assistant step that
+	 * had completed when it was first written; a later write to the same name
+	 * updates `data` in place, keeping the anchor.
+	 */
+	responseDataParts: Map<string, ResponseDataPart[]>;
+	/** Last completed assistant entry per submission — the data-write anchor. */
+	lastAssistantEntryBySubmission: Map<string, string>;
+}
+
+interface ResponseDataPart {
+	name: string;
+	anchorEntryId: string;
+	data: unknown;
 }
 
 export type ReducedConversationState = ReducedConversationStateBase &
@@ -243,6 +266,15 @@ function cloneReducedInstanceState(state: ReducedInstanceState): ReducedInstance
 						]),
 					),
 					childConversations: new Map(conversation.childConversations),
+					// Values are replaced immutably on update, so shallow copies suffice.
+					responseMetadata: new Map(conversation.responseMetadata),
+					responseDataParts: new Map(
+						[...conversation.responseDataParts].map(([submissionId, parts]) => [
+							submissionId,
+							[...parts],
+						]),
+					),
+					lastAssistantEntryBySubmission: new Map(conversation.lastAssistantEntryBySubmission),
 				},
 			]),
 		),
@@ -280,6 +312,9 @@ export function applyConversationRecord(
 			inProgressMessages: new Map(),
 			toolOutcomes: new Map(),
 			childConversations: new Map(),
+			responseMetadata: new Map(),
+			responseDataParts: new Map(),
+			lastAssistantEntryBySubmission: new Map(),
 		});
 		state.conversationScopes.set(scopeKey, record.conversationId);
 		state.recordsById.set(record.id, record);
@@ -346,6 +381,12 @@ export function applyConversationRecord(
 				blocks: new Map(),
 				blockIndexes: new Set(),
 			});
+			if (record.responseMetadata) {
+				if (!record.submissionId) {
+					fail(record, `Response metadata requires a tracked submission.`);
+				}
+				mergeResponseMetadata(conversation, record.submissionId, record.responseMetadata);
+			}
 			break;
 		case 'assistant_text_started': {
 			const message = getInProgress(conversation, record, record.messageId);
@@ -429,6 +470,9 @@ export function applyConversationRecord(
 				turnId: inProgress.turnId,
 				message,
 			});
+			if (inProgress.submissionId) {
+				conversation.lastAssistantEntryBySubmission.set(inProgress.submissionId, record.messageId);
+			}
 			break;
 		}
 		case 'tool_outcome': {
@@ -587,8 +631,46 @@ export function applyConversationRecord(
 		case 'state_write':
 			state.state.set(record.name, record.value);
 			break;
+		case 'message_metadata': {
+			if (!record.submissionId) fail(record, `Response metadata requires a tracked submission.`);
+			mergeResponseMetadata(conversation, record.submissionId, record.metadata);
+			break;
+		}
+		case 'message_data_write': {
+			if (!record.submissionId) {
+				fail(record, `Message data writes require a tracked submission.`);
+			}
+			const anchorEntryId = conversation.lastAssistantEntryBySubmission.get(record.submissionId);
+			if (!anchorEntryId) {
+				fail(record, `Message data writes require a completed assistant step to anchor to.`);
+			}
+			const parts = conversation.responseDataParts.get(record.submissionId) ?? [];
+			const index = parts.findIndex((part) => part.name === record.name);
+			const next =
+				index < 0
+					? [...parts, { name: record.name, anchorEntryId, data: record.data }]
+					: parts.map((part, partIndex) =>
+							// A rewrite updates the data in place: the part keeps its
+							// first-write anchor (and therefore its rendered position).
+							partIndex === index ? { ...part, data: record.data } : part,
+						);
+			conversation.responseDataParts.set(record.submissionId, next);
+			break;
+		}
 	}
 	state.recordsById.set(record.id, record);
+}
+
+function mergeResponseMetadata(
+	conversation: ReducedConversationState,
+	submissionId: string,
+	metadata: Record<string, unknown>,
+): void {
+	const current = conversation.responseMetadata.get(submissionId);
+	conversation.responseMetadata.set(
+		submissionId,
+		current ? deepMergeMetadata(current, metadata) : deepMergeMetadata({}, metadata),
+	);
 }
 
 function validateConversationCreation(

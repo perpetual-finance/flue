@@ -11,6 +11,13 @@ import type { PromptUsage } from '../types.ts';
 export type FlueConversationPart =
 	| { type: 'text'; text: string; state: 'streaming' | 'done' }
 	| { type: 'reasoning'; text: string; state: 'streaming' | 'done' }
+	/**
+	 * A named, client-facing data part streamed by the agent's
+	 * `useMessageData` writers (AI SDK convention: `data-<name>` type, payload
+	 * on `data`). The name is the part's identity within the response — a
+	 * later write updates the part in place.
+	 */
+	| { type: `data-${string}`; data: unknown }
 	| {
 			type: 'file';
 			mediaType: string;
@@ -110,6 +117,12 @@ export interface FlueConversationMessage {
 		timestamp?: string;
 		usage?: PromptUsage;
 		model?: { provider: string; id: string };
+		/**
+		 * Custom response metadata contributed by the agent's
+		 * `useMessageMetadata` producers. The three server-authored keys above
+		 * are reserved — producer values for them never override the server's.
+		 */
+		[key: string]: unknown;
 	};
 }
 

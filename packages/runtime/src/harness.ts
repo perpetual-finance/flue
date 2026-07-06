@@ -5,6 +5,7 @@ import type { ConversationRecordWriter } from './conversation-writer.ts';
 import { SessionAlreadyExistsError, SessionNotFoundError } from './errors.ts';
 import type { FlueExecutionContext } from './execution-interceptor.ts';
 import type { HookStateBuffer } from './hooks/state.ts';
+import type { AgentOutputChannel } from './message-output.ts';
 import type { AttachmentStore } from './runtime/attachment-store.ts';
 import { generateConversationId, generateSessionAffinityKey } from './runtime/ids.ts';
 import { createCwdSessionEnv, createFlueFs } from './sandbox.ts';
@@ -85,6 +86,8 @@ export class Harness implements FlueHarness {
 		private hookState?: HookStateBuffer,
 		/** Per-turn re-render for function agents; same routing as hookState. */
 		private rerender?: SessionRerender,
+		/** Client-facing output channel (useMessageData/useMessageMetadata); same routing as hookState. */
+		private output?: AgentOutputChannel,
 	) {
 		this.fs = createFlueFs(env);
 		if (scopeSignal) {
@@ -207,6 +210,7 @@ export class Harness implements FlueHarness {
 			executionContext: { ...this.executionContext, harness: harnessScope },
 			hookState: this.hookState,
 			rerender: this.rerender,
+			output: this.output,
 		});
 		await session.initializeCanonicalContext();
 		this.openSessions.set(sessionName, session);
