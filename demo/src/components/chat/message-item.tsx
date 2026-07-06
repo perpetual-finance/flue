@@ -36,6 +36,27 @@ function answerText(messages: FlueConversationMessage[]): string {
     .join('')
 }
 
+/**
+ * Relative "time ago" for the reply footer, read from agent-authored message
+ * metadata (`useMessageMetadata` attaching a `timestamp` ISO string is the
+ * convention this demo's agents follow). Absent metadata → no label.
+ */
+function relativeTime(messages: FlueConversationMessage[]): string | undefined {
+  const timestamp = messages
+    .map((message) => message.metadata?.timestamp)
+    .find((value): value is string => typeof value === 'string')
+  if (!timestamp) return undefined
+  const at = Date.parse(timestamp)
+  if (Number.isNaN(at)) return undefined
+  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000))
+  if (seconds < 60) return 'just now'
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
+}
+
 function UserGroup({
   messages,
   failedById,
@@ -96,6 +117,7 @@ function AssistantGroup({
   const model = messages
     .map((message) => message.metadata?.model)
     .findLast((value): value is string => typeof value === 'string')
+  const timeAgo = relativeTime(messages)
 
   const copy = async () => {
     try {
@@ -147,6 +169,7 @@ function AssistantGroup({
               {copied ? 'Copied' : 'Copy'}
             </Button>
             {model ? <span className="text-xs text-muted-foreground">{model}</span> : null}
+            {timeAgo ? <span className="text-xs text-muted-foreground">{timeAgo}</span> : null}
           </MessageFooter>
         ) : null}
       </MessageContent>

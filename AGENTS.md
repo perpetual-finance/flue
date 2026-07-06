@@ -33,6 +33,7 @@ A blueprint is a Markdown implementation guide returned by `flue add`; its kind 
 - `examples/hello-world/` — General runtime integration fixture.
 - `examples/cloudflare/` — Cloudflare integration fixture.
 - `examples/imported-skill/` — Packaged skill and release fixture.
+- `demo/` — Standalone Vite+React chat SPA that connects to any running Flue example server (defaults to `examples/react-chat` on port 3583). It doubles as a real-world demo and a real-world test of the codebase: not every change needs a run against it, but large changes to e2e client-visible behavior (streaming, conversation projection, the SDK wire contract) should be verified in it live, in a browser, where unit tests don't provide sufficient coverage. See `demo/README.md`.
 
 Project source roots resolve as the first existing of `<root>/.flue/`, `<root>/src/`, then `<root>/`. `app.ts` (the route map) lives at the source root; agent modules are found anywhere under it by the `'use agent'` directive scan, not by directory convention.
 

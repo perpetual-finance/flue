@@ -1,5 +1,5 @@
 import type { FlueConversationPart } from '@flue/react'
-import { Brain, ChevronRight, FileText } from 'lucide-react'
+import { Brain, ChevronRight, CloudSun, Database, FileText } from 'lucide-react'
 import { useState } from 'react'
 import {
   Attachment,
@@ -142,6 +142,75 @@ function ToolPart({ part }: { part: Extract<FlueConversationPart, { type: 'dynam
   )
 }
 
+/** The weather-card convention streamed by the react-chat `helper` agent. */
+interface WeatherData {
+  city: string
+  status: 'loading' | 'loaded'
+  tempC?: number
+  condition?: string
+}
+
+function readWeatherData(data: unknown): WeatherData | undefined {
+  if (typeof data !== 'object' || data === null) return undefined
+  const value = data as Record<string, unknown>
+  if (typeof value.city !== 'string') return undefined
+  if (value.status !== 'loading' && value.status !== 'loaded') return undefined
+  return {
+    city: value.city,
+    status: value.status,
+    ...(typeof value.tempC === 'number' ? { tempC: value.tempC } : {}),
+    ...(typeof value.condition === 'string' ? { condition: value.condition } : {}),
+  }
+}
+
+function WeatherCard({ weather }: { weather: WeatherData }) {
+  const loading = weather.status === 'loading'
+  return (
+    <div
+      data-testid="weather-card"
+      className="my-1.5 flex w-fit min-w-52 items-center gap-3 rounded-lg border border-border bg-muted/30 p-3"
+    >
+      <CloudSun className={cn('size-8 text-muted-foreground', loading && 'animate-pulse')} />
+      <div className="min-w-0">
+        <div className="text-sm font-medium">{weather.city}</div>
+        {loading ? (
+          <div className="text-xs text-muted-foreground shimmer">Checking the weather…</div>
+        ) : (
+          <div className="text-xs text-muted-foreground">
+            {weather.tempC}°C · {weather.condition}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Data parts are agent-defined (`useMessageData`): the part type is
+ * `data-<name>` and the payload rides `data`. The demo special-cases the
+ * weather card its helper agent streams; anything else renders as a generic
+ * named-data disclosure so pointing the demo at an arbitrary agent still
+ * shows what arrived.
+ */
+function DataPart({ part }: { part: Extract<FlueConversationPart, { data: unknown }> }) {
+  const name = part.type.slice('data-'.length)
+  if (name === 'weather') {
+    const weather = readWeatherData(part.data)
+    if (weather) return <WeatherCard weather={weather} />
+  }
+  return (
+    <div className="my-1.5 w-fit rounded-md border border-border bg-muted/30 p-2.5 text-xs">
+      <div className="mb-1 flex items-center gap-1.5 font-medium text-muted-foreground">
+        <Database className="size-3.5" />
+        {name}
+      </div>
+      <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-[0.78rem] leading-relaxed">
+        {JSON.stringify(part.data, null, 2)}
+      </pre>
+    </div>
+  )
+}
+
 function ToolPayload({ label, value }: { label: string; value: unknown }) {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
   return (
@@ -165,6 +234,6 @@ export function MessagePart({ part }: { part: FlueConversationPart }) {
     case 'dynamic-tool':
       return <ToolPart part={part} />
     default:
-      return null
+      return part.type.startsWith('data-') ? <DataPart part={part} /> : null
   }
 }
