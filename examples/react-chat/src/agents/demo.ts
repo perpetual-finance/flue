@@ -1,11 +1,11 @@
 'use agent';
 /**
- * Formerly `src/workflows/demo.ts` (`defineWorkflow` with a code-first `run`).
- * Workflows are gone: a background job is now an agent whose deterministic
- * code lives in a model-callable action, and a "run" is one conversation.
- * The UI triggers it by sending a message; the scripted model calls the
- * `run_demo` action, whose progress logs and structured result stream back
- * through the conversation like any other tool call.
+ * Formerly a `defineAction` demo (and before that `src/workflows/demo.ts`).
+ * Actions are gone: a background job is deterministic code in a model-callable
+ * tool. This one needs no model access of its own, so it is a plain tool —
+ * its progress lines stream through `ctx.log` and its structured result
+ * returns through the conversation like any other tool call. (Code that must
+ * drive models declares `harness: true` and receives `ctx.harness`.)
  */
 import {
 	fauxAssistantMessage,
@@ -13,41 +13,43 @@ import {
 	fauxToolCall,
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
-import { defineAction, defineAgent } from '@flue/runtime';
+import { defineAgent, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 
-const runDemo = defineAction({
-	name: 'run_demo',
-	description: 'Run the demo background job: logs progress and returns a structured receipt.',
-	input: v.object({ requestedAt: v.string() }),
-	async run({ log, input }) {
-		log.info('demo action started', { requestedAt: input.requestedAt });
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		log.info('demo action received input', { input });
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		log.info('demo action completed');
-		return { ok: true, requestedAt: input.requestedAt };
-	},
+// Scripted model so the demo runs fully offline. Module scope, not the agent
+// body: the agent function is a render that may re-run. Responses are consumed
+// one per model call, so the opening turn re-queues itself — one scripted
+// run per user message, indefinitely.
+const faux = registerFauxProvider({
+	api: 'react-chat-demo',
+	provider: 'react-chat-demo',
+	models: [{ id: 'demo' }],
 });
+const closingTurn = () => fauxAssistantMessage(fauxText('Demo job completed.'));
+const openingTurn: Parameters<typeof faux.setResponses>[0][number] = () => {
+	faux.appendResponses([closingTurn, openingTurn]);
+	return fauxAssistantMessage(
+		fauxToolCall('run_demo', { requestedAt: new Date().toISOString() }),
+		{ stopReason: 'toolUse' },
+	);
+};
+faux.setResponses([openingTurn]);
 
-export default defineAgent(() => {
-	// Scripted model so the demo runs fully offline: one tool call into the
-	// action, then a closing text reply.
-	const faux = registerFauxProvider({
-		api: 'react-chat-demo',
-		provider: 'react-chat-demo',
-		models: [{ id: 'demo' }],
+function Demo() {
+	useTool({
+		name: 'run_demo',
+		description: 'Run the demo background job: logs progress and returns a structured receipt.',
+		input: v.object({ requestedAt: v.string() }),
+		async run({ input, log }) {
+			log.info('demo job started', { requestedAt: input.requestedAt });
+			await new Promise((resolve) => setTimeout(resolve, 500));
+			log.info('demo job received input', { input });
+			await new Promise((resolve) => setTimeout(resolve, 500));
+			log.info('demo job completed');
+			return { ok: true, requestedAt: input.requestedAt };
+		},
 	});
-	faux.setResponses([
-		fauxAssistantMessage(
-			fauxToolCall('run_demo', { requestedAt: new Date().toISOString() }),
-			{ stopReason: 'toolUse' },
-		),
-		fauxAssistantMessage(fauxText('Demo action completed.')),
-	]);
-	return {
-		model: 'react-chat-demo/demo',
-		instructions: 'When asked to run the demo, call the run_demo action and report its result.',
-		actions: [runDemo],
-	};
-});
+	return 'When asked to run the demo, call the run_demo tool and report its result.';
+}
+
+export default defineAgent(Demo, { model: 'react-chat-demo/demo' });

@@ -13,23 +13,27 @@ import type {
 	ToolOutput,
 	ToolOutputSchema,
 } from './tool-types.ts';
+import type { FlueHarness, FlueLogger } from './types.ts';
 
 export function defineTool<
 	const TInput extends ToolInputSchema | undefined = undefined,
 	const TOutput extends ToolOutputSchema | undefined = undefined,
+	const THarness extends boolean = false,
 >(options: {
 	name: string;
 	description: string;
 	input?: TInput;
 	output?: TOutput;
-	run: ToolDefinition<TInput, TOutput>['run'];
-}): ToolDefinition<TInput, TOutput> {
+	harness?: THarness;
+	run: ToolDefinition<TInput, TOutput, THarness>['run'];
+}): ToolDefinition<TInput, TOutput, THarness> {
 	assertToolDefinition(options, 'defineTool()');
 	return Object.freeze({
 		name: options.name,
 		description: options.description,
 		input: options.input as TInput,
 		output: options.output as TOutput,
+		harness: options.harness as THarness,
 		run: options.run,
 	});
 }
@@ -57,25 +61,32 @@ export function assertToolDefinition(
 	if (tool.output !== undefined && !isValibotSchema(tool.output)) {
 		throw new Error(`[flue] ${label} output must be a Valibot schema.`);
 	}
+	if (tool.harness !== undefined && typeof tool.harness !== 'boolean') {
+		throw new Error(`[flue] ${label} harness must be a boolean.`);
+	}
 	if (typeof tool.run !== 'function') {
 		throw new Error(`[flue] ${label} run must be a function.`);
 	}
 }
 
-/** The environment surface the executing session injects into `ToolContext`. */
-export interface ToolRuntime {
-	shell: ToolContext<undefined>['shell'];
-	fs: ToolContext<undefined>['fs'];
+/** Runtime facilities the executing session injects into {@link ToolContext}. */
+export interface ToolRunFacilities {
+	log: FlueLogger;
+	/** Present only for `harness: true` tools, created per invocation. */
+	harness?: FlueHarness;
 }
 
 export function parseToolInput<TTool extends ToolDefinition>(
 	tool: TTool,
 	input?: unknown,
 	signal?: AbortSignal,
-	runtime?: ToolRuntime,
+	facilities?: ToolRunFacilities,
 ): { context: Parameters<TTool['run']>[0]; input: unknown } {
-	const env = runtime ?? createDetachedToolRuntime(tool.name);
-	const base = { signal, shell: env.shell, fs: env.fs };
+	const base: Record<string, unknown> = {
+		signal,
+		log: facilities?.log ?? NOOP_LOGGER,
+		...(facilities?.harness ? { harness: facilities.harness } : {}),
+	};
 	if (!tool.input) return { context: base as Parameters<TTool['run']>[0], input: undefined };
 	const parsedInput = parseValibot(tool.input, input === undefined ? {} : input);
 	if (!parsedInput.success) {
@@ -87,31 +98,12 @@ export function parseToolInput<TTool extends ToolDefinition>(
 	};
 }
 
-/**
- * `ctx.shell`/`ctx.fs` for a tool run with no session behind it (standalone
- * `validateAndRunTool` calls): every member throws on use, so tools that never
- * touch the environment still run standalone unchanged.
- */
-function createDetachedToolRuntime(toolName: string): ToolRuntime {
-	const unavailable = (surface: string): never => {
-		throw new Error(
-			`[flue] Tool "${toolName}" used ctx.${surface} outside an agent session. The runtime injects shell/fs when it executes the tool; a standalone run has no environment.`,
-		);
-	};
-	return {
-		shell: () => unavailable('shell()'),
-		fs: {
-			readFile: () => unavailable('fs.readFile()'),
-			readFileBuffer: () => unavailable('fs.readFileBuffer()'),
-			writeFile: () => unavailable('fs.writeFile()'),
-			stat: () => unavailable('fs.stat()'),
-			readdir: () => unavailable('fs.readdir()'),
-			exists: () => unavailable('fs.exists()'),
-			mkdir: () => unavailable('fs.mkdir()'),
-			rm: () => unavailable('fs.rm()'),
-		},
-	};
-}
+/** Standalone runs have no conversation stream to log into. */
+const NOOP_LOGGER: FlueLogger = {
+	info: () => {},
+	warn: () => {},
+	error: () => {},
+};
 
 export function validateToolOutput<TTool extends ToolDefinition>(
 	tool: TTool,
@@ -139,6 +131,11 @@ export async function validateAndRunTool<TTool extends ToolDefinition>(
 	input?: unknown,
 	signal?: AbortSignal,
 ): Promise<ToolOutput<TTool>> {
+	if (tool.harness) {
+		throw new Error(
+			`[flue] Tool "${tool.name}" declares \`harness: true\` and can only run inside an agent session — a standalone run has no harness.`,
+		);
+	}
 	const parsed = parseToolInput(tool, input, signal);
 	return validateToolOutput(tool, await tool.run(parsed.context));
 }

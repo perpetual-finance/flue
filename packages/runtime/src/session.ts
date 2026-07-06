@@ -131,12 +131,7 @@ import {
 	findTrailingPartialToolBatch,
 	isRetryableModelError,
 } from './submission-state.ts';
-import {
-	assertToolDefinition,
-	parseToolInput,
-	type ToolRuntime,
-	validateToolOutput,
-} from './tool.ts';
+import { assertToolDefinition, parseToolInput, validateToolOutput } from './tool.ts';
 import { getPreparedToolAdapter } from './tool-adapter.ts';
 import type {
 	AgentConfig,
@@ -2156,21 +2151,83 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	}
 
 	/**
-	 * The `ctx.shell`/`ctx.fs` surface for one custom-tool call: raw access to
-	 * the session's environment (no conversation record — the tool result is
-	 * the record), with the tool call's AbortSignal composed into every exec.
+	 * `ctx.log` for one tool call: progress lines emitted into the
+	 * conversation stream as `log` events attributed to the call. Not part of
+	 * the tool result; the model never sees them.
 	 */
-	private createToolRuntime(signal?: AbortSignal): ToolRuntime {
+	private createToolLogger(tool: string, toolCallId: string) {
+		const emit = (
+			level: 'info' | 'warn' | 'error',
+			message: string,
+			attributes?: Record<string, unknown>,
+		) => this.emit({ type: 'log', level, message, attributes: { ...attributes, tool, toolCallId } });
 		return {
-			shell: (command, options) =>
-				this.env.exec(command, {
-					cwd: options?.cwd,
-					env: options?.env,
-					timeoutMs: options?.timeoutMs,
-					signal,
-				}),
-			fs: this.fs,
+			info: (message: string, attributes?: Record<string, unknown>) =>
+				emit('info', message, attributes),
+			warn: (message: string, attributes?: Record<string, unknown>) =>
+				emit('warn', message, attributes),
+			error: (message: string, attributes?: Record<string, unknown>) =>
+				emit('error', message, attributes),
 		};
+	}
+
+	/**
+	 * The invocation-scoped harness behind `harness: true` tools and legacy
+	 * Actions: the one interface between tool code and the agent's runtime
+	 * (sandbox shell/fs, sessions, model calls). Scoped to the invocation
+	 * (`close()` after the run), depth-counted against the general delegation
+	 * cap — the fuse on tool→session→tool recursion — and every child
+	 * conversation it opens is durably retained under the invocation id.
+	 * Callers must remove it from {@link activeActionHarnesses} and `close()`
+	 * it when the run settles.
+	 */
+	private createInvocationHarness(invocationId: string, signal?: AbortSignal): ActionHarness {
+		if (!this.createActionHarness) {
+			throw new Error('[flue] This session cannot run harness-connected tools.');
+		}
+		if (this.delegationDepth >= MAX_DELEGATION_DEPTH) {
+			throw new DelegationDepthExceededError({ maxDepth: MAX_DELEGATION_DEPTH });
+		}
+		const harness = this.createActionHarness({
+			invocationId,
+			parentConversationId: this.conversationId,
+			depth: this.delegationDepth + 1,
+			signal,
+			executionContext: this.executionIdentity,
+			eventCallback: this.eventCallback,
+			config: this.config,
+			env: this.env,
+			tools: this.agentTools,
+			actions: this.actions,
+			retainSession: async (session, conversation, harnessScope) => {
+				await this.conversationWriter.ensureChildConversation({
+					parent: {
+						conversationId: this.conversationId,
+						harness: this.executionIdentity.harness ?? 'default',
+						session: this.name,
+					},
+					child: {
+						kind: 'action',
+						conversationId: conversation.conversationId,
+						harness: harnessScope,
+						session,
+						affinityKey: conversation.affinityKey,
+						createdAt: conversation.createdAt,
+						parentConversationId: this.conversationId,
+						actionInvocationId: invocationId,
+					},
+					ref: {
+						conversationId: conversation.conversationId,
+						harness: harnessScope,
+						session,
+						type: 'action',
+						invocationId,
+					},
+				});
+			},
+		});
+		this.activeActionHarnesses.add(harness);
+		return harness;
 	}
 
 	private createCustomTools(tools: ToolDefinition[]): AgentTool<any>[] {
@@ -2189,7 +2246,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					throw new Error('unreachable');
 				},
 			};
-			return this.wrapModelTool(tool, 'custom', (_toolCallId, params, signal) => {
+			return this.wrapModelTool(tool, 'custom', (toolCallId, params, signal) => {
 				if (preparedToolAdapter) {
 					return {
 						args: params,
@@ -2208,20 +2265,45 @@ export class Session implements FlueSession, AgentSubmissionSession {
 						result: toolResultText,
 					};
 				}
-				const parsed = parseToolInput(toolDef, params, signal, this.createToolRuntime(signal));
+				const parsed = parseToolInput(toolDef, params, signal, {
+					log: this.createToolLogger(toolDef.name, toolCallId),
+				});
 				return {
 					args: parsed.input,
 					run: async () => {
-						const output = validateToolOutput(toolDef, await toolDef.run(parsed.context));
-						return {
-							content: [
-								{
-									type: 'text' as const,
-									text: output === undefined ? 'null' : JSON.stringify(output),
+						// The harness materializes at run time (a refused/aborted call
+						// never creates one) and closes when the run settles. The
+						// invocation id is per execution ATTEMPT (a recovery re-run of
+						// the same toolCallId gets a fresh scope, so its child sessions
+						// never collide with a prior attempt's retained conversations).
+						const invocationId = toolDef.harness ? crypto.randomUUID() : undefined;
+						const harness = invocationId
+							? this.createInvocationHarness(invocationId, signal)
+							: undefined;
+						try {
+							const context = harness
+								? ({ ...parsed.context, harness } as unknown as typeof parsed.context)
+								: parsed.context;
+							const output = validateToolOutput(toolDef, await toolDef.run(context));
+							return {
+								content: [
+									{
+										type: 'text' as const,
+										text: output === undefined ? 'null' : JSON.stringify(output),
+									},
+								],
+								details: {
+									customTool: toolDef.name,
+									output,
+									...(invocationId ? { invocationId } : {}),
 								},
-							],
-							details: { customTool: toolDef.name, output },
-						};
+							};
+						} finally {
+							if (harness) {
+								this.activeActionHarnesses.delete(harness);
+								await harness.close();
+							}
+						}
 					},
 					result: (value) => (value.details as { output?: unknown }).output,
 				};
@@ -2263,50 +2345,8 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		parsedInput: ReturnType<typeof parseActionInput>,
 		signal?: AbortSignal,
 	): Promise<AgentToolResult<any>> {
-		if (!this.createActionHarness) throw new Error('[flue] This session cannot execute Actions.');
-		if (this.delegationDepth >= MAX_DELEGATION_DEPTH) {
-			throw new DelegationDepthExceededError({ maxDepth: MAX_DELEGATION_DEPTH });
-		}
 		const invocationId = crypto.randomUUID();
-		const harness = this.createActionHarness({
-			invocationId,
-			parentConversationId: this.conversationId,
-			depth: this.delegationDepth + 1,
-			signal,
-			executionContext: this.executionIdentity,
-			eventCallback: this.eventCallback,
-			config: this.config,
-			env: this.env,
-			tools: this.agentTools,
-			actions: this.actions,
-			retainSession: async (session, conversation, harness) => {
-				await this.conversationWriter.ensureChildConversation({
-					parent: {
-						conversationId: this.conversationId,
-						harness: this.executionIdentity.harness ?? 'default',
-						session: this.name,
-					},
-					child: {
-						kind: 'action',
-						conversationId: conversation.conversationId,
-						harness,
-						session,
-						affinityKey: conversation.affinityKey,
-						createdAt: conversation.createdAt,
-						parentConversationId: this.conversationId,
-						actionInvocationId: invocationId,
-					},
-					ref: {
-						conversationId: conversation.conversationId,
-						harness,
-						session,
-						type: 'action',
-						invocationId,
-					},
-				});
-			},
-		});
-		this.activeActionHarnesses.add(harness);
+		const harness = this.createInvocationHarness(invocationId, signal);
 		try {
 			const output = await runActionWithParsedInput(
 				action,

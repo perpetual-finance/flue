@@ -22,12 +22,20 @@ import { currentScope, requireRenderFrame } from './frame.ts';
 export function useTool<
 	const TInput extends ToolInputSchema | undefined = undefined,
 	const TOutput extends ToolOutputSchema | undefined = undefined,
+	const THarness extends boolean = false,
 >(tool: {
 	name: string;
 	description: string;
 	input?: TInput;
 	output?: TOutput;
-	run: ToolDefinition<TInput, TOutput>['run'];
+	/**
+	 * Connect this tool to the agent's runtime: `run` receives `harness` —
+	 * the one interface to the sandbox (`harness.shell()`, `harness.fs`) and
+	 * to models (`harness.session()`). Tools without it are pure functions of
+	 * their input.
+	 */
+	harness?: THarness;
+	run: ToolDefinition<TInput, TOutput, THarness>['run'];
 }): void {
 	const frame = requireRenderFrame('useTool');
 	assertToolDefinition(tool, 'useTool()');

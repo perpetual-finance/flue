@@ -146,7 +146,6 @@ export type {
 	ToolInputSchema,
 	ToolOutput,
 	ToolOutputSchema,
-	ToolShellOptions,
 } from './types.ts';
 export { FLUE_EVENT_SCHEMA_REVISION } from './types.ts';
 

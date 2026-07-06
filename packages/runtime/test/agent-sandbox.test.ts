@@ -159,22 +159,23 @@ describe('useSandbox() invariance', () => {
 	});
 });
 
-describe('ctx.shell / ctx.fs outside a session', () => {
-	it('throws a pointed error from the detached runtime', async () => {
+describe('harness tools outside a session', () => {
+	it('rejects standalone runs of harness: true tools', async () => {
 		const tool = defineTool({
 			name: 'probe',
 			description: 'Probe the environment.',
 			input: v.object({}),
-			run: ({ shell }) => shell('pwd').then((result) => result.stdout),
+			harness: true,
+			run: ({ harness }) => harness.shell('pwd').then((result) => result.stdout),
 		});
 		await expect(validateAndRunTool(tool, {})).rejects.toThrow(
-			/Tool "probe" used ctx\.shell\(\) outside an agent session/,
+			/Tool "probe" declares `harness: true` and can only run inside an agent session/,
 		);
 	});
 });
 
 describe('useSandbox end to end (node coordinator, faux provider)', () => {
-	it('threads the sandbox env to ctx.shell/ctx.fs instead of the default env', async () => {
+	it('threads the sandbox env to the tool harness instead of the default env', async () => {
 		const dbPath = createTempDbPath();
 		const adapter = sqlite(dbPath);
 		await adapter.migrate?.();
@@ -224,9 +225,10 @@ describe('useSandbox end to end (node coordinator, faux provider)', () => {
 				name: 'inspect',
 				description: 'Inspect the working tree.',
 				input: v.object({}),
-				run: async ({ shell, fs }) => {
-					const status = await shell('git status --porcelain');
-					const notes = await fs.readFile('/notes.md');
+				harness: true,
+				run: async ({ harness }) => {
+					const status = await harness.shell('git status --porcelain');
+					const notes = await harness.fs.readFile('/notes.md');
 					observed = `${status.stdout}|${notes}`;
 					return observed;
 				},
