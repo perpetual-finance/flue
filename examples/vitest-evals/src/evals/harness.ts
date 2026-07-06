@@ -29,6 +29,39 @@ function messageText(message: FlueConversationMessage | undefined): string {
 		.join('');
 }
 
+/**
+ * Message metadata is agent-authored. This harness reads the convention the
+ * example agent follows: `useMessageMetadata('finish', (event) => ({ usage:
+ * event.usage, model: '<provider>/<id>' }))`. Agents that attach nothing
+ * simply report no usage.
+ */
+interface EvalUsageMetadata {
+	input: number;
+	output: number;
+	totalTokens: number;
+	cost: { total: number };
+}
+
+function readUsageMetadata(value: unknown): EvalUsageMetadata | undefined {
+	if (typeof value !== 'object' || value === null) return undefined;
+	const usage = value as Record<string, unknown>;
+	const cost = usage.cost as Record<string, unknown> | undefined;
+	if (
+		typeof usage.input !== 'number' ||
+		typeof usage.output !== 'number' ||
+		typeof usage.totalTokens !== 'number' ||
+		typeof cost?.total !== 'number'
+	) {
+		return undefined;
+	}
+	return {
+		input: usage.input,
+		output: usage.output,
+		totalTokens: usage.totalTokens,
+		cost: { total: cost.total },
+	};
+}
+
 function collectToolCalls(messages: FlueConversationMessage[]): SimpleToolCallRecord[] {
 	return messages.flatMap((message) =>
 		message.parts.flatMap((part) => {
@@ -70,18 +103,21 @@ export function createFlueAgentHarness(options: FlueAgentHarnessOptions) {
 			await conversation.wait(admission, { signal });
 			const history = await conversation.history({ signal });
 			const reply = lastAssistantMessage(history.messages);
-			const usage = reply?.metadata?.usage;
-			const model = reply?.metadata?.model;
+			const usage = readUsageMetadata(reply?.metadata?.usage);
+			const model = typeof reply?.metadata?.model === 'string' ? reply.metadata.model : undefined;
+			const [provider, ...modelId] = model?.split('/') ?? [];
 
 			return {
 				output: messageText(reply),
 				toolCalls: collectToolCalls(history.messages),
-				// The reply's own message metadata carries usage/model — the same
-				// data the removed prompt-result surface used to return.
+				// Usage/model come from the agent's own `useMessageMetadata('finish')`
+				// producer — see the convention documented on readUsageMetadata.
 				...((usage ?? model)
 					? {
 							usage: {
-								...(model ? { provider: model.provider, model: model.id } : {}),
+								...(provider && modelId.length > 0
+									? { provider, model: modelId.join('/') }
+									: {}),
 								...(usage
 									? {
 											inputTokens: usage.input,

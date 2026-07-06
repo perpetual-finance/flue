@@ -733,12 +733,8 @@ describe('reduceConversationRecords()', () => {
 				{ type: 'text', text: 'Done.', state: 'done' },
 			],
 		});
-		// Identity metadata stays the first step's; usage sums across steps.
-		expect(messages[1]?.metadata).toEqual({
-			timestamp: '2026-06-25T00:00:02.000Z',
-			usage: { ...usage, input: 20, output: 4, totalTokens: 24 },
-			model: { provider: 'test', id: 'test-model' },
-		});
+		// Metadata is agent-authored only; the runtime stamps nothing.
+		expect(messages[1]?.metadata).toBeUndefined();
 	});
 
 	it('streams a live continuation step into the open response message', () => {
@@ -812,14 +808,12 @@ describe('reduceConversationRecords()', () => {
 		]);
 	});
 
-	it('merges custom response metadata under the server-authored keys', () => {
+	it('projects agent-authored response metadata, start and finish deep-merged', () => {
 		const records = multiStepSubmission().map((record) =>
 			record.type === 'assistant_message_started' && record.messageId === 'entry_a1'
 				? {
 						...record,
-						// `usage` is server-reserved: the producer's value must never
-						// override the summed server usage.
-						responseMetadata: { createdAt: 111, usage: 'CUSTOM-MUST-LOSE' },
+						responseMetadata: { timestamp: '2026-06-25T00:00:02.000Z', op: { startedAt: 111 } },
 					}
 				: record,
 		);
@@ -833,20 +827,18 @@ describe('reduceConversationRecords()', () => {
 					id: 'record_mm_finish',
 					type: 'message_metadata',
 					timestamp: '2026-06-25T00:00:04.000Z',
-					metadata: { finishedAt: 222, op: { nested: true } },
+					metadata: { op: { finishedAt: 222 } },
 				},
 			],
 			'16',
 		);
 		const messages = projectConversationUi(required(state.conversations.get('conv_01')), '16').messages;
 
+		// The message's metadata is exactly what the producers wrote — the
+		// `timestamp` here exists because the agent attached it, not the runtime.
 		expect(messages[1]?.metadata).toEqual({
-			createdAt: 111,
-			finishedAt: 222,
-			op: { nested: true },
 			timestamp: '2026-06-25T00:00:02.000Z',
-			usage: { ...usage, input: 20, output: 4, totalTokens: 24 },
-			model: { provider: 'test', id: 'test-model' },
+			op: { startedAt: 111, finishedAt: 222 },
 		});
 	});
 
@@ -932,18 +924,12 @@ describe('reduceConversationRecords()', () => {
 		]);
 	});
 
-	it('stamps each projected message with its canonical creation timestamp', () => {
+	it('projects no runtime-authored metadata — metadata is entirely agent-authored', () => {
 		const state = reduceConversationRecords(createReducedInstanceState(), canonicalConversation(), '8');
 		const messages = projectConversationUi(required(state.conversations.get('conv_01')), '8').messages;
 
-		// User message: the time it was recorded. Assistant message: generation
-		// start (the assistant_message_started record), carried alongside usage/model.
-		expect(messages[0]?.metadata).toEqual({ timestamp: '2026-06-25T00:00:01.000Z' });
-		expect(messages[1]?.metadata).toEqual({
-			timestamp: '2026-06-25T00:00:02.000Z',
-			usage,
-			model: { provider: 'test', id: 'test-model' },
-		});
+		expect(messages[0]?.metadata).toBeUndefined();
+		expect(messages[1]?.metadata).toBeUndefined();
 	});
 
 	it('projects an in-progress assistant shell even before its first delta so post-hydration deltas attach', () => {
@@ -964,7 +950,6 @@ describe('reduceConversationRecords()', () => {
 				purpose: 'user',
 				display: 'visible',
 				parts: [{ type: 'text', text: 'Hello', state: 'done' }],
-				metadata: { timestamp: '2026-06-25T00:00:01.000Z' },
 			},
 			{
 				id: 'entry_assistant',
@@ -973,7 +958,6 @@ describe('reduceConversationRecords()', () => {
 				display: 'visible',
 				turnId: 'turn_01',
 				parts: [],
-				metadata: { timestamp: '2026-06-25T00:00:02.000Z' },
 			},
 		]);
 	});
@@ -994,7 +978,6 @@ describe('reduceConversationRecords()', () => {
 				text: 'Hi ',
 				state: 'streaming',
 			}],
-			metadata: { timestamp: '2026-06-25T00:00:02.000Z' },
 		});
 		expect(buildConversationContext(conversation)).toHaveLength(1);
 		expect(classifyConversationSubmission(conversation, 'entry_user', { contextWindow: 100000 })).toMatchObject({
@@ -1043,7 +1026,6 @@ describe('reduceConversationRecords()', () => {
 				turnId: 'turn_07',
 				signal: { tagName: 'dispatch', attributes: { agent: 'planner', dispatchId: 'dispatch_01' } },
 				parts: [{ type: 'text', text: '{"input":"go"}', state: 'done' }],
-				metadata: { timestamp: '2026-06-25T00:00:01.000Z' },
 			},
 		]);
 	});

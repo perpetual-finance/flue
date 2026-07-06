@@ -94,58 +94,35 @@ describe('applyConversationChunk()', () => {
 		expect(conversation.messages[0]?.parts[0]).toEqual({ type: 'text', text: 'hello', state: 'done' });
 	});
 
-	it('carries the message-started timestamp onto metadata and preserves it through deltas and completion', () => {
+	it('carries agent-authored start metadata onto the message and preserves it through deltas and completion', () => {
 		const conversation = reduce([
-			{ type: 'message-started', conversationId: 'c1', messageId: 'a1', timestamp: '2026-06-25T00:00:02.000Z' },
-			{ type: 'message-delta', conversationId: 'c1', messageId: 'a1', kind: 'text', delta: 'hi' },
 			{
-				type: 'message-completed',
+				type: 'message-started',
 				conversationId: 'c1',
 				messageId: 'a1',
-				usage: {
-					input: 1,
-					output: 1,
-					cacheRead: 0,
-					cacheWrite: 0,
-					totalTokens: 2,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-				},
+				metadata: { timestamp: '2026-06-25T00:00:02.000Z' },
 			},
+			{ type: 'message-delta', conversationId: 'c1', messageId: 'a1', kind: 'text', delta: 'hi' },
+			{ type: 'message-completed', conversationId: 'c1', messageId: 'a1' },
 		]);
 		expect(conversation.messages[0]?.metadata).toEqual({
 			timestamp: '2026-06-25T00:00:02.000Z',
-			usage: {
-				input: 1,
-				output: 1,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 2,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
 		});
 	});
 
 	it('assembles a multi-step response into one message when later steps reuse the message id', () => {
-		const stepUsage = {
-			input: 10,
-			output: 2,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 12,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		};
 		// The runtime addresses every step of a submission at the response
 		// message id, so the second message-started is a no-op and step 2's parts
-		// accumulate after step 1's tool call. Usage sums across completions.
+		// accumulate after step 1's tool call.
 		const conversation = reduce([
 			{ type: 'message-started', conversationId: 'c1', messageId: 'a1', submissionId: 's1' },
 			{ type: 'message-delta', conversationId: 'c1', messageId: 'a1', kind: 'text', delta: 'Looking. ' },
 			{ type: 'tool-input', conversationId: 'c1', messageId: 'a1', toolCallId: 'call_1', toolName: 'lookup', input: {} },
-			{ type: 'message-completed', conversationId: 'c1', messageId: 'a1', usage: stepUsage },
+			{ type: 'message-completed', conversationId: 'c1', messageId: 'a1' },
 			{ type: 'tool-output', conversationId: 'c1', toolCallId: 'call_1', output: 'found it' },
 			{ type: 'message-started', conversationId: 'c1', messageId: 'a1', submissionId: 's1' },
 			{ type: 'message-delta', conversationId: 'c1', messageId: 'a1', kind: 'text', delta: 'Done.' },
-			{ type: 'message-completed', conversationId: 'c1', messageId: 'a1', usage: stepUsage },
+			{ type: 'message-completed', conversationId: 'c1', messageId: 'a1' },
 		]);
 
 		expect(conversation.messages).toHaveLength(1);
@@ -154,12 +131,6 @@ describe('applyConversationChunk()', () => {
 			{ type: 'dynamic-tool', toolName: 'lookup', toolCallId: 'call_1', state: 'output-available', input: {}, output: 'found it', errorText: undefined },
 			{ type: 'text', text: 'Done.', state: 'done' },
 		]);
-		expect(conversation.messages[0]?.metadata?.usage).toEqual({
-			...stepUsage,
-			input: 20,
-			output: 4,
-			totalTokens: 24,
-		});
 	});
 
 	it('appends a data part at the live end and updates it in place on rewrite', () => {
@@ -186,38 +157,27 @@ describe('applyConversationChunk()', () => {
 		]);
 	});
 
-	it('merges custom metadata under the server-authored keys', () => {
-		const stepUsage = {
-			input: 1,
-			output: 1,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 2,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		};
+	it('deep-merges agent-authored metadata across the start and finish points', () => {
 		const conversation = reduce([
 			{
 				type: 'message-started',
 				conversationId: 'c1',
 				messageId: 'a1',
-				timestamp: '2026-06-25T00:00:02.000Z',
-				metadata: { createdAt: 111, timestamp: 'CUSTOM-MUST-LOSE' },
+				metadata: { op: { startedAt: 111 }, timestamp: '2026-06-25T00:00:02.000Z' },
 			},
 			{ type: 'message-delta', conversationId: 'c1', messageId: 'a1', kind: 'text', delta: 'hi' },
-			{ type: 'message-completed', conversationId: 'c1', messageId: 'a1', usage: stepUsage },
+			{ type: 'message-completed', conversationId: 'c1', messageId: 'a1' },
 			{
 				type: 'message-metadata',
 				conversationId: 'c1',
 				messageId: 'a1',
-				metadata: { finishedAt: 222, usage: 'CUSTOM-MUST-LOSE' },
+				metadata: { op: { finishedAt: 222 } },
 			},
 		]);
 
 		expect(conversation.messages[0]?.metadata).toEqual({
-			createdAt: 111,
-			finishedAt: 222,
+			op: { startedAt: 111, finishedAt: 222 },
 			timestamp: '2026-06-25T00:00:02.000Z',
-			usage: stepUsage,
 		});
 	});
 

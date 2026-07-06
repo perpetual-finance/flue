@@ -68,13 +68,6 @@ export function createAgentOutputChannel(): AgentOutputChannel {
 }
 
 /**
- * Message-metadata keys the runtime authors on every message. Custom response
- * metadata never overrides them: producers' values for these keys are dropped
- * where custom and server metadata combine (projection and SDK assembly).
- */
-const RESERVED_MESSAGE_METADATA_KEYS = ['timestamp', 'usage', 'model'] as const;
-
-/**
  * Run one point's producers in call order and deep-merge their results.
  * Fail-fast on purpose: a producer throw propagates (wrapped with the point
  * for context) and fails the submission through the normal failure path — it
@@ -125,14 +118,6 @@ export function deepMergeMetadata(
 			isPlainObject(current) && isPlainObject(value) ? deepMergeMetadata(current, value) : value;
 	}
 	return merged;
-}
-
-/** Drop the server-reserved keys from custom response metadata. */
-export function stripReservedMetadataKeys(
-	metadata: Record<string, unknown>,
-): Record<string, unknown> {
-	const reserved: readonly string[] = RESERVED_MESSAGE_METADATA_KEYS;
-	return Object.fromEntries(Object.entries(metadata).filter(([key]) => !reserved.includes(key)));
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

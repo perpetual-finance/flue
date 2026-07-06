@@ -11,7 +11,6 @@ import type {
 import type { ReducedConversationState, ReducedInstanceState } from './conversation-reducer.ts';
 import { getActiveConversationPath } from './conversation-reducer.ts';
 import { toolResultOutput, toolResultText } from './message-rendering.ts';
-import type { PromptUsage } from './types.ts';
 
 interface AgentConversationSettlement {
 	submissionId: string;
@@ -48,10 +47,7 @@ type ConversationStreamChunkBody =
 			/** Turn this assistant message belongs to; the SDK stamps it onto the
 			 *  synthesized message so live grouping matches the snapshot projection. */
 			turnId?: string;
-			/** Server-authored generation-start time as an ISO 8601 string. */
-			timestamp?: string;
-			model?: { provider: string; id: string };
-			/** Custom response metadata from `useMessageMetadata('start')` producers. */
+			/** Agent-authored response metadata from `useMessageMetadata('start')` producers. */
 			metadata?: Record<string, unknown>;
 	  }
 	| {
@@ -84,7 +80,7 @@ type ConversationStreamChunkBody =
 	  }
 	| { type: 'tool-output'; conversationId: string; toolCallId: string; output: unknown; durationMs?: number }
 	| { type: 'tool-output-error'; conversationId: string; toolCallId: string; errorText: string; durationMs?: number }
-	| { type: 'message-completed'; conversationId: string; messageId: string; usage?: PromptUsage }
+	| { type: 'message-completed'; conversationId: string; messageId: string }
 	| {
 			type: 'submission-settled';
 			conversationId: string;
@@ -236,7 +232,6 @@ function encodeRecord(
 						display: 'visible',
 						...(record.submissionId ? { submissionId: record.submissionId } : {}),
 						...(record.turnId ? { turnId: record.turnId } : {}),
-						metadata: { timestamp: record.timestamp },
 						parts: record.content.map((content) =>
 							content.type === 'text'
 								? { type: 'text', text: content.text, state: 'done' }
@@ -271,7 +266,6 @@ function encodeRecord(
 						...(record.submissionId ? { submissionId: record.submissionId } : {}),
 						...(record.turnId ? { turnId: record.turnId } : {}),
 						...(Object.keys(signal).length > 0 ? { signal } : {}),
-						metadata: { timestamp: record.timestamp },
 						parts: [{ type: 'text', text: record.content, state: 'done' }],
 					},
 				},
@@ -283,12 +277,8 @@ function encodeRecord(
 					type: 'message-started',
 					conversationId,
 					messageId: uiMessageId(record.messageId),
-					timestamp: record.timestamp,
 					...(record.submissionId ? { submissionId: record.submissionId } : {}),
 					...(record.turnId ? { turnId: record.turnId } : {}),
-					...(typeof record.modelInfo.provider === 'string' && typeof record.modelInfo.model === 'string'
-						? { model: { provider: record.modelInfo.provider, id: record.modelInfo.model } }
-						: {}),
 					...(record.responseMetadata ? { metadata: record.responseMetadata } : {}),
 				},
 			];
@@ -319,7 +309,6 @@ function encodeRecord(
 					type: 'message-completed',
 					conversationId,
 					messageId: uiMessageId(record.messageId),
-					...(record.usage ? { usage: record.usage as PromptUsage } : {}),
 				},
 			];
 		case 'tool_results_committed':

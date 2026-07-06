@@ -1,4 +1,3 @@
-import type { PromptUsage } from '../types.ts';
 
 /**
  * One renderable part of a conversation message.
@@ -107,23 +106,13 @@ export interface FlueConversationMessage {
 	/** Typed signal detail; present only on `system`-role messages. */
 	signal?: FlueConversationSignalDescriptor;
 	parts: FlueConversationPart[];
-	metadata?: {
-		/**
-		 * Server-authored message creation time as an ISO 8601 string. For a user
-		 * message this is when it was recorded; for an assistant message it is when
-		 * generation started. A local optimistic echo carries a client-authored time
-		 * until its canonical copy (with the server time) arrives.
-		 */
-		timestamp?: string;
-		usage?: PromptUsage;
-		model?: { provider: string; id: string };
-		/**
-		 * Custom response metadata contributed by the agent's
-		 * `useMessageMetadata` producers. The three server-authored keys above
-		 * are reserved — producer values for them never override the server's.
-		 */
-		[key: string]: unknown;
-	};
+	/**
+	 * Message metadata is entirely agent-authored: whatever the agent's
+	 * `useMessageMetadata` producers return, deep-merged in call order. The
+	 * runtime stamps nothing — keys like `timestamp`, `usage`, or `model` are
+	 * app conventions, present only when the agent attaches them.
+	 */
+	metadata?: Record<string, unknown>;
 }
 
 /** Terminal outcome of one tracked agent submission within a conversation. */

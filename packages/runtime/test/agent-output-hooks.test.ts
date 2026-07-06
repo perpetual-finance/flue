@@ -294,13 +294,13 @@ describe('output hooks end to end (node coordinator, faux provider)', () => {
 			{ type: 'data-caseCard', data: { status: 'loaded' } },
 			{ type: 'text', text: 'Done.' },
 		]);
-		// Start + finish metadata deep-merged; the finish event carried the
-		// response's aggregate usage; server keys still authored by the server.
+		// The metadata is exactly what the producers wrote (start + finish
+		// deep-merged); the finish event carried the response's aggregate usage.
 		expect(response?.metadata).toMatchObject({
 			op: { startedAt: 111, finishedAt: 222 },
 		});
-		expect(response?.metadata?.totalTokens).toBe(response?.metadata?.usage?.totalTokens);
-		expect(typeof response?.metadata?.timestamp).toBe('string');
+		expect(typeof response?.metadata?.totalTokens).toBe('number');
+		expect(Object.keys(response?.metadata ?? {}).sort()).toEqual(['op', 'totalTokens']);
 	});
 
 	it('fails the submission when a finish producer throws — settled failed, no retry, no recovery', async () => {

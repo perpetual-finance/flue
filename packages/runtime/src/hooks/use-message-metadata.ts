@@ -12,12 +12,13 @@ import { requireRenderFrame } from './frame.ts';
  * runs after the response's last model step completes, with the response's
  * aggregate usage on the event. Whatever the producer returns is deep-merged
  * onto the response message's `metadata` (multiple producers compose in call
- * order; `undefined` values are skipped). The server-authored keys —
- * `timestamp`, `usage`, `model` — are reserved and never overridden.
+ * order; `undefined` values are skipped). Message metadata is entirely
+ * agent-authored — the runtime stamps nothing, so keys like `timestamp` or
+ * `usage` exist only when you attach them.
  *
  * ```ts
  * function useTimestamps() {
- *   useMessageMetadata('start', () => ({ createdAt: Date.now() }));
+ *   useMessageMetadata('start', () => ({ timestamp: new Date().toISOString() }));
  *   useMessageMetadata('finish', () => ({ finishedAt: Date.now() }));
  * }
  *

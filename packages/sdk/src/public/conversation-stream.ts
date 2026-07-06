@@ -1,4 +1,3 @@
-import type { PromptUsage } from '../types.ts';
 import type {
 	FlueConversationMessage,
 	FlueConversationPart,
@@ -47,10 +46,7 @@ export type ConversationStreamChunk =
 			/** Turn this assistant message belongs to; stamped onto the synthesized
 			 *  message so live grouping matches the snapshot projection. */
 			turnId?: string;
-			/** Server-authored generation-start time as an ISO 8601 string. */
-			timestamp?: string;
-			model?: { provider: string; id: string };
-			/** Custom response metadata from `useMessageMetadata('start')` producers. */
+			/** Agent-authored response metadata from `useMessageMetadata('start')` producers. */
 			metadata?: Record<string, unknown>;
 			position: ConversationChunkPosition;
 	  }
@@ -88,7 +84,7 @@ export type ConversationStreamChunk =
 	  }
 	| { type: 'tool-output'; conversationId: string; toolCallId: string; output: unknown; durationMs?: number; position: ConversationChunkPosition }
 	| { type: 'tool-output-error'; conversationId: string; toolCallId: string; errorText: string; durationMs?: number; position: ConversationChunkPosition }
-	| { type: 'message-completed'; conversationId: string; messageId: string; usage?: PromptUsage; position: ConversationChunkPosition }
+	| { type: 'message-completed'; conversationId: string; messageId: string; position: ConversationChunkPosition }
 	| {
 			type: 'submission-settled';
 			conversationId: string;
@@ -180,7 +176,6 @@ export function applyConversationChunk(
 				// step of the same response — a no-op here; its parts accumulate on
 				// the open message.
 				if (messages.some((message) => message.id === chunk.messageId)) return messages;
-				const custom = chunk.metadata ? stripReservedMetadataKeys(chunk.metadata) : undefined;
 				return [
 					...messages,
 					{
@@ -191,15 +186,7 @@ export function applyConversationChunk(
 						...(chunk.submissionId ? { submissionId: chunk.submissionId } : {}),
 						...(chunk.turnId ? { turnId: chunk.turnId } : {}),
 						parts: [],
-						...(chunk.timestamp || chunk.model || custom
-							? {
-									metadata: {
-										...custom,
-										...(chunk.timestamp ? { timestamp: chunk.timestamp } : {}),
-										...(chunk.model ? { model: chunk.model } : {}),
-									},
-								}
-							: {}),
+						...(chunk.metadata ? { metadata: chunk.metadata } : {}),
 					},
 				];
 			});
@@ -209,16 +196,9 @@ export function applyConversationChunk(
 				if (index < 0) return messages;
 				const message = messages[index] as FlueConversationMessage;
 				const next = [...messages];
-				// Custom metadata deep-merges under the server-authored keys: the
-				// reserved keys the message already carries always win.
 				next[index] = {
 					...message,
-					metadata: {
-						...deepMergeMetadata(message.metadata ?? {}, stripReservedMetadataKeys(chunk.metadata)),
-						...(message.metadata?.timestamp !== undefined ? { timestamp: message.metadata.timestamp } : {}),
-						...(message.metadata?.usage !== undefined ? { usage: message.metadata.usage } : {}),
-						...(message.metadata?.model !== undefined ? { model: message.metadata.model } : {}),
-					},
+					metadata: deepMergeMetadata(message.metadata ?? {}, chunk.metadata),
 				};
 				return next;
 			});
@@ -261,7 +241,7 @@ export function applyConversationChunk(
 				...(chunk.durationMs !== undefined ? { durationMs: chunk.durationMs } : {}),
 			}));
 		case 'message-completed':
-			return completeMessage(state, chunk.messageId, chunk.usage);
+			return completeMessage(state, chunk.messageId);
 		case 'submission-settled':
 			return applySettlement(state, chunk);
 		default: {
@@ -388,11 +368,7 @@ function applyToolResult(
 	});
 }
 
-function completeMessage(
-	state: FlueConversationState,
-	messageId: string,
-	usage: PromptUsage | undefined,
-): FlueConversationState {
+function completeMessage(state: FlueConversationState, messageId: string): FlueConversationState {
 	return mutateMessages(state, (messages) => {
 		const index = messages.findIndex((message) => message.id === messageId);
 		if (index < 0) return messages;
@@ -403,24 +379,9 @@ function completeMessage(
 			parts: message.parts.map((part) =>
 				part.type === 'text' || part.type === 'reasoning' ? { ...part, state: 'done' } : part,
 			),
-			// A multi-step response completes once per step; usage accumulates so
-			// the message ends with the whole response's total, matching the
-			// snapshot projection.
-			...(usage
-				? { metadata: { ...message.metadata, usage: addUsage(message.metadata?.usage, usage) } }
-				: {}),
 		};
 		return next;
 	});
-}
-
-/** Message-metadata keys the runtime authors; custom metadata never overrides them. */
-const RESERVED_METADATA_KEYS = ['timestamp', 'usage', 'model'];
-
-function stripReservedMetadataKeys(metadata: Record<string, unknown>): Record<string, unknown> {
-	return Object.fromEntries(
-		Object.entries(metadata).filter(([key]) => !RESERVED_METADATA_KEYS.includes(key)),
-	);
 }
 
 /** Deep-merge metadata: later values win, plain objects merge recursively, proto keys dropped. */
@@ -443,24 +404,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
 	const proto = Object.getPrototypeOf(value);
 	return proto === Object.prototype || proto === null;
-}
-
-function addUsage(current: PromptUsage | undefined, next: PromptUsage): PromptUsage {
-	if (!current) return next;
-	return {
-		input: current.input + next.input,
-		output: current.output + next.output,
-		cacheRead: current.cacheRead + next.cacheRead,
-		cacheWrite: current.cacheWrite + next.cacheWrite,
-		totalTokens: current.totalTokens + next.totalTokens,
-		cost: {
-			input: current.cost.input + next.cost.input,
-			output: current.cost.output + next.cost.output,
-			cacheRead: current.cost.cacheRead + next.cost.cacheRead,
-			cacheWrite: current.cost.cacheWrite + next.cost.cacheWrite,
-			total: current.cost.total + next.cost.total,
-		},
-	};
 }
 
 function applySettlement(

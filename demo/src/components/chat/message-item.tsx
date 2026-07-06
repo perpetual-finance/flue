@@ -90,7 +90,12 @@ function AssistantGroup({
 }) {
   const { showThinking } = usePreferences()
   const [copied, setCopied] = useState(false)
-  const model = messages.findLast((message) => message.metadata?.model)?.metadata?.model
+  // Metadata is agent-authored (`useMessageMetadata`); `model` as a string is
+  // the convention this demo's agents follow. Absent when the agent doesn't
+  // attach it.
+  const model = messages
+    .map((message) => message.metadata?.model)
+    .findLast((value): value is string => typeof value === 'string')
 
   const copy = async () => {
     try {
@@ -141,11 +146,7 @@ function AssistantGroup({
               {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
               {copied ? 'Copied' : 'Copy'}
             </Button>
-            {model ? (
-              <span className="text-xs text-muted-foreground">
-                {model.provider}/{model.id}
-              </span>
-            ) : null}
+            {model ? <span className="text-xs text-muted-foreground">{model}</span> : null}
           </MessageFooter>
         ) : null}
       </MessageContent>

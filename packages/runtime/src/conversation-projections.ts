@@ -12,7 +12,6 @@ import {
 	buildConversationContextEntries,
 	getActiveConversationPath,
 } from './conversation-reducer.ts';
-import { stripReservedMetadataKeys } from './message-output.ts';
 import { toolResultOutput, toolResultText } from './message-rendering.ts';
 import type { SubmissionState } from './submission-state.ts';
 import { classifySubmissionState } from './submission-state.ts';
@@ -103,14 +102,13 @@ export interface ConversationUiMessage {
 	/** Typed signal detail; present only on `system`-role messages. */
 	signal?: ConversationSignalDescriptor;
 	parts: ConversationUiPart[];
-	metadata?: {
-		/** Server-authored message creation time as an ISO 8601 string. */
-		timestamp?: string;
-		usage?: PromptUsage;
-		model?: { provider: string; id: string };
-		/** Custom response metadata from `useMessageMetadata` producers. */
-		[key: string]: unknown;
-	};
+	/**
+	 * Message metadata is entirely agent-authored (`useMessageMetadata`
+	 * producers, deep-merged in call order). The runtime stamps nothing — keys
+	 * like `timestamp`, `usage`, or `model` are app conventions, present only
+	 * when the agent attaches them.
+	 */
+	metadata?: Record<string, unknown>;
 }
 
 /**
@@ -243,6 +241,7 @@ export function projectConversationUi(
 			mergeAssistantContinuation(open, projected);
 			continue;
 		}
+		if (projected.submissionId) applyResponseMetadata(projected, conversation);
 		messages.push(projected);
 	}
 	return { conversationId: conversation.conversationId, streamOffset, messages };
@@ -250,19 +249,14 @@ export function projectConversationUi(
 
 /**
  * Fold a later assistant step of the same submission into its response
- * message: parts append in record order; usage sums across steps; identity
- * fields (id, timestamp, model, turnId) stay the first step's.
+ * message: parts append in record order; identity fields (id, turnId) stay
+ * the first step's.
  */
 function mergeAssistantContinuation(
 	open: ConversationUiMessage,
 	continuation: ConversationUiMessage,
 ): void {
 	open.parts.push(...continuation.parts);
-	const usage = continuation.metadata?.usage;
-	if (usage) {
-		const current = open.metadata?.usage;
-		open.metadata = { ...open.metadata, usage: current ? addUsage(current, usage) : usage };
-	}
 }
 
 /**
@@ -284,22 +278,14 @@ function appendAnchoredDataParts(
 	}
 }
 
-/**
- * Combine custom response metadata (`useMessageMetadata`) with the
- * server-authored fields. Server keys are reserved and win; everything else
- * the producers wrote survives as-is.
- */
+/** Attach the response's agent-authored metadata (`useMessageMetadata`). */
 function applyResponseMetadata(
 	message: ConversationUiMessage,
 	conversation: ReducedConversationState,
 ): void {
 	if (!message.submissionId) return;
 	const custom = conversation.responseMetadata.get(message.submissionId);
-	if (!custom) return;
-	message.metadata = {
-		...stripReservedMetadataKeys(custom),
-		...message.metadata,
-	};
+	if (custom) message.metadata = custom;
 }
 
 export function getActiveConversationPathSince(
@@ -375,7 +361,6 @@ function projectCompletedMessage(entry: ReducedMessageEntry): ConversationUiMess
 			...(entry.submissionId ? { submissionId: entry.submissionId } : {}),
 			...(entry.turnId ? { turnId: entry.turnId } : {}),
 			parts,
-			metadata: { timestamp: entry.timestamp },
 		};
 	}
 	if (message.role === 'signal') {
@@ -393,7 +378,6 @@ function projectCompletedMessage(entry: ReducedMessageEntry): ConversationUiMess
 			...(entry.turnId ? { turnId: entry.turnId } : {}),
 			...(Object.keys(signal).length > 0 ? { signal } : {}),
 			parts: [{ type: 'text', text: message.content, state: 'done' }],
-			metadata: { timestamp: entry.timestamp },
 		};
 	}
 	if (message.role !== 'assistant') return undefined;
@@ -417,11 +401,6 @@ function projectCompletedMessage(entry: ReducedMessageEntry): ConversationUiMess
 				state: 'input-available',
 			};
 		}),
-		metadata: {
-			timestamp: entry.timestamp,
-			usage: message.usage,
-			model: { provider: message.provider, id: message.model },
-		},
 	};
 }
 
@@ -505,6 +484,5 @@ function projectInProgressMessage(
 		...(message.submissionId ? { submissionId: message.submissionId } : {}),
 		...(message.turnId ? { turnId: message.turnId } : {}),
 		parts,
-		metadata: { timestamp: message.timestamp },
 	};
 }
