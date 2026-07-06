@@ -81,13 +81,28 @@ describe('useDelivery()', () => {
 		).toThrow(/not available in a subagent render/);
 	});
 
-	it('returns undefined when no delivered message triggered the run', () => {
-		let seen: DeliveredMessage | undefined | 'unset' = 'unset';
-		renderAgentFunctionWithStructure(() => {
-			seen = useDelivery();
-			return 'Base.';
-		}, CONFIG);
-		expect(seen).toBeUndefined();
+	it('throws when no delivery backs the render, and reads one supplied to a direct render', () => {
+		// Inside the runtime every run is triggered by a delivered message, so
+		// absence is an error, not undefined.
+		expect(() =>
+			renderAgentFunctionWithStructure(() => {
+				useDelivery();
+				return 'Base.';
+			}, CONFIG),
+		).toThrow(/no delivered message behind this render/);
+
+		// Direct render harnesses (tests, tooling) supply one via render state.
+		const message: DeliveredMessage = { kind: 'user', body: 'Hello.' };
+		let seen: DeliveredMessage | undefined;
+		renderAgentFunctionWithStructure(
+			() => {
+				seen = useDelivery();
+				return 'Base.';
+			},
+			CONFIG,
+			{ snapshot: new Map(), store: undefined, delivery: message },
+		);
+		expect(seen).toEqual(message);
 	});
 
 	it('exposes the dispatched signal, attributes included, to every render of the run', async () => {
@@ -109,7 +124,7 @@ describe('useDelivery()', () => {
 			body: 'Triage issue #42.',
 			attributes: { issue: '42' },
 		};
-		const rendersSaw: Array<DeliveredMessage | undefined> = [];
+		const rendersSaw: DeliveredMessage[] = [];
 		let toolSaw: DeliveredMessage | undefined;
 
 		function assistant() {

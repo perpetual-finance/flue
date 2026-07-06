@@ -15,7 +15,7 @@ import { requireRenderFrame } from './frame.ts';
  * export default function IssueTriage() {
  *   const delivery = useDelivery();
  *   const issue =
- *     delivery?.kind === 'signal' ? Number(delivery.attributes?.issue) : undefined;
+ *     delivery.kind === 'signal' ? Number(delivery.attributes?.issue) : undefined;
  *
  *   useTool({
  *     name: 'load_issue',
@@ -31,17 +31,25 @@ import { requireRenderFrame } from './frame.ts';
  *   `attributes` sent directly over HTTP.
  * - Constant across every render of one run (render-per-turn re-renders read
  *   the same triggering input; a new delivery starts a new run).
- * - Returns `undefined` when no delivered message triggered the run —
- *   guard for it, or make the model-facing contract require one.
+ * - Always present: every agent run is triggered by a delivered message, so
+ *   the return is non-optional. A render with no delivery behind it (a bare
+ *   tooling/test render outside the runtime) throws — supply one through the
+ *   render-state context there.
  * - Throws in subagent renders: delegates receive their world through the
  *   task prompt, not the parent's input.
  */
-export function useDelivery(): DeliveredMessage | undefined {
+export function useDelivery(): DeliveredMessage {
 	const frame = requireRenderFrame('useDelivery');
 	if (frame.kind === 'subagent') {
 		throw new Error(
 			'[flue] useDelivery() is not available in a subagent render. Delegates run detached tasks with no delivery of their own; pass what the delegate needs through the task prompt instead.',
 		);
 	}
-	return frame.state?.delivery;
+	const delivery = frame.state?.delivery;
+	if (!delivery) {
+		throw new Error(
+			'[flue] useDelivery() found no delivered message behind this render. Every agent run in the runtime is triggered by one; a direct render outside the runtime (tests, tooling) must supply a `delivery` in its render-state context.',
+		);
+	}
+	return delivery;
 }
