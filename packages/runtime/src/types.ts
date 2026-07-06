@@ -342,7 +342,7 @@ export interface AgentConfig {
 	definitionSkills?: Skill[];
 	/** Discovered at runtime from .agents/skills/ in the session's cwd. */
 	skills: Record<string, Skill>;
-	subagents?: Record<string, AgentProfile>;
+	subagents?: Record<string, DeclaredSubagent>;
 	actions?: ActionDefinition[];
 	/** Agent-wide default model. Per-call values override this. */
 	model: Model<any>;
@@ -380,8 +380,8 @@ export interface AgentProfile {
 	/** Custom model-callable tools available to sessions initialized from this profile. */
 	tools?: ToolDefinition[];
 	actions?: ActionDefinition[];
-	/** Named profiles available for delegated `session.task()` operations. */
-	subagents?: AgentProfile[];
+	/** Named delegates available for `task` delegation. */
+	subagents?: DeclaredSubagent[];
 	/** Default reasoning effort. Individual operations may override this value. */
 	thinkingLevel?: ThinkingLevel;
 	/**
@@ -401,6 +401,35 @@ export interface AgentProfile {
 	durability?: DurabilityConfig;
 }
 
+/**
+ * A capability-backed delegate declared with `useSubagent(...)`. The
+ * `capabilities` function is rendered at delegation time — in its own frame,
+ * fresh per task — into the delegate's instructions, tools, skills, and
+ * nested subagents. Identity/capability fields come only from that render;
+ * environment fields (`model`, `thinkingLevel`) inherit from the parent's
+ * turn unless overridden here.
+ */
+export interface SubagentDefinition {
+	/** Catalog name the model uses to select this delegate on the `task` tool. */
+	name: string;
+	/** Catalog line — how the model decides when to delegate to this agent. */
+	description: string;
+	/** Capability function defining the delegate's whole world. */
+	capabilities: Capability;
+	/** Model specifier override. Inherits the parent's model when omitted. */
+	model?: string;
+	/** Reasoning-effort override. Inherits when omitted. */
+	thinkingLevel?: ThinkingLevel;
+}
+
+/** Either declared-subagent form: a legacy profile or a capability-backed delegate. */
+export type DeclaredSubagent = AgentProfile | SubagentDefinition;
+
+/** Discriminate a capability-backed delegate from a legacy profile. */
+export function isSubagentDefinition(value: DeclaredSubagent): value is SubagentDefinition {
+	return typeof (value as Partial<SubagentDefinition>).capabilities === 'function';
+}
+
 /** Configuration returned by a {@link defineAgent} initializer. */
 export interface AgentRuntimeConfig {
 	/** Reusable baseline profile. Agent definition fields replace or extend profile values. */
@@ -416,8 +445,8 @@ export interface AgentRuntimeConfig {
 	/** Additional custom model-callable tools available to initialized sessions. */
 	tools?: ToolDefinition[];
 	actions?: ActionDefinition[];
-	/** Additional named profiles available for delegated `session.task()` operations. */
-	subagents?: AgentProfile[];
+	/** Additional named delegates available for `task` delegation. */
+	subagents?: DeclaredSubagent[];
 	/** Default reasoning effort. Individual operations may override this value. */
 	thinkingLevel?: ThinkingLevel;
 	/**
@@ -850,7 +879,7 @@ export interface ShellResult {
 // ─── Sandbox ────────────────────────────────────────────────────────────────
 
 export interface SessionToolFactoryOptions {
-	subagents: Record<string, AgentProfile>;
+	subagents: Record<string, DeclaredSubagent>;
 }
 
 /** Sandbox adapter-supplied model-facing tools. Flue appends `task` separately. */

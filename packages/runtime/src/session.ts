@@ -90,6 +90,7 @@ import {
 	redactObservationDetailImages,
 } from './event-redaction.ts';
 import { type FlueExecutionContext, interceptExecution } from './execution-interceptor.ts';
+import { resolveSubagentDefinition } from './hooks/render.ts';
 import type { HookStateBuffer, HookStateWrite } from './hooks/state.ts';
 import { renderSignalMessage } from './message-rendering.ts';
 import { assertImagesWithinLimit } from './persisted-images.ts';
@@ -166,6 +167,7 @@ import type {
 	ThinkingLevel,
 	ToolDefinition,
 } from './types.ts';
+import { isSubagentDefinition } from './types.ts';
 import { emptyUsage, fromProviderUsage } from './usage.ts';
 
 const MAX_DELEGATION_DEPTH = 4;
@@ -2524,8 +2526,14 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	private resolveDeclaredSubagent(name: string): AgentProfile {
 		const subagents = this.config.subagents ?? {};
 		const subagent = subagents[name];
-		if (subagent) return subagent;
-		throw new SubagentNotDeclaredError({ subagent: name, available: Object.keys(subagents) });
+		if (!subagent) {
+			throw new SubagentNotDeclaredError({ subagent: name, available: Object.keys(subagents) });
+		}
+		// Capability-backed delegates render here — at delegation time, fresh
+		// per task (resume included), outside any parent render — into the same
+		// self-contained profile shape the task machinery has always consumed.
+		if (isSubagentDefinition(subagent)) return resolveSubagentDefinition(subagent);
+		return subagent;
 	}
 
 	private async runTaskForTool(

@@ -27,6 +27,11 @@ import { requireRenderFrame } from './frame.ts';
  */
 export function useSandbox(sandbox: SandboxFactory): void {
 	const frame = requireRenderFrame('useSandbox');
+	if (frame.kind === 'subagent') {
+		throw new Error(
+			"[flue] useSandbox() is not available in a subagent render. Delegates share the parent agent's environment (scope work with the task call's cwd instead).",
+		);
+	}
 	if (
 		!sandbox ||
 		typeof sandbox !== 'object' ||

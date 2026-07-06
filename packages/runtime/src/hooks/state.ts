@@ -59,6 +59,11 @@ export function useState(options: {
 	default?: unknown;
 }): [unknown, StateSetter<unknown>] {
 	const frame = requireRenderFrame('useState');
+	if (frame.kind === 'subagent') {
+		throw new Error(
+			'[flue] useState() is not available in a subagent render. Durable state is scoped to the agent instance; delegates run detached tasks with no state channel. Pass what the delegate needs through the task prompt instead.',
+		);
+	}
 	const { name, schema } = assertUseStateOptions(options);
 	if (frame.stateNames.has(name)) {
 		throw new Error(

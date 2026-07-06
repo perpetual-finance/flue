@@ -1,5 +1,5 @@
 import type { ToolDefinition } from '../tool-types.ts';
-import type { SandboxFactory, Skill } from '../types.ts';
+import type { SandboxFactory, Skill, SubagentDefinition } from '../types.ts';
 
 /**
  * The render frame: the module-global slot Flue Hooks resolve against while
@@ -52,6 +52,13 @@ export interface HookStateStore {
 }
 
 export interface RenderFrame {
+	/**
+	 * What is being rendered: a root agent, or a subagent capability rendered
+	 * at delegation time. Subagent frames reject the hooks whose contracts are
+	 * root-scoped (`useState` — durable state is instance-scoped; `useSandbox`
+	 * — delegates share the parent environment).
+	 */
+	kind: 'agent' | 'subagent';
 	root: AttachScope;
 	/** Current attachment target is the last entry; the root sits at index 0. */
 	scopeStack: AttachScope[];
@@ -63,6 +70,8 @@ export interface RenderFrame {
 	sandbox: SandboxFactory | undefined;
 	/** `useSkill` mounts across the whole render, in call order; names unique. */
 	skills: Skill[];
+	/** `useSubagent` declarations across the whole render, in call order; names unique. */
+	subagents: SubagentDefinition[];
 	state: RenderStateContext | undefined;
 }
 
@@ -93,6 +102,7 @@ export function currentScope(frame: RenderFrame): AttachScope {
 export function renderWithFrame<T>(
 	render: () => T,
 	state?: RenderStateContext,
+	kind: RenderFrame['kind'] = 'agent',
 ): { result: T; frame: RenderFrame } {
 	if (currentFrame) {
 		throw new Error(
@@ -101,12 +111,14 @@ export function renderWithFrame<T>(
 	}
 	const root: AttachScope = { instructions: [], tools: [] };
 	const frame: RenderFrame = {
+		kind,
 		root,
 		scopeStack: [root],
 		capabilities: [],
 		stateNames: new Set(),
 		sandbox: undefined,
 		skills: [],
+		subagents: [],
 		state,
 	};
 	currentFrame = frame;

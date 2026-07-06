@@ -8,12 +8,14 @@ import type {
 	AgentProfile,
 	AgentRuntimeConfig,
 	Capability,
+	DeclaredSubagent,
 	FunctionAgentConfig,
 	FunctionAgentDefinition,
 	Skill,
 	ThinkingLevel,
 	ToolDefinition,
 } from './types.ts';
+import { isSubagentDefinition } from './types.ts';
 
 const agentDefinitions = new WeakSet<object>();
 
@@ -354,7 +356,7 @@ function assertSubagents(
 	values: unknown[] | undefined,
 	label: string,
 	activeDefinitions: WeakSet<object>,
-): asserts values is AgentProfile[] | undefined {
+): asserts values is DeclaredSubagent[] | undefined {
 	for (const [index, value] of values?.entries() ?? []) {
 		if (!value || typeof value !== 'object') {
 			throw new Error(`[flue] ${label} subagents[${index}] must be an agent definition object.`);
@@ -367,6 +369,10 @@ function assertSubagents(
 					'Delegated task sessions run inside the parent operation; configure durability on the agent definition instead.',
 			);
 		}
+		// Capability-backed delegates (useSubagent) are validated at the hook
+		// call site; their capabilities render at delegation time, so the
+		// profile-shape assertions below do not apply to them.
+		if (isSubagentDefinition(value as DeclaredSubagent)) continue;
 		assertAgentProfile(value, `${label} subagents[${index}]`, activeDefinitions);
 	}
 }

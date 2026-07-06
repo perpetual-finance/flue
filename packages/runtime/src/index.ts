@@ -54,6 +54,7 @@ export { use } from './hooks/use.ts';
 export { useInstruction } from './hooks/use-instruction.ts';
 export { useSandbox } from './hooks/use-sandbox.ts';
 export { useSkill } from './hooks/use-skill.ts';
+export { useSubagent } from './hooks/use-subagent.ts';
 export { useTool } from './hooks/use-tool.ts';
 export { type FlueInstrumentation, instrument } from './instrumentation.ts';
 export type { McpServerConnection, McpServerOptions, McpTransport } from './mcp.ts';
@@ -89,6 +90,7 @@ export type {
 	CallHandle,
 	Capability,
 	CompactionConfig,
+	DeclaredSubagent,
 	DeliveredAttachment,
 	DeliveredMessage,
 	DispatchReceipt,
@@ -135,6 +137,7 @@ export type {
 	Skill,
 	SkillOptions,
 	SkillReference,
+	SubagentDefinition,
 	TaskOptions,
 	ThinkingLevel,
 	ToolContext,

@@ -1,5 +1,11 @@
 import { ToolNameConflictError } from '../errors.ts';
-import type { AgentRuntimeConfig, Capability, FunctionAgentConfig } from '../types.ts';
+import type {
+	AgentProfile,
+	AgentRuntimeConfig,
+	Capability,
+	FunctionAgentConfig,
+	SubagentDefinition,
+} from '../types.ts';
 import {
 	type CapabilityRecord,
 	type RenderFrame,
@@ -37,6 +43,7 @@ export interface AgentRenderStructure {
 	toolNames: readonly string[];
 	stateNames: readonly string[];
 	skillNames: readonly string[];
+	subagentNames: readonly string[];
 	hasSandbox: boolean;
 }
 
@@ -62,6 +69,7 @@ export function renderAgentFunctionWithStructure(
 			...(config.cwd !== undefined ? { cwd: config.cwd } : {}),
 			...(frame.sandbox !== undefined ? { sandbox: frame.sandbox } : {}),
 			...(frame.skills.length > 0 ? { skills: frame.skills } : {}),
+			...(frame.subagents.length > 0 ? { subagents: frame.subagents } : {}),
 		},
 		structure: {
 			capabilities: frame.capabilities.map((record) => record.capability),
@@ -69,8 +77,40 @@ export function renderAgentFunctionWithStructure(
 			toolNames: tools.map((tool) => tool.name),
 			stateNames: [...frame.stateNames],
 			skillNames: frame.skills.map((skill) => skill.name),
+			subagentNames: frame.subagents.map((subagent) => subagent.name),
 			hasSandbox: frame.sandbox !== undefined,
 		},
+	};
+}
+
+/**
+ * Render a capability-backed delegate into the self-contained profile shape
+ * the task machinery consumes. Runs at delegation time, in its own frame,
+ * fresh per task — closures read current values, and two delegations to the
+ * same subagent render independently. Subagent frames reject root-scoped
+ * hooks (`useState`, `useSandbox`); nested `useSubagent` declarations pass
+ * through for the delegate's own task tool, governed by the delegation
+ * depth cap.
+ */
+export function resolveSubagentDefinition(subagent: SubagentDefinition): AgentProfile {
+	const { result, frame } = renderWithFrame(
+		subagent.capabilities as () => unknown,
+		undefined,
+		'subagent',
+	);
+	assertAgentInstruction(result);
+	assertUniqueToolNames(frame);
+	const instructions = composeAgentDocument(result, frame);
+	const tools = [...frame.root.tools, ...frame.capabilities.flatMap((record) => record.tools)];
+	return {
+		name: subagent.name,
+		description: subagent.description,
+		...(subagent.model !== undefined ? { model: subagent.model } : {}),
+		...(subagent.thinkingLevel !== undefined ? { thinkingLevel: subagent.thinkingLevel } : {}),
+		...(instructions !== undefined ? { instructions } : {}),
+		...(tools.length > 0 ? { tools } : {}),
+		...(frame.skills.length > 0 ? { skills: frame.skills } : {}),
+		...(frame.subagents.length > 0 ? { subagents: frame.subagents } : {}),
 	};
 }
 
@@ -99,6 +139,8 @@ export function assertRenderStructureInvariance(
 	if (stateDelta) problems.push(`state ${stateDelta}`);
 	const skillDelta = setDelta(previous.skillNames, next.skillNames);
 	if (skillDelta) problems.push(`skills ${skillDelta}`);
+	const subagentDelta = setDelta(previous.subagentNames, next.subagentNames);
+	if (subagentDelta) problems.push(`subagents ${subagentDelta}`);
 	if (previous.hasSandbox !== next.hasSandbox) {
 		problems.push(`sandbox ${next.hasSandbox ? 'added' : 'removed'}`);
 	}
