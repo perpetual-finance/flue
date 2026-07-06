@@ -17,6 +17,12 @@ starting point rather than a finished product.
 - **Tool calls** as one-line summaries (built-ins get custom renderers, e.g.
   `read <path>`); click to expand the input/output payloads.
 - **Subagent delegation** (the framework `task` tool) surfaced as "Delegated to `<agent>`".
+- **Data parts** (`useMessageData`): the react-chat `helper` agent streams a live weather
+  card (`data-weather`) that shows a loading state mid-tool-run and updates in place; any
+  other `data-<name>` part renders as a generic named-JSON disclosure.
+- **Agent-authored message metadata** (`useMessageMetadata`): the reply footer's model
+  label and relative "time ago" come from `model`/`timestamp` metadata the agent attaches —
+  the runtime stamps nothing, so both simply disappear for agents that attach none.
 - Multi-step replies grouped into one block (a tool-calling turn + an answer turn share a
   single avatar and footer).
 - Multi-turn conversations with server-side history.
