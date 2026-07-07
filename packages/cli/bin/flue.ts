@@ -478,7 +478,14 @@ function loadRunEnvironment(envFile: string | undefined): EnvLoader {
 }
 
 function describeRunError(error: unknown): string {
-	if (error instanceof Error) return error.message;
+	if (error instanceof Error) {
+		// Flue errors carry the caller-safe specifics in `details` (the message
+		// itself is deliberately generic) — surface them.
+		const details = (error as { details?: unknown }).details;
+		return typeof details === 'string' && details.trim() !== ''
+			? `${error.message} ${details}`
+			: error.message;
+	}
 	if (typeof error === 'string') return error;
 	if (error && typeof error === 'object' && 'message' in error) {
 		const message = (error as { message: unknown }).message;
@@ -556,9 +563,10 @@ async function run(args: RunArgs) {
 	} catch (err) {
 		presenter.flush();
 		if (!execution.signal.aborted) {
-			// Setup failures (module resolution, config, persistence) surface here;
-			// agent-execution failures settle and land in the branch above.
-			cliError(err instanceof Error ? err.message : String(err));
+			// Setup and admission failures (module resolution, config, persistence,
+			// creation-data validation) surface here; agent-execution failures
+			// settle and land in the branch above.
+			cliError(describeRunError(err));
 			process.exitCode = 1;
 		}
 	} finally {
