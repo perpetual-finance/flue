@@ -1431,6 +1431,9 @@ importers:
       '@flue/runtime':
         specifier: workspace:*
         version: link:../runtime
+      ulidx:
+        specifier: ^2.4.1
+        version: 2.4.1
     devDependencies:
       mongodb:
         specifier: ^6.17.0
@@ -1576,6 +1579,9 @@ importers:
       '@flue/runtime':
         specifier: workspace:*
         version: link:../runtime
+      ulidx:
+        specifier: ^2.4.1
+        version: 2.4.1
     devDependencies:
       redis:
         specifier: ^5.12.1
@@ -1902,6 +1908,9 @@ importers:
       tinyglobby:
         specifier: ^0.2.15
         version: 0.2.17
+      ulidx:
+        specifier: ^2.4.1
+        version: 2.4.1
     devDependencies:
       '@cloudflare/vite-plugin':
         specifier: ^1.39.2

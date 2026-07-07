@@ -2,11 +2,11 @@
  * Flue's attributed-import transform, moved from the CLI's legacy build
  * pipeline. Behavior is intentionally unchanged.
  */
-import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { PackagedSkillDirectory } from '@flue/runtime';
 import { buildPackagedSkill, parseSkillMarkdown } from '@flue/runtime/internal';
+import { ulid } from 'ulidx';
 import { normalizePath, type Plugin, transformWithOxc } from 'vite';
 
 const MARKDOWN_MODULE_PREFIX = '\0flue-markdown:';
@@ -33,7 +33,7 @@ const SENSITIVE_FILE_PATTERNS = [/\.key$/i, /\.pem$/i, /\.p12$/i, /\.pfx$/i, /^s
  */
 export function importAttributePlugin(): Plugin {
 	let viteRoot = '';
-	const internalModuleToken = randomUUID();
+	const internalModuleToken = ulid();
 	const internalSkillModulePrefix = `${SKILL_MODULE_PREFIX}${internalModuleToken}:`;
 	const encodedInternalSkillModulePrefix = `__x00__flue-skill:${internalModuleToken}:`;
 	const trackedSkillDirectories = new Set<string>();

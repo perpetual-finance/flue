@@ -29,7 +29,8 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
-		"@flue/runtime": "workspace:*"
+		"@flue/runtime": "workspace:*",
+		"ulidx": "^2.4.1"
 	},
 	"devDependencies": {
 		"redis": "^5.12.1",

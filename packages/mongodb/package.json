@@ -30,7 +30,8 @@
 		"check:lint": "biome lint ."
 	},
 	"dependencies": {
-		"@flue/runtime": "workspace:*"
+		"@flue/runtime": "workspace:*",
+		"ulidx": "^2.4.1"
 	},
 	"devDependencies": {
 		"mongodb": "^6.17.0",

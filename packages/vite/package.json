@@ -38,7 +38,8 @@
 		"@flue/runtime": "workspace:*",
 		"@hono/node-server": "^2.0.3",
 		"magic-string": "^0.30.21",
-		"tinyglobby": "^0.2.15"
+		"tinyglobby": "^0.2.15",
+		"ulidx": "^2.4.1"
 	},
 	"peerDependencies": {
 		"vite": "^8.0.0"

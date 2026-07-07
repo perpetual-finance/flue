@@ -9,6 +9,7 @@ import {
 	type ConversationStreamStore,
 	StreamListenerRegistry,
 } from './conversation-stream-store.ts';
+import { generateIncarnationId } from './ids.ts';
 import { formatOffset, parseOffset } from './stream-offsets.ts';
 
 const DEFAULT_READ_LIMIT = 100;
@@ -76,7 +77,7 @@ class SqlConversationStreamStore implements ConversationStreamStore {
 			await tx.query(
 				`${dialect.insertIgnorePrefix} INTO flue_conversation_streams (path, identity_json, incarnation)
 				 VALUES (${p(1)}, ${p(2)}, ${p(3)}) ${dialect.insertIgnoreSuffix}`,
-				[path, data, crypto.randomUUID()],
+				[path, data, generateIncarnationId()],
 			);
 			const rows = await tx.query(
 				`SELECT identity_json FROM flue_conversation_streams WHERE path = ${p(1)}`,

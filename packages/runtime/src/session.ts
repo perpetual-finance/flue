@@ -122,7 +122,13 @@ import type {
 	ProcessAgentSubmissionOptions,
 } from './runtime/agent-submissions.ts';
 import { type AttachmentStore, createAttachmentRef } from './runtime/attachment-store.ts';
-import { generateOperationId, generateTurnId } from './runtime/ids.ts';
+import {
+	generateBlockId,
+	generateInvocationId,
+	generateOperationId,
+	generateTaskId,
+	generateTurnId,
+} from './runtime/ids.ts';
 import {
 	getProviderTelemetry,
 	getRegisteredApiKey,
@@ -868,7 +874,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			log: this.createEffectLogger(index),
 			signal,
 			get harness() {
-				harness ??= session.createInvocationHarness(crypto.randomUUID(), signal);
+				harness ??= session.createInvocationHarness(generateInvocationId(), signal);
 				return harness as unknown as FlueHarness;
 			},
 		};
@@ -1183,7 +1189,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					const aEvent = event.assistantMessageEvent;
 					const assistant = this.canonicalAssistant;
 					if (assistant && aEvent.type === 'text_start') {
-						const blockId = `block_${crypto.randomUUID()}`;
+						const blockId = generateBlockId();
 						assistant.blocks.set(aEvent.contentIndex, {
 							id: blockId,
 							type: 'text',
@@ -1236,7 +1242,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 						]);
 						block.completed = true;
 					} else if (assistant && aEvent.type === 'thinking_start') {
-						const blockId = `block_${crypto.randomUUID()}`;
+						const blockId = generateBlockId();
 						assistant.blocks.set(aEvent.contentIndex, {
 							id: blockId,
 							type: 'reasoning',
@@ -1306,7 +1312,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 								...this.canonicalEnvelope('assistant_tool_call'),
 								type: 'assistant_tool_call',
 								messageId: assistant.messageId,
-								blockId: `block_${crypto.randomUUID()}`,
+								blockId: generateBlockId(),
 								blockIndex: aEvent.contentIndex,
 								toolCallId: aEvent.toolCall.id,
 								name: aEvent.toolCall.name,
@@ -2660,7 +2666,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 						// invocation id is per execution ATTEMPT (a recovery re-run of
 						// the same toolCallId gets a fresh scope, so its child sessions
 						// never collide with a prior attempt's retained conversations).
-						const invocationId = toolDef.harness ? crypto.randomUUID() : undefined;
+						const invocationId = toolDef.harness ? generateInvocationId() : undefined;
 						const harness = invocationId
 							? this.createInvocationHarness(invocationId, signal)
 							: undefined;
@@ -2955,7 +2961,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		assertImagesWithinLimit(options?.images);
 		if (signal?.aborted) throw abortErrorFor(signal);
 
-		const taskId = crypto.randomUUID();
+		const taskId = generateTaskId();
 		const taskAgent = options?.agent
 			? this.resolveSubagent(options.agent, taskDeliveryMessage(text, options?.images))
 			: undefined;
@@ -3324,7 +3330,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				...this.canonicalEnvelope('assistant_tool_call'),
 				type: 'assistant_tool_call',
 				messageId: assistantMessageId,
-				blockId: `block_${crypto.randomUUID()}`,
+				blockId: generateBlockId(),
 				blockIndex: 0,
 				toolCallId,
 				name: 'bash',

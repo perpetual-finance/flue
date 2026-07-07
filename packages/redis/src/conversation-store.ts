@@ -14,6 +14,7 @@ import {
 	parseOffset,
 	StreamListenerRegistry,
 } from '@flue/runtime/adapter';
+import { ulid } from 'ulidx';
 import {
 	acquireConversationProducerScript,
 	appendConversationScript,
@@ -43,7 +44,7 @@ export class RedisConversationStreamStore implements ConversationStreamStore {
 		const result = strings(await this.runner.eval(
 			createConversationScript,
 			[this.keys.conversation(path), this.keys.conversations()],
-			[JSON.stringify(identity), crypto.randomUUID(), path],
+			[JSON.stringify(identity), `inc_${ulid()}`, path],
 		));
 		if (result[0] === 'conflict') throw failure('create', path, 'Stream identity conflicts.');
 	}

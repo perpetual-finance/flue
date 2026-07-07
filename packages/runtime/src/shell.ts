@@ -9,6 +9,7 @@
 import type { AgentToolResult } from '@earendil-works/pi-agent-core';
 import { formatBashResult } from './agent.ts';
 import { type FlueExecutionContext, interceptExecution } from './execution-interceptor.ts';
+import { generateToolCallId } from './runtime/ids.ts';
 import type {
 	FlueEventInput,
 	FlueObservationDetail,
@@ -39,7 +40,7 @@ export async function execShellWithEvents(
 		isError: boolean,
 	) => Promise<void>,
 ): Promise<ShellResult> {
-	const toolCallId = crypto.randomUUID();
+	const toolCallId = generateToolCallId();
 	const startedAt = Date.now();
 
 	// Per-call cwd/env names, when set, are part of the call's identity and

@@ -1,4 +1,5 @@
 import type { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai';
+import { generateEntryId, generateRecordId } from './runtime/ids.ts';
 import type { PromptUsage } from './types.ts';
 
 interface ConversationRecordEnvelope {
@@ -355,9 +356,9 @@ export type ConversationRecord =
 	| MessageMetadataRecord;
 
 export function generateConversationRecordId(): string {
-	return `record_${crypto.randomUUID()}`;
+	return generateRecordId();
 }
 
 export function generateConversationEntryId(): string {
-	return `entry_${crypto.randomUUID()}`;
+	return generateEntryId();
 }

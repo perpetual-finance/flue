@@ -34,6 +34,7 @@ import {
 	handleAgentConversationHead,
 	handleAgentConversationRead,
 } from '../runtime/handle-conversation-routes.ts';
+import { generateAttemptId } from '../runtime/ids.ts';
 import { agentStreamPath } from '../runtime/stream-offsets.ts';
 import { createSessionStorageKey } from '../session-identity.ts';
 import type { DeliveredMessage } from '../types.ts';
@@ -476,7 +477,7 @@ class CloudflareAgentCoordinator {
 				// lease expiry with heartbeat renewal for multi-process safety.
 				const claimed = await this.submissions.claimSubmission({
 					submissionId: submission.submissionId,
-					attemptId: crypto.randomUUID(),
+					attemptId: generateAttemptId(),
 					ownerId: this.instance.ctx.id.toString(),
 					leaseExpiresAt: 0,
 				});

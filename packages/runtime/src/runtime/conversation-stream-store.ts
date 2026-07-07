@@ -4,6 +4,7 @@ import { ConversationStreamStoreError } from '../errors.ts';
 import { migrateFlueSqlSchema } from '../schema-version.ts';
 import { parseSessionStorageKey } from '../session-identity.ts';
 import type { SqlStorage } from '../sql-storage.ts';
+import { generateIncarnationId } from './ids.ts';
 import { formatOffset, parseOffset } from './stream-offsets.ts';
 
 export interface ConversationStreamIdentity {
@@ -176,7 +177,7 @@ export class InMemoryConversationStreamStore implements ConversationStreamStore 
 		}
 		this.streams.set(path, {
 			identity: { ...identity },
-			incarnation: crypto.randomUUID(),
+			incarnation: generateIncarnationId(),
 			producerId: null,
 			producerEpoch: 0,
 			nextProducerSequence: 0,
@@ -358,7 +359,7 @@ export class SqliteConversationStreamStore implements ConversationStreamStore {
 				'INSERT INTO flue_conversation_streams (path, identity_json, incarnation) VALUES (?, ?, ?)',
 				path,
 				data,
-				crypto.randomUUID(),
+				generateIncarnationId(),
 			);
 		});
 	}

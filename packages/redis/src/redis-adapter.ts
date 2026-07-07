@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type {
 	AgentAttemptMarker,
 	AgentDispatchAdmission,
@@ -27,6 +26,7 @@ import {
 	SUBMISSION_HARNESS_NAME,
 	SUBMISSION_SESSION_NAME,
 } from '@flue/runtime/adapter';
+import { ulid } from 'ulidx';
 import { RedisAttachmentStore } from './attachment-store.ts';
 import { RedisConversationStreamStore } from './conversation-store.ts';
 import { encodeSegment, RedisKeys } from './redis-keys.ts';
@@ -509,7 +509,7 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 		input: AgentSubmissionInput,
 	): Promise<AgentDispatchAdmission> {
 		const prepared = prepareSubmissionAttachments(input);
-		const generation = randomUUID();
+		const generation = `gen_${ulid()}`;
 		const generationKey = this.backend.keys.submissionGeneration(input.submissionId, generation);
 		const sessionKey = createSessionStorageKey(
 			input.id,

@@ -9,8 +9,27 @@ interface SessionStorageIdentity {
 	session: string;
 }
 
-export function isUuid(value: string): boolean {
+function isUuid(value: string): boolean {
 	return UUID_PATTERN.test(value);
+}
+
+const ULID_TAIL_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+
+/**
+ * House id convention: `<prefix>_<ulid>`. Durable-record validators accept
+ * this OR a bare UUID — records written before the ulid convention landed
+ * carry UUIDs and must keep folding forever.
+ */
+function isPrefixedUlid(value: string, prefix: string): boolean {
+	return value.startsWith(prefix) && ULID_TAIL_PATTERN.test(value.slice(prefix.length));
+}
+
+export function isDurableTaskId(value: string): boolean {
+	return isUuid(value) || isPrefixedUlid(value, 'task_');
+}
+
+export function isDurableInvocationId(value: string): boolean {
+	return isUuid(value) || isPrefixedUlid(value, 'inv_');
 }
 
 function isTaskSessionName(name: string): boolean {

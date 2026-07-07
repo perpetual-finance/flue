@@ -14,6 +14,7 @@ import {
 	parseOffset,
 	StreamListenerRegistry,
 } from '@flue/runtime/adapter';
+import { ulid } from 'ulidx';
 import type { MongoOperations, MongoRunner } from './mongodb-runner.ts';
 import { collectionName } from './schema.ts';
 
@@ -34,7 +35,7 @@ export class MongoConversationStreamStore implements ConversationStreamStore {
 						producerId: null,
 						producerEpoch: 0,
 						nextProducerSequence: 0,
-						incarnation: crypto.randomUUID(),
+						incarnation: `inc_${ulid()}`,
 					},
 				},
 				{ upsert: true },

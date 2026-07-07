@@ -15,8 +15,9 @@ import { createUserContextMessage, renderSignalMessage } from './message-renderi
 import {
 	createActionScopeName,
 	createTaskSessionName,
+	isDurableInvocationId,
+	isDurableTaskId,
 	isPublicSessionName,
-	isUuid,
 } from './session-identity.ts';
 
 interface ReducedEntryBase {
@@ -728,7 +729,7 @@ function validateConversationCreation(
 			typeof value.parentConversationId !== 'string' ||
 			typeof value.taskId !== 'string' ||
 			value.actionInvocationId !== undefined ||
-			!isUuid(value.taskId) ||
+			!isDurableTaskId(value.taskId) ||
 			(value.agent !== undefined && typeof value.agent !== 'string')
 		) {
 			fail(record, `Task conversation creation has invalid discriminated identity.`);
@@ -749,7 +750,7 @@ function validateConversationCreation(
 		typeof value.actionInvocationId !== 'string' ||
 		value.taskId !== undefined ||
 		value.agent !== undefined ||
-		!isUuid(value.actionInvocationId)
+		!isDurableInvocationId(value.actionInvocationId)
 	) {
 		fail(record, `Action conversation creation has invalid discriminated identity.`);
 	}
@@ -771,7 +772,7 @@ function validateChildReference(
 		if (
 			typeof child.taskId !== 'string' ||
 			child.invocationId !== undefined ||
-			!isUuid(child.taskId) ||
+			!isDurableTaskId(child.taskId) ||
 			(child.parentToolCallId !== undefined && typeof child.parentToolCallId !== 'string') ||
 			(child.parentAssistantEntryId !== undefined &&
 				typeof child.parentAssistantEntryId !== 'string')
@@ -786,7 +787,7 @@ function validateChildReference(
 		child.taskId !== undefined ||
 		child.parentToolCallId !== undefined ||
 		child.parentAssistantEntryId !== undefined ||
-		!isUuid(child.invocationId)
+		!isDurableInvocationId(child.invocationId)
 	) {
 		fail(record, `Action child reference has invalid discriminated identity.`);
 	}

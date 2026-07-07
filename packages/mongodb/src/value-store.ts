@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { ulid } from 'ulidx';
 import type { MongoOperations, MongoRunner } from './mongodb-runner.ts';
 import { collectionName } from './schema.ts';
 
@@ -19,7 +19,7 @@ export class ValueStore {
 	) {}
 
 	async stage(owner: string, value: unknown): Promise<StoredValue> {
-		const pointer = { owner, generation: randomUUID(), count: 0 };
+		const pointer = { owner, generation: `gen_${ulid()}`, count: 0 };
 		const text = JSON.stringify([value]);
 		const parts: string[] = [];
 		for (let offset = 0; offset < text.length; ) {

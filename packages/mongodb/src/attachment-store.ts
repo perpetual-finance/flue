@@ -10,6 +10,7 @@ import {
 	sameAttachmentRef,
 	verifyAttachmentBytes,
 } from '@flue/runtime/adapter';
+import { ulid } from 'ulidx';
 import type { MongoOperations, MongoRunner } from './mongodb-runner.ts';
 import { collectionName } from './schema.ts';
 
@@ -28,7 +29,7 @@ export class MongoAttachmentStore implements AttachmentStore {
 					if (!matchesInput(existing, input)) conflict(input);
 					return;
 				}
-				await collection.insertOne({ _id: crypto.randomUUID(), path: input.streamPath, attachmentId: input.attachment.id, mimeType: input.attachment.mimeType, byteSize: input.attachment.size, digest: input.attachment.digest, conversationId: input.conversationId, bytes: copyAttachmentBytes(input.bytes), createdAt: Date.now() });
+				await collection.insertOne({ _id: `att_${ulid()}`, path: input.streamPath, attachmentId: input.attachment.id, mimeType: input.attachment.mimeType, byteSize: input.attachment.size, digest: input.attachment.digest, conversationId: input.conversationId, bytes: copyAttachmentBytes(input.bytes), createdAt: Date.now() });
 			});
 		} catch (error) {
 			if (!isDuplicate(error)) throw error;

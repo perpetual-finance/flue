@@ -24,6 +24,7 @@ import type { ConversationStreamStore } from '../runtime/conversation-stream-sto
 import type { AgentInteractionStart } from '../runtime/dev-lifecycle-logger.ts';
 import type { DispatchInput, DispatchQueue } from '../runtime/dispatch-queue.ts';
 import type { CreateAgentContextFn } from '../runtime/handle-agent.ts';
+import { generateAttemptId, generateOwnerId } from '../runtime/ids.ts';
 import type { RuntimeActivityGate, RuntimeActivityLease } from '../runtime/runtime-activity-gate.ts';
 import { agentStreamPath } from '../runtime/stream-offsets.ts';
 import { createSessionStorageKey } from '../session-identity.ts';
@@ -127,7 +128,7 @@ export function createNodeAgentCoordinator(options: {
 
 	/** Unique identifier for this coordinator instance. Used as the owner
 	 *  for lease-based submission ownership. */
-	const ownerId = crypto.randomUUID();
+	const ownerId = generateOwnerId();
 
 	/** Heartbeat interval handle; started with the claim loop. */
 	let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
@@ -317,7 +318,7 @@ export function createNodeAgentCoordinator(options: {
 			if (activeSubmissions.has(submission.submissionId)) continue;
 			const claimed = await submissions.claimSubmission({
 				submissionId: submission.submissionId,
-				attemptId: crypto.randomUUID(),
+				attemptId: generateAttemptId(),
 				ownerId,
 				leaseExpiresAt: Date.now() + LEASE_DURATION_MS,
 			});

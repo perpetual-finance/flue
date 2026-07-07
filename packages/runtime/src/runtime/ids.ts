@@ -25,3 +25,50 @@ export function generateTurnId(): string {
 export function generateInstanceUid(): string {
 	return `inst_${ulid()}`;
 }
+
+export function generateRecordId(): string {
+	return `record_${ulid()}`;
+}
+
+export function generateEntryId(): string {
+	return `entry_${ulid()}`;
+}
+
+export function generateBlockId(): string {
+	return `block_${ulid()}`;
+}
+
+export function generateTaskId(): string {
+	return `task_${ulid()}`;
+}
+
+export function generateInvocationId(): string {
+	return `inv_${ulid()}`;
+}
+
+export function generateDispatchId(): string {
+	return `dispatch_${ulid()}`;
+}
+
+/** Direct (attached HTTP / flue run) submissions; dispatches use their dispatchId. */
+export function generateSubmissionId(): string {
+	return `sub_${ulid()}`;
+}
+
+export function generateAttemptId(): string {
+	return `attempt_${ulid()}`;
+}
+
+export function generateToolCallId(): string {
+	return `call_${ulid()}`;
+}
+
+/** Per-process producer identity for conversation-stream ownership. */
+export function generateOwnerId(): string {
+	return `owner_${ulid()}`;
+}
+
+/** Per-creation stream incarnation marker (adapters mint the same shape). */
+export function generateIncarnationId(): string {
+	return `inc_${ulid()}`;
+}

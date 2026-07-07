@@ -231,7 +231,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 			attributes: { question: 'What is the summary?', tool: 'ask_model', toolCallId: 'tool-ask-1' },
 		});
 		// The child conversation the harness opened was durably retained under
-		// the per-attempt invocation id (a UUID — the durable contract; the
+		// the per-attempt invocation id (inv_<ulid> — the durable contract; the
 		// toolCallId correlates via the tool result's details).
 		const db = new DatabaseSync(dbPath);
 		const rows = db

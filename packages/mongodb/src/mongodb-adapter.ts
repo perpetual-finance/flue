@@ -1,10 +1,10 @@
-import { randomUUID } from 'node:crypto';
 import type { PersistenceAdapter } from '@flue/runtime/adapter';
 import {
 	assertSupportedFlueSchemaVersion,
 	FLUE_SCHEMA_VERSION,
 	PersistedSchemaVersionError,
 } from '@flue/runtime/adapter';
+import { ulid } from 'ulidx';
 import { MongoAttachmentStore } from './attachment-store.ts';
 import { MongoConversationStreamStore } from './conversation-store.ts';
 import type { MongoOptions, MongoRunner } from './mongodb-runner.ts';
@@ -33,7 +33,7 @@ export function mongodb(runner: MongoRunner, options: MongoOptions = {}): Persis
 			const metaSpec = schema(prefix)[0];
 			if (!metaSpec) throw new TypeError('MongoDB schema is missing metadata collection.');
 			await runner.ensureCollection(metaSpec);
-			const ownerId = randomUUID();
+			const ownerId = `owner_${ulid()}`;
 			while (true) {
 				const now = Date.now();
 				const lock = await meta

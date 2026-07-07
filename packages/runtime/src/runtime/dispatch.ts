@@ -1,5 +1,6 @@
 import type { DeliveredMessage, DispatchReceipt, NamedAgentDispatchRequest } from '../types.ts';
 import type { DispatchQueue } from './dispatch-queue.ts';
+import { generateDispatchId } from './ids.ts';
 import { parseDeliveredMessage } from './schemas.ts';
 
 export interface DispatchRuntime {
@@ -19,7 +20,7 @@ export async function enqueueDispatch(options: {
 		);
 	}
 	return options.dispatchQueue.enqueue({
-		dispatchId: crypto.randomUUID(),
+		dispatchId: generateDispatchId(),
 		agent,
 		id: options.request.id,
 		message,

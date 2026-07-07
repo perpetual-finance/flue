@@ -23,6 +23,7 @@ import { getInternalSession } from '../session.ts';
 import type { AgentModuleValue, CallHandle, DeliveredMessage } from '../types.ts';
 import { type AttachmentStore, createAttachmentRef } from './attachment-store.ts';
 import type { DispatchInput } from './dispatch-queue.ts';
+import { generateAttemptId, generateSubmissionId } from './ids.ts';
 import { agentStreamPath } from './stream-offsets.ts';
 
 /**
@@ -232,7 +233,7 @@ export function createDirectAgentSubmissionInput(options: {
 }): AgentSubmissionInput {
 	return {
 		kind: 'direct',
-		submissionId: crypto.randomUUID(),
+		submissionId: generateSubmissionId(),
 		agent: options.agent,
 		id: options.id,
 		message: options.message,
@@ -418,7 +419,7 @@ export async function reconcileInterruptedSubmission(
 	if (submission.inputAppliedAt === undefined && state !== 'absent') {
 		const replacement = await submissions.replaceSubmissionAttempt(
 			attempt,
-			crypto.randomUUID(),
+			generateAttemptId(),
 			lease,
 		);
 		if (replacement?.attemptId) {
@@ -465,7 +466,7 @@ export async function reconcileInterruptedSubmission(
 	if (state === 'continuable' || state === 'uncertain') {
 		const replacement = await submissions.replaceSubmissionAttempt(
 			attempt,
-			crypto.randomUUID(),
+			generateAttemptId(),
 			lease,
 		);
 		if (!replacement?.attemptId) return undefined;
