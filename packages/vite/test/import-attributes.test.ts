@@ -26,10 +26,14 @@ function attributedImportsFixture(): Fixture {
 		'src/skills/explore/SKILL.md':
 			'---\nname: explore\ndescription: Explore a repository.\n---\nExplore carefully.\n',
 		'src/agents/echo.ts': `'use agent';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useInstruction, useSkill } from '@flue/runtime';
 import explore from '../skills/explore/SKILL.md' with { type: 'skill' };
 import guide from '../guide.md' with { type: 'markdown' };
-export default defineAgent(() => ({ model: 'flue-test/fake-model', skills: [explore], instructions: guide }));
+function echo() {
+	useSkill(explore);
+	useInstruction(guide);
+}
+export default defineAgent(echo, { model: 'flue-test/fake-model' });
 `,
 		'src/app.ts': `import { Hono } from 'hono';
 import './test-model.ts';

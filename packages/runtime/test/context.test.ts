@@ -4,7 +4,7 @@ import {
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineAgent } from '../src/index.ts';
+import { defineAgent, useSandbox } from '../src/index.ts';
 import type { FlueContextConfig } from '../src/internal.ts';
 import { createFlueContext, resolveModel } from '../src/internal.ts';
 import type { FlueEvent, SessionEnv } from '../src/types.ts';
@@ -260,16 +260,19 @@ describe('FlueContext', () => {
 	it('allows root harness initialization to retry after an earlier attempt fails', async () => {
 		let attempt = 0;
 		const ctx = createContext();
-		const agent = defineAgent(() => ({
-			model: 'anthropic/claude-haiku-4-5',
-			sandbox: {
-				createSessionEnv: async () => {
-					attempt += 1;
-					if (attempt === 1) throw new Error('temporary sandbox failure');
-					return createEnv();
-				},
+		const agent = defineAgent(
+			() => {
+				useSandbox({
+					createSessionEnv: async () => {
+						attempt += 1;
+						if (attempt === 1) throw new Error('temporary sandbox failure');
+						return createEnv();
+					},
+				});
+				return undefined;
 			},
-		}));
+			{ model: 'anthropic/claude-haiku-4-5' },
+		);
 
 		await expect(ctx.initializeRootHarness(agent)).rejects.toThrow('temporary sandbox failure');
 		await expect(ctx.initializeRootHarness(agent)).resolves.toMatchObject({
@@ -294,10 +297,9 @@ describe('session context discovery', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({
+			defineAgent(() => 'Agent-specific review instructions.', {
 				model: `${provider.getModel().provider}/${provider.getModel().id}`,
-				instructions: 'Agent-specific review instructions.',
-			})),
+			}),
 		);
 		const session = await harness.session();
 
@@ -359,9 +361,9 @@ describe('session context discovery', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({
+			defineAgent(() => undefined, {
 				model: `${provider.getModel().provider}/${provider.getModel().id}`,
-			})),
+			}),
 		);
 		const session = await harness.session();
 
@@ -400,10 +402,10 @@ describe('session context discovery', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({
+			defineAgent(() => undefined, {
 				model: `${provider.getModel().provider}/${provider.getModel().id}`,
 				cwd: 'workspace',
-			})),
+			}),
 		);
 		const session = await harness.session();
 
@@ -433,22 +435,27 @@ describe('session context discovery', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({
-				model: `${provider.getModel().provider}/${provider.getModel().id}`,
-				cwd: 'workspace',
-				sandbox: {
-					createSessionEnv: async (options) => {
-						factoryOptions.push(options);
-						return createEnv({
-							cwd: '/sandbox',
-							files: {
-								'/sandbox/AGENTS.md': 'Sandbox root guidance.',
-								'/sandbox/workspace/AGENTS.md': 'Sandbox workspace guidance.',
-							},
-						});
-					},
+			defineAgent(
+				() => {
+					useSandbox({
+						createSessionEnv: async (options) => {
+							factoryOptions.push(options);
+							return createEnv({
+								cwd: '/sandbox',
+								files: {
+									'/sandbox/AGENTS.md': 'Sandbox root guidance.',
+									'/sandbox/workspace/AGENTS.md': 'Sandbox workspace guidance.',
+								},
+							});
+						},
+					});
+					return undefined;
 				},
-			})),
+				{
+					model: `${provider.getModel().provider}/${provider.getModel().id}`,
+					cwd: 'workspace',
+				},
+			),
 		);
 		const session = await harness.session();
 

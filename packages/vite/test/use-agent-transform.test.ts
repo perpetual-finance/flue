@@ -13,7 +13,7 @@ describe('transformUseAgentModule', () => {
 			[
 				`'use agent';`,
 				`import { defineAgent } from '@flue/runtime';`,
-				`export default defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5' }));`,
+				`export default defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' });`,
 				`export const route = async (_c, next) => next();`,
 				`export const description = 'Triage agent';`,
 			].join('\n'),
@@ -40,7 +40,7 @@ describe('transformUseAgentModule', () => {
 				`'use agent';`,
 				`import { defineAgent } from '@flue/runtime';`,
 				`const authMiddleware = async (_c, next) => next();`,
-				`const agent = defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5' }));`,
+				`const agent = defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' });`,
 				`export { agent as default, authMiddleware as route };`,
 				`export { attachments } from './middleware.ts';`,
 			].join('\n'),
@@ -60,7 +60,10 @@ describe('transformUseAgentModule', () => {
 			[
 				`import { defineAgent } from '@flue/runtime';`,
 				`const note = 'use agent';`,
-				`export default defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5', instructions: note }));`,
+				`function agent() {`,
+				`	return note;`,
+				`}`,
+				`export default defineAgent(agent, { model: 'anthropic/claude-haiku-4-5' });`,
 			].join('\n'),
 		);
 		expect(result).toBeNull();

@@ -9,14 +9,14 @@ import {
 	resetFlueAgentRegistrationForTests,
 	resolveAgentModuleBinding,
 } from '../src/runtime/registration.ts';
-import type { AgentDefinition } from '../src/types.ts';
+import type { AgentDefinition, FunctionAgentDefinition } from '../src/types.ts';
 
 afterEach(() => {
 	resetFlueAgentRegistrationForTests();
 });
 
-function testAgent(): AgentDefinition {
-	return defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5' }));
+function testAgent(): FunctionAgentDefinition {
+	return defineAgent(() => 'Test agent.', { model: 'anthropic/claude-haiku-4-5' });
 }
 
 describe('registerFlueAgents()', () => {

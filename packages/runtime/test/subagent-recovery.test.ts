@@ -7,13 +7,16 @@ import {
 import * as v from 'valibot';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ConversationRecordWriter } from '../src/conversation-writer.ts';
-import { type AgentDefinition, defineAgent, defineTool } from '../src/index.ts';
+import { useSubagent } from '../src/hooks/use-subagent.ts';
+import { useTool } from '../src/hooks/use-tool.ts';
+import { defineAgent, defineTool } from '../src/index.ts';
 import {
 	createFlueContext,
 	InMemoryAttachmentStore,
 	InMemoryConversationStreamStore,
 } from '../src/internal.ts';
 import { getInternalSession } from '../src/session.ts';
+import type { AgentModuleValue } from '../src/types.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
 
 const providers: FauxProviderRegistration[] = [];
@@ -72,7 +75,7 @@ async function makeHarness(
 	provider: FauxProviderRegistration,
 	writer: ConversationRecordWriter,
 	attachmentStore: InMemoryAttachmentStore,
-	agent: AgentDefinition,
+	agent: AgentModuleValue,
 ) {
 	const ctx = createFlueContext({
 		id: INSTANCE,
@@ -131,10 +134,14 @@ describe('subagent task recovery', () => {
 			fauxAssistantMessage('Child finished the work.'),
 			fauxAssistantMessage('Parent done with the delegated result.'),
 		]);
-		const agent = defineAgent(() => ({
-			model,
-			subagents: [{ name: 'reviewer', model, tools: [gate] }],
-		}));
+		function Reviewer() {
+			useTool(gate);
+			return 'You review the delegated work.';
+		}
+		const agent = defineAgent(() => {
+			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', capabilities: Reviewer });
+			return 'Case agent.';
+		}, { model });
 
 		const store = new InMemoryConversationStreamStore();
 		const attachments = new InMemoryAttachmentStore();
@@ -192,10 +199,14 @@ describe('subagent task recovery', () => {
 			fauxAssistantMessage('Second child done.'),
 			fauxAssistantMessage('Parent done with both.'),
 		]);
-		const agent = defineAgent(() => ({
-			model,
-			subagents: [{ name: 'reviewer', model, tools: [gate] }],
-		}));
+		function Reviewer() {
+			useTool(gate);
+			return 'You review the delegated work.';
+		}
+		const agent = defineAgent(() => {
+			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', capabilities: Reviewer });
+			return 'Case agent.';
+		}, { model });
 
 		const store = new InMemoryConversationStreamStore();
 		const attachments = new InMemoryAttachmentStore();
@@ -240,12 +251,18 @@ describe('subagent task recovery', () => {
 			fauxAssistantMessage('Child done.'),
 			fauxAssistantMessage('Parent done.'),
 		]);
-		const agent = defineAgent(() => ({
-			model,
-			subagents: [
-				{ name: 'reviewer', model, subagents: [{ name: 'deep', model, tools: [gate] }] },
-			],
-		}));
+		function Deep() {
+			useTool(gate);
+			return 'You go deeper on delegated work.';
+		}
+		function Reviewer() {
+			useSubagent({ name: 'deep', description: 'Handles the deeper delegated work.', capabilities: Deep });
+			return 'You review delegated work by delegating deeper.';
+		}
+		const agent = defineAgent(() => {
+			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', capabilities: Reviewer });
+			return 'Case agent.';
+		}, { model });
 
 		const store = new InMemoryConversationStreamStore();
 		const attachments = new InMemoryAttachmentStore();
@@ -280,12 +297,16 @@ describe('subagent task recovery', () => {
 			fauxAssistantMessage(fauxToolCall('gate', {}), { stopReason: 'toolUse' }),
 			fauxAssistantMessage('Parent continued despite the missing subagent.'),
 		]);
-		const withSubagent = defineAgent(() => ({
-			model,
-			subagents: [{ name: 'reviewer', model, tools: [gate] }],
-		}));
+		function Reviewer() {
+			useTool(gate);
+			return 'You review the delegated work.';
+		}
+		const withSubagent = defineAgent(() => {
+			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', capabilities: Reviewer });
+			return 'Case agent.';
+		}, { model });
 		// Restart deploys a config where `reviewer` no longer exists.
-		const withoutSubagent = defineAgent(() => ({ model, subagents: [] }));
+		const withoutSubagent = defineAgent(() => 'Case agent.', { model });
 
 		const store = new InMemoryConversationStreamStore();
 		const attachments = new InMemoryAttachmentStore();
@@ -331,10 +352,15 @@ describe('subagent task recovery', () => {
 		]);
 		const gateA = { ...first.tool, name: 'gate_a' };
 		const gateB = { ...second.tool, name: 'gate_b' };
-		const agent = defineAgent(() => ({
-			model,
-			subagents: [{ name: 'reviewer', model, tools: [gateA, gateB] }],
-		}));
+		function Reviewer() {
+			useTool(gateA);
+			useTool(gateB);
+			return 'You review the delegated work.';
+		}
+		const agent = defineAgent(() => {
+			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', capabilities: Reviewer });
+			return 'Case agent.';
+		}, { model });
 
 		const store = new InMemoryConversationStreamStore();
 		const attachments = new InMemoryAttachmentStore();
@@ -461,7 +487,7 @@ describe('subagent task recovery', () => {
 			attachmentStore: new InMemoryAttachmentStore(),
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({ model: `${provider.getModel().provider}/reviewer` })),
+			defineAgent(() => 'Case agent.', { model: `${provider.getModel().provider}/reviewer` }),
 		);
 		const internal = getInternalSession(await harness.session());
 		if (!internal) throw new Error('Expected internal session.');

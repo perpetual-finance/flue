@@ -57,7 +57,8 @@ faux.setResponses([
 ]);
 registerProvider('faux', { api: faux.api, baseUrl: 'https://faux.invalid' });
 
-export default defineAgent(() => ({ model: 'faux/faux-model' }));
+function ${name}() {}
+export default defineAgent(${name}, { model: 'faux/faux-model' });
 `,
 	);
 	return path.join('src', 'agents', `${name}.mjs`);
@@ -109,7 +110,8 @@ faux.setResponses([
 ]);
 registerProvider('faux', { api: faux.api, baseUrl: 'https://faux.invalid' });
 
-export default defineAgent(() => ({ model: 'faux/faux-model' }));
+function slow() {}
+export default defineAgent(slow, { model: 'faux/faux-model' });
 `,
 	);
 	return path.join('src', 'agents', 'slow.mjs');

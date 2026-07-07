@@ -79,7 +79,7 @@ registerProvider('flue-test', {
 
 export const CF_ECHO_AGENT_MODULE = `'use agent';
 import { defineAgent } from '@flue/runtime';
-export default defineAgent(() => ({ model: 'flue-test/fake-model' }));
+export default defineAgent(() => undefined, { model: 'flue-test/fake-model' });
 export const description = 'Echo agent';
 `;
 

@@ -35,7 +35,9 @@ describe('session.compact()', () => {
 		ctx.subscribeEvent((event) => {
 			events.push(event);
 		});
-		const harness = await ctx.initializeRootHarness(defineAgent(() => ({ model: modelSpecifier })));
+		const harness = await ctx.initializeRootHarness(
+			defineAgent(() => undefined, { model: modelSpecifier }),
+		);
 		const session = await harness.session();
 
 		await expect(session.compact()).resolves.toBeUndefined();
@@ -70,7 +72,7 @@ describe('session.compact()', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({ model: modelSpecifier, compaction: { keepRecentTokens: 3 } })),
+			defineAgent(() => undefined, { model: modelSpecifier, compaction: { keepRecentTokens: 3 } }),
 		);
 		const session = await harness.session();
 		await session.prompt('old marker');
@@ -117,7 +119,7 @@ describe('session.compact()', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({ model: modelSpecifier, compaction: { keepRecentTokens: 3 } })),
+			defineAgent(() => undefined, { model: modelSpecifier, compaction: { keepRecentTokens: 3 } }),
 		);
 		const session = await harness.session();
 		await session.prompt('old marker');
@@ -164,7 +166,9 @@ describe('session.compact()', () => {
 			},
 			createDefaultEnv: async () => createNoopSessionEnv(),
 		});
-		const harness = await ctx.initializeRootHarness(defineAgent(() => ({ model: modelSpecifier })));
+		const harness = await ctx.initializeRootHarness(
+			defineAgent(() => undefined, { model: modelSpecifier }),
+		);
 		const session = await harness.session();
 		const prompt = session.prompt('wait for completion');
 		await started;
@@ -202,10 +206,10 @@ describe('session.compact()', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({
+			defineAgent(() => undefined, {
 				model: modelSpecifier,
 				compaction: false,
-			})),
+			}),
 		);
 		const session = await harness.session();
 		await session.prompt('old marker');
@@ -248,10 +252,10 @@ describe('automatic compaction', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({
+			defineAgent(() => undefined, {
 				model: modelSpecifier,
 				compaction: { reserveTokens: 100000, keepRecentTokens: 1 },
-			})),
+			}),
 		);
 		const session = await harness.session();
 
@@ -290,10 +294,10 @@ describe('automatic compaction', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({
+			defineAgent(() => undefined, {
 				model: modelSpecifier,
 				compaction: false,
-			})),
+			}),
 		);
 		const session = await harness.session();
 
@@ -333,7 +337,7 @@ describe('automatic compaction', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({ model: modelSpecifier, compaction: { keepRecentTokens: 3 } })),
+			defineAgent(() => undefined, { model: modelSpecifier, compaction: { keepRecentTokens: 3 } }),
 		);
 		const session = await harness.session();
 		await session.prompt('prior marker');
@@ -378,10 +382,10 @@ describe('automatic compaction', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({
+			defineAgent(() => undefined, {
 				model: modelSpecifier,
 				compaction: false,
-			})),
+			}),
 		);
 		const session = await harness.session();
 		await session.prompt('prior marker');
@@ -423,7 +427,7 @@ describe('automatic compaction', () => {
 			createDefaultEnv: async () => createNoopSessionEnv(),
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({ model: modelSpecifier, compaction: { keepRecentTokens: 3 } })),
+			defineAgent(() => undefined, { model: modelSpecifier, compaction: { keepRecentTokens: 3 } }),
 		);
 		const session = await harness.session();
 		await session.prompt('old marker');
@@ -490,10 +494,10 @@ describe('automatic compaction', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({
+			defineAgent(() => undefined, {
 				model: agentModelSpecifier,
 				compaction: { keepRecentTokens: 3, model: summarizerModelSpecifier },
-			})),
+			}),
 		);
 		const session = await harness.session();
 		await session.prompt('old marker');

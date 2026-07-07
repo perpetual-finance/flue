@@ -6,6 +6,7 @@ import {
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it } from 'vitest';
+import { useSandbox } from '../src/hooks/use-sandbox.ts';
 import { defineAgent, IMAGE_DATA_OMITTED } from '../src/index.ts';
 import { createFlueContext } from '../src/internal.ts';
 import type { FlueEvent } from '../src/types.ts';
@@ -52,7 +53,7 @@ describe('session event image redaction', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({ model: `${provider.getModel().provider}/reviewer` })),
+			defineAgent(() => undefined, { model: `${provider.getModel().provider}/reviewer` }),
 		);
 		const session = await harness.session();
 
@@ -96,7 +97,7 @@ describe('session event image redaction', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({ model: `${provider.getModel().provider}/reviewer` })),
+			defineAgent(() => undefined, { model: `${provider.getModel().provider}/reviewer` }),
 		);
 		const session = await harness.session();
 
@@ -129,24 +130,26 @@ describe('session event image redaction', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({
-				model: `${provider.getModel().provider}/reviewer`,
-				sandbox: {
-					createSessionEnv: async () => createNoopSessionEnv(),
-					tools: () => [
-						{
-							name: 'screenshot',
-							label: 'Screenshot',
-							description: 'Capture a screenshot.',
-							parameters: { type: 'object', properties: {} },
-							execute: async () => ({
-								content: [{ type: 'image' as const, data: IMAGE_BYTES, mimeType: 'image/png' }],
-								details: {},
-							}),
-						},
-					],
+			defineAgent(
+				() => {
+					useSandbox({
+						createSessionEnv: async () => createNoopSessionEnv(),
+						tools: () => [
+							{
+								name: 'screenshot',
+								label: 'Screenshot',
+								description: 'Capture a screenshot.',
+								parameters: { type: 'object', properties: {} },
+								execute: async () => ({
+									content: [{ type: 'image' as const, data: IMAGE_BYTES, mimeType: 'image/png' }],
+									details: {},
+								}),
+							},
+						],
+					});
 				},
-			})),
+				{ model: `${provider.getModel().provider}/reviewer` },
+			),
 		);
 		const session = await harness.session();
 
@@ -188,7 +191,7 @@ describe('session event image redaction', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({ model: `${provider.getModel().provider}/reviewer` })),
+			defineAgent(() => undefined, { model: `${provider.getModel().provider}/reviewer` }),
 		);
 		const session = await harness.session();
 
@@ -223,24 +226,26 @@ describe('session event image redaction', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({
-				model: `${provider.getModel().provider}/reviewer`,
-				sandbox: {
-					createSessionEnv: async () => createNoopSessionEnv(),
-					tools: () => [
-						{
-							name: 'screenshot',
-							label: 'Screenshot',
-							description: 'Capture a screenshot.',
-							parameters: { type: 'object', properties: {} },
-							execute: async () => ({
-								content: [{ type: 'image' as const, data: IMAGE_BYTES, mimeType: 'image/png' }],
-								details: {},
-							}),
-						},
-					],
+			defineAgent(
+				() => {
+					useSandbox({
+						createSessionEnv: async () => createNoopSessionEnv(),
+						tools: () => [
+							{
+								name: 'screenshot',
+								label: 'Screenshot',
+								description: 'Capture a screenshot.',
+								parameters: { type: 'object', properties: {} },
+								execute: async () => ({
+									content: [{ type: 'image' as const, data: IMAGE_BYTES, mimeType: 'image/png' }],
+									details: {},
+								}),
+							},
+						],
+					});
 				},
-			})),
+				{ model: `${provider.getModel().provider}/reviewer` },
+			),
 		);
 		const session = await harness.session();
 

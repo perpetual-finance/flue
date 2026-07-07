@@ -9,10 +9,11 @@ import {
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
 import * as v from 'valibot';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
 import { renderAgentFunctionWithStructure } from '../src/hooks/render.ts';
 import { useState } from '../src/hooks/state.ts';
+import { useSandbox } from '../src/hooks/use-sandbox.ts';
 import { useSubagent } from '../src/hooks/use-subagent.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { createFlueContext, type DispatchInput } from '../src/internal.ts';
@@ -21,6 +22,7 @@ import { sqlite } from '../src/node/agent-execution-store.ts';
 import { observe } from '../src/runtime/events.ts';
 import type { CreateAgentContextFn } from '../src/runtime/handle-agent.ts';
 import { defineTool } from '../src/tool.ts';
+import type { SessionEnv } from '../src/types.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
 
 const providers: FauxProviderRegistration[] = [];
@@ -82,6 +84,18 @@ async function connectSqlite(dbPath: string) {
 	const adapter = sqlite(dbPath);
 	await adapter.migrate?.();
 	return adapter.connect();
+}
+
+/** A root harness without the sqlite-backed coordinator, for tests that only
+ * need one session's worth of direct prompting (mirrors the pattern used in
+ * tool.test.ts / harness-session.test.ts). */
+function createDirectContext(provider: FauxProviderRegistration, env: SessionEnv = createNoopSessionEnv()) {
+	return createFlueContext({
+		id: 'agent-harness-tool-direct-instance',
+		env: {},
+		agentConfig: { subagents: {}, resolveModel: () => provider.getModel() },
+		createDefaultEnv: async () => env,
+	});
 }
 
 const CONFIG = { model: 'faux/agent-harness-tool' };
@@ -366,5 +380,243 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 		await coordinator.shutdown();
 
 		expect(renderedNote).toBe('written');
+	});
+});
+
+// Ported from action-execution.test.ts (the Actions feature is being
+// removed and that file will be deleted): these three cases cover shared
+// harness machinery — task delegation inheritance, abort cascades, and
+// sandbox reuse — that has no equivalent elsewhere, rewritten in
+// `useTool({ harness: true })` terms.
+describe('harness tool delegation and lifecycle (ported from action-execution.test.ts)', () => {
+	it('inherits declared subagent capabilities through Task to a harness tool to Task', async () => {
+		const provider = createFauxProvider();
+		const exec = vi.fn(async () => ({ stdout: 'ok', stderr: '', exitCode: 0 }));
+		let promptToolNames: string[] = [];
+		let nestedTaskToolNames: string[] = [];
+		const selectedTool = defineTool({
+			name: 'selected_tool',
+			description: 'Selected profile tool.',
+			input: v.object({}),
+			run: async () => 'selected',
+		});
+		function Reviewer() {
+			useTool(selectedTool);
+			useTool({
+				name: 'inspect_task_scope',
+				description: 'Inspect the selected task scope.',
+				harness: true,
+				run: async ({ harness }) => {
+					await harness.shell('pwd');
+					const session = await harness.session();
+					await session.prompt('List inherited capabilities.');
+					// Agent-less task: inherits this (reviewer) session's own
+					// resolved config wholesale, same as the model's `task` tool
+					// would without an explicit `agent` target.
+					await session.task('Inspect inherited task capabilities.');
+					return undefined;
+				},
+			});
+			return 'You review the delegated scope.';
+		}
+		function assistant() {
+			useSubagent({
+				name: 'reviewer',
+				description: 'Reviews the delegated scope.',
+				capabilities: Reviewer,
+			});
+			return 'Case agent.';
+		}
+		provider.setResponses([
+			fauxAssistantMessage(
+				fauxToolCall('task', {
+					prompt: 'Inspect the task scope.',
+					agent: 'reviewer',
+					cwd: 'packages/runtime',
+				}),
+				{ stopReason: 'toolUse' },
+			),
+			fauxAssistantMessage(fauxToolCall('inspect_task_scope', {}), { stopReason: 'toolUse' }),
+			(context) => {
+				promptToolNames = (context.tools ?? []).map((tool) => tool.name);
+				return fauxAssistantMessage('Capabilities inherited.');
+			},
+			(context) => {
+				nestedTaskToolNames = (context.tools ?? []).map((tool) => tool.name);
+				return fauxAssistantMessage('Nested task complete.');
+			},
+			fauxAssistantMessage('Task complete.'),
+			fauxAssistantMessage('Root complete.'),
+		]);
+		const harness = await createDirectContext(
+			provider,
+			createNoopSessionEnv({ exec }),
+		).initializeRootHarness(
+			defineAgent(assistant, {
+				model: `${provider.getModel().provider}/${provider.getModel().id}`,
+			}),
+		);
+
+		await (await harness.session()).prompt('Delegate inspection.');
+
+		expect(exec).toHaveBeenCalledWith(
+			'pwd',
+			expect.objectContaining({ cwd: '/repo/packages/runtime' }),
+		);
+		expect(promptToolNames).toContain('selected_tool');
+		expect(promptToolNames).toContain('inspect_task_scope');
+		expect(nestedTaskToolNames).toContain('selected_tool');
+		expect(nestedTaskToolNames).toContain('inspect_task_scope');
+	});
+
+	it('cancels a direct harness shell call and waits for cleanup before a harness tool settles', async () => {
+		const provider = createFauxProvider();
+		let startedResolve: () => void = () => {};
+		const started = new Promise<void>((resolve) => {
+			startedResolve = resolve;
+		});
+		let settled = false;
+		let receivedSignal: AbortSignal | undefined;
+		const env = createNoopSessionEnv({
+			exec: async (_command, options) => {
+				receivedSignal = options?.signal;
+				startedResolve();
+				if (!options?.signal?.aborted) {
+					await new Promise<void>((resolve) =>
+						options?.signal?.addEventListener('abort', () => resolve()),
+					);
+				}
+				throw new DOMException('aborted', 'AbortError');
+			},
+		});
+		function assistant() {
+			useTool({
+				name: 'run_direct_shell',
+				description: 'Run a direct harness shell call.',
+				harness: true,
+				run: async ({ harness }) => {
+					void harness.shell('wait').then(
+						() => {
+							settled = true;
+						},
+						() => {
+							settled = true;
+						},
+					);
+					await started;
+					throw new Error('finish tool');
+				},
+			});
+			return 'Case agent.';
+		}
+		provider.setResponses([
+			fauxAssistantMessage(fauxToolCall('run_direct_shell', {}), { stopReason: 'toolUse' }),
+			(_context) => {
+				expect(settled).toBe(true);
+				return fauxAssistantMessage('Handled.');
+			},
+		]);
+		const harness = await createDirectContext(provider, env).initializeRootHarness(
+			defineAgent(assistant, {
+				model: `${provider.getModel().provider}/${provider.getModel().id}`,
+			}),
+		);
+
+		await (await harness.session()).prompt('Run shell.');
+
+		expect(receivedSignal?.aborted).toBe(true);
+		expect(settled).toBe(true);
+	});
+
+	it('retains child sessions and cancels every active harness-tool operation when the parent is aborted', async () => {
+		const provider = createFauxProvider();
+		let startedResolve: () => void = () => {};
+		const started = new Promise<void>((resolve) => {
+			startedResolve = resolve;
+		});
+		const signals: AbortSignal[] = [];
+		const env = createNoopSessionEnv({
+			exec: async (_command, options) => {
+				if (options?.signal) signals.push(options.signal);
+				if (signals.length === 2) startedResolve();
+				if (!options?.signal?.aborted) {
+					await new Promise<void>((resolve) =>
+						options?.signal?.addEventListener('abort', () => resolve()),
+					);
+				}
+				throw new DOMException('aborted', 'AbortError');
+			},
+		});
+		function assistant() {
+			useTool({
+				name: 'wait_for_children',
+				description: 'Wait for child operations.',
+				harness: true,
+				run: async ({ harness }) => {
+					const first = await harness.session();
+					const second = await harness.session('second');
+					const calls = [first.shell('first'), second.shell('second')];
+					await Promise.all(calls);
+					return undefined;
+				},
+			});
+			return 'Case agent.';
+		}
+		provider.setResponses([
+			fauxAssistantMessage(fauxToolCall('wait_for_children', {}), { stopReason: 'toolUse' }),
+		]);
+		const harness = await createDirectContext(provider, env).initializeRootHarness(
+			defineAgent(assistant, {
+				model: `${provider.getModel().provider}/${provider.getModel().id}`,
+			}),
+		);
+		const parent = await harness.session();
+
+		const operation = parent.prompt('Wait.');
+		await Promise.race([
+			started,
+			new Promise<never>((_, reject) =>
+				setTimeout(() => reject(new Error(`started ${signals.length} harness-tool operations`)), 1_000),
+			),
+		]);
+		operation.abort('stop');
+
+		await expect(operation).rejects.toMatchObject({ name: 'AbortError' });
+		expect(signals).toHaveLength(2);
+		expect(signals.every((signal) => signal.aborted)).toBe(true);
+	});
+
+	it('reuses the agent sandbox for a harness tool without creating a second one', async () => {
+		const provider = createFauxProvider();
+		const writeFile = vi.fn(async () => {});
+		const sharedEnv = createNoopSessionEnv({ writeFile });
+		const createSessionEnv = vi.fn(async () => sharedEnv);
+		function assistant() {
+			useSandbox({ createSessionEnv });
+			useTool({
+				name: 'write_report',
+				description: 'Write a report.',
+				harness: true,
+				run: async ({ harness }) => {
+					await harness.fs.writeFile('report.txt', 'complete');
+					return { done: true };
+				},
+			});
+			return 'Case agent.';
+		}
+		provider.setResponses([
+			fauxAssistantMessage(fauxToolCall('write_report', {}), { stopReason: 'toolUse' }),
+			fauxAssistantMessage('Done.'),
+		]);
+		const harness = await createDirectContext(provider).initializeRootHarness(
+			defineAgent(assistant, {
+				model: `${provider.getModel().provider}/${provider.getModel().id}`,
+			}),
+		);
+
+		await (await harness.session()).prompt('Write the report.');
+
+		expect(createSessionEnv).toHaveBeenCalledOnce();
+		expect(writeFile).toHaveBeenCalledWith('report.txt', 'complete');
 	});
 });

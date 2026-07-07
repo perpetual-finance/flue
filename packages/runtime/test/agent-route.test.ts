@@ -9,7 +9,7 @@ import {
 	registerFlueAgents,
 	resetFlueAgentRegistrationForTests,
 } from '../src/runtime/registration.ts';
-import type { AgentDefinition } from '../src/types.ts';
+import type { FunctionAgentDefinition } from '../src/types.ts';
 import { cloudflareRuntime, nodeRuntime } from './helpers/runtime-config.ts';
 
 afterEach(() => {
@@ -24,8 +24,8 @@ function boundAgent(
 		attachments?: MiddlewareHandler;
 		description?: string;
 	} = {},
-): AgentDefinition {
-	const agent = defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5' }));
+): FunctionAgentDefinition {
+	const agent = defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' });
 	__flueBindAgentModule(agent, { identity, ...metadata });
 	return agent;
 }
@@ -40,7 +40,7 @@ function promptRequest(url: string): Request {
 
 describe('AgentDefinition.route()', () => {
 	it('throws a directive hint when the definition has no identity binding and no registration', () => {
-		const agent = defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5' }));
+		const agent = defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' });
 		expect(() => agent.route()).toThrow("Add the 'use agent' directive");
 	});
 
@@ -94,7 +94,7 @@ describe('AgentDefinition.route()', () => {
 	});
 
 	it('serves a definition registered by the bootstrap without a module binding', async () => {
-		const agent = defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5' }));
+		const agent = defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' });
 		registerFlueAgents([{ definition: agent, identity: 'support' }]);
 		const createAgentAdmission = vi.fn((_agentName: string, _id: string) => async () => ({
 			submissionId: 'submission-1',

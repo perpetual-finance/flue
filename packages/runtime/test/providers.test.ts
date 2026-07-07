@@ -73,7 +73,7 @@ describe('registerProvider()', () => {
 			apiKey: 'sk-capture',
 		});
 		const harness = await createContext().initializeRootHarness(
-			defineAgent(() => ({ model: 'capture-http/capture-model' })),
+			defineAgent(() => undefined, { model: 'capture-http/capture-model' }),
 		);
 		const session = await harness.session();
 
@@ -98,7 +98,7 @@ describe('registerProvider()', () => {
 			headers: { 'x-gateway-tenant': 'acme' },
 		});
 		const harness = await createContext().initializeRootHarness(
-			defineAgent(() => ({ model: 'capture-auth/capture-model' })),
+			defineAgent(() => undefined, { model: 'capture-auth/capture-model' }),
 		);
 		const session = await harness.session();
 

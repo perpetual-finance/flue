@@ -38,7 +38,7 @@ function noopDispatchQueue(): DispatchQueue {
  * returns its definition — the value dispatch() resolves back to that name.
  */
 function configureModerator(dispatchQueue: DispatchQueue = noopDispatchQueue()) {
-	const moderator = defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5' }));
+	const moderator = defineAgent(() => 'Moderator agent.', { model: 'anthropic/claude-haiku-4-5' });
 	configureFlueRuntime({
 		...nodeRuntime(),
 		dispatchQueue,
@@ -70,7 +70,7 @@ function createProvider(): FauxProviderRegistration {
 
 describe('dispatch()', () => {
 	it('rejects calls when the runtime has not been configured', async () => {
-		const moderator = defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5' }));
+		const moderator = defineAgent(() => 'Moderator agent.', { model: 'anthropic/claude-haiku-4-5' });
 		await expect(
 			dispatch(moderator, {
 				id: 'guild:unconfigured',
@@ -112,7 +112,7 @@ describe('dispatch()', () => {
 	});
 
 	it('rejects an agent definition target when the built application cannot resolve its identity', async () => {
-		const localModerator = defineAgent(() => ({ model: 'anthropic/claude-haiku-4-5' }));
+		const localModerator = defineAgent(() => 'Moderator agent.', { model: 'anthropic/claude-haiku-4-5' });
 		configureFlueRuntime({
 			...nodeRuntime(),
 			dispatchQueue: noopDispatchQueue(),
@@ -290,9 +290,9 @@ describe('dispatched session processing', () => {
 				errorMessage: 'Request was aborted',
 			}),
 		]);
-		const agent = defineAgent(() => ({
+		const agent = defineAgent(() => 'Moderator agent.', {
 			model: `${provider.getModel().provider}/${provider.getModel().id}`,
-		}));
+		});
 		const input: AgentSubmissionInput = {
 			kind: 'direct',
 			submissionId: 'direct:aborted-turn',
@@ -328,9 +328,9 @@ describe('dispatched session processing', () => {
 		provider.setResponses([
 			fauxAssistantMessage('', { stopReason: 'error', errorMessage: 'invalid_api_key' }),
 		]);
-		const agent = defineAgent(() => ({
+		const agent = defineAgent(() => 'Moderator agent.', {
 			model: `${provider.getModel().provider}/${provider.getModel().id}`,
-		}));
+		});
 		const input: AgentSubmissionInput = {
 			kind: 'direct',
 			submissionId: 'direct:error-turn',

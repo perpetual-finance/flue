@@ -13,6 +13,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
 import type { AgentExecutionStore } from '../src/agent-execution-store.ts';
 import type { ConversationRecord } from '../src/conversation-records.ts';
+import { useSubagent } from '../src/hooks/use-subagent.ts';
+import { useTool } from '../src/hooks/use-tool.ts';
 import { createFlueContext, type DispatchInput, resolveModel } from '../src/internal.ts';
 import {
 	createNodeAgentCoordinator,
@@ -161,7 +163,7 @@ async function createRealCoordinator(
 	const adapter = sqlite(dbPath);
 	await adapter.migrate?.();
 	const { executionStore, conversationStreamStore, attachmentStore } = await adapter.connect();
-	const agent = defineAgent(() => ({ model: REAL_MODEL }));
+	const agent = defineAgent(() => 'Assistant agent.', { model: REAL_MODEL });
 	const coordinator = createNodeAgentCoordinator({
 		submissions: executionStore.submissions,
 		agents: [{ name: 'assistant', definition: agent }],
@@ -181,10 +183,10 @@ async function createFauxCoordinator(
 	const adapter = sqlite(dbPath);
 	await adapter.migrate?.();
 	const { executionStore, conversationStreamStore, attachmentStore } = await adapter.connect();
-	const agent = defineAgent(() => ({
+	const agent = defineAgent(() => 'Assistant agent.', {
 		model: `${provider.getModel().provider}/${provider.getModel().id}`,
 		durability,
-	}));
+	});
 	const coordinator = createNodeAgentCoordinator({
 		submissions: executionStore.submissions,
 		agents: [{ name: 'assistant', definition: agent }],
@@ -545,9 +547,9 @@ describe('NodeAgentCoordinator', () => {
 				submissions: executionStore.submissions,
 				agents: [{
 					name: 'assistant',
-					definition: defineAgent(() => ({
+					definition: defineAgent(() => 'Assistant agent.', {
 						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					})),
+					}),
 				}],
 				createContext: makeFauxCreateContext(provider),
 				conversationStreamStore: failingStore,
@@ -744,9 +746,9 @@ describe('NodeAgentCoordinator', () => {
 				submissions: executionStore.submissions,
 				agents: [{
 					name: 'assistant',
-					definition: defineAgent(() => ({
+					definition: defineAgent(() => 'Assistant agent.', {
 						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					})),
+					}),
 				}],
 				createContext: makeFauxCreateContext(provider),
 				conversationStreamStore,
@@ -788,14 +790,17 @@ describe('NodeAgentCoordinator', () => {
 					return 'must not run';
 				},
 			});
+			function Assistant() {
+				useTool(lookup);
+				return 'Assistant agent.';
+			}
 			const coordinator = createNodeAgentCoordinator({
 				submissions: executionStore.submissions,
 				agents: [{
 					name: 'assistant',
-					definition: defineAgent(() => ({
+					definition: defineAgent(Assistant, {
 						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-						tools: [lookup],
-					})),
+					}),
 				}],
 				createContext: makeFauxCreateContext(provider),
 				conversationStreamStore,
@@ -844,14 +849,17 @@ describe('NodeAgentCoordinator', () => {
 					return 'must not run';
 				},
 			});
+			function Assistant() {
+				useTool(lookup);
+				return 'Assistant agent.';
+			}
 			const coordinator = createNodeAgentCoordinator({
 				submissions: executionStore.submissions,
 				agents: [{
 					name: 'assistant',
-					definition: defineAgent(() => ({
+					definition: defineAgent(Assistant, {
 						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-						tools: [lookup],
-					})),
+					}),
 				}],
 				createContext: makeFauxCreateContext(provider),
 				conversationStreamStore,
@@ -898,14 +906,19 @@ describe('NodeAgentCoordinator', () => {
 				},
 			});
 			const model = `${provider.getModel().provider}/${provider.getModel().id}`;
+			function Reviewer() {
+				useTool(lookup);
+				return 'You review the delegated work.';
+			}
+			function Assistant() {
+				useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', capabilities: Reviewer });
+				return 'Assistant agent.';
+			}
 			const coordinator = createNodeAgentCoordinator({
 				submissions: executionStore.submissions,
 				agents: [{
 					name: 'assistant',
-					definition: defineAgent(() => ({
-						model,
-						subagents: [{ name: 'reviewer', model, tools: [lookup] }],
-					})),
+					definition: defineAgent(Assistant, { model }),
 				}],
 				createContext: makeFauxCreateContext(provider),
 				conversationStreamStore,
@@ -1401,15 +1414,18 @@ describe('NodeAgentCoordinator', () => {
 				input: v.object({ q: v.string() }),
 				run: async () => 'found it',
 			});
+			function Assistant() {
+				useTool(lookup);
+				return 'Assistant agent.';
+			}
 			const coordinator = createNodeAgentCoordinator({
 				submissions: executionStore.submissions,
 				agents: [
 					{
 						name: 'assistant',
-						definition: defineAgent(() => ({
+						definition: defineAgent(Assistant, {
 							model: `${provider.getModel().provider}/${provider.getModel().id}`,
-							tools: [lookup],
-						})),
+						}),
 					},
 				],
 				createContext: makeFauxCreateContext(provider),

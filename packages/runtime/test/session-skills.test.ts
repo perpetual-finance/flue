@@ -5,7 +5,7 @@ import {
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineAgent, SkillNotRegisteredError } from '../src/index.ts';
+import { defineAgent, SkillNotRegisteredError, useSkill } from '../src/index.ts';
 import { createFlueContext } from '../src/internal.ts';
 import type { SessionEnv } from '../src/types.ts';
 
@@ -108,7 +108,9 @@ describe('session.skill()', () => {
 				}),
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({ model: `${provider.getModel().provider}/${provider.getModel().id}` })),
+			defineAgent(() => undefined, {
+				model: `${provider.getModel().provider}/${provider.getModel().id}`,
+			}),
 		);
 		const session = await harness.session();
 
@@ -141,7 +143,9 @@ describe('session.skill()', () => {
 				}),
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({ model: `${provider.getModel().provider}/${provider.getModel().id}` })),
+			defineAgent(() => undefined, {
+				model: `${provider.getModel().provider}/${provider.getModel().id}`,
+			}),
 		);
 		const session = await harness.session();
 
@@ -161,7 +165,9 @@ describe('session.skill()', () => {
 			createDefaultEnv: async () => createEnv(),
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({ model: `${provider.getModel().provider}/${provider.getModel().id}` })),
+			defineAgent(() => undefined, {
+				model: `${provider.getModel().provider}/${provider.getModel().id}`,
+			}),
 		);
 		const session = await harness.session();
 
@@ -187,10 +193,12 @@ describe('session.skill()', () => {
 
 		await expect(
 			ctx.initializeRootHarness(
-				defineAgent(() => ({
-					model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					skills: [{ name: 'review', description: 'Review packaged changes.' }],
-				})),
+				defineAgent(
+					() => {
+						useSkill({ name: 'review', description: 'Review packaged changes.' });
+					},
+					{ model: `${provider.getModel().provider}/${provider.getModel().id}` },
+				),
 			),
 		).rejects.toThrow(
 			'[flue] Skill name "review" appears in both agent definition and workspace discovery.',
@@ -215,7 +223,9 @@ describe('session.skill()', () => {
 			createDefaultEnv: async () => createEnv(),
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({ model: `${provider.getModel().provider}/${provider.getModel().id}` })),
+			defineAgent(() => undefined, {
+				model: `${provider.getModel().provider}/${provider.getModel().id}`,
+			}),
 		);
 		const session = await harness.session();
 
@@ -254,7 +264,9 @@ describe('session.skill()', () => {
 			createDefaultEnv: async () => createEnv({ files }),
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({ model: `${provider.getModel().provider}/${provider.getModel().id}` })),
+			defineAgent(() => undefined, {
+				model: `${provider.getModel().provider}/${provider.getModel().id}`,
+			}),
 		);
 		files['/repo/.agents/skills/review/SKILL.md'] =
 			'---\nname: review\ndescription: Review workspace changes.\n---\nRead the current checklist.';
@@ -309,10 +321,12 @@ describe('session.skill()', () => {
 			createDefaultEnv: async () => createEnv(),
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => ({
-				model: `${provider.getModel().provider}/${provider.getModel().id}`,
-				skills: [{ name: 'review', description: 'Review changes.' }],
-			})),
+			defineAgent(
+				() => {
+					useSkill({ name: 'review', description: 'Review changes.' });
+				},
+				{ model: `${provider.getModel().provider}/${provider.getModel().id}` },
+			),
 		);
 		const session = await harness.session();
 

@@ -7,6 +7,7 @@ import {
 } from '@earendil-works/pi-ai/compat';
 import * as v from 'valibot';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useSkill } from '../src/hooks/use-skill.ts';
 import { defineAgent, observe, ResultUnavailableError } from '../src/index.ts';
 import { createFlueContext } from '../src/internal.ts';
 import type { FlueEvent, FlueObservation, FlueSession, Skill } from '../src/types.ts';
@@ -26,7 +27,23 @@ function createProvider(): FauxProviderRegistration {
 
 async function createSession(
 	provider: FauxProviderRegistration,
-	options: { skills?: Skill[]; onEvent?: (event: FlueEvent) => void } = {},
+	options: {
+		skills?: Skill[];
+		onEvent?: (event: FlueEvent) => void;
+		/**
+		 * A function agent's per-turn re-render (`prepareRerenderTurn` in
+		 * src/session.ts) rebuilds `agentLoop.state.tools` from the capability
+		 * alone, dropping the ephemeral `finish`/`give_up` result-tool bundle
+		 * that `withCallOverrides` installs for the duration of a
+		 * `session.prompt(..., { result })` call. That's fine for single-turn
+		 * structured results, but a follow-up turn (the model doesn't call
+		 * `finish`/`give_up` on its first reply) loses the tool and the retry
+		 * fails with "Tool finish not found" — a pre-existing runtime gap, not
+		 * something a test fixture can route around. Use the legacy
+		 * initializer form for those multi-turn scenarios until that's fixed.
+		 */
+		legacyAgent?: boolean;
+	} = {},
 ): Promise<FlueSession> {
 	const ctx = createFlueContext({
 		id: 'structured-results-instance',
@@ -37,12 +54,16 @@ async function createSession(
 		createDefaultEnv: async () => createNoopSessionEnv(),
 	});
 	if (options.onEvent) ctx.setEventCallback(options.onEvent);
-	const harness = await ctx.initializeRootHarness(
-		defineAgent(() => ({
-			model: `${provider.getModel().provider}/${provider.getModel().id}`,
-			skills: options.skills,
-		})),
-	);
+	const model = `${provider.getModel().provider}/${provider.getModel().id}`;
+	const agent = options.legacyAgent
+		? defineAgent(() => ({ model, skills: options.skills }))
+		: defineAgent(
+				() => {
+					for (const skill of options.skills ?? []) useSkill(skill);
+				},
+				{ model },
+			);
+	const harness = await ctx.initializeRootHarness(agent);
 	return harness.session();
 }
 
@@ -210,7 +231,10 @@ describe('structured operation results', () => {
 			if (ctx.id === 'structured-results-instance') observations.push(event);
 		});
 		try {
-			const session = await createSession(provider, { onEvent: (event) => events.push(event) });
+			const session = await createSession(provider, {
+				onEvent: (event) => events.push(event),
+				legacyAgent: true,
+			});
 
 			const response = await session.prompt('Count the accepted entries.', {
 				result: v.object({ count: v.pipe(v.number(), v.minValue(0)) }),
@@ -302,6 +326,7 @@ describe('structured operation results', () => {
 			onEvent: (event) => {
 				if (event.type === 'turn') turns.push(event);
 			},
+			legacyAgent: true,
 		});
 
 		const response = await session.prompt('Complete the structured response.', {

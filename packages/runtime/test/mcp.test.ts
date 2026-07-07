@@ -13,6 +13,7 @@ import {
 	type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useTool } from '../src/hooks/use-tool.ts';
 import { connectMcpServer, defineAgent } from '../src/index.ts';
 import { createFlueContext } from '../src/internal.ts';
 import { connectMcpServerWithClient } from '../src/mcp.ts';
@@ -328,10 +329,12 @@ describe('connectMcpServerWithClient()', () => {
 				createDefaultEnv: async () => createNoopSessionEnv(),
 			});
 			const harness = await context.initializeRootHarness(
-				defineAgent(() => ({
-					model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					tools: [decoratedTool],
-				})),
+				defineAgent(
+					() => {
+						useTool(decoratedTool);
+					},
+					{ model: `${provider.getModel().provider}/${provider.getModel().id}` },
+				),
 			);
 
 			await (await harness.session()).prompt('Look up flue.');
