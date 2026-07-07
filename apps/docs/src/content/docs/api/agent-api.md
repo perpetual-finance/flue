@@ -1,6 +1,6 @@
 ---
 title: Agent API
-description: Reference for defining agents, composing capabilities with Flue Hooks, and running agent operations with @flue/runtime.
+description: Reference for defining agents, composing behavior with Flue Hooks, and running agent operations with @flue/runtime.
 lastReviewedAt: 2026-07-07
 ---
 
@@ -23,7 +23,6 @@ import {
   defineTool,
   dispatch,
   getAgentInstance,
-  use,
   useAppend,
   useDelivery,
   useEffect,
@@ -36,12 +35,12 @@ import {
   useSubagent,
   useTool,
   type AgentDispatchRequest,
+  type AgentFunction,
   type AgentInstanceInfo,
   type AgentModuleValue,
   type AgentSignalAppend,
   type BashFactory,
   type CallHandle,
-  type Capability,
   type CompactionConfig,
   type DefineSkillOptions,
   type DeliveredAttachment,
@@ -90,10 +89,10 @@ import {
 ## `defineAgent(...)`
 
 ```ts
-function defineAgent(agent: Capability<AgentProps>, config: FunctionAgentConfig): FunctionAgentDefinition;
+function defineAgent(agent: AgentFunction<AgentProps>, config: FunctionAgentConfig): FunctionAgentDefinition;
 ```
 
-Defines an addressable agent. An agent is a [capability](#capability) given a model: the capability function composes the agent's behavior with Flue Hooks — attaching tools, instructions, skills, subagents, and durable state — and returns the agent's instruction string; `config` is the static identity (model, tuning) that never renders.
+Defines an addressable agent. An agent is an [agent function](#agentfunction) given a model: it composes the agent's behavior with Flue Hooks — attaching tools, instructions, skills, subagents, and durable state — and returns the agent's instruction string; `config` is the static identity (model, tuning) that never renders.
 
 Default-export the returned value from a module whose first statement is the `'use agent'` directive to make the agent part of the application:
 
@@ -118,9 +117,9 @@ export default defineAgent(Support, { model: 'anthropic/claude-sonnet-4-6' });
 
 The directive gives the agent its durable identity (the file basename) and registers it with the built application — there is no name-based addressing beyond that identity. To expose the agent over HTTP, mount `agent.route()` in `app.ts`; see the [Routing API](/docs/api/routing-api/). A dispatch-only agent needs no mount. `flue run <path>` and raw `defineAgent()` values in unit tests do not require the directive.
 
-The capability re-renders every turn as durable state changes — it must return synchronously and the set of mounted capabilities (`use()`, `useTool()`, `useSkill()`, `useSubagent()`) must stay identical across renders. Async work belongs in tools, `useEffect()`, or resource factories, never in the capability body itself.
+The agent function re-renders every turn as durable state changes — it must return synchronously and the tools, state, skills, and subagents it attaches (`useTool()`, `useSkill()`, `useSubagent()`, and other hooks) must stay identical across renders. Async work belongs in tools, `useEffect()`, or resource factories, never in the agent function body itself.
 
-The runtime passes the top-level capability an `AgentProps` object — the agent's route data, the way a web framework passes route params to the page component. Zero-argument capabilities stay assignable unchanged. Only the root receives it: `use()` children get the props their caller passes, and subagent capabilities get nothing (a delegate runs in isolation from the parent).
+The runtime passes the top-level agent function an `AgentProps` object — the agent's route data, the way a web framework passes route params to the page component. Zero-argument agent functions stay assignable unchanged. Only the root receives it: custom hooks get whatever arguments their caller passes, and a subagent's agent function gets nothing (a delegate runs in isolation from the parent).
 
 ```ts
 interface AgentProps {
@@ -153,16 +152,16 @@ hatch for the rare caller that must recover them from the id itself.
 | `cwd`           | `string`                    | Working directory inside the initialized environment.                                                                           |
 | `input`         | Valibot schema              | Schema for the instance's creation data, validated once at instance creation (a mismatch — including absence, unless the schema accepts `undefined` — rejects the creating call). Read the recorded value with [`useInitialData()`](#useinitialdata). |
 
-Everything dynamic — instructions, tools, skills, subagents, sandbox — is composed inside the capability function with Flue Hooks; `FunctionAgentConfig` holds only what's fixed for the agent's whole lifetime.
+Everything dynamic — instructions, tools, skills, subagents, sandbox — is composed inside the agent function with Flue Hooks; `FunctionAgentConfig` holds only what's fixed for the agent's whole lifetime.
 
 #### `FunctionAgentDefinition`
 
-The opaque value `defineAgent(Capability, config)` returns:
+The opaque value `defineAgent(Agent, config)` returns:
 
 ```ts
 interface FunctionAgentDefinition {
   __flueFunctionAgent: true;
-  capability: Capability;
+  agent: AgentFunction;
   config: FunctionAgentConfig;
   route(): Hono;
 }
@@ -187,43 +186,38 @@ interface FunctionAgentDefinition {
 
 ## Flue Hooks
 
-Flue Hooks are the functions called inside a capability's body to attach behavior for the current render — tools, instructions, skills, subagents, durable state, and more. All hooks throw when called outside an active render (i.e. anywhere other than the agent function or a `use()`-mounted capability it calls).
+Flue Hooks are the functions called inside an agent function's body — directly, or inside a custom hook it calls — to attach behavior for the current render: tools, instructions, skills, subagents, durable state, and more. All hooks throw when called outside an active render.
 
-### `use(...)`
-
-```ts
-function use(capability: Capability): void;
-function use<TProps>(capability: Capability<TProps>, props: TProps): void;
-```
-
-Mounts a [capability](#capability) for this render. Flue invokes the capability — pass the function itself, never its result — and any tools or instructions attached in its body are attributed to it.
+#### `AgentFunction`
 
 ```ts
-function Retention({ active }: { active: () => boolean }) {
-  useTool({
-    ...offerCredit,
-    run: (ctx) => (active() ? offerCredit.run(ctx) : 'Refused: no churn risk on record.'),
-  });
-  return 'Only while the customer is weighing cancellation: you may offer retention incentives.';
-}
-
-function Support() {
-  use(Retention, { active: () => sentiment === 'churn-risk' });
-  return 'Support agent.';
-}
-```
-
-`use()` is never conditional and the set of mounted capabilities must be identical across renders. State informs the agent — through props, guards, and interpolated text — it does not reshape the agent. Capabilities may `use()` other capabilities; all mounts record flat, in mount order.
-
-#### `Capability`
-
-```ts
-type Capability<TProps = void> = TProps extends void
+type AgentFunction<TProps = void> = TProps extends void
   ? () => string | undefined | void
   : (props: TProps) => string | undefined | void;
 ```
 
-A plain synchronous function that composes agent behavior: Flue Hooks in the body attach what it provides, and the returned string is its instruction — the prose that teaches the model what this capability is and how to use it. Return nothing for a tools-only capability. Capabilities must return synchronously; async work lives in tools, `useEffect()`, or resource factories.
+A plain synchronous function that composes agent behavior: Flue Hooks in the body attach what it provides, and the returned string is its instruction — the prose that teaches the model who it is and how to use it. Return nothing for a tools-only agent function. Agent functions must return synchronously; async work lives in tools, `useEffect()`, or resource factories.
+
+### Custom hooks
+
+There is no separate mounting API for composition — write a plain function that calls `useTool()`, `useInstruction()`, or any other hook, and call it from the agent body or from another custom hook:
+
+```ts
+function useRetention(active: () => boolean) {
+  useTool({
+    ...offerCredit,
+    run: (ctx) => (active() ? offerCredit.run(ctx) : 'Refused: no churn risk on record.'),
+  });
+  useInstruction('Only while the customer is weighing cancellation: you may offer retention incentives.');
+}
+
+function Support() {
+  useRetention(() => sentiment === 'churn-risk');
+  return 'Support agent.';
+}
+```
+
+Hook calls are never conditional and the set of hooks each function calls must be identical across renders. State informs the agent — through arguments, guards, and interpolated text — it does not reshape the agent. A custom hook may take arguments and return values to its caller like any other function, and may call other custom hooks.
 
 ### `useTool(...)`
 
@@ -238,7 +232,7 @@ function useTool(tool: {
 }): void;
 ```
 
-Mounts a model-callable tool for the current render. Accepts a `defineTool(...)` value or an inline definition object (same validation, applied here). Called directly in the agent body or inside a capability — either way the tool joins the render's single flat tool set:
+Mounts a model-callable tool for the current render. Accepts a `defineTool(...)` value or an inline definition object (same validation, applied here). Called directly in the agent body or inside a custom hook — either way the tool joins the render's single flat tool set:
 
 ```ts
 function Retention() {
@@ -255,7 +249,7 @@ Duplicate active tool names across the whole render fail fast. See [`defineTool(
 function useInstruction(text: string): void;
 ```
 
-Appends raw instruction text for the current render — the deliberately low-level escape hatch. Called in the agent body, text lands after the base instruction, in call order; called inside a component, it lands in that component's capability section. No structure, no identity, no change tracking: prefer a component (`use()`) for anything coherent.
+Appends raw instruction text for the current render — the deliberately low-level escape hatch. Called in the agent body, text lands after the base instruction, in call order; called inside a custom hook, it lands in that hook's section. No structure, no identity, no change tracking: prefer a custom hook for anything coherent.
 
 ```ts
 export default function marketing() {
@@ -315,7 +309,7 @@ Accepts a `SkillReference` (a `SKILL.md` import `with { type: 'skill' }`, or [`d
 function useSubagent(subagent: SubagentDefinition): void;
 ```
 
-Declares a delegate the model can hand focused work to via the framework's `task` tool. `capabilities` defines the delegate's whole world — it is rendered at delegation time, in its own frame, fresh per task — and the delegate is isolated from the parent's capabilities: nothing flows in except the shared environment and, unless overridden here, the parent's model and reasoning effort.
+Declares a delegate the model can hand focused work to via the framework's `task` tool. `agent` defines the delegate's whole world — it is rendered at delegation time, in its own frame, fresh per task — and the delegate is isolated from the parent: nothing flows in except the shared environment and, unless overridden here, the parent's model and reasoning effort.
 
 ```ts
 function Reproducer() {
@@ -327,7 +321,7 @@ function ReproducePhase() {
   useSubagent({
     name: 'reproducer',
     description: 'Sets up the reproduction for one issue and writes report.md.',
-    capabilities: Reproducer,
+    agent: Reproducer,
   });
   return 'Delegate the reproduction to the `reproducer` subagent.';
 }
@@ -339,11 +333,11 @@ function ReproducePhase() {
 | --------------- | --------------- | --------------------------------------------------------------------------------------------------------- |
 | `name`          | `string`        | Catalog name the model uses to select this delegate on the `task` tool.                                   |
 | `description`   | `string`        | Catalog line — how the model decides when to delegate to this agent.                                      |
-| `capabilities`  | `Capability`    | Capability function defining the delegate's whole world.                                                  |
+| `agent`         | `AgentFunction` | Agent function defining the delegate's whole world.                                                       |
 | `model`         | `string`        | Model specifier override. Inherits the parent's model when omitted.                                       |
 | `thinkingLevel` | `ThinkingLevel` | Reasoning-effort override. Inherits when omitted.                                                          |
 
-Inside the delegate's render, `use()`, `useTool()`, `useInstruction()`, `useSkill()`, and nested `useSubagent()` all compose as usual; `useState()` and `useSandbox()` throw (durable state is instance-scoped and delegates share the parent environment). Duplicate delegate names in one render fail fast. Select a declared subagent from a `session.task()` call with `options.agent`; see [`session.task(...)`](#sessiontask).
+Inside the delegate's render, custom hooks, `useTool()`, `useInstruction()`, `useSkill()`, and nested `useSubagent()` all compose as usual; `useState()` and `useSandbox()` throw (durable state is instance-scoped and delegates share the parent environment). Duplicate delegate names in one render fail fast. Select a declared subagent from a `session.task()` call with `options.agent`; see [`session.task(...)`](#sessiontask).
 
 ### `useSandbox(...)`
 
@@ -360,7 +354,7 @@ function IssueTriage() {
 }
 ```
 
-Callable from the agent body, a capability, or a custom hook — but at most once per render (an agent has one environment), and never conditionally. Without it, the runtime's default virtual sandbox applies. Not available in a subagent render (delegates share the parent agent's environment; scope work with the task call's `cwd` instead). See [Sandboxes](/docs/guide/sandboxes/).
+Callable from the agent body or a custom hook — but at most once per render (an agent has one environment), and never conditionally. Without it, the runtime's default virtual sandbox applies. Not available in a subagent render (delegates share the parent agent's environment; scope work with the task call's `cwd` instead). See [Sandboxes](/docs/guide/sandboxes/).
 
 ### `useDelivery()`
 
@@ -796,7 +790,7 @@ if (info) await dispatch(triage, { id: info.id, uid: info.uid, message });
 
 ## Agent
 
-A `FunctionAgentDefinition` is the opaque value returned by `defineAgent(Capability, config)`. Default-export it from a `'use agent'` module to register it with the application; mount `agent.route()` in `app.ts` to make its conversations addressable over HTTP.
+A `FunctionAgentDefinition` is the opaque value returned by `defineAgent(Agent, config)`. Default-export it from a `'use agent'` module to register it with the application; mount `agent.route()` in `app.ts` to make its conversations addressable over HTTP.
 
 ## Harness
 

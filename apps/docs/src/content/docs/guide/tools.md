@@ -49,7 +49,7 @@ Use clear action-oriented names, such as `lookup_order_status` or `create_suppor
 
 ## Using tools
 
-Mount a tool with `useTool(...)` inside the agent's capability function:
+Mount a tool with `useTool(...)` inside the agent function:
 
 ```ts title="src/agents/order-assistant.ts"
 'use agent';

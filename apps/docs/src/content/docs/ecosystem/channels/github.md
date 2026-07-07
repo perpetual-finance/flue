@@ -278,7 +278,7 @@ instance is created; `useInitialData()` returns the parsed value on every
 render. Pull requests use their issue number for issue comments. The model
 selects the comment body; trusted code binds the repository and issue. The
 channel-agent import cycle is supported because both imported bindings are
-read only inside deferred callbacks or the agent's capability function.
+read only inside deferred callbacks or the agent function body.
 
 GitHub expects a `2xx` response within ten seconds and does not auto-retry.
 The package does not enforce a handler deadline; treat the ten-second window as

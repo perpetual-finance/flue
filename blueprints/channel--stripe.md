@@ -175,7 +175,7 @@ needs no `app.ts` mounting. Add
 should also be reachable over HTTP directly.
 
 The channel-agent import cycle is supported only because imported bindings are
-read inside deferred callbacks and capability functions. Do not read the agent
+read inside deferred callbacks and agent function bodies. Do not read the agent
 binding while constructing `channel`.
 
 ## Thin event notifications

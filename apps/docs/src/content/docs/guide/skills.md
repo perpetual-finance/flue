@@ -29,7 +29,7 @@ The example stores the skill in `src/skills/` alongside other authored source, b
 
 ## Import a skill
 
-Import your skills with the `skill` import attribute (a new feature in modern JavaScript). Once imported, pass the imported reference to `useSkill(...)` inside the agent's capability function:
+Import your skills with the `skill` import attribute (a new feature in modern JavaScript). Once imported, pass the imported reference to `useSkill(...)` inside the agent function:
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
@@ -48,7 +48,7 @@ function Assistant() {
 export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
-Each import produces a skill reference and includes that skill directory in the application build. Mounting a reference with `useSkill(...)` makes the skill available to this agent by its declared name. Skills mount unconditionally like any other hook — a skill mounted by one capability is cataloged on every render, whether or not the current phase calls for it; write the capability's instruction to say when to activate it.
+Each import produces a skill reference and includes that skill directory in the application build. Mounting a reference with `useSkill(...)` makes the skill available to this agent by its declared name. Skills mount unconditionally like any other hook — a skill mounted by one custom hook is cataloged on every render, whether or not the current phase calls for it; write that hook's instruction to say when to activate it.
 
 Skills can also be imported from installed packages:
 

@@ -9,7 +9,7 @@ function WithThinking() {
 	useSubagent({
 		name: 'auditor',
 		description: 'Reviews a claim carefully at a high reasoning effort.',
-		capabilities: Auditor,
+		agent: Auditor,
 		thinkingLevel: 'high',
 	});
 	useTool({

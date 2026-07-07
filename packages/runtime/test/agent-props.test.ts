@@ -60,12 +60,12 @@ describe('AgentProps', () => {
 		).toThrow('no agent instance behind it');
 	});
 
-	it('renders zero-argument capabilities unchanged', () => {
+	it('renders zero-argument agent functions unchanged', () => {
 		const config = renderAgentFunction(() => 'No props needed.', { model: 'test/model' });
 		expect(config.instructions).toBe('No props needed.');
 	});
 
-	it('does not pass props to subagent capabilities — delegates run in isolation', async () => {
+	it('does not pass props to a subagent\'s agent function — delegates run in isolation', async () => {
 		const provider = createProvider();
 		provider.setResponses([fauxAssistantMessage('ok')]);
 		let delegateArgCount: number | undefined;
@@ -74,7 +74,7 @@ describe('AgentProps', () => {
 				useSubagent({
 					name: 'worker',
 					description: 'Isolated delegate.',
-					capabilities: function Worker(...args: unknown[]) {
+					agent: function Worker(...args: unknown[]) {
 						delegateArgCount = args.length;
 						return 'Delegate instruction.';
 					} as () => string,

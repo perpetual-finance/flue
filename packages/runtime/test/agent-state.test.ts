@@ -17,7 +17,6 @@ import {
 } from '../src/conversation-reducer.ts';
 import { renderAgentFunction } from '../src/hooks/render.ts';
 import { createHookStateBuffer, type StateSetter, useState } from '../src/hooks/state.ts';
-import { use } from '../src/hooks/use.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { createFlueContext, type DispatchInput } from '../src/internal.ts';
 import { createNodeAgentCoordinator } from '../src/node/agent-coordinator.ts';
@@ -431,7 +430,7 @@ describe('useState end to end (node coordinator, faux provider)', () => {
 		expect(laterPrompts[0]).toContain('count=1');
 	});
 
-	it('fails the run when a render changes structure mid-run (conditional use)', async () => {
+	it('fails the run when a render changes structure mid-run (conditional custom hook)', async () => {
 		const dbPath = createTempDbPath();
 		const adapter = sqlite(dbPath);
 		await adapter.migrate?.();
@@ -444,12 +443,16 @@ describe('useState end to end (node coordinator, faux provider)', () => {
 			fauxAssistantMessage('Should never be reached.'),
 		]);
 
-		function Extra() {
-			return 'Conditionally mounted — illegal.';
+		function useExtra() {
+			useTool({
+				name: 'extra_tool',
+				description: 'Conditionally mounted — illegal.',
+				run: async () => 'ok',
+			});
 		}
 		function assistant() {
 			const [count, setCount] = useState('count', 0);
-			if (count > 0) use(Extra);
+			if (count > 0) useExtra();
 			useTool({
 				name: 'bump',
 				description: 'Increment the counter.',
@@ -494,7 +497,8 @@ describe('useState end to end (node coordinator, faux provider)', () => {
 			.at(-1);
 		expect(finalAssistant).toMatchObject({ stopReason: 'error' });
 		expect(JSON.stringify(finalAssistant)).toContain('changed structure between turns');
-		expect(JSON.stringify(finalAssistant)).toContain('Extra');
+		expect(JSON.stringify(finalAssistant)).toContain('extra_tool');
+		expect(JSON.stringify(finalAssistant)).toContain('Hook calls must not be conditional');
 		expect(JSON.stringify(records)).not.toContain('Should never be reached.');
 	});
 });

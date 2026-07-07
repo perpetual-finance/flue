@@ -1,19 +1,19 @@
 import { assertToolDefinition } from '../tool.ts';
 import type { ToolDefinition, ToolInputSchema, ToolOutputSchema } from '../tool-types.ts';
-import { currentScope, requireRenderFrame } from './frame.ts';
+import { requireRenderFrame } from './frame.ts';
 
 /**
  * Mount a model-callable tool for the current render.
  *
  * Accepts a `defineTool(...)` value or an inline definition object (same
  * validation, applied here; `run`'s `data` is typed from the `input` schema).
- * Called directly in the agent body or inside a capability — either way the
+ * Called directly in the agent body or inside a custom hook — either way the
  * tool joins the render's single flat tool set:
  *
  * ```ts
- * function Retention() {
+ * function useRetention() {
  *   useTool(offerCredit);
- *   return 'You may offer retention incentives.';
+ *   useInstruction('You may offer retention incentives.');
  * }
  * ```
  *
@@ -39,5 +39,5 @@ export function useTool<
 }): void {
 	const frame = requireRenderFrame('useTool');
 	assertToolDefinition(tool, 'useTool()');
-	currentScope(frame).tools.push(tool as unknown as ToolDefinition);
+	frame.root.tools.push(tool as unknown as ToolDefinition);
 }

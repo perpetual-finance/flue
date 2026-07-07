@@ -13,29 +13,16 @@ import type { DeliveredMessage, SandboxFactory, Skill, SubagentDefinition } from
  * set for exactly the duration of one render, and hooks throw when it is
  * empty (called from tools, events, or module scope).
  *
- * Attachments land in the *current scope*: the root scope for hooks called
- * directly in the agent body, or a component scope while `use()` runs a
- * component function. Scopes form a stack because components may use()
- * other components; completed components are recorded flat, keyed by their
- * manifest `key`.
+ * All attachments land flat on the frame in call order — a custom hook is a
+ * plain function, so hooks it calls record exactly as if the agent body had
+ * called them directly.
  */
 
-/** Attachments collected for one scope (the root, or one component render). */
-export interface AttachScope {
+/** The render's collected attachments. */
+interface AttachScope {
 	/** `useInstruction()` contributions, in call order. */
 	instructions: string[];
 	/** `useTool()` mounts, in call order. */
-	tools: ToolDefinition[];
-}
-
-/** One mounted capability: its returned instruction plus everything attached in its body. */
-export interface CapabilityRecord {
-	/** The capability function itself — identity for the structural-invariance guard. */
-	capability: (props?: never) => unknown;
-	/** The capability's returned instruction string, when it returned one. */
-	instruction?: string;
-	/** `useInstruction()` contributions made in the capability's body, in call order. */
-	instructions: string[];
 	tools: ToolDefinition[];
 }
 
@@ -50,7 +37,7 @@ export interface RenderStateContext {
 	store: HookStateStore | undefined;
 	/**
 	 * The agent instance id backing this render, threaded into the root
-	 * capability as `AgentProps.id`. Absent on bare tooling/test renders —
+	 * agent function as `AgentProps.id`. Absent on bare tooling/test renders —
 	 * reading `props.id` there throws.
 	 */
 	instanceId?: string;
@@ -85,17 +72,13 @@ export interface HookStateStore {
 
 export interface RenderFrame {
 	/**
-	 * What is being rendered: a root agent, or a subagent capability rendered
+	 * What is being rendered: a root agent, or a delegate's agent function rendered
 	 * at delegation time. Subagent frames reject the hooks whose contracts are
 	 * root-scoped (`useState` — durable state is instance-scoped; `useSandbox`
 	 * — delegates share the parent environment).
 	 */
 	kind: 'agent' | 'subagent';
 	root: AttachScope;
-	/** Current attachment target is the last entry; the root sits at index 0. */
-	scopeStack: AttachScope[];
-	/** Mounted capabilities in mount order, flat (nested use() records here too). */
-	capabilities: CapabilityRecord[];
 	/** `useState` names declared this render; duplicates throw. */
 	stateNames: Set<string>;
 	/** `useMessageData` names declared this render; duplicates throw. */
@@ -125,15 +108,10 @@ export function requireRenderFrame(hookName: string): RenderFrame {
 	if (!currentFrame) {
 		throw new Error(
 			`[flue] ${hookName}() was called outside an agent function. ` +
-				'Flue Hooks compose an agent while it renders: call them synchronously in the agent function body (or in a component it adds), not from tools, actions, event handlers, or module scope.',
+				'Flue Hooks compose an agent while it renders: call them synchronously in the agent function body (or in a custom hook it calls), not from tools, actions, event handlers, or module scope.',
 		);
 	}
 	return currentFrame;
-}
-
-/** The scope attachments currently land in (root, or the component being rendered). */
-export function currentScope(frame: RenderFrame): AttachScope {
-	return frame.scopeStack[frame.scopeStack.length - 1] as AttachScope;
 }
 
 /** Run one synchronous render inside a fresh frame; always clears the slot. */
@@ -144,15 +122,13 @@ export function renderWithFrame<T>(
 ): { result: T; frame: RenderFrame } {
 	if (currentFrame) {
 		throw new Error(
-			'[flue] Re-entrant agent render. An agent function must not invoke another agent function directly; compose shared behavior with components instead.',
+			'[flue] Re-entrant agent render. An agent function must not invoke another agent function directly; compose shared behavior with custom hooks instead.',
 		);
 	}
 	const root: AttachScope = { instructions: [], tools: [] };
 	const frame: RenderFrame = {
 		kind,
 		root,
-		scopeStack: [root],
-		capabilities: [],
 		stateNames: new Set(),
 		messageDataNames: new Set(),
 		metadataProducers: { start: [], finish: [] },

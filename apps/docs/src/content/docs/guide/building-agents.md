@@ -10,7 +10,7 @@ For the underlying mental model, start with [What is an agent?](/docs/concepts/a
 
 ## Creating a new agent
 
-In a Flue project, an agent is a module marked with the [`'use agent'` directive](/docs/guide/use-agent/) whose default export is created with `defineAgent(Capability, config)`. The **capability** is a plain function: Flue Hooks in its body attach tools, instructions, and state, and its returned string is the agent's instruction.
+In a Flue project, an agent is a module marked with the [`'use agent'` directive](/docs/guide/use-agent/) whose default export is created with `defineAgent(Agent, config)`. The **agent function** is a plain function: Flue Hooks in its body attach tools, instructions, and state, and its returned string is the agent's instruction.
 
 ```ts title="src/agents/joke-teller.ts"
 'use agent';
@@ -32,7 +32,7 @@ In this example:
 - **`'use agent'`:** This registers the module with the application. The filename gives the agent its durable identity: `joke-teller`.
 - `description`: This optional static description of the agent. When present, it must be a non-empty string.
 - `route`: This optional middleware runs on every HTTP request the agent's routes serve. Here it allows everything; real applications authenticate in it.
-- `defineAgent(JokeTeller, config)`: This pairs the capability function with the agent's static identity — its model and tuning, fixed for the agent's lifetime.
+- `defineAgent(JokeTeller, config)`: This pairs the agent function with the agent's static identity — its model and tuning, fixed for the agent's lifetime.
 
 The module defines the agent; making it reachable over HTTP is a separate, explicit step in `app.ts`:
 
@@ -48,9 +48,9 @@ export default app;
 
 See [Routing](/docs/guide/routing/) for the routes `.route()` serves and [Models & Providers](/docs/guide/models/) for model selection.
 
-## The capability function
+## The agent function
 
-The capability function is where an agent's behavior lives. Flue Hooks called in its body — `useTool`, `useInstruction`, `useState`, and others — attach what the agent can do; the string it returns is the instruction text the model sees. A tools-only capability can return nothing at all.
+The agent function is where an agent's behavior lives. Flue Hooks called in its body — `useTool`, `useInstruction`, `useState`, and others — attach what the agent can do; the string it returns is the instruction text the model sees. A tools-only agent function can return nothing at all.
 
 ```ts title="src/agents/order-assistant.ts"
 'use agent';
@@ -65,9 +65,9 @@ function OrderAssistant() {
 export default defineAgent(OrderAssistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
-The function runs again before every model turn, so guards and interpolated text always reflect current state — but the *shape* of what it mounts must stay the same across an instance's whole life: hook calls are never conditional, and every render must attach the same tools, state, and capabilities. See [Tools](/docs/guide/tools/), [Skills](/docs/guide/skills/), [Sandboxes](/docs/guide/sandboxes/), and [Subagents](/docs/guide/subagents/) for what an agent's body can compose, and [Durable Agents](/docs/concepts/durable-execution/) for how that state persists.
+The function runs again before every model turn, so guards and interpolated text always reflect current state — but the *shape* of what it mounts must stay the same across an instance's whole life: hook calls are never conditional, and every render must attach the same tools, state, and attachments. See [Tools](/docs/guide/tools/), [Skills](/docs/guide/skills/), [Sandboxes](/docs/guide/sandboxes/), and [Subagents](/docs/guide/subagents/) for what an agent's body can compose, and [Durable Agents](/docs/concepts/durable-execution/) for how that state persists.
 
-`defineAgent(Capability, config)`'s second argument is the agent's static identity — the fields that never render:
+`defineAgent(Agent, config)`'s second argument is the agent's static identity — the fields that never render:
 
 ```ts title="src/agents/repository-reviewer.ts"
 'use agent';
@@ -89,33 +89,33 @@ export default defineAgent(RepositoryReviewer, {
 
 `config` accepts `model` (required), `thinkingLevel`, `compaction`, `durability`, and `cwd` — see the [Agent API](/docs/api/agent-api/) for each field's semantics.
 
-### Composing capabilities with `use()`
+### Composing with custom hooks
 
-Break a large agent into named pieces with `use(Capability, props?)`. Flue invokes the capability and records its instruction and attachments under that capability's identity — pass the function itself, never its result:
+Break a large agent into named pieces with custom hooks: plain functions that call `useTool()`, `useInstruction()`, or other hooks. A custom hook may take arguments and return values to its caller, just like any other function:
 
 ```ts title="src/agents/support-assistant.ts"
 'use agent';
-import { defineAgent, use, useTool } from '@flue/runtime';
+import { defineAgent, useInstruction, useTool } from '@flue/runtime';
 import { escalateCase } from '../shared/support-tools.ts';
 
-function Escalation() {
+function useEscalation() {
   useTool(escalateCase);
-  return 'Escalate to a specialist only after you have confirmed the account and issue.';
+  useInstruction('Escalate to a specialist only after you have confirmed the account and issue.');
 }
 
 function SupportAssistant() {
-  use(Escalation);
+  useEscalation();
   return 'Answer customer support questions clearly and accurately.';
 }
 
 export default defineAgent(SupportAssistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
-`use()` is subject to the same rule as every other hook: never call it conditionally. Drive behavior with state, props, and tool guards instead of mounting or unmounting capabilities — see [Durable Agents](/docs/concepts/durable-execution/) for the reasoning and the phased-workflow pattern this enables.
+Like every other hook, a custom hook's calls are never conditional. Drive behavior with state, arguments, and tool guards instead — see [Durable Agents](/docs/concepts/durable-execution/) for the reasoning and the phased-workflow pattern this enables.
 
 ### Markdown instructions
 
-Long instructions can live in their own markdown file. Import a `.md` file with the `with { type: 'markdown' }` import attribute and Flue inlines its contents as a string at build time — then return it as the capability's instruction:
+Long instructions can live in their own markdown file. Import a `.md` file with the `with { type: 'markdown' }` import attribute and Flue inlines its contents as a string at build time — then return it as the agent function's instruction:
 
 ```ts title="src/agents/repository-reviewer.ts"
 'use agent';
@@ -140,7 +140,7 @@ POST /agents/support-assistant/ticket-8472
                                └─────────┘ id
 ```
 
-It's up to the developer to decide what `id` means and whether it maps to important application data, such as a user ID, customer support ticket, or GitHub issue. A randomly generated ID can also work. The `id` keys the conversation's durable storage, and the runtime passes it to the top-level capability function as a prop — the way a web framework passes route params to the page component:
+It's up to the developer to decide what `id` means and whether it maps to important application data, such as a user ID, customer support ticket, or GitHub issue. A randomly generated ID can also work. The `id` keys the conversation's durable storage, and the runtime passes it to the top-level agent function as a prop — the way a web framework passes route params to the page component:
 
 ```ts
 import { type AgentProps, defineAgent, useInitialData, useTool } from '@flue/runtime';
@@ -159,7 +159,7 @@ export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
 The `id` is the opaque address; structured facts like the thread ref arrive as
 creation data (below), not by parsing `id` — channel packages expose a
 `parseInstanceId(id)` escape hatch for the rare caller that must recover them
-from the id itself. Only the top-level function receives `AgentProps`; a capability mounted with `use()` gets the props its caller passes, and a subagent's capability function gets nothing — a delegate runs in isolation from its parent, so share a value with it explicitly (close over it) or not at all. Agents that don't need the id keep the zero-argument form.
+from the id itself. Only the top-level function receives `AgentProps`; a custom hook gets whatever arguments its caller passes, and a subagent's agent function gets nothing — a delegate runs in isolation from its parent, so share a value with it explicitly (close over it) or not at all. Agents that don't need the id keep the zero-argument form.
 
 ## Creation data
 
@@ -304,7 +304,7 @@ Your application chooses the agent conversation before dispatching the event. `d
 
 - [Agent API](/docs/api/agent-api/) — look up session operations and their results.
 - [Tools](/docs/guide/tools/), [Skills](/docs/guide/skills/), and [Sandboxes](/docs/guide/sandboxes/) — configure what an agent can do and where it works.
-- [Subagents](/docs/guide/subagents/) — delegate focused work to a specialist capability.
+- [Subagents](/docs/guide/subagents/) — delegate focused work to a specialist agent function.
 - [Routing](/docs/guide/routing/) — mount agent HTTP surfaces inside an authenticated application.
 - [Schedules](/docs/guide/schedules/) — dispatch agent input on a schedule.
 - [Channels](/docs/guide/channels/) — deliver verified provider events into agent sessions.

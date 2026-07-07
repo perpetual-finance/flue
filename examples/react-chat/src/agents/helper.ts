@@ -66,7 +66,7 @@ function Helper() {
 	useSubagent({
 		name: 'poet',
 		description: 'Writes a short, original poem on a given topic.',
-		capabilities: () => 'Reply with a short four-line poem and nothing else.',
+		agent: () => 'Reply with a short four-line poem and nothing else.',
 	});
 
 	return 'You are a helpful assistant. When a question involves arithmetic, use the calculator tool rather than computing it yourself. When asked about the weather, use the get_weather tool. When asked for a poem, delegate to the "poet" subagent via the task tool. Keep answers concise.';

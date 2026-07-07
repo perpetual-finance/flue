@@ -282,7 +282,7 @@ function Assistant() {
   useSubagent({
     name: 'triager',
     description: 'Researches a topic thoroughly and reports back with cited sources.',
-    capabilities: Triager,
+    agent: Triager,
   });
   return 'Delegate research to the `triager` subagent via a task.';
 }

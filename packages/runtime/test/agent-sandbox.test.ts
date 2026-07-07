@@ -14,7 +14,6 @@ import {
 	assertRenderStructureInvariance,
 	renderAgentFunctionWithStructure,
 } from '../src/hooks/render.ts';
-import { use } from '../src/hooks/use.ts';
 import { useSandbox } from '../src/hooks/use-sandbox.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { createFlueContext, type DispatchInput } from '../src/internal.ts';
@@ -99,31 +98,29 @@ describe('useSandbox() (render)', () => {
 		expect(withoutIt.structure.hasSandbox).toBe(false);
 	});
 
-	it('is callable from a capability or a custom wrapper hook', () => {
+	it('is callable from a nested custom hook', () => {
 		const factory = stubFactory();
 		function useCompanySandbox() {
 			useSandbox(factory);
 		}
-		function Environment() {
+		function useEnvironment() {
 			useCompanySandbox();
-			return 'Runs in the company environment.';
 		}
 		const rendered = renderAgentFunctionWithStructure(() => {
-			use(Environment);
+			useEnvironment();
 			return 'Base.';
 		}, CONFIG);
 		expect(rendered.config.sandbox).toBe(factory);
 	});
 
 	it('throws when called twice in one render, wherever the calls live', () => {
-		const Environment = () => {
+		const useEnvironment = () => {
 			useSandbox(stubFactory());
-			return undefined;
 		};
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
 				useSandbox(stubFactory());
-				use(Environment);
+				useEnvironment();
 				return 'Base.';
 			}, CONFIG),
 		).toThrow(/useSandbox\(\) was called twice in one render/);

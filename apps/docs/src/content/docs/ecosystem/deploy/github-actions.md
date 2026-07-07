@@ -143,7 +143,7 @@ If you want a tighter boundary — the agent can call a specific operation but n
 
 ### Subagents
 
-Named subagents can run focused detached tasks. `useSubagent(...)` declares one, backed by its own capability function:
+Named subagents can run focused detached tasks. `useSubagent(...)` declares one, backed by its own agent function:
 
 ```typescript title="src/agents/triage.ts"
 'use agent';
@@ -157,7 +157,7 @@ function Triage() {
   useSubagent({
     name: 'reviewer',
     description: 'Reviews a pull request for correctness, security, and project standards.',
-    capabilities: Reviewer,
+    agent: Reviewer,
   });
   return 'Delegate PR reviews to the `reviewer` subagent via a task.';
 }

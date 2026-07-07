@@ -125,7 +125,7 @@ describe('useInitialData()', () => {
 		resolveSubagentDefinition({
 			name: 'worker',
 			description: 'Isolated delegate.',
-			capabilities: () => {
+			agent: () => {
 				seen = useInitialData();
 				return 'Delegate.';
 			},

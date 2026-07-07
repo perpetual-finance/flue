@@ -38,7 +38,6 @@ export type {
 	FlueExecutionOperation,
 } from './execution-interceptor.ts';
 export { type StateSetter, useState } from './hooks/state.ts';
-export { use } from './hooks/use.ts';
 export { useAppend } from './hooks/use-append.ts';
 export { useDelivery } from './hooks/use-delivery.ts';
 export { useEffect } from './hooks/use-effect.ts';
@@ -80,6 +79,7 @@ export { type DefineSkillOptions, defineSkill } from './skill-definition.ts';
 export { defineTool } from './tool.ts';
 export type {
 	AgentDispatchRequest,
+	AgentFunction,
 	AgentModuleValue,
 	AgentProps,
 	AgentRouteHandler,
@@ -88,7 +88,6 @@ export type {
 	BashFactory,
 	BashLike,
 	CallHandle,
-	Capability,
 	CompactionConfig,
 	DeliveredAttachment,
 	DeliveredMessage,

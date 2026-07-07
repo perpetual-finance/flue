@@ -139,7 +139,7 @@ describe('subagent task recovery', () => {
 			return 'You review the delegated work.';
 		}
 		const agent = defineAgent(() => {
-			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', capabilities: Reviewer });
+			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', agent: Reviewer });
 			return 'Case agent.';
 		}, { model });
 
@@ -204,7 +204,7 @@ describe('subagent task recovery', () => {
 			return 'You review the delegated work.';
 		}
 		const agent = defineAgent(() => {
-			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', capabilities: Reviewer });
+			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', agent: Reviewer });
 			return 'Case agent.';
 		}, { model });
 
@@ -256,11 +256,11 @@ describe('subagent task recovery', () => {
 			return 'You go deeper on delegated work.';
 		}
 		function Reviewer() {
-			useSubagent({ name: 'deep', description: 'Handles the deeper delegated work.', capabilities: Deep });
+			useSubagent({ name: 'deep', description: 'Handles the deeper delegated work.', agent: Deep });
 			return 'You review delegated work by delegating deeper.';
 		}
 		const agent = defineAgent(() => {
-			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', capabilities: Reviewer });
+			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', agent: Reviewer });
 			return 'Case agent.';
 		}, { model });
 
@@ -302,7 +302,7 @@ describe('subagent task recovery', () => {
 			return 'You review the delegated work.';
 		}
 		const withSubagent = defineAgent(() => {
-			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', capabilities: Reviewer });
+			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', agent: Reviewer });
 			return 'Case agent.';
 		}, { model });
 		// Restart deploys a config where `reviewer` no longer exists.
@@ -358,7 +358,7 @@ describe('subagent task recovery', () => {
 			return 'You review the delegated work.';
 		}
 		const agent = defineAgent(() => {
-			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', capabilities: Reviewer });
+			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', agent: Reviewer });
 			return 'Case agent.';
 		}, { model });
 

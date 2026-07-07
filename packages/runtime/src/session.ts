@@ -367,7 +367,7 @@ interface SessionInitOptions {
 	 */
 	hookState?: HookStateBuffer;
 	/**
-	 * Re-render the agent's capability function (function agents only).
+	 * Re-render the agent function (function agents only).
 	 * Called at each turn boundary after the tool batch commits: the session
 	 * swaps in the fresh tools (closures over current state values) and the
 	 * recomposed system prompt, so the next model call sees them.
@@ -660,7 +660,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	}
 
 	/**
-	 * Render-per-turn: re-render the agent's capability function and hand the
+	 * Render-per-turn: re-render the agent function and hand the
 	 * loop a replacement context for its next provider request. The wrapper's
 	 * `state.messages` tracks the run (every assistant/tool-result message got
 	 * a `message_end`), so the rebuilt context loses nothing. Also syncs the

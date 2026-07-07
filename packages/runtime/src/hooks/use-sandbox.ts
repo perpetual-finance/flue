@@ -21,7 +21,7 @@ import { requireRenderFrame } from './frame.ts';
  * }
  * ```
  *
- * Callable from the agent body, a capability, or a custom hook — but at most
+ * Callable from the agent body or a custom hook — but at most
  * once per render (an agent has one environment), and never conditionally.
  * Without it, the runtime's default environment applies.
  */
@@ -46,7 +46,7 @@ export function useSandbox(sandbox: SandboxFactory): void {
 	}
 	if (frame.sandbox !== undefined) {
 		throw new Error(
-			'[flue] useSandbox() was called twice in one render. An agent has one environment — attach it once, in the agent body or a single capability.',
+			'[flue] useSandbox() was called twice in one render. An agent has one environment — attach it once, in the agent body or a single custom hook.',
 		);
 	}
 	frame.sandbox = sandbox;

@@ -284,7 +284,7 @@ than an authorization capability; apply the project's normal access policy to
 direct agent routes.
 
 The channel-agent import cycle is supported because imported bindings are read
-inside deferred callbacks and capability functions.
+inside deferred callbacks and agent function bodies.
 
 ## Credentials and endpoint
 

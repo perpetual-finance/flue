@@ -266,7 +266,7 @@ The tool accepts no workspace, token, host, or conversation id from the model.
 The instance id is an identifier, not an authorization capability; apply the
 project's normal access policy to direct agent routes. The channel-agent import
 cycle is supported because imported bindings are read only inside deferred
-callbacks and capability functions.
+callbacks and agent function bodies.
 
 ## Configure the endpoint
 

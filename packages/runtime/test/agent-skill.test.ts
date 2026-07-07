@@ -13,7 +13,7 @@ import {
 	assertRenderStructureInvariance,
 	renderAgentFunctionWithStructure,
 } from '../src/hooks/render.ts';
-import { use } from '../src/hooks/use.ts';
+import { useInstruction } from '../src/hooks/use-instruction.ts';
 import { useSkill } from '../src/hooks/use-skill.ts';
 import { createFlueContext, type DispatchInput } from '../src/internal.ts';
 import { createNodeAgentCoordinator } from '../src/node/agent-coordinator.ts';
@@ -95,18 +95,18 @@ describe('useSkill() (render)', () => {
 		expect(rendered.structure.skillNames).toEqual(['triage-reproduce', 'release-notes']);
 	});
 
-	it('collects skills mounted by capabilities into the flat catalog', () => {
+	it('collects skills mounted by a custom hook into the flat catalog', () => {
 		const skill = defineSkill({
 			name: 'triage-verify',
 			description: 'Verify a fix against the reproduction.',
 			instructions: 'Verify carefully.',
 		});
-		function VerifyPhase() {
+		function useVerifyPhase() {
 			useSkill(skill);
-			return 'Verify phase.';
+			useInstruction('Verify phase.');
 		}
 		const rendered = renderAgentFunctionWithStructure(() => {
-			use(VerifyPhase);
+			useVerifyPhase();
 			return 'Base.';
 		}, CONFIG);
 		expect(rendered.config.skills).toEqual([skill]);
@@ -192,12 +192,12 @@ describe('useSkill end to end (node coordinator, faux provider)', () => {
 			description: 'Deep instructions for reproducing a reported issue.',
 			instructions: 'Reproduce carefully, starting from a minimal project.',
 		});
-		function ReproducePhase() {
+		function useReproducePhase() {
 			useSkill(skill);
-			return 'Activate the `triage-reproduce` skill before starting this phase.';
+			useInstruction('Activate the `triage-reproduce` skill before starting this phase.');
 		}
 		function assistant() {
-			use(ReproducePhase);
+			useReproducePhase();
 			return 'Issue triage agent.';
 		}
 

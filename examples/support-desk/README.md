@@ -1,26 +1,26 @@
-# Support desk — the capabilities / state-machine model
+# Support desk — the custom-hooks / state-machine model
 
-This is the flagship example for Flue's **static capabilities** authoring
-model: an agent as a plain function, composed from smaller capability
-functions, with a durable phase recorded in `useState` — no workflow engine,
-no conditional tool mounting.
+This is the flagship example for Flue's **custom hooks** authoring model: an
+agent as a plain function, composed from smaller hook functions, with a
+durable phase recorded in `useState` — no workflow engine, no conditional
+tool mounting.
 
 ## What it demonstrates
 
-- **Everything is a capability.** `src/agents/support.ts`'s `Support` function
-  is itself a capability — the one `defineAgent(Support, { model })` gives a
-  model. `Gathering`, `Drafting`, `Committing`, `Done`, and `Retention` are
-  capabilities it mounts with `use()`. Each is a plain sync function: hooks in
-  its body attach tools, and the string it returns is its instruction (the
-  author formats headings and prose themselves).
-- **All phases are always connected.** `use(Gathering, ...)`, `use(Drafting,
-...)`, `use(Committing, ...)`, `use(Done)`, and `use(Retention, ...)` all run
-  on every render, unconditionally. `use()` must never be called conditionally
-  — the runtime enforces structural invariance across renders and fails the
-  run if the mounted set changes. Nothing here "unlocks" a phase by mounting
-  new tools; every tool exists for the agent's entire life.
+- **Everything is a hook.** `src/agents/support.ts`'s `Support` function is
+  itself the agent function — the one `defineAgent(Support, { model })` gives
+  a model. `useGathering`, `useDrafting`, `useCommitting`, `useDone`, and
+  `useRetention` are custom hooks it calls. Each is a plain sync function:
+  `useTool()` calls in its body attach tools, and `useInstruction()` calls
+  contribute its prose (the author formats headings and prose themselves).
+- **All phases are always connected.** `useGathering(...)`, `useDrafting(...)`,
+  `useCommitting(...)`, `useDone()`, and `useRetention(...)` all run on every
+  render, unconditionally. Hook calls must never be conditional — the runtime
+  enforces structural invariance across renders and fails the run if the
+  mounted set changes. Nothing here "unlocks" a phase by mounting new tools;
+  every tool exists for the agent's entire life.
 - **Guards and trust replace tool mounting.** Instead of hiding
-  `commit_approved_refund` until a "committing" phase begins, `Committing`
+  `commit_approved_refund` until a "committing" phase begins, `useCommitting`
   mounts it always and wraps it with `guarded()` (`src/machine.ts`): the
   wrapped `run()` calls a `check()` prop first and returns a refusal string —
   which teaches, rather than a missing tool, which merely confuses — when the
@@ -40,7 +40,7 @@ no conditional tool mounting.
   subsequent turn, including mid-run after a transition.
 - **`useMachine` is userland, not framework.** `src/machine.ts` is a small
   hook built entirely out of public hooks (`useState`, `useInstruction`) —
-  proof that authors can build their own conventions on top of capabilities
+  proof that authors can build their own conventions on top of custom hooks
   without needing anything from Flue itself. It stays out of `@flue/runtime`
   on purpose.
 

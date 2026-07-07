@@ -248,7 +248,7 @@ needs no `app.ts` mounting. Add
 should also be reachable over HTTP directly.
 
 The channel-agent import cycle is supported because imported bindings are read
-inside deferred callbacks and capability functions.
+inside deferred callbacks and agent function bodies.
 
 ## Configure ordinary webhooks
 

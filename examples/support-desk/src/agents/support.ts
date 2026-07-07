@@ -1,5 +1,5 @@
 'use agent';
-import { defineAgent, use, useState, useTool } from '@flue/runtime';
+import { defineAgent, useInstruction, useState, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { guarded, useMachine } from '../machine.ts';
 import {
@@ -18,23 +18,23 @@ interface PhaseProps {
 	onComplete: () => string;
 }
 
-function Gathering({ check, onComplete }: PhaseProps) {
+function useGathering({ check, onComplete }: PhaseProps) {
 	useTool({
 		name: 'begin_draft',
 		description: 'Call once you have enough verified context to draft a response.',
 		input: v.object({}),
 		run: () => check() ?? onComplete(),
 	});
-	return (
+	useInstruction(
 		'## Phase: gathering\n\n' +
-		'Gather and verify the facts of the case before drafting anything: read the ticket ' +
-		'history, confirm the account and order in question, and check for prior promises made ' +
-		'to this customer. Do not draft a reply from assumptions — if evidence is missing, ask ' +
-		'for it or say so.'
+			'Gather and verify the facts of the case before drafting anything: read the ticket ' +
+			'history, confirm the account and order in question, and check for prior promises made ' +
+			'to this customer. Do not draft a reply from assumptions — if evidence is missing, ask ' +
+			'for it or say so.',
 	);
 }
 
-function Drafting({ check, onComplete }: PhaseProps) {
+function useDrafting({ check, onComplete }: PhaseProps) {
 	useTool(guarded(check, draftReply));
 	useTool(guarded(check, draftEscalation));
 	useTool(guarded(check, proposeRefund));
@@ -45,15 +45,15 @@ function Drafting({ check, onComplete }: PhaseProps) {
 		input: v.object({}),
 		run: () => check() ?? onComplete(),
 	});
-	return (
+	useInstruction(
 		'## Phase: drafting\n\n' +
-		'Draft the reply, a refund proposal, or an escalation summary — never send or commit ' +
-		'anything from this phase. A refund is proposed here and committed, separately, only after ' +
-		'operator approval: propose, then commit, never both in one step.'
+			'Draft the reply, a refund proposal, or an escalation summary — never send or commit ' +
+			'anything from this phase. A refund is proposed here and committed, separately, only after ' +
+			'operator approval: propose, then commit, never both in one step.',
 	);
 }
 
-function Committing({ check, onComplete }: PhaseProps) {
+function useCommitting({ check, onComplete }: PhaseProps) {
 	useTool(guarded(check, sendReply));
 	useTool(guarded(check, commitApprovedRefund));
 	useTool({
@@ -62,32 +62,32 @@ function Committing({ check, onComplete }: PhaseProps) {
 		input: v.object({}),
 		run: () => check() ?? onComplete(),
 	});
-	return (
+	useInstruction(
 		'## Phase: committing\n\n' +
-		'Only approved work happens here: send the reply that was drafted, and commit a refund ' +
-		'only if an operator has approved the proposal by reference. Never invent an approval.'
+			'Only approved work happens here: send the reply that was drafted, and commit a refund ' +
+			'only if an operator has approved the proposal by reference. Never invent an approval.',
 	);
 }
 
-function Done() {
-	return (
+function useDone() {
+	useInstruction(
 		'## Phase: done\n\n' +
-		'The case is closed. Take no further action unless the customer replies again.'
+			'The case is closed. Take no further action unless the customer replies again.',
 	);
 }
 
-function Retention({ active }: { active: () => boolean }) {
+function useRetention({ active }: { active: () => boolean }) {
 	useTool(
 		guarded(
 			() => (active() ? null : 'Refused: no churn risk is on record for this case.'),
 			offerCredit,
 		),
 	);
-	return (
+	useInstruction(
 		'## Retention\n\n' +
-		'Only while the customer is weighing cancellation (sentiment: churn-risk): you may offer ' +
-		'a retention credit alongside your normal case work. This is an addition, never a ' +
-		'substitute for resolving the underlying issue.'
+			'Only while the customer is weighing cancellation (sentiment: churn-risk): you may offer ' +
+			'a retention credit alongside your normal case work. This is an addition, never a ' +
+			'substitute for resolving the underlying issue.',
 	);
 }
 
@@ -110,13 +110,13 @@ function Support() {
 	});
 
 	// All phases are always mounted — activation is guards and trust, never
-	// control flow. use() must never be conditional: the runtime enforces
+	// control flow. Hook calls are never conditional: the runtime enforces
 	// structural invariance across renders and fails the run otherwise.
-	use(Gathering, { check: machine.check('gathering'), onComplete: machine.enter('drafting') });
-	use(Drafting, { check: machine.check('drafting'), onComplete: machine.enter('committing') });
-	use(Committing, { check: machine.check('committing'), onComplete: machine.enter('done') });
-	use(Done);
-	use(Retention, { active: () => sentiment === 'churn-risk' });
+	useGathering({ check: machine.check('gathering'), onComplete: machine.enter('drafting') });
+	useDrafting({ check: machine.check('drafting'), onComplete: machine.enter('committing') });
+	useCommitting({ check: machine.check('committing'), onComplete: machine.enter('done') });
+	useDone();
+	useRetention({ active: () => sentiment === 'churn-risk' });
 
 	return (
 		'# Support Agent\n\n' +

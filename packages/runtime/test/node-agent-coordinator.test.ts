@@ -911,7 +911,7 @@ describe('NodeAgentCoordinator', () => {
 				return 'You review the delegated work.';
 			}
 			function Assistant() {
-				useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', capabilities: Reviewer });
+				useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', agent: Reviewer });
 				return 'Assistant agent.';
 			}
 			const coordinator = createNodeAgentCoordinator({

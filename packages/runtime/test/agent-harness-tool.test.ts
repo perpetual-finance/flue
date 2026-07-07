@@ -296,7 +296,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 			return 'You verify the working tree.';
 		}
 		function assistant() {
-			useSubagent({ name: 'checker', description: 'Checks the tree.', capabilities: Checker });
+			useSubagent({ name: 'checker', description: 'Checks the tree.', agent: Checker });
 			return 'Case agent.';
 		}
 
@@ -423,7 +423,7 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 			useSubagent({
 				name: 'reviewer',
 				description: 'Reviews the delegated scope.',
-				capabilities: Reviewer,
+				agent: Reviewer,
 			});
 			return 'Case agent.';
 		}

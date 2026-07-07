@@ -201,7 +201,7 @@ export default defineAgent(Billing, { model: 'anthropic/claude-haiku-4-5' });
 The model can invoke the lookup but cannot select another customer, account, or
 credential. Trusted application code binds those values. The channel-agent
 import cycle is supported because both imported bindings are read only inside
-deferred callbacks or the agent's capability function.
+deferred callbacks or the agent function body.
 
 ## Thin event notifications
 

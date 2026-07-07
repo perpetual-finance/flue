@@ -180,7 +180,7 @@ function Reporter() {
   useSubagent({
     name: 'analyst',
     description: 'Analyzes metrics for quantitative insights and actionable takeaways.',
-    capabilities: Analyst,
+    agent: Analyst,
   });
   return 'Delegate metric analysis to the `analyst` subagent via a task.';
 }

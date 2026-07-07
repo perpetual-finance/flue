@@ -193,7 +193,7 @@ describe('useDelivery()', () => {
 			useSubagent({
 				name: 'summarizer',
 				description: 'Summarizes one support case.',
-				capabilities: Summarizer,
+				agent: Summarizer,
 			});
 			return 'Case agent.';
 		}

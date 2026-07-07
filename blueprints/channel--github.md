@@ -226,7 +226,7 @@ needs no `app.ts` mounting. Add
 should also be reachable over HTTP directly.
 
 The channel-agent import cycle is supported only because these imported
-bindings are read inside deferred callbacks and capability functions. Do not
+bindings are read inside deferred callbacks and agent function bodies. Do not
 read the agent binding while constructing `channel`.
 
 ## Credentials and verification

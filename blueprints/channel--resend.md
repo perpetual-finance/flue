@@ -189,7 +189,7 @@ email message, not a stable thread root. If the application groups replies or
 related mail, define and persist that thread policy itself.
 
 The channel-agent import cycle is supported because imported bindings are read
-inside deferred callbacks and capability functions.
+inside deferred callbacks and agent function bodies.
 
 ## Credentials and endpoint
 

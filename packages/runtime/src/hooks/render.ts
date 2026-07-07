@@ -1,25 +1,21 @@
 import { ToolNameConflictError } from '../errors.ts';
 import type {
+	AgentFunction,
 	AgentProps,
 	AgentRuntimeConfig,
-	Capability,
 	DeliveredMessage,
 	FunctionAgentConfig,
 	ResolvedSubagent,
 	SubagentDefinition,
 } from '../types.ts';
-import {
-	type CapabilityRecord,
-	type RenderFrame,
-	type RenderStateContext,
-	renderWithFrame,
-} from './frame.ts';
+import { type RenderFrame, type RenderStateContext, renderWithFrame } from './frame.ts';
 
 /**
- * The props the runtime passes to the ROOT capability. On a bare render with
- * no backing instance (tests/tooling), reading `id` throws — the same
- * contract as `useDelivery()` on an unbacked render. Subagent capabilities
- * never receive props: a delegate runs in isolation from the parent.
+ * The props the runtime passes to the root agent function. On a bare render
+ * with no backing instance (tests/tooling), reading `id` throws — the same
+ * contract as `useDelivery()` on an unbacked render. A subagent's agent
+ * function never receives props: a delegate runs in isolation from the
+ * parent.
  */
 function agentPropsFor(state: RenderStateContext | undefined): AgentProps {
 	if (state?.instanceId !== undefined) return { id: state.instanceId };
@@ -35,32 +31,29 @@ function agentPropsFor(state: RenderStateContext | undefined): AgentProps {
 }
 
 /**
- * Run one render of an agent's capability function: invoke it inside a fresh
- * frame, validate the returned instruction, and map the static config + hook
+ * Run one render of an agent function: invoke it inside a fresh frame,
+ * validate the returned instruction, and map the static config + hook
  * attachments onto the internal runtime-config shape the initialization path
  * consumes (the same shape a legacy `defineAgent` initializer returns).
  * Config field values beyond shape (thinking levels, compaction/durability
  * fields) are validated downstream by the shared profile asserts.
  */
 export function renderAgentFunction(
-	capability: Capability<AgentProps>,
+	agent: AgentFunction<AgentProps>,
 	config: FunctionAgentConfig,
 	state?: RenderStateContext,
 ): AgentRuntimeConfig {
-	return renderAgentFunctionWithStructure(capability, config, state).config;
+	return renderAgentFunctionWithStructure(agent, config, state).config;
 }
 
 /**
- * The structural fingerprint of one render, for the invariance guard:
- * capabilities are compared by function identity in mount order; tools by
- * NAME only (schemas may legally vary with state — labels fetched at
+ * The structural fingerprint of one render, for the invariance guard: tools
+ * by NAME only (schemas may legally vary with state — labels fetched at
  * runtime, say — without counting as a structural change); state by name;
  * the sandbox by presence (the environment is built once at initialization,
  * so only a conditional `useSandbox` counts as a structural change).
  */
 export interface AgentRenderStructure {
-	capabilities: readonly ((props?: never) => unknown)[];
-	capabilityNames: readonly string[];
 	toolNames: readonly string[];
 	stateNames: readonly string[];
 	messageDataNames: readonly string[];
@@ -76,12 +69,12 @@ export interface AgentRenderStructure {
 
 /** `renderAgentFunction` plus the render's structural fingerprint. */
 export function renderAgentFunctionWithStructure(
-	capability: Capability<AgentProps>,
+	agent: AgentFunction<AgentProps>,
 	config: FunctionAgentConfig,
 	state?: RenderStateContext,
 ): { config: AgentRuntimeConfig; structure: AgentRenderStructure } {
 	const props = agentPropsFor(state);
-	const { result, frame } = renderWithFrame(() => capability(props), state);
+	const { result, frame } = renderWithFrame(() => agent(props), state);
 	assertAgentInstruction(result);
 	assertUniqueToolNames(frame);
 	// Hand the render's metadata producers and effect declarations to the
@@ -96,7 +89,7 @@ export function renderAgentFunctionWithStructure(
 		state.output.effects = [...frame.effects];
 	}
 	const instructions = composeAgentDocument(result, frame);
-	const tools = [...frame.root.tools, ...frame.capabilities.flatMap((record) => record.tools)];
+	const tools = frame.root.tools;
 	return {
 		config: {
 			model: config.model,
@@ -111,8 +104,6 @@ export function renderAgentFunctionWithStructure(
 			...(frame.subagents.length > 0 ? { subagents: frame.subagents } : {}),
 		},
 		structure: {
-			capabilities: frame.capabilities.map((record) => record.capability),
-			capabilityNames: frame.capabilities.map((record) => record.capability.name || '(anonymous)'),
 			toolNames: tools.map((tool) => tool.name),
 			stateNames: [...frame.stateNames],
 			messageDataNames: [...frame.messageDataNames],
@@ -125,7 +116,7 @@ export function renderAgentFunctionWithStructure(
 }
 
 /**
- * Render a capability-backed delegate into the self-contained profile shape
+ * Render a delegate's agent function into the self-contained profile shape
  * the task machinery consumes. Runs at delegation time, in its own frame,
  * fresh per task — closures read current values, and two delegations to the
  * same subagent render independently. Subagent frames reject root-scoped
@@ -142,14 +133,14 @@ export function resolveSubagentDefinition(
 	delivery?: DeliveredMessage,
 ): ResolvedSubagent {
 	const { result, frame } = renderWithFrame(
-		subagent.capabilities as () => unknown,
+		subagent.agent as () => unknown,
 		delivery ? { snapshot: new Map(), store: undefined, delivery } : undefined,
 		'subagent',
 	);
 	assertAgentInstruction(result);
 	assertUniqueToolNames(frame);
 	const instructions = composeAgentDocument(result, frame);
-	const tools = [...frame.root.tools, ...frame.capabilities.flatMap((record) => record.tools)];
+	const tools = frame.root.tools;
 	return {
 		name: subagent.name,
 		description: subagent.description,
@@ -164,23 +155,15 @@ export function resolveSubagentDefinition(
 
 /**
  * Renders must be structurally identical across an agent instance's life:
- * `use()` and hook calls are never conditional. State informs the agent
- * (values, props, guards, interpolated text) — it does not reshape it.
- * Throws with the precise delta when consecutive renders disagree.
+ * hook calls are never conditional. State informs the agent (values, props,
+ * guards, interpolated text) — it does not reshape it. Throws with the
+ * precise delta when consecutive renders disagree.
  */
 export function assertRenderStructureInvariance(
 	previous: AgentRenderStructure,
 	next: AgentRenderStructure,
 ): void {
 	const problems: string[] = [];
-	const sameCapabilities =
-		previous.capabilities.length === next.capabilities.length &&
-		previous.capabilities.every((fn, index) => fn === next.capabilities[index]);
-	if (!sameCapabilities) {
-		problems.push(
-			`mounted capabilities changed (${previous.capabilityNames.join(', ') || 'none'} → ${next.capabilityNames.join(', ') || 'none'})`,
-		);
-	}
 	const toolDelta = setDelta(previous.toolNames, next.toolNames);
 	if (toolDelta) problems.push(`tools ${toolDelta}`);
 	const stateDelta = setDelta(previous.stateNames, next.stateNames);
@@ -200,7 +183,7 @@ export function assertRenderStructureInvariance(
 	if (problems.length > 0) {
 		throw new Error(
 			`[flue] The agent's render changed structure between turns: ${problems.join('; ')}. ` +
-				'use() and hook calls must not be conditional — every render mounts the same capabilities, tools, and state. Drive behavior with state values, props, and tool guards instead.',
+				'Hook calls must not be conditional — every render composes the same tools, state, and attachments. Drive behavior with state values, arguments, and tool guards instead.',
 		);
 	}
 }
@@ -219,31 +202,22 @@ function setDelta(previous: readonly string[], next: readonly string[]): string 
 
 /**
  * The agent's instruction document, concatenated in composition order: the
- * agent's returned instruction first, then root-level `useInstruction`
- * contributions in call order, then each mounted capability's content (its
- * returned instruction, then its in-body contributions) in mount order.
- * Authors own all formatting — the runtime only joins with blank lines.
+ * agent's returned instruction first, then `useInstruction` contributions in
+ * call order. Authors own all formatting — the runtime only joins with blank
+ * lines.
  */
 function composeAgentDocument(base: string | undefined, frame: RenderFrame): string | undefined {
 	const parts = [
 		...(base !== undefined && base.length > 0 ? [base] : []),
 		...frame.root.instructions,
-		...frame.capabilities.flatMap(capabilityParts),
 	];
 	if (parts.length === 0) return undefined;
 	return parts.join('\n\n');
 }
 
-function capabilityParts(record: CapabilityRecord): string[] {
-	return [
-		...(record.instruction !== undefined ? [record.instruction] : []),
-		...record.instructions,
-	];
-}
-
 function assertUniqueToolNames(frame: RenderFrame): void {
 	const seen = new Set<string>();
-	const all = [...frame.root.tools, ...frame.capabilities.flatMap((record) => record.tools)];
+	const all = frame.root.tools;
 	for (const tool of all) {
 		if (seen.has(tool.name)) {
 			throw new ToolNameConflictError({ name: tool.name, conflict: 'duplicate', source: 'custom' });
@@ -255,7 +229,7 @@ function assertUniqueToolNames(frame: RenderFrame): void {
 function assertAgentInstruction(value: unknown): asserts value is string | undefined {
 	if (isPromiseLike(value)) {
 		throw new Error(
-			'[flue] Agent capability functions must be synchronous. Move async work into tools, actions, or resource factories.',
+			'[flue] Agent functions must be synchronous. Move async work into tools, actions, or resource factories.',
 		);
 	}
 	if (value !== undefined && typeof value !== 'string') {
@@ -265,7 +239,7 @@ function assertAgentInstruction(value: unknown): asserts value is string | undef
 	}
 }
 
-export function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 	return (
 		typeof value === 'object' &&
 		value !== null &&

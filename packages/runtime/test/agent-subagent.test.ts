@@ -16,7 +16,6 @@ import {
 	resolveSubagentDefinition,
 } from '../src/hooks/render.ts';
 import { useState } from '../src/hooks/state.ts';
-import { use } from '../src/hooks/use.ts';
 import { useInstruction } from '../src/hooks/use-instruction.ts';
 import { useSandbox } from '../src/hooks/use-sandbox.ts';
 import { useSkill } from '../src/hooks/use-skill.ts';
@@ -91,11 +90,11 @@ function Helper() {
 describe('useSubagent() (render)', () => {
 	it('declares delegates on the rendered config, in call order', () => {
 		const rendered = renderAgentFunctionWithStructure(() => {
-			useSubagent({ name: 'helper', description: 'Handles focused work.', capabilities: Helper });
+			useSubagent({ name: 'helper', description: 'Handles focused work.', agent: Helper });
 			useSubagent({
 				name: 'checker',
 				description: 'Verifies results.',
-				capabilities: Helper,
+				agent: Helper,
 				model: 'anthropic/claude-haiku-4-5',
 			});
 			return 'Base.';
@@ -108,23 +107,23 @@ describe('useSubagent() (render)', () => {
 		});
 	});
 
-	it('collects declarations made inside capabilities', () => {
-		function Phase() {
-			useSubagent({ name: 'helper', description: 'Handles focused work.', capabilities: Helper });
-			return 'Phase.';
+	it('collects declarations made inside a custom hook', () => {
+		function usePhase() {
+			useSubagent({ name: 'helper', description: 'Handles focused work.', agent: Helper });
+			useInstruction('Phase.');
 		}
 		const rendered = renderAgentFunctionWithStructure(() => {
-			use(Phase);
+			usePhase();
 			return 'Base.';
 		}, CONFIG);
 		expect(rendered.structure.subagentNames).toEqual(['helper']);
 	});
 
-	it('throws on duplicate delegate names, missing capabilities, and bad shapes', () => {
+	it('throws on duplicate delegate names, missing agent function, and bad shapes', () => {
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
-				useSubagent({ name: 'twin', description: 'One.', capabilities: Helper });
-				useSubagent({ name: 'twin', description: 'Two.', capabilities: Helper });
+				useSubagent({ name: 'twin', description: 'One.', agent: Helper });
+				useSubagent({ name: 'twin', description: 'Two.', agent: Helper });
 				return 'Base.';
 			}, CONFIG),
 		).toThrow(/declared the subagent name "twin" twice/);
@@ -133,26 +132,26 @@ describe('useSubagent() (render)', () => {
 				useSubagent({ name: 'broken', description: 'No fn.' } as SubagentDefinition);
 				return 'Base.';
 			}, CONFIG),
-		).toThrow(/needs `capabilities`/);
+		).toThrow(/needs `agent`/);
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
-				useSubagent({ name: 'mute', description: '', capabilities: Helper });
+				useSubagent({ name: 'mute', description: '', agent: Helper });
 				return 'Base.';
 			}, CONFIG),
 		).toThrow(/needs a non-empty description/);
 	});
 
 	it('throws outside an agent render', () => {
-		expect(() =>
-			useSubagent({ name: 'outside', description: 'Nope.', capabilities: Helper }),
-		).toThrow(/called outside an agent function/);
+		expect(() => useSubagent({ name: 'outside', description: 'Nope.', agent: Helper })).toThrow(
+			/called outside an agent function/,
+		);
 	});
 
 	it('names the invariance delta when a delegate is declared conditionally', () => {
 		let declare = false;
 		const agent = () => {
 			if (declare) {
-				useSubagent({ name: 'flaky', description: 'Sometimes.', capabilities: Helper });
+				useSubagent({ name: 'flaky', description: 'Sometimes.', agent: Helper });
 			}
 			return 'Base.';
 		};
@@ -175,13 +174,13 @@ describe('resolveSubagentDefinition() (delegation-time render)', () => {
 			useInstruction('Work only inside the triage directory.');
 			useSkill({ name: 'reproduce', description: 'Reproduction playbook.' });
 			useTool({ name: 'write_report', description: 'Write report.md.', run: () => 'ok' });
-			useSubagent({ name: 'verifier', description: 'Verifies.', capabilities: Verifier });
+			useSubagent({ name: 'verifier', description: 'Verifies.', agent: Verifier });
 			return 'You reproduce one issue.';
 		}
 		const profile = resolveSubagentDefinition({
 			name: 'reproducer',
 			description: 'Reproduces one issue.',
-			capabilities: Reproducer,
+			agent: Reproducer,
 		});
 		expect(profile.name).toBe('reproducer');
 		expect(profile.description).toBe('Reproduces one issue.');
@@ -202,7 +201,7 @@ describe('resolveSubagentDefinition() (delegation-time render)', () => {
 		const definition: SubagentDefinition = {
 			name: 'reviewer',
 			description: 'Reviews.',
-			capabilities: Reviewer,
+			agent: Reviewer,
 		};
 		expect(resolveSubagentDefinition(definition).instructions).toBe('Review in a strict tone.');
 		tone = 'kind';
@@ -215,14 +214,14 @@ describe('resolveSubagentDefinition() (delegation-time render)', () => {
 			return 'Nope.';
 		}
 		expect(() =>
-			resolveSubagentDefinition({ name: 's', description: 'd', capabilities: WithState }),
+			resolveSubagentDefinition({ name: 's', description: 'd', agent: WithState }),
 		).toThrow(/useState\(\) is not available in a subagent render/);
 		function WithSandbox() {
 			useSandbox({ createSessionEnv: async () => createNoopSessionEnv() });
 			return 'Nope.';
 		}
 		expect(() =>
-			resolveSubagentDefinition({ name: 's', description: 'd', capabilities: WithSandbox }),
+			resolveSubagentDefinition({ name: 's', description: 'd', agent: WithSandbox }),
 		).toThrow(/useSandbox\(\) is not available in a subagent render/);
 	});
 });
@@ -278,7 +277,7 @@ describe('useSubagent end to end (node coordinator, faux provider)', () => {
 			useSubagent({
 				name: 'summarizer',
 				description: 'Summarizes one support case.',
-				capabilities: Summarizer,
+				agent: Summarizer,
 			});
 			return 'Case agent.';
 		}

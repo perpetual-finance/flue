@@ -340,7 +340,7 @@ function assertAgentDefinitionValue(
 ): asserts value is AgentModuleValue {
 	// Twin: `isAgentDefinitionValue` in flue-app.ts — keep in sync.
 	if (typeof value === 'function') {
-		// A bare capability function is the likeliest authoring mistake: it
+		// A bare agent function is the likeliest authoring mistake: it
 		// carries no model. Point at the wrapper.
 		throw new Error(
 			`[flue] Agent "${identity}" default-exports a bare function. Wrap it: defineAgent(${value.name || 'Agent'}, { model: 'provider-id/model-id' }).`,

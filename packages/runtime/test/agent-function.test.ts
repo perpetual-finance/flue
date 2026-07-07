@@ -11,7 +11,6 @@ import {
 	renderAgentFunction,
 	renderAgentFunctionWithStructure,
 } from '../src/hooks/render.ts';
-import { use } from '../src/hooks/use.ts';
 import { useInstruction } from '../src/hooks/use-instruction.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { dispatch } from '../src/index.ts';
@@ -274,151 +273,97 @@ describe('useInstruction()', () => {
 	});
 });
 
-describe('use() capabilities', () => {
+describe('custom hooks (composition)', () => {
 	const tool = (name: string) => ({
 		name,
 		description: `The ${name} tool.`,
 		run: async () => 'ok',
 	});
 
-	it('concatenates capability content after base and root instructions, author-formatted', () => {
-		function Retention() {
+	it("lands a custom hook's useTool/useInstruction flat on the render, in call order after the base instruction", () => {
+		function useRetention() {
 			useTool(tool('offer_credit'));
 			useInstruction('Prefer the smallest credit that resolves the concern.');
-			return '## Retention\n\nYou may offer retention incentives.';
 		}
 		const config = renderAgentFunction(
 			() => {
 				useInstruction('Ungrouped note.');
-				use(Retention);
+				useRetention();
 				return 'Base.';
 			},
 			{ model: MODEL },
 		);
 
 		const doc = config.instructions ?? '';
-		const order = [
-			'Base.',
-			'Ungrouped note.',
-			'## Retention',
-			'You may offer retention incentives.',
-			'Prefer the smallest credit that resolves the concern.',
-		].map((part) => doc.indexOf(part));
+		const order = ['Base.', 'Ungrouped note.', 'Prefer the smallest credit that resolves the concern.'].map(
+			(part) => doc.indexOf(part),
+		);
 		expect(order.every((index) => index >= 0)).toBe(true);
 		expect([...order].sort((a, b) => a - b)).toEqual(order);
 		expect(config.tools?.map((t) => t.name)).toEqual(['offer_credit']);
 	});
 
-	it('passes props through', () => {
-		function Phase({ check, onComplete }: { check: () => boolean; onComplete: () => string }) {
+	it('composes nested custom hooks flat, in call order', () => {
+		function useInner() {
+			useInstruction('Inner contribution.');
+		}
+		function useOuter() {
+			useInner();
+			useInstruction('Outer contribution.');
+		}
+		const config = renderAgentFunction(
+			() => {
+				useOuter();
+				return 'Base.';
+			},
+			{ model: MODEL },
+		);
+		const doc = config.instructions ?? '';
+		const base = doc.indexOf('Base.');
+		const inner = doc.indexOf('Inner contribution.');
+		const outer = doc.indexOf('Outer contribution.');
+		expect(base).toBeGreaterThanOrEqual(0);
+		expect(inner).toBeGreaterThan(base);
+		expect(outer).toBeGreaterThan(inner);
+	});
+
+	it('takes arguments and returns values to the agent body', () => {
+		function usePhase({ check, onComplete }: { check: () => boolean; onComplete: () => string }) {
 			useTool({
 				name: 'begin_draft',
 				description: 'Advance.',
 				run: async () => (check() ? onComplete() : 'Refused.'),
 			});
-			return 'Gather facts.';
+			return 'phase-ready';
 		}
+		let received: string | undefined;
 		const config = renderAgentFunction(
 			() => {
-				use(Phase, { check: () => true, onComplete: () => 'You are now drafting.' });
+				received = usePhase({ check: () => true, onComplete: () => 'You are now drafting.' });
+				return 'Gather facts.';
 			},
 			{ model: MODEL },
 		);
+		expect(received).toBe('phase-ready');
 		expect(config.instructions).toContain('Gather facts.');
 		expect(config.tools?.map((t) => t.name)).toEqual(['begin_draft']);
 	});
 
-	it('allows a tools-only capability (no return)', () => {
-		function Tools() {
-			useTool(tool('lookup'));
+	it('trips the invariance guard when a custom hook is called conditionally, with the new error text', () => {
+		function useRetention() {
+			useTool(tool('offer_credit'));
 		}
-		const config = renderAgentFunction(
-			() => {
-				use(Tools);
-			},
-			{ model: MODEL },
-		);
-		expect(config.instructions).toBeUndefined();
-		expect(config.tools?.map((t) => t.name)).toEqual(['lookup']);
-	});
-
-	it('rejects an already-invoked capability', () => {
-		const Retention = () => 'Retention prose.';
-		expect(() =>
-			renderAgentFunction(
-				() => {
-					use(Retention() as never);
-				},
-				{ model: MODEL },
-			),
-		).toThrow('pass the function itself');
-	});
-
-	it('rejects an object return from a capability', () => {
-		expect(() =>
-			renderAgentFunction(
-				() => {
-					use((() => ({ key: 'x' })) as never);
-				},
-				{ model: MODEL },
-			),
-		).toThrow('returns its instruction string');
-	});
-
-	it('fails fast on duplicate tool names across root and capabilities', () => {
-		const A = () => {
-			useTool(tool('clash'));
+		let mount = false;
+		const agent = () => {
+			if (mount) useRetention();
+			return 'Base.';
 		};
-		expect(() =>
-			renderAgentFunction(
-				() => {
-					useTool(tool('clash'));
-					use(A);
-				},
-				{ model: MODEL },
-			),
-		).toThrow(/clash/);
-	});
-
-	it('supports nested use() calls, recorded flat in mount order', () => {
-		const Inner = () => 'Inner prose.';
-		const Outer = () => {
-			use(Inner);
-			return 'Outer prose.';
-		};
-		const config = renderAgentFunction(
-			() => {
-				use(Outer);
-			},
-			{ model: MODEL },
+		const first = renderAgentFunctionWithStructure(agent, { model: MODEL }).structure;
+		mount = true;
+		const second = renderAgentFunctionWithStructure(agent, { model: MODEL }).structure;
+		expect(() => assertRenderStructureInvariance(first, second)).toThrow(
+			/Hook calls must not be conditional/,
 		);
-		const doc = config.instructions ?? '';
-		expect(doc.indexOf('Inner prose.')).toBeGreaterThanOrEqual(0);
-		expect(doc.indexOf('Outer prose.')).toBeGreaterThanOrEqual(0);
-	});
-
-	it('mounts capability tools live end-to-end', async () => {
-		const provider = createProvider();
-		const model = `${provider.getModel().provider}/${provider.getModel().id}`;
-		function Weather() {
-			useTool({
-				name: 'lookup_weather',
-				description: 'Look up current weather for a city.',
-				run: async () => 'sunny',
-			});
-			return 'Use the weather tool when asked about weather.';
-		}
-		const systemPrompt = await processPromptCapturingSystemPrompt(
-			defineAgent(
-				() => {
-					use(Weather);
-					return 'Base.';
-				},
-				{ model },
-			),
-			provider,
-		);
-		expect(systemPrompt).toContain('Use the weather tool when asked about weather.');
 	});
 });
 
@@ -427,24 +372,31 @@ describe('assertRenderStructureInvariance()', () => {
 		renderAgentFunctionWithStructure(agent, { model: MODEL }).structure;
 
 	it('passes when consecutive renders are structurally identical', () => {
-		const Retention = () => 'Retention.';
+		function useRetention() {
+			useInstruction('Retention.');
+		}
 		const agent = () => {
-			use(Retention);
+			useRetention();
 			useTool({ name: 'lookup', description: 'Look up.', run: async () => 'ok' });
 			return 'Base.';
 		};
 		expect(() => assertRenderStructureInvariance(render(agent), render(agent))).not.toThrow();
 	});
 
-	it('names the delta when a capability is conditionally mounted', () => {
-		const Retention = () => 'Retention.';
+	it('names the delta when a custom hook is conditionally called', () => {
+		function useRetention() {
+			useTool({ name: 'retention_tool', description: 'Offer retention.', run: async () => 'ok' });
+		}
 		const withIt = () => {
-			use(Retention);
+			useRetention();
 			return 'Base.';
 		};
 		const withoutIt = () => 'Base.';
 		expect(() => assertRenderStructureInvariance(render(withoutIt), render(withIt))).toThrow(
-			/mounted capabilities changed \(none → Retention\)/,
+			/tools added retention_tool/,
+		);
+		expect(() => assertRenderStructureInvariance(render(withoutIt), render(withIt))).toThrow(
+			/Hook calls must not be conditional/,
 		);
 	});
 

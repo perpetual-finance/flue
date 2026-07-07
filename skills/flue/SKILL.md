@@ -15,7 +15,7 @@ For example, `flue docs search "durable execution"` searches with the query `dur
 
 ```text
 api/agent-api -- Agent API
-  Reference for defining agents, composing capabilities with Flue Hooks, and running agent operations with @flue/runtime.
+  Reference for defining agents, composing behavior with Flue Hooks, and running agent operations with @flue/runtime.
 api/data-persistence-api -- Data Persistence API
   Reference for Flue persistence adapters and stores.
 api/errors-reference -- Errors Reference

@@ -382,20 +382,19 @@ export interface AgentConfig {
 // ─── Agent Runtime Configuration ────────────────────────────────────────────
 
 /**
- * A capability-backed delegate declared with `useSubagent(...)`. The
- * `capabilities` function is rendered at delegation time — in its own frame,
- * fresh per task — into the delegate's instructions, tools, skills, and
- * nested subagents. Identity/capability fields come only from that render;
- * environment fields (`model`, `thinkingLevel`) inherit from the parent's
- * turn unless overridden here.
+ * A delegate declared with `useSubagent(...)`. The `agent` function is
+ * rendered at delegation time — in its own frame, fresh per task — into the
+ * delegate's instructions, tools, skills, and nested subagents. Identity and
+ * behavior come only from that render; environment fields (`model`,
+ * `thinkingLevel`) inherit from the parent's turn unless overridden here.
  */
 export interface SubagentDefinition {
 	/** Catalog name the model uses to select this delegate on the `task` tool. */
 	name: string;
 	/** Catalog line — how the model decides when to delegate to this agent. */
 	description: string;
-	/** Capability function defining the delegate's whole world. */
-	capabilities: Capability;
+	/** The delegate's agent function — it defines the delegate's whole world. */
+	agent: AgentFunction;
 	/** Model specifier override. Inherits the parent's model when omitted. */
 	model?: string;
 	/** Reasoning-effort override. Inherits when omitted. */
@@ -403,8 +402,8 @@ export interface SubagentDefinition {
 }
 
 /**
- * A capability-backed delegate rendered into the self-contained shape the
- * task machinery consumes. Internal: produced at delegation time from a
+ * A delegate rendered into the self-contained shape the task machinery
+ * consumes. Internal: produced at delegation time from a
  * {@link SubagentDefinition}, never authored directly.
  */
 export interface ResolvedSubagent {
@@ -449,35 +448,41 @@ export interface AgentRuntimeConfig {
 	sandbox?: SandboxFactory;
 }
 
-// ─── Capabilities (Flue Hooks) ──────────────────────────────────────────────
+// ─── Agent functions (Flue Hooks) ────────────────────────────────────────────
 
 /**
- * A capability: a plain synchronous function that composes agent behavior.
- * Flue Hooks in the body attach what it provides (tools, instructions,
- * state); the returned string is its instruction — the prose that teaches
- * the model what this capability is and how to use it. Return nothing for a
- * tools-only capability. The author owns the formatting (headings included).
+ * An agent function: a plain synchronous function that composes an agent's
+ * behavior. Flue Hooks in the body attach what it provides (tools,
+ * instructions, state); the returned string is its instruction — the prose
+ * that teaches the model who it is and how to work. Return nothing for a
+ * tools-only body. The author owns the formatting (headings included).
  *
- * Mount one with `use(Capability, props?)` — Flue invokes it. An agent is a
- * capability given a model: `defineAgent(Capability, { model })`.
+ * An agent is an agent function given a model — `defineAgent(Agent, {
+ * model })` — and a delegate is an agent function on the `task` catalog —
+ * `useSubagent({ name, description, agent: Delegate })`. Shared behavior is
+ * composed with custom hooks: plain functions that call `useTool()`,
+ * `useInstruction()`, and the other hooks, and may return values to the
+ * agent body.
  *
  * ```ts
- * function Retention({ active }: { active: () => boolean }) {
+ * function useRetention(active: () => boolean) {
  *   useTool({
  *     ...offerCredit,
  *     run: (ctx) => (active() ? offerCredit.run(ctx) : 'Refused: no churn risk on record.'),
  *   });
- *   return 'Only while the customer is weighing cancellation: you may offer retention incentives.';
+ *   useInstruction(
+ *     'Only while the customer is weighing cancellation: you may offer retention incentives.',
+ *   );
  * }
  * ```
  *
- * Capabilities stay mounted for the agent's whole life (`use()` is never
- * conditional); guards like the one above, not mounting, scope when a tool
- * may act. They must return synchronously — async work lives in tools and
- * resource factories.
+ * Hook calls are never conditional — every render composes the same
+ * structure; guards like the one above, not conditional hooks, scope when a
+ * tool may act. Agent functions must return synchronously — async work lives
+ * in tools and resource factories.
  */
-export type Capability<TProps = void> = TProps extends void
-	? // biome-ignore lint/suspicious/noConfusingVoidType: tools-only capability bodies have no return statement; `void` keeps them assignable.
+export type AgentFunction<TProps = void> = TProps extends void
+	? // biome-ignore lint/suspicious/noConfusingVoidType: tools-only agent bodies have no return statement; `void` keeps them assignable.
 		() => string | undefined | void
 	: // biome-ignore lint/suspicious/noConfusingVoidType: same as above, props form.
 		(props: TProps) => string | undefined | void;
@@ -485,10 +490,9 @@ export type Capability<TProps = void> = TProps extends void
 /**
  * Props the runtime passes to the top-level agent function — the agent's
  * route data, the way a web framework passes route params to the page
- * component. Only the ROOT capability receives them: `use()` children get
- * the props their caller passes, and subagent capabilities get nothing (a
- * delegate runs in isolation from the parent, intentionally — close over a
- * value explicitly to share it).
+ * component. Only the root agent function receives them; a subagent's agent
+ * function gets nothing (a delegate runs in isolation from the parent,
+ * intentionally — close over a value explicitly to share it).
  *
  * ```ts
  * // dispatch(support, { id: `order-${orderId}`, message: {...} })
@@ -503,7 +507,7 @@ export type Capability<TProps = void> = TProps extends void
  * it — pass them as creation `data` and read them with `useInitialData()`.
  *
  * Agents that don't need route data keep the zero-argument form — `() =>`
- * capabilities stay assignable unchanged.
+ * agent functions stay assignable unchanged.
  */
 export interface AgentProps {
 	/**
@@ -517,7 +521,7 @@ export interface AgentProps {
 /**
  * Static agent identity for {@link defineAgent}'s two-argument form: the
  * fields that never render. Everything dynamic (instructions, tools, state)
- * is composed inside the capability function; everything here is fixed for
+ * is composed inside the agent function; everything here is fixed for
  * the agent's lifetime.
  */
 export interface FunctionAgentConfig {
@@ -548,16 +552,16 @@ export interface FunctionAgentConfig {
 }
 
 /**
- * The value `defineAgent(Capability, config)` returns: an addressable agent
- * whose behavior is the capability function (re-rendered by the runtime as
- * state changes) and whose identity is the static config. Default-export it
- * from a `'use agent'` module.
+ * The value `defineAgent(Agent, config)` returns: an addressable agent whose
+ * behavior is the agent function (re-rendered by the runtime as state
+ * changes) and whose identity is the static config. Default-export it from a
+ * `'use agent'` module.
  *
  * ```ts
  * 'use agent';
  * function Support() {
  *   const [phase] = useState('phase', 'gathering');
- *   use(GatheringPhase, { ... });
+ *   useGatheringPhase({ ... });
  *   return 'Operator-facing support agent. Work only from verified evidence.';
  * }
  * export default defineAgent(Support, { model: 'anthropic/claude-sonnet-4-6' });
@@ -565,7 +569,7 @@ export interface FunctionAgentConfig {
  */
 export interface FunctionAgentDefinition {
 	__flueFunctionAgent: true;
-	capability: Capability<AgentProps>;
+	agent: AgentFunction<AgentProps>;
 	config: FunctionAgentConfig;
 	/**
 	 * Hono router serving this agent's HTTP surface. May be mounted multiple

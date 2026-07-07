@@ -4,12 +4,12 @@ import * as v from 'valibot';
 
 /**
  * A tiny phase machine built entirely from public hooks — proof that authors
- * can layer their own conventions on top of the capabilities model without
+ * can layer their own conventions on top of the custom-hooks model without
  * any framework support. There is nothing special here: `useMachine` just
  * calls `useState` and `useInstruction`.
  *
- * The machine is advisory, not structural: every phase capability stays
- * mounted for the agent's whole life (see `agents/support.ts` — `use()` is
+ * The machine is advisory, not structural: every phase hook stays mounted
+ * for the agent's whole life (see `agents/support.ts` — hook calls are
  * never conditional). `check(phase)` and `enter(phase)` give phase-guarded
  * tools a deterministic legality check and a way to announce a move through
  * the transition tool's own result, without ever reshaping the render.

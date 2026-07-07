@@ -317,7 +317,7 @@ export async function initializeRootHarness(
 		instanceId: config.id,
 		initialData,
 	};
-	const first = renderAgentFunctionWithStructure(agent.capability, agent.config, renderState);
+	const first = renderAgentFunctionWithStructure(agent.agent, agent.config, renderState);
 	const resolvedOptions: AgentRuntimeConfig = first.config;
 	let lastStructure: AgentRenderStructure = first.structure;
 	// The render composes the config: hooks validated every attachment when it
@@ -365,7 +365,7 @@ export async function initializeRootHarness(
 	// the very next model call (guards read current truth; interpolated text
 	// stays live).
 	const rerender: SessionRerender = () => {
-		const next = renderAgentFunctionWithStructure(agent.capability, agent.config, renderState);
+		const next = renderAgentFunctionWithStructure(agent.agent, agent.config, renderState);
 		assertRenderStructureInvariance(lastStructure, next.structure);
 		lastStructure = next.structure;
 		return {

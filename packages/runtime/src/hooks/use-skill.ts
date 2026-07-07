@@ -24,8 +24,8 @@ import { requireRenderFrame } from './frame.ts';
  *
  * Always-on skill content needs no hook — import the markdown
  * `with { type: 'markdown' }` and pass it to `useInstruction()`. Mounts are
- * static like everything else: a skill mounted by a phase capability is
- * cataloged on every turn; the capability's instruction says when to
+ * static like everything else: a skill mounted by a phase hook is
+ * cataloged on every turn; the hook's instruction says when to
  * activate it. Duplicate names across the render fail fast.
  */
 export function useSkill(skill: Skill): void {
@@ -46,7 +46,7 @@ export function useSkill(skill: Skill): void {
 	}
 	if (frame.skills.some((mounted) => mounted.name === name)) {
 		throw new Error(
-			`[flue] useSkill() mounted the skill name "${name}" twice in one render. Each skill mounts once; share it from a single capability.`,
+			`[flue] useSkill() mounted the skill name "${name}" twice in one render. Each skill mounts once; share it from a single custom hook.`,
 		);
 	}
 	frame.skills.push(skill);

@@ -2,8 +2,8 @@ import * as v from 'valibot';
 import { createAgentRouter } from './runtime/registration.ts';
 import { isValibotSchema } from './schema.ts';
 import type {
+	AgentFunction,
 	AgentProps,
-	Capability,
 	FunctionAgentConfig,
 	FunctionAgentDefinition,
 	ThinkingLevel,
@@ -39,7 +39,7 @@ const FunctionAgentConfigSchema = v.strictObject(
  * Defines an addressable agent. Default-export the returned value from a
  * `'use agent'` module.
  *
- * An agent is a capability given a model: the capability function composes
+ * An agent is an agent function given a model: the function composes
  * behavior with Flue Hooks and returns the agent's instruction string;
  * `config` is the static identity (model, tuning) that never renders:
  *
@@ -52,11 +52,11 @@ const FunctionAgentConfigSchema = v.strictObject(
  * ```
  */
 export function defineAgent(
-	agent: Capability<AgentProps>,
+	agent: AgentFunction<AgentProps>,
 	config: FunctionAgentConfig,
 ): FunctionAgentDefinition {
 	if (typeof agent !== 'function') {
-		throw new Error('[flue] defineAgent() requires a function: defineAgent(Capability, { model }).');
+		throw new Error('[flue] defineAgent() requires a function: defineAgent(Agent, { model }).');
 	}
 	const parsed = v.safeParse(FunctionAgentConfigSchema, config);
 	if (!parsed.success) {
@@ -76,7 +76,7 @@ export function defineAgent(
 	}
 	const definition: FunctionAgentDefinition = {
 		__flueFunctionAgent: true as const,
-		capability: agent,
+		agent,
 		config,
 		// Pure router factory over the module's bound identity/metadata — see
 		// createAgentRouter for the served routes and resolution rules.

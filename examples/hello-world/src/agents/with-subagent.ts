@@ -10,7 +10,7 @@ function WithSubagent() {
 	useSubagent({
 		name: 'greeter',
 		description: 'Writes a short, warm greeting for a named user.',
-		capabilities: Greeter,
+		agent: Greeter,
 	});
 	useTool({
 		name: 'subagent-greet',
