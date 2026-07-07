@@ -8,8 +8,8 @@ import {
 	assertRenderStructureInvariance,
 	renderAgentFunctionWithStructure,
 } from './hooks/render.ts';
-import { createHookStateBuffer, type HookStateBuffer } from './hooks/state.ts';
-import { type AgentOutputChannel, createAgentOutputChannel } from './message-output.ts';
+import { createHookStateBuffer } from './hooks/state.ts';
+import { createAgentOutputChannel } from './message-output.ts';
 import { type AttachmentStore, InMemoryAttachmentStore } from './runtime/attachment-store.ts';
 import { InMemoryConversationStreamStore } from './runtime/conversation-stream-store.ts';
 import { dispatchGlobalEvent } from './runtime/events.ts';
