@@ -9,11 +9,22 @@
  * ```typescript
  * 'use agent';
  * import { Daytona } from '@daytona/sdk';
+ * import { defineAgent, useSandbox } from '@flue/runtime';
  * import { daytona } from './sandboxes/daytona';
  *
- * const client = new Daytona({ apiKey: process.env.DAYTONA_API_KEY });
- * const sandbox = await client.create({ image: 'ubuntu:latest' });
- * export default defineAgent(() => ({ sandbox: daytona(sandbox), model: 'anthropic/claude-sonnet-4-6' }));
+ * function MyAgent() {
+ *   useSandbox({
+ *     // Lazy: the expensive sandbox creation happens once, inside
+ *     // createSessionEnv(), at initialization — never on a re-render.
+ *     async createSessionEnv(options) {
+ *       const client = new Daytona({ apiKey: process.env.DAYTONA_API_KEY });
+ *       const sandbox = await client.create({ image: 'ubuntu:latest' });
+ *       return daytona(sandbox).createSessionEnv(options);
+ *     },
+ *   });
+ *   return 'You have a Daytona sandbox.';
+ * }
+ * export default defineAgent(MyAgent, { model: 'anthropic/claude-sonnet-4-6' });
  * ```
  */
 

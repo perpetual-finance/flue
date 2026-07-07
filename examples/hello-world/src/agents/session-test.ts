@@ -1,8 +1,10 @@
 'use agent';
-import { defineAgent, defineAgentProfile } from '@flue/runtime';
+import { defineAgent } from '@flue/runtime';
 
-const sessionTest = defineAgentProfile({
-	instructions: 'You are a test agent for session-oriented message delivery.',
-});
+function SessionTest() {
+	return 'You are a test agent for session-oriented message delivery.';
+}
 
-export default defineAgent(() => ({ profile: sessionTest }));
+// The legacy profile declared no model of its own; picking a low-cost default
+// here since the function-agent config requires one.
+export default defineAgent(SessionTest, { model: 'anthropic/claude-haiku-4-5' });
