@@ -50,8 +50,13 @@ export interface LocalAgentRunOptions {
 	/** The `<path>` argument as the user typed it. */
 	modulePath: string;
 	message: string;
-	/** Instance-creation data; takes effect only on the conversation's first contact. */
+	/** Instance-creation data; the seed, consulted only when this send creates. */
 	data?: unknown;
+	/**
+	 * Send condition: a string continues only the incarnation with that uid;
+	 * `null` creates only when no instance exists; omit for unconditional.
+	 */
+	uid?: string | null;
 	/** Caller-chosen conversation id; a fresh ulid is minted when absent. */
 	conversationId?: string;
 	cwd?: string;
@@ -186,6 +191,7 @@ export function createLocalAgentRun(options: LocalAgentRunOptions): LocalAgentRu
 				{
 					signal: controller.signal,
 					data: options.data,
+					uid: options.uid,
 					onEvent: (chunk) => options.onEvent?.(chunk),
 				},
 			);

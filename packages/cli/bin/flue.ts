@@ -23,7 +23,7 @@ import { BLUEPRINTS, KIND_ROOTS } from './_blueprints.generated.ts';
 function printUsage(log: (message: string) => void = console.error) {
 	log(
 		'Usage:\n' +
-			'  flue run    <path> --message <text> [--id <conversation-id>] [--data <json>] [--env <path>] [--json]\n' +
+			'  flue run    <path> --message <text> [--id <conversation-id>] [--data <json>] [--uid <uid> | --new] [--env <path>] [--json]\n' +
 			'  flue init   --target <node|cloudflare> [--root <path>] [--force]\n' +
 			'  flue add    [<kind> <name|url>] [--print]\n' +
 			'  flue update <kind> <name|url> [--print]\n' +
@@ -42,7 +42,9 @@ function printUsage(log: (message: string) => void = console.error) {
 			'Flags:\n' +
 			'  --message <text>     (flue run) The user message submitted to the agent. Required.\n' +
 			'  --id <id>            (flue run) Conversation id to create or continue. Default: a fresh id, printed.\n' +
-			'  --data <json>        (flue run) Instance-creation data (JSON). Takes effect only on the conversation\'s first contact; read with useInitialData().\n' +
+			'  --data <json>        (flue run) Instance-creation data (JSON). The seed, used only when this run creates the conversation; read with useInitialData().\n' +
+			'  --uid <uid>          (flue run) Continue only the conversation incarnation with this uid (printed by the creating run); rejects when it no longer exists.\n' +
+			'  --new                (flue run) Create only: rejects when the conversation id already exists (the error names its uid).\n' +
 			'  --json               (flue run) Print a JSON result envelope to stdout instead of the message text.\n' +
 			'  --env <path>         (flue run) Select one alternate .env-format file, loaded before the run.\n' +
 			'                       Without --env, `flue run` loads <project>/.env when present. Shell values win.\n' +
@@ -78,6 +80,8 @@ interface RunArgs {
 	message: string;
 	id: string | undefined;
 	data: unknown;
+	/** Send condition: a string (--uid, continue-only) or null (--new, create-only). */
+	uid: string | null | undefined;
 	json: boolean;
 	envFile: string | undefined;
 }
@@ -354,10 +358,12 @@ function parseRunArgs(rest: string[]): RunArgs {
 			message: { type: 'string' },
 			id: { type: 'string' },
 			data: { type: 'string' },
+			uid: { type: 'string' },
+			new: { type: 'boolean' },
 			json: { type: 'boolean' },
 			env: { type: 'string', multiple: true },
 		},
-		new Set(['--message', '--id', '--data', '--json', '--env']),
+		new Set(['--message', '--id', '--data', '--uid', '--new', '--json', '--env']),
 	);
 
 	const [modulePath, ...extra] = positionals;
@@ -393,12 +399,23 @@ function parseRunArgs(rest: string[]): RunArgs {
 		}
 	}
 
+	const uidFlag = stringFlag(values, 'uid', 'Missing value for --uid');
+	const createOnly = booleanFlag(values, 'new', '--new');
+	if (uidFlag !== undefined && createOnly) {
+		fail('`--uid` continues an existing instance and `--new` creates a fresh one — pass one or the other.');
+	}
+	if (uidFlag !== undefined && data !== undefined) {
+		fail('`--uid` continues an existing instance, so `--data` (creation data) could never apply. Pass one or the other.');
+	}
+
 	return {
 		command: 'run',
 		modulePath,
 		message,
 		id: stringFlag(values, 'id', 'Missing value for --id'),
 		data,
+		// The send condition: --uid <value> = continue-only, --new = create-only.
+		uid: createOnly ? null : uidFlag,
 		json: booleanFlag(values, 'json', '--json'),
 		envFile: envFiles[0],
 	};
@@ -509,6 +526,7 @@ async function run(args: RunArgs) {
 		modulePath: args.modulePath,
 		message: args.message,
 		data: args.data,
+		uid: args.uid,
 		conversationId: args.id,
 		onEvent: (chunk) => presenter.present(chunk as ConversationStreamChunk),
 		onRuntimeOutput: (line) => {
@@ -543,12 +561,14 @@ async function run(args: RunArgs) {
 						submissionId: result.submissionId,
 						outcome: result.outcome,
 						message: result.message,
+						...(result.uid !== undefined ? { uid: result.uid } : {}),
 					}),
 				);
 			} else if (result.message !== '') {
 				console.log(result.message);
 			}
 			row('id', result.conversationId);
+			if (result.uid !== undefined) row('uid', result.uid);
 			success('agent completed');
 		} else {
 			row('id', result.conversationId);

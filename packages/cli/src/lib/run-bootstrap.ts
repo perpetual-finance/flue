@@ -71,8 +71,14 @@ export interface FlueRunSessionOptions {
 export interface FlueRunSubmitOptions {
 	/** Receives every conversation stream chunk as it is durably recorded. */
 	onEvent?: (chunk: ConversationStreamChunk) => void;
-	/** Instance-creation data; takes effect only on the conversation's first contact. */
+	/** Instance-creation data; the seed, consulted only when this send creates. */
 	data?: unknown;
+	/**
+	 * Send condition: a string continues only the incarnation with that uid
+	 * (else the run rejects); `null` creates only when no instance exists.
+	 * Omit to send unconditionally.
+	 */
+	uid?: string | null;
 	/**
 	 * Abort intent (SIGINT). Aborting requests a durable instance abort and
 	 * keeps draining the stream until the aborted settlement is observed.
@@ -86,6 +92,8 @@ export interface FlueRunOutcome {
 	error?: unknown;
 	/** Final assistant message text produced by this submission ('' if none). */
 	message: string;
+	/** The contacted instance's uid (minted at creation, echoed on continues). */
+	uid?: string;
 }
 
 export interface FlueRunSession {
@@ -339,7 +347,7 @@ async function submitAndSettle(options: SubmitAndSettleOptions): Promise<FlueRun
 	throwIfAborted(options.signal);
 
 	const admit = coordinator.createAdmission(identity, conversationId);
-	const receipt = await admit(message, undefined, options.data);
+	const receipt = await admit(message, undefined, options.data, options.uid);
 	const streamPath = agentStreamPath(identity, conversationId);
 
 	let abortRequested = false;
@@ -390,6 +398,7 @@ async function submitAndSettle(options: SubmitAndSettleOptions): Promise<FlueRun
 				streamPath,
 				receipt.submissionId,
 			),
+			...(receipt.uid !== undefined ? { uid: receipt.uid } : {}),
 		};
 	} finally {
 		options.signal?.removeEventListener('abort', requestAbort);

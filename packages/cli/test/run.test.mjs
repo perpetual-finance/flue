@@ -284,12 +284,78 @@ test('--json prints a machine-readable envelope to stdout', async () => {
 		'message',
 		'outcome',
 		'submissionId',
+		'uid',
 	]);
 	assert.equal(envelope.id, 'json-conv');
 	assert.equal(envelope.agent, 'hello');
 	assert.equal(envelope.outcome, 'completed');
 	assert.equal(envelope.message, 'reply from hello: context-messages=1');
 	assert.ok(envelope.submissionId.length > 0);
+	assert.match(envelope.uid, /^inst_/);
+});
+
+test('conditional sends: --uid continues the incarnation, --new rejects an existing id', async () => {
+	const root = createFixtureRoot();
+	const agent = writeEchoAgent(root);
+
+	const created = await runCli(root, [agent, '--message', 'hi', '--id', 'cond-conv', '--json']);
+	assert.equal(created.code, 0, created.stderr);
+	const uid = JSON.parse(created.stdout).uid;
+	assert.match(uid, /^inst_/);
+
+	// Continue with the receipt's uid: same incarnation, uid echoed.
+	const continued = await runCli(root, [
+		agent,
+		'--message',
+		'again',
+		'--id',
+		'cond-conv',
+		'--uid',
+		uid,
+		'--json',
+	]);
+	assert.equal(continued.code, 0, continued.stderr);
+	assert.equal(JSON.parse(continued.stdout).uid, uid);
+
+	// A stale/wrong uid names a dead incarnation.
+	const stale = await runCli(root, [
+		agent,
+		'--message',
+		'again',
+		'--id',
+		'cond-conv',
+		'--uid',
+		'inst_nonexistent',
+	]);
+	assert.notEqual(stale.code, 0);
+	assert.match(stale.stderr, /was not found/);
+
+	// --new against an existing id rejects and hands back the uid.
+	const conflict = await runCli(root, [
+		agent,
+		'--message',
+		'fresh',
+		'--id',
+		'cond-conv',
+		'--new',
+	]);
+	assert.notEqual(conflict.code, 0);
+	assert.match(conflict.stderr, /already exists/);
+	assert.ok(conflict.stderr.includes(uid), conflict.stderr);
+
+	// --uid and --new together are rejected at flag parse.
+	const both = await runCli(root, [
+		agent,
+		'--message',
+		'x',
+		'--id',
+		'cond-conv',
+		'--uid',
+		uid,
+		'--new',
+	]);
+	assert.notEqual(both.code, 0);
+	assert.match(both.stderr, /pass one or the other/i);
 });
 
 // ─── SIGINT ──────────────────────────────────────────────────────────────────
