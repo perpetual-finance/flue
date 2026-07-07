@@ -545,6 +545,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	private actions: ActionDefinition[];
 	private createActionHarness: CreateActionHarness | undefined;
 	private scopeSignal: AbortSignal | undefined;
+	private activeCallOverrides: CallOverrides | undefined;
 	private onClose: (() => void) | undefined;
 	private activeTimeoutAt: number | undefined;
 	private activeSubmissionId: string | undefined;
@@ -669,10 +670,20 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		if (!this.rerender) return undefined;
 		const next = this.rerender();
 		this.agentTools = next.tools;
+		// Rebuild under any active per-call overrides — a structured-result
+		// prompt's finish/give_up bundle and per-call tools must survive the
+		// turn boundary, not just the first turn.
+		const overrides = this.activeCallOverrides;
 		const tools = this.assembleModelTools(
-			this.createBuiltinToolGroups(this.env, []),
-			this.agentTools,
-			[],
+			this.createBuiltinToolGroups(
+				this.env,
+				overrides?.tools ?? [],
+				overrides?.model,
+				overrides?.thinkingLevel,
+				overrides?.activePackagedSkills,
+			),
+			overrides ? [...this.agentTools, ...overrides.tools] : this.agentTools,
+			overrides?.extraTools ?? [],
 		);
 		this.agentLoop.state.tools = tools;
 		this.agentLoop.state.systemPrompt = next.systemPrompt;
@@ -2932,10 +2943,16 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			[...this.agentTools, ...options.tools],
 			options.extraTools ?? [],
 		);
+		this.activeCallOverrides = options;
 		try {
 			return await fn({ resolvedModel });
 		} finally {
-			this.agentLoop.state.tools = previousTools;
+			this.activeCallOverrides = undefined;
+			// A re-render inside the overridden window makes the pre-call tool
+			// snapshot stale — rebuild from the current render instead.
+			this.agentLoop.state.tools = this.rerender
+				? this.assembleModelTools(this.createBuiltinToolGroups(this.env, []), this.agentTools, [])
+				: previousTools;
 			this.agentLoop.state.model = previousModel;
 			this.agentLoop.state.thinkingLevel = previousThinkingLevel;
 		}

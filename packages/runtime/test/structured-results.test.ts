@@ -30,19 +30,6 @@ async function createSession(
 	options: {
 		skills?: Skill[];
 		onEvent?: (event: FlueEvent) => void;
-		/**
-		 * A function agent's per-turn re-render (`prepareRerenderTurn` in
-		 * src/session.ts) rebuilds `agentLoop.state.tools` from the capability
-		 * alone, dropping the ephemeral `finish`/`give_up` result-tool bundle
-		 * that `withCallOverrides` installs for the duration of a
-		 * `session.prompt(..., { result })` call. That's fine for single-turn
-		 * structured results, but a follow-up turn (the model doesn't call
-		 * `finish`/`give_up` on its first reply) loses the tool and the retry
-		 * fails with "Tool finish not found" — a pre-existing runtime gap, not
-		 * something a test fixture can route around. Use the legacy
-		 * initializer form for those multi-turn scenarios until that's fixed.
-		 */
-		legacyAgent?: boolean;
 	} = {},
 ): Promise<FlueSession> {
 	const ctx = createFlueContext({
@@ -55,14 +42,12 @@ async function createSession(
 	});
 	if (options.onEvent) ctx.setEventCallback(options.onEvent);
 	const model = `${provider.getModel().provider}/${provider.getModel().id}`;
-	const agent = options.legacyAgent
-		? defineAgent(() => ({ model, skills: options.skills }))
-		: defineAgent(
-				() => {
-					for (const skill of options.skills ?? []) useSkill(skill);
-				},
-				{ model },
-			);
+	const agent = defineAgent(
+		() => {
+			for (const skill of options.skills ?? []) useSkill(skill);
+		},
+		{ model },
+	);
 	const harness = await ctx.initializeRootHarness(agent);
 	return harness.session();
 }
@@ -233,7 +218,6 @@ describe('structured operation results', () => {
 		try {
 			const session = await createSession(provider, {
 				onEvent: (event) => events.push(event),
-				legacyAgent: true,
 			});
 
 			const response = await session.prompt('Count the accepted entries.', {
@@ -326,7 +310,6 @@ describe('structured operation results', () => {
 			onEvent: (event) => {
 				if (event.type === 'turn') turns.push(event);
 			},
-			legacyAgent: true,
 		});
 
 		const response = await session.prompt('Complete the structured response.', {
