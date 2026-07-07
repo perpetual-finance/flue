@@ -54,13 +54,14 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  * @example
  * ```ts
  * 'use agent';
- * import { defineAgent } from '@flue/runtime';
+ * import { defineAgent, useSandbox } from '@flue/runtime';
  * import { islo } from './sandboxes/islo';
  *
- * export default defineAgent(() => ({
- *   sandbox: islo('my-sandbox'),
- *   model: 'anthropic/claude-sonnet-4-6',
- * }));
+ * function Assistant() {
+ *   useSandbox(islo('my-sandbox'));
+ *   return 'You are a helpful assistant with a full sandbox.';
+ * }
+ * export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
  * ```
  */
 import { spawn } from 'node:child_process';
@@ -294,13 +295,15 @@ share this snippet so they can wire it up themselves.
 
 ```ts
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useSandbox } from '@flue/runtime';
 import { islo } from '../sandboxes/islo'; // adjust path to match the user's layout
 
-export default defineAgent(() => ({
-  sandbox: islo('my-sandbox'),
-  model: 'anthropic/claude-sonnet-4-6',
-}));
+function Assistant() {
+	useSandbox(islo('my-sandbox'));
+	return 'You are a helpful assistant with a full sandbox.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 The `'use agent'` directive at the top is what registers the module with

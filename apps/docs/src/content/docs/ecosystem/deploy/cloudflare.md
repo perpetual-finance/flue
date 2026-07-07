@@ -266,56 +266,62 @@ Use `app.ts` for custom HTTP routes and middleware. `cloudflare.ts` must not exp
 
 ## Subagents
 
-Subagents define named delegates for detached task sessions:
+`useSubagent(...)` declares a named delegate the model can hand focused work to via a task:
 
-```typescript
-import { defineAgent, defineAgentProfile } from '@flue/runtime';
+```typescript title="src/agents/assistant.ts"
+'use agent';
+import { defineAgent, useSubagent } from '@flue/runtime';
 
-const triager = defineAgentProfile({
-  name: 'triager',
-  instructions: 'Search thoroughly, cite sources, and stay concise.',
-});
+function Triager() {
+  return 'Search thoroughly, cite sources, and stay concise.';
+}
 
-export default defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-  instructions: "Delegate research to the 'triager' subagent via a task.",
-  subagents: [triager],
-}));
+function Assistant() {
+  useSubagent({
+    name: 'triager',
+    description: 'Researches a topic thoroughly and reports back with cited sources.',
+    capabilities: Triager,
+  });
+  return 'Delegate research to the `triager` subagent via a task.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 ## Using the sandbox
 
 By default, the virtual sandbox starts empty — no files, no skills, no context. This is fine for stateless prompt-and-response agents like the translator above. But many agents need files to work with.
 
-Because the agent has shell access, it can set up its own workspace on the fly, and a deterministic [Action](/docs/guide/actions/) can seed context before prompting:
+Because the agent has shell access, it can set up its own workspace on the fly, and a harness-connected tool (`useTool({ harness: true })`) can seed context before prompting:
 
 ```typescript title="src/agents/support.ts"
 'use agent';
-import { defineAction, defineAgent } from '@flue/runtime';
+import { defineAgent, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 
-const answer = defineAction({
-  name: 'answer',
-  description: 'Answer one support request using the workspace articles.',
-  input: v.object({ message: v.string() }),
-  async run({ harness, input }) {
-    await harness.fs.writeFile(
-      '/workspace/articles/reset-password.md',
-      '# Reset your password\n\nUse the account settings page to request a password reset email.',
-    );
+function Support() {
+  useTool({
+    name: 'answer',
+    description: 'Answer one support request using the workspace articles.',
+    input: v.object({ message: v.string() }),
+    harness: true,
+    async run({ harness, input }) {
+      await harness.fs.writeFile(
+        '/workspace/articles/reset-password.md',
+        '# Reset your password\n\nUse the account settings page to request a password reset email.',
+      );
 
-    const session = await harness.session();
-    return await session.prompt(
-      `Search the workspace for articles relevant to this request, then write a helpful response.\n\nCustomer: ${input.message}`,
-    );
-  },
-});
+      const session = await harness.session();
+      const { text } = await session.prompt(
+        `Search the workspace for articles relevant to this request, then write a helpful response.\n\nCustomer: ${input.message}`,
+      );
+      return text;
+    },
+  });
+  return 'For each support request, call the `answer` tool with the customer message.';
+}
 
-export default defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-  instructions: 'For each support request, call the `answer` action with the customer message.',
-  actions: [answer],
-}));
+export default defineAgent(Support, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 The agent can use its built-in tools — grep, glob, read — to search and read these files. This is still running on a virtual sandbox (no container), so it's fast and cheap. If an application needs durable external storage or a full Linux environment, choose and own a sandbox adapter appropriate to that requirement.

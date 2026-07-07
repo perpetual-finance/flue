@@ -1,7 +1,7 @@
 ---
 title: Sandboxes
 description: Give agents a workspace for files and command-driven work.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-07
 ---
 
 Sandboxes give an agent a workspace to read, write, and run commands in while it works. Use them when an agent needs to operate on files or run commands, rather than only respond to prompts or call application-defined [tools](/docs/guide/tools/).
@@ -12,16 +12,17 @@ Flue provides a lightweight virtual sandbox by default. Use a local sandbox when
 
 By default, an initialized agent works in a virtual sandbox unless you configure another environment. The virtual sandbox is a lightweight, in-memory workspace powered by [just-bash](https://justbash.dev/). It is the right starting point when your application can provide the files the agent needs.
 
-For example, an [Action](/docs/guide/actions/) can stage an input document, let the agent work on it, and retrieve an output file:
+For example, a [harness tool](/docs/guide/tools/#harness-tools) can stage an input document, let the agent work on it, and retrieve an output file:
 
-```ts title="src/actions/review-document.ts"
-import { defineAction } from '@flue/runtime';
+```ts title="src/shared/review-tools.ts"
+import { defineTool } from '@flue/runtime';
 import * as v from 'valibot';
 
-export const reviewDocument = defineAction({
+export const reviewDocument = defineTool({
   name: 'review_document',
   description: 'Review one supplied document and report findings.',
   input: v.object({ document: v.string() }),
+  harness: true,
 
   async run({ harness, input }) {
     await harness.fs.writeFile('document.md', input.document);
@@ -33,7 +34,7 @@ export const reviewDocument = defineAction({
 });
 ```
 
-Configure the agent that exposes this Action with `cwd: '/workspace'` and no `sandbox` field: omitting it selects the virtual sandbox, and `cwd` sets the working directory, so these relative file paths resolve below `/workspace`. The agent can use built-in file and command capabilities in that workspace, while application code uses `harness.fs` to provide inputs and retrieve results.
+Configure the agent that mounts this tool with `cwd: '/workspace'` and no `useSandbox()` call: omitting it selects the virtual sandbox, and `cwd` sets the working directory, so these relative file paths resolve below `/workspace`. The agent can use built-in file and command capabilities in that workspace, while application code uses `harness.fs` to provide inputs and retrieve results.
 
 The virtual sandbox starts without your application files or host filesystem, and its files do not persist beyond its in-memory lifetime. Its command environment is suitable for lightweight workspace work, not an arbitrary Linux toolchain. It is also not a network isolation boundary: current generated runtimes permit network access from the virtual sandbox.
 
@@ -43,15 +44,18 @@ On the Node.js target, use `local()` when an agent should operate directly on th
 
 ```ts title="src/agents/repository-reviewer.ts"
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useSandbox } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
-export default defineAgent(() => ({
+function RepositoryReviewer() {
+  useSandbox(local());
+  return 'Inspect the requested change and run only relevant validation.';
+}
+
+export default defineAgent(RepositoryReviewer, {
   model: 'anthropic/claude-sonnet-4-6',
-  sandbox: local(),
   cwd: '/srv/checkouts/catalog-service',
-  instructions: 'Inspect the requested change and run only relevant validation.',
-}));
+});
 ```
 
 `local()` makes host files and installed commands reachable through the agent's workspace capabilities. It does not provide isolation between model-directed work and the host machine.
@@ -89,8 +93,7 @@ Choose the narrowest sandbox that supports the task. Expanding the environment e
 ## Next steps
 
 - [Agents](/docs/guide/building-agents/) — configure continuing agents that work inside a sandbox.
-- [Actions](/docs/guide/actions/) — stage files and collect artifacts during finite work.
-- [Tools](/docs/guide/tools/) — expose bounded application actions separately from workspace access.
+- [Tools](/docs/guide/tools/) — expose bounded application capabilities, including harness tools that stage files and collect artifacts, separately from workspace access.
 - [Skills](/docs/guide/skills/) — bundle procedures or provide workspace-discovered skills.
 - [Sandbox Adapter API](/docs/api/sandbox-api/) — implement a provider-backed sandbox integration.
 - [Daytona](/docs/ecosystem/sandboxes/daytona/) and [Cloudflare Sandbox](/docs/ecosystem/sandboxes/cloudflare/) — configure remote sandbox integrations.

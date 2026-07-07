@@ -1,10 +1,10 @@
 ---
 title: Schedules
 description: Dispatch agent input on a schedule with Cloudflare or Node.js.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-07
 ---
 
-Schedules often start bounded work such as daily summaries, recurring reports, data synchronization, or cleanup. Model that work as an agent — typically one with an [Action](/docs/guide/actions/) that owns the reliability-critical steps — and deliver each occurrence with `dispatch(...)`.
+Schedules often start bounded work such as daily summaries, recurring reports, data synchronization, or cleanup. Model that work as an agent and deliver each occurrence with `dispatch(...)`.
 
 The conversation `id` you dispatch to sets the work's memory. A fresh id per occurrence (`daily-2026-07-02`) gives every run an independent conversation; a stable id (`daily-summary`) makes successive occurrences share conversation state, which is useful when the agent should remember what it reported yesterday.
 
@@ -17,15 +17,15 @@ The scheduled agent is an ordinary agent module. It needs no mount in `app.ts` �
 ```ts title="src/agents/daily-summary.ts"
 'use agent';
 import { defineAgent } from '@flue/runtime';
-import { prepareSummary } from '../actions/prepare-summary.ts';
 
-export default defineAgent(() => ({
-  model: 'anthropic/claude-haiku-4-5',
-  instructions:
-    'When asked for the daily summary, call the `prepare-summary` action and report its result.',
-  actions: [prepareSummary],
-}));
+function DailySummary() {
+  return 'When triggered, review recent activity and report a concise daily summary.';
+}
+
+export default defineAgent(DailySummary, { model: 'anthropic/claude-haiku-4-5' });
 ```
+
+Reach for a [harness tool](/docs/guide/tools/#harness-tools) instead of plain instructions when the scheduled work needs application-controlled steps — reading a data source, writing a report, calling an external API — that should behave the same way on every occurrence.
 
 ## Scheduling on Cloudflare
 
@@ -118,7 +118,7 @@ Each invocation runs locally, streams activity, prints the reply, and exits. The
 
 ## Next steps
 
-- [Actions](/docs/guide/actions/) — put the reliability-critical steps of scheduled work behind validated inputs and outputs.
+- [Tools](/docs/guide/tools/) — put the reliability-critical steps of scheduled work behind a harness tool with validated input and output.
 - [Agents](/docs/guide/building-agents/) — define the agent that receives scheduled input.
 - [Cloudflare](/docs/guide/targets/cloudflare/) — configure the Cloudflare target and `cloudflare.ts` entrypoint.
 - [Node.js](/docs/guide/targets/node/) — build and operate the Node.js server.

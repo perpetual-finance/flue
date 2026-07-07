@@ -60,16 +60,25 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  * ```typescript
  * 'use agent';
  * import { ModalClient } from 'modal';
- * import { defineAgent } from '@flue/runtime';
+ * import { defineAgent, useSandbox } from '@flue/runtime';
  * import { modal } from './sandboxes/modal';
  *
- * export default defineAgent(async () => {
- *   const client = new ModalClient();
- *   const app = await client.apps.fromName('my-app', { createIfMissing: true });
- *   const image = client.images.fromRegistry('python:3.13-slim');
- *   const sandbox = await client.sandboxes.create(app, image);
- *   return { sandbox: modal(sandbox), model: 'anthropic/claude-sonnet-4-6' };
- * });
+ * function Assistant() {
+ *   useSandbox({
+ *     // Lazy, per the SandboxFactory contract: constructing this object is
+ *     // cheap; the expensive Modal sandbox creation happens once, inside
+ *     // createSessionEnv(), at initialization — never on a re-render.
+ *     async createSessionEnv(options) {
+ *       const client = new ModalClient();
+ *       const app = await client.apps.fromName('my-app', { createIfMissing: true });
+ *       const image = client.images.fromRegistry('python:3.13-slim');
+ *       const sandbox = await client.sandboxes.create(app, image);
+ *       return modal(sandbox).createSessionEnv(options);
+ *     },
+ *   });
+ *   return 'You are a helpful assistant with a full sandbox.';
+ * }
+ * export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
  * ```
  */
 import { createSandboxSessionEnv } from '@flue/runtime';
@@ -331,21 +340,28 @@ share this snippet so they can wire it up themselves.
 ```ts
 'use agent';
 import { ModalClient } from 'modal';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useSandbox } from '@flue/runtime';
 import { modal } from '../sandboxes/modal'; // adjust path to match the user's layout
 
-export default defineAgent(async () => {
-  // ModalClient reads MODAL_TOKEN_ID / MODAL_TOKEN_SECRET (or ~/.modal.toml)
-  // automatically.
-  const client = new ModalClient();
-  const app = await client.apps.fromName('my-flue-app', { createIfMissing: true });
-  const image = client.images.fromRegistry('python:3.13-slim');
-  const sandbox = await client.sandboxes.create(app, image);
-  return {
-    sandbox: modal(sandbox),
-    model: 'anthropic/claude-sonnet-4-6',
-  };
-});
+function Assistant() {
+	useSandbox({
+		// Lazy, per the SandboxFactory contract: constructing this object is
+		// cheap; the expensive Modal sandbox creation happens once, inside
+		// createSessionEnv(), at initialization — never on a re-render.
+		async createSessionEnv(options) {
+			// ModalClient reads MODAL_TOKEN_ID / MODAL_TOKEN_SECRET (or
+			// ~/.modal.toml) automatically.
+			const client = new ModalClient();
+			const app = await client.apps.fromName('my-flue-app', { createIfMissing: true });
+			const image = client.images.fromRegistry('python:3.13-slim');
+			const sandbox = await client.sandboxes.create(app, image);
+			return modal(sandbox).createSessionEnv(options);
+		},
+	});
+	return 'You are a helpful assistant with a full sandbox.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 The `'use agent'` directive at the top is what registers the module with

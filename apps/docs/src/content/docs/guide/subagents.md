@@ -1,62 +1,66 @@
 ---
 title: Subagents
 description: Let agents delegate focused work to named specialists.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-07
 ---
 
-Subagents let an agent delegate a piece of work to a named specialist while it continues to own the interaction. Use them when an agent should ask another configured role to research, classify, or review something and then work with the returned answer.
+Subagents let an agent delegate a piece of work to a named specialist while it continues to own the interaction. Use them when an agent should ask another capability to research, classify, or review something and then work with the returned answer.
 
-A subagent is an [agent profile](/docs/guide/building-agents/#agent-profiles) declared on another agent. Delegated work runs in a separate child session, rather than continuing the parent agent's conversation history. The subagent is not a separately addressable agent endpoint.
+A subagent is a **capability function** isolated as a delegate with `useSubagent({ name, description, capabilities })`, declared inside another agent. Delegated work runs in a separate child session, rather than continuing the parent agent's conversation history. The subagent is not a separately addressable agent endpoint.
 
 ## Define a subagent
 
-Create a named profile with `defineAgentProfile(...)`, then provide it through an agent's `subagents` configuration:
+Declare `useSubagent(...)` inside the capability that should be able to delegate, passing it the delegate's own capability function:
 
 ```ts title="src/agents/support-assistant.ts"
 'use agent';
-import { defineAgent, defineAgentProfile } from '@flue/runtime';
+import { defineAgent, useSubagent } from '@flue/runtime';
 
-const issueClassifier = defineAgentProfile({
-  name: 'issue_classifier',
-  description: 'Classifies support issues for routing.',
-  instructions: 'Return the likely product area and urgency for the reported issue.',
-});
+function IssueClassifier() {
+  return 'Return the likely product area and urgency for the reported issue.';
+}
 
-export default defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-  instructions: 'Help resolve support requests. Delegate classification when it helps your answer.',
-  subagents: [issueClassifier],
-}));
+function SupportAssistant() {
+  useSubagent({
+    name: 'issue_classifier',
+    description: 'Classifies support issues for routing.',
+    capabilities: IssueClassifier,
+  });
+  return 'Help resolve support requests. Delegate classification when it helps your answer.';
+}
+
+export default defineAgent(SupportAssistant, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
-In this example, `support-assistant` can delegate work to `issue_classifier`. The profile configures the specialist used for delegated tasks; it does not define another agent at `/agents/issue_classifier/:id`.
+In this example, `support-assistant` can delegate work to `issue_classifier`. `capabilities` is the function that defines the delegate's whole world — Flue renders it fresh, in its own frame, at the moment the model delegates to it. It does not define another agent at `/agents/issue_classifier/:id`.
 
-The profile's `description` is shown to the parent model alongside the subagent's name, so write it as delegation guidance: a short statement of what the subagent is good for.
+`description` is shown to the parent model alongside the delegate's name on the built-in `task` tool, so write it as delegation guidance: a short statement of what the subagent is good for.
 
 ## Delegate work
 
-An agent with configured subagents can decide to delegate while answering a prompt. Flue gives the agent a built-in `task` capability that starts a child session for the selected subagent and returns that child's answer to the parent agent.
+An agent with a declared subagent can decide to delegate while answering a prompt. Flue gives the agent a built-in `task` capability that renders the selected delegate's `capabilities` function, runs it in a child session, and returns that child's answer to the parent agent.
 
-The child session receives the delegated request and its own configured context, not the parent's existing conversation transcript. When persistence is configured, its retained history remains owned by the parent session rather than becoming an ordinary named session. See [Database](/docs/guide/database/) for persistence setup. When a subagent works in a configured sandbox, it uses that same sandbox boundary as its parent. See [Sandboxes](/docs/guide/sandboxes/) for controlling workspace and command access.
+The delegate's render composes its own `use()`, `useTool()`, `useInstruction()`, and `useSkill()` calls exactly like a root agent's capability, and it may declare further `useSubagent()` delegates of its own, up to the delegation depth cap. `useState()` and `useSandbox()` throw inside a delegate's render: durable state is scoped to the agent instance, and a delegate shares its parent's environment rather than attaching its own.
 
 ## Configuration inheritance
 
-A subagent profile is self-contained. The capability fields that define what the subagent is and can do apply only when the profile declares them — omitting one means the subagent has none, never the parent's. Environment fields fall back to the parent's values as runtime defaults.
+A subagent's `capabilities` function is self-contained: what it mounts is exactly what its own render produces — nothing flows in from the parent's capability. Only environment defaults inherit.
 
-| Field                                          | Behavior                                                                                                                                          |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `instructions`, `tools`, `skills`, `subagents` | Profile-owned. Only the profile's own declarations apply; an omitted field means none. The parent's values never flow into the delegated session. |
-| `model`, `thinkingLevel`, `compaction`         | Inherits as a default. The profile's own value wins when declared; an omitted field uses the parent's value.                                      |
-| `durability`                                   | Rejected. Delegated task sessions run inside the parent operation, so declaring `durability` on a subagent profile is a definition-time error.    |
+| Field                                    | Behavior                                                                                                            |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Instructions, tools, skills, subagents    | Delegate-owned. Exactly what the `capabilities` function composes when rendered at delegation time.                  |
+| `model`, `thinkingLevel`                  | Inherits as a default: the parent's current values apply unless `useSubagent(...)` sets its own `model`/`thinkingLevel`. |
+
+A delegated task runs inside the parent operation, so it has no independent durability configuration of its own.
 
 A `task()` call without an `agent` name is not a subagent delegation: the child session reuses the parent's full configuration in a fresh context.
 
-## Use subagents in Actions
+## Use subagents in tools
 
-An [Action](/docs/guide/actions/) can choose delegation directly when application logic requires work from a particular subagent. Call `session.task(...)` with the name of a declared subagent, and provide `result` when the Action needs validated data:
+A [harness tool](/docs/guide/tools/#harness-tools) can choose delegation directly when application logic requires work from a particular subagent. Call `session.task(...)` with the name of a declared subagent, and provide `result` when the tool needs validated data:
 
-```ts title="src/actions/review-change.ts"
-import { defineAction } from '@flue/runtime';
+```ts title="src/shared/review-tools.ts"
+import { defineTool } from '@flue/runtime';
 import * as v from 'valibot';
 
 const Review = v.object({
@@ -64,11 +68,11 @@ const Review = v.object({
   risks: v.array(v.string()),
 });
 
-export const reviewChange = defineAction({
+export const reviewChange = defineTool({
   name: 'review_change',
   description: 'Have the reviewer subagent assess one proposed change.',
   input: v.object({ change: v.string() }),
-  output: Review,
+  harness: true,
 
   async run({ harness, input }) {
     const response = await (
@@ -82,13 +86,13 @@ export const reviewChange = defineAction({
 });
 ```
 
-Here, application code chooses `reviewer` rather than leaving delegation to the parent agent. The agent exposing this Action declares the `reviewer` profile in its `subagents` configuration. See the [Agent API](/docs/api/agent-api/) for task options and result types.
+Here, application code chooses `reviewer` rather than leaving delegation to the parent agent. The agent that mounts this tool must also declare the `reviewer` delegate with its own `useSubagent({ name: 'reviewer', ... })` call. See the [Agent API](/docs/api/agent-api/) for task options and result types.
 
 ## Next steps
 
-- [Agents](/docs/guide/building-agents/) — create agents and reusable agent profiles.
-- [Actions](/docs/guide/actions/) — orchestrate finite agent work in application code.
-- [Tools](/docs/guide/tools/) and [Skills](/docs/guide/skills/) — give an agent profile capabilities and reusable instructions.
-- [Sandboxes](/docs/guide/sandboxes/) — control the workspace available during delegated work.
+- [Agents](/docs/guide/building-agents/) — create agents composed from capability functions.
+- [Tools](/docs/guide/tools/) — give a subagent's capability its own tools, or delegate from inside a harness tool.
+- [Skills](/docs/guide/skills/) — reusable instructions a delegate's capability can mount.
+- [Sandboxes](/docs/guide/sandboxes/) — how a delegate shares the parent's environment.
 - [Agent API](/docs/api/agent-api/) — look up `session.task(...)` options and results.
 - [Observability](/docs/guide/observability/) — inspect delegated activity alongside other agent work.

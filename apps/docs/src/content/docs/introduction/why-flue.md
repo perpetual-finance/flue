@@ -13,7 +13,7 @@ lastReviewedAt: 2026-07-02
 Some highlights include:
 
 - **[Agents](/docs/concepts/agents/):** Autonomous agents that keep context across conversations and events.
-- **[Actions](/docs/guide/actions/):** Structured, validated operations from a clear input to a finished result.
+- **[Harness tools](/docs/guide/tools/#harness-tools):** Structured, validated operations from a clear input to a finished result.
 - **[Sandboxes](/docs/guide/sandboxes/):** A secure environment where agents act and run code.
 - **[Vite plugin](/docs/guide/vite-plugin/):** `vite dev` and `vite build` own the deployable application.
 - **[CLI](/docs/cli/overview/):** Run any agent one-shot from your terminal with `flue run`.

@@ -155,4 +155,4 @@ Route declarations are validated eagerly: invalid method/path/handler shapes and
 
 ## Removed router surface
 
-The name-addressed `flue()` router (`/agents/:name/:id`), `createDefaultFlueApp()`, `/workflows/:name`, `/runs/:runId`, and the `listAgents()`/`listRuns()`/`getRun()` inspection primitives were removed. Agents are addressed only where `app.ts` mounts them, and workflows no longer exist — an agent with model-callable [actions](/docs/api/action-api/) covers the deterministic-code role.
+The name-addressed `flue()` router (`/agents/:name/:id`), `createDefaultFlueApp()`, `/workflows/:name`, `/runs/:runId`, and the `listAgents()`/`listRuns()`/`getRun()` inspection primitives were removed. Agents are addressed only where `app.ts` mounts them, and workflows no longer exist — an agent with model-callable [harness tools](/docs/api/agent-api/#usetool) covers the deterministic-code role.

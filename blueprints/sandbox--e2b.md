@@ -55,13 +55,23 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  * ```typescript
  * 'use agent';
  * import { Sandbox } from 'e2b';
- * import { defineAgent } from '@flue/runtime';
+ * import { defineAgent, useSandbox } from '@flue/runtime';
  * import { e2b } from './sandboxes/e2b';
  *
- * export default defineAgent(async () => {
- *   const sandbox = await Sandbox.create();
- *   return { sandbox: e2b(sandbox), model: 'anthropic/claude-sonnet-4-6' };
- * });
+ * function Assistant() {
+ *   useSandbox({
+ *     // Lazy, per the SandboxFactory contract: constructing this object is
+ *     // cheap; the expensive E2B sandbox creation happens once, inside
+ *     // createSessionEnv(), at initialization — never on a re-render.
+ *     // E2B reads E2B_API_KEY from the environment automatically.
+ *     async createSessionEnv(options) {
+ *       const sandbox = await Sandbox.create();
+ *       return e2b(sandbox).createSessionEnv(options);
+ *     },
+ *   });
+ *   return 'You are a helpful assistant with a full sandbox.';
+ * }
+ * export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
  * ```
  */
 import { createSandboxSessionEnv, SandboxOperationUnsupportedError } from '@flue/runtime';
@@ -233,17 +243,24 @@ share this snippet so they can wire it up themselves.
 ```ts
 'use agent';
 import { Sandbox } from 'e2b';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useSandbox } from '@flue/runtime';
 import { e2b } from '../sandboxes/e2b'; // adjust path to match the user's layout
 
-export default defineAgent(async () => {
-  // E2B reads E2B_API_KEY from the environment automatically.
-  const sandbox = await Sandbox.create();
-  return {
-    sandbox: e2b(sandbox),
-    model: 'anthropic/claude-sonnet-4-6',
-  };
-});
+function Assistant() {
+	useSandbox({
+		// Lazy, per the SandboxFactory contract: constructing this object is
+		// cheap; the expensive E2B sandbox creation happens once, inside
+		// createSessionEnv(), at initialization — never on a re-render.
+		// E2B reads E2B_API_KEY from the environment automatically.
+		async createSessionEnv(options) {
+			const sandbox = await Sandbox.create();
+			return e2b(sandbox).createSessionEnv(options);
+		},
+	});
+	return 'You are a helpful assistant with a full sandbox.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 The `'use agent'` directive at the top is what registers the module with

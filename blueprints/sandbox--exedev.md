@@ -62,25 +62,35 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  * @example Existing VM (most common)
  * ```typescript
  * 'use agent';
- * import { defineAgent } from '@flue/runtime';
+ * import { defineAgent, useSandbox } from '@flue/runtime';
  * import { exedev } from './sandboxes/exedev';
  *
- * export default defineAgent(() => ({
- *   sandbox: exedev({ host: 'maple-dune.exe.xyz' }),
- *   model: 'anthropic/claude-sonnet-4-6',
- * }));
+ * function Assistant() {
+ *   useSandbox(exedev({ host: 'maple-dune.exe.xyz' }));
+ *   return 'You are a helpful assistant with a full sandbox.';
+ * }
+ * export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
  * ```
  *
  * @example Create a VM before wrapping it
  * ```typescript
  * 'use agent';
- * import { defineAgent } from '@flue/runtime';
+ * import { defineAgent, useSandbox } from '@flue/runtime';
  * import { createExeVm, exedev } from './sandboxes/exedev';
  *
- * export default defineAgent(async ({ env }) => ({
- *   sandbox: exedev(await createExeVm({ apiToken: env.EXE_API_TOKEN })),
- *   model: 'anthropic/claude-sonnet-4-6',
- * }));
+ * function Assistant() {
+ *   useSandbox({
+ *     // Lazy, per the SandboxFactory contract: constructing this object is
+ *     // cheap; the expensive VM creation happens once, inside
+ *     // createSessionEnv(), at initialization — never on a re-render.
+ *     async createSessionEnv(options) {
+ *       const vm = await createExeVm({ apiToken: process.env.EXE_API_TOKEN });
+ *       return exedev(vm).createSessionEnv(options);
+ *     },
+ *   });
+ *   return 'You are a helpful assistant with a full sandbox.';
+ * }
+ * export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
  * ```
  */
 import {
@@ -727,13 +737,15 @@ hostname before wiring the adapter.
 
 ```ts
 'use agent';
-import { defineAgent } from "@flue/runtime";
+import { defineAgent, useSandbox } from "@flue/runtime";
 import { exedev } from "../sandboxes/exedev";
 
-export default defineAgent(({ env }) => ({
-  sandbox: exedev({ host: env.EXE_VM_HOST }),
-  model: "anthropic/claude-sonnet-4-6",
-}));
+function Assistant() {
+	useSandbox(exedev({ host: process.env.EXE_VM_HOST }));
+	return "You are a helpful assistant with a full sandbox.";
+}
+
+export default defineAgent(Assistant, { model: "anthropic/claude-sonnet-4-6" });
 ```
 
 The `'use agent'` directive at the top is what registers the module with
@@ -743,21 +755,25 @@ an HTTP endpoint — `flue run` and `dispatch()` work without a mount.
 ### Fresh VM
 
 Only use this when the user explicitly asks to create a VM and provides an
-API token with `new` permission. The bound agent initializer creates the VM and
-passes it to `exedev(...)`.
+API token with `new` permission. The `createSessionEnv` closure creates the
+VM and passes it to `exedev(...)`.
 
 ```ts
 'use agent';
-import { defineAgent } from "@flue/runtime";
+import { defineAgent, useSandbox } from "@flue/runtime";
 import { createExeVm, exedev } from "../sandboxes/exedev";
 
-export default defineAgent(async ({ env }) => {
-  const vm = await createExeVm({ apiToken: env.EXE_API_TOKEN });
-  return {
-    sandbox: exedev(vm),
-    model: "anthropic/claude-sonnet-4-6",
-  };
-});
+function Assistant() {
+	useSandbox({
+		async createSessionEnv(options) {
+			const vm = await createExeVm({ apiToken: process.env.EXE_API_TOKEN });
+			return exedev(vm).createSessionEnv(options);
+		},
+	});
+	return "You are a helpful assistant with a full sandbox.";
+}
+
+export default defineAgent(Assistant, { model: "anthropic/claude-sonnet-4-6" });
 ```
 
 ### Cloned VM
@@ -768,19 +784,23 @@ token needs `rm` permission.
 
 ```ts
 'use agent';
-import { defineAgent } from "@flue/runtime";
+import { defineAgent, useSandbox } from "@flue/runtime";
 import { cloneExeVm, exedev } from "../sandboxes/exedev";
 
-export default defineAgent(async ({ env }) => {
-  const vm = await cloneExeVm({
-    apiToken: env.EXE_API_TOKEN,
-    source: "my-dev-vm",
-  });
-  return {
-    sandbox: exedev(vm),
-    model: "anthropic/claude-sonnet-4-6",
-  };
-});
+function Assistant() {
+	useSandbox({
+		async createSessionEnv(options) {
+			const vm = await cloneExeVm({
+				apiToken: process.env.EXE_API_TOKEN,
+				source: "my-dev-vm",
+			});
+			return exedev(vm).createSessionEnv(options);
+		},
+	});
+	return "You are a helpful assistant with a full sandbox.";
+}
+
+export default defineAgent(Assistant, { model: "anthropic/claude-sonnet-4-6" });
 ```
 
 ## Verify

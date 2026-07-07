@@ -87,7 +87,7 @@ Now let's build something useful — an issue triage agent that analyzes an issu
 
 ### Structured work with skills and actions
 
-An agent's deterministic orchestration lives in [Actions](/docs/guide/actions/) — finite, schema-validated jobs the model calls — and [skills](/docs/guide/skills/), reusable instruction files. Inside either, a session gives you three core methods:
+An agent's deterministic orchestration lives in [harness tools](/docs/guide/tools/#harness-tools) — finite, schema-validated jobs the model calls — and [skills](/docs/guide/skills/), reusable instruction files. Inside either, a session gives you three core methods:
 
 - **`session.shell(cmd)`** — Run a shell command in the sandbox. Returns `{ stdout, stderr, exitCode }`.
 - **`session.prompt(text, opts)`** — Send a prompt to the agent and get back a result.
@@ -140,21 +140,26 @@ If you want a tighter boundary — the agent can call a specific operation but n
 
 ### Subagents
 
-Named subagents can run focused detached tasks:
+Named subagents can run focused detached tasks. `useSubagent(...)` declares one, backed by its own capability function:
 
-```typescript
-import { defineAgent, defineAgentProfile } from '@flue/runtime';
+```typescript title="src/agents/triage.ts"
+'use agent';
+import { defineAgent, useSubagent } from '@flue/runtime';
 
-const reviewer = defineAgentProfile({
-  name: 'reviewer',
-  instructions: 'Focus on correctness, security, and project standards.',
-});
+function Reviewer() {
+  return 'Focus on correctness, security, and project standards.';
+}
 
-export default defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-  instructions: "Delegate PR reviews to the 'reviewer' subagent via a task.",
-  subagents: [reviewer],
-}));
+function Triage() {
+  useSubagent({
+    name: 'reviewer',
+    description: 'Reviews a pull request for correctness, security, and project standards.',
+    capabilities: Reviewer,
+  });
+  return 'Delegate PR reviews to the `reviewer` subagent via a task.';
+}
+
+export default defineAgent(Triage, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 ### Sandbox context
@@ -233,44 +238,45 @@ jobs:
 
 ## Typed results and orchestration
 
-Result schemas aren't just for type safety — they're how you orchestrate multi-step work. Wrap the orchestration in an [Action](/docs/guide/actions/): you get typed data back from `prompt()` and `skill()` and can branch on it in plain code, all inside one durable conversation:
+Result schemas aren't just for type safety — they're how you orchestrate multi-step work. Wrap the orchestration in a harness-connected tool (`useTool({ harness: true })`): you get typed data back from `prompt()` and `skill()` and can branch on it in plain code, all inside one durable conversation:
 
 ```typescript title="src/agents/auto-triage.ts"
-import { defineAction, defineAgent } from '@flue/runtime';
+'use agent';
+import { defineAgent, useSandbox, useTool } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 import * as v from 'valibot';
 
-const triage = defineAction({
-  name: 'triage-issue',
-  description: 'Triage one GitHub issue and auto-fix critical reproducible ones.',
-  input: v.object({ issueNumber: v.number() }),
-  async run({ harness, input }) {
-    const session = await harness.session();
-    const { data } = await session.skill('triage', {
-      args: { issueNumber: input.issueNumber },
-      result: v.object({
-        severity: v.picklist(['low', 'medium', 'high', 'critical']),
-        reproducible: v.boolean(),
-        summary: v.string(),
-      }),
-    });
-
-    if (data.severity === 'critical' && data.reproducible) {
-      await session.skill('auto-fix', {
+function AutoTriage() {
+  useSandbox(local());
+  useTool({
+    name: 'triage-issue',
+    description: 'Triage one GitHub issue and auto-fix critical reproducible ones.',
+    input: v.object({ issueNumber: v.number() }),
+    harness: true,
+    async run({ harness, input }) {
+      const session = await harness.session();
+      const { data } = await session.skill('triage', {
         args: { issueNumber: input.issueNumber },
-        result: v.object({ fix_applied: v.boolean(), pr_url: v.optional(v.string()) }),
+        result: v.object({
+          severity: v.picklist(['low', 'medium', 'high', 'critical']),
+          reproducible: v.boolean(),
+          summary: v.string(),
+        }),
       });
-    }
-    return data;
-  },
-});
 
-export default defineAgent(() => ({
-  sandbox: local(),
-  model: 'anthropic/claude-sonnet-4-6',
-  instructions: 'When given an issue number, call the `triage-issue` action and report its result.',
-  actions: [triage],
-}));
+      if (data.severity === 'critical' && data.reproducible) {
+        await session.skill('auto-fix', {
+          args: { issueNumber: input.issueNumber },
+          result: v.object({ fix_applied: v.boolean(), pr_url: v.optional(v.string()) }),
+        });
+      }
+      return data;
+    },
+  });
+  return 'When given an issue number, call the `triage-issue` tool and report its result.';
+}
+
+export default defineAgent(AutoTriage, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 This pattern — prompt or skill call, check the result, decide what to do next — is how you build sophisticated agents that go beyond single-shot prompts.

@@ -65,13 +65,15 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  * ```typescript
  * 'use agent';
  * import { Workspace, RAMResource, MountMode } from '@struktoai/mirage-node';
- * import { defineAgent } from '@flue/runtime';
+ * import { defineAgent, useSandbox } from '@flue/runtime';
  * import { mirage } from '../sandboxes/mirage';
  *
- * export default defineAgent(() => {
+ * function Assistant() {
  *   const ws = new Workspace({ '/data': new RAMResource() }, { mode: MountMode.WRITE });
- *   return { sandbox: mirage(ws), model: 'anthropic/claude-sonnet-4-6' };
- * });
+ *   useSandbox(mirage(ws));
+ *   return 'You are a helpful assistant with a full sandbox.';
+ * }
+ * export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
  * ```
  */
 import { createSandboxSessionEnv, SandboxOperationUnsupportedError } from '@flue/runtime';
@@ -354,16 +356,16 @@ share this snippet so they can wire it up themselves.
 ```ts
 'use agent';
 import { Workspace, RAMResource, MountMode } from '@struktoai/mirage-node';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useSandbox } from '@flue/runtime';
 import { mirage } from '../sandboxes/mirage'; // adjust path to match the user's layout
 
-export default defineAgent(() => {
-  const ws = new Workspace({ '/data': new RAMResource() }, { mode: MountMode.WRITE });
-  return {
-    sandbox: mirage(ws, { cwd: '/data' }),
-    model: 'anthropic/claude-sonnet-4-6',
-  };
-});
+function Assistant() {
+	const ws = new Workspace({ '/data': new RAMResource() }, { mode: MountMode.WRITE });
+	useSandbox(mirage(ws, { cwd: '/data' }));
+	return 'You are a helpful assistant with a full sandbox.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 The `'use agent'` directive at the top is what registers the module with

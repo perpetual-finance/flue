@@ -133,54 +133,59 @@ node dist/server.mjs
 
 To verify the artifact before deploying, `vite preview` serves the built application (it imports `dist/app.mjs` directly, with production behavior), or run it for real with `node dist/server.mjs`.
 
-## Deterministic jobs with actions
+## Deterministic tool calls
 
-For structured automations — the role workflows used to play — give the agent a model-callable [Action](/docs/guide/actions/): a finite, schema-validated job that runs inside the durable conversation.
+For structured, schema-validated work inside the conversation, give the agent a harness-connected tool with `useTool({ harness: true })`: `run` receives the agent's runtime (sandbox, sessions) and can call back into the model for sub-tasks.
 
 ```typescript title="src/agents/reporter.ts"
 'use agent';
-import { defineAction, defineAgent } from '@flue/runtime';
+import { defineAgent, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 
-const compileReport = defineAction({
-  name: 'compile-report',
-  description: 'Compile the weekly metrics report.',
-  input: v.object({ period: v.string() }),
-  async run({ harness, input }) {
-    const session = await harness.session();
-    const { data } = await session.prompt(`Compile the metrics report for ${input.period}.`, {
-      result: v.object({ summary: v.string() }),
-    });
-    return data;
-  },
-});
+function Reporter() {
+  useTool({
+    name: 'compile-report',
+    description: 'Compile the weekly metrics report.',
+    input: v.object({ period: v.string() }),
+    harness: true,
+    async run({ harness, input }) {
+      const session = await harness.session();
+      const { data } = await session.prompt(`Compile the metrics report for ${input.period}.`, {
+        result: v.object({ summary: v.string() }),
+      });
+      return data;
+    },
+  });
+  return 'When asked for a report, call the `compile-report` tool.';
+}
 
-export default defineAgent(() => ({
-  model: 'openai/gpt-5.5',
-  instructions: 'When asked for a report, call the `compile-report` action.',
-  actions: [compileReport],
-}));
+export default defineAgent(Reporter, { model: 'openai/gpt-5.5' });
 ```
 
 Drive it with `flue run src/agents/reporter.ts --message "Compile the weekly report."`, a `dispatch()` from server code, or the SDK.
 
 ## Subagents
 
-Subagents define named delegates for detached task sessions:
+`useSubagent(...)` declares a named delegate the model can hand focused work to via a task:
 
-```typescript
-import { defineAgent, defineAgentProfile } from '@flue/runtime';
+```typescript title="src/agents/reporter.ts"
+'use agent';
+import { defineAgent, useSubagent } from '@flue/runtime';
 
-const analyst = defineAgentProfile({
-  name: 'analyst',
-  instructions: 'Focus on quantitative insights, trends, and actionable takeaways.',
-});
+function Analyst() {
+  return 'Focus on quantitative insights, trends, and actionable takeaways.';
+}
 
-export default defineAgent(() => ({
-  model: 'openai/gpt-5.5',
-  instructions: "Delegate metric analysis to the 'analyst' subagent via a task.",
-  subagents: [analyst],
-}));
+function Reporter() {
+  useSubagent({
+    name: 'analyst',
+    description: 'Analyzes metrics for quantitative insights and actionable takeaways.',
+    capabilities: Analyst,
+  });
+  return 'Delegate metric analysis to the `analyst` subagent via a task.';
+}
+
+export default defineAgent(Reporter, { model: 'openai/gpt-5.5' });
 ```
 
 ## Sandbox context

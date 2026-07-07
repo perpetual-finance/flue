@@ -1,7 +1,7 @@
 ---
 title: Agent API
-description: Reference for defining agents and running agent operations with @flue/runtime.
-lastReviewedAt: 2026-07-02
+description: Reference for defining agents, composing capabilities with Flue Hooks, and running agent operations with @flue/runtime.
+lastReviewedAt: 2026-07-07
 ---
 
 The agent API is exported from `@flue/runtime`.
@@ -17,28 +17,47 @@ import {
   bash,
   connectMcpServer,
   defineAgent,
-  defineAgentProfile,
+  defineSkill,
   defineTool,
   dispatch,
-  type AgentInitializerContext,
+  use,
+  useAppend,
+  useDelivery,
+  useEffect,
+  useInstruction,
+  useMessageData,
+  useMessageMetadata,
+  useSandbox,
+  useSkill,
+  useState,
+  useSubagent,
+  useTool,
   type AgentDispatchRequest,
-  type AgentProfile,
-  type AgentRuntimeConfig,
+  type AgentModuleValue,
+  type AgentSignalAppend,
   type BashFactory,
   type CallHandle,
+  type Capability,
   type CompactionConfig,
-  type AgentDefinition,
+  type DeclaredSubagent,
+  type DefineSkillOptions,
   type DeliveredAttachment,
   type DeliveredMessage,
   type DispatchReceipt,
+  type DurabilityConfig,
+  type EffectContext,
   type FileStat,
   type FlueFs,
   type FlueHarness,
   type FlueLogger,
   type FlueSession,
   type FlueSessions,
+  type FunctionAgentConfig,
+  type FunctionAgentDefinition,
   type McpServerConnection,
   type McpServerOptions,
+  type MessageMetadataEvent,
+  type MessageMetadataPoint,
   type PromptImage,
   type PromptModel,
   type PromptOptions,
@@ -51,6 +70,8 @@ import {
   type Skill,
   type SkillOptions,
   type SkillReference,
+  type StateSetter,
+  type SubagentDefinition,
   type TaskOptions,
   type ThinkingLevel,
   type ToolContext,
@@ -63,61 +84,395 @@ import {
 } from '@flue/runtime';
 ```
 
-## `defineAgentProfile(...)`
+## `defineAgent(...)`
 
 ```ts
-function defineAgentProfile(profile: AgentProfile): AgentProfile;
+function defineAgent(agent: Capability, config: FunctionAgentConfig): FunctionAgentDefinition;
 ```
 
-Validates and returns a reusable agent profile. Use profiles as the baseline for an agent definition or as named subagents available to `session.task()`.
+Defines an addressable agent. An agent is a [capability](#capability) given a model: the capability function composes the agent's behavior with Flue Hooks — attaching tools, instructions, skills, subagents, and durable state — and returns the agent's instruction string; `config` is the static identity (model, tuning) that never renders.
 
-Throws when the profile contains unknown fields, invalid capabilities, duplicate capability names, or circular subagents.
+Default-export the returned value from a module whose first statement is the `'use agent'` directive to make the agent part of the application:
 
-#### `AgentProfile`
+```ts title="src/agents/support.ts"
+'use agent';
+import { defineAgent, useState, useTool } from '@flue/runtime';
 
-| Field           | Type                        | Description                                                                                                                                                                 |
-| --------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`          | `string`                    | Profile name. Required when selecting this profile with `session.task()`.                                                                                                   |
-| `description`   | `string`                    | Human-readable profile description.                                                                                                                                         |
-| `model`         | `string`                    | Default model specifier.                                                                                                                                                    |
-| `instructions`  | `string`                    | Instructions prepended to discovered workspace context.                                                                                                                     |
-| `skills`        | `Skill[]`                   | Registered skills available to initialized sessions.                                                                                                                        |
-| `tools`         | `ToolDefinition[]`          | Custom model-callable tools available to initialized sessions.                                                                                                              |
-| `actions`       | `ActionDefinition[]`        | Reusable Actions exposed to the model as framework-managed tools.                                                                                                           |
-| `subagents`     | `AgentProfile[]`            | Named profiles available for delegated `session.task()` operations.                                                                                                         |
-| `thinkingLevel` | `ThinkingLevel`             | Default reasoning effort. Individual operations may override this value.                                                                                                    |
+function Support() {
+  const [phase, setPhase] = useState('phase', 'gathering');
+
+  useTool({
+    name: 'begin_draft',
+    description: 'Call once the case facts are verified.',
+    run: () => setPhase('drafting'),
+  });
+
+  return `Operator-facing support agent. Current phase: ${phase}.`;
+}
+
+export default defineAgent(Support, { model: 'anthropic/claude-sonnet-4-6' });
+```
+
+The directive gives the agent its durable identity (the file basename) and registers it with the built application — there is no name-based addressing beyond that identity. To expose the agent over HTTP, mount `agent.route()` in `app.ts`; see the [Routing API](/docs/api/routing-api/). A dispatch-only agent needs no mount. `flue run <path>` and raw `defineAgent()` values in unit tests do not require the directive.
+
+The capability re-renders every turn as durable state changes — it must return synchronously and the set of mounted capabilities (`use()`, `useTool()`, `useSkill()`, `useSubagent()`) must stay identical across renders. Async work belongs in tools, `useEffect()`, or resource factories, never in the capability body itself.
+
+#### `FunctionAgentConfig`
+
+| Field           | Type                        | Description                                                                                                                   |
+| --------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `model`         | `string`                    | Model specifier (`'<provider-id>/<model-id>'`). Required.                                                                       |
+| `thinkingLevel` | `ThinkingLevel`             | Default reasoning effort. Individual operations may override this value.                                                        |
 | `compaction`    | `false \| CompactionConfig` | Automatic conversation-compaction configuration. `false` disables threshold compaction; overflow recovery and explicit `session.compact()` calls still compact when needed. |
-| `durability`    | `DurabilityConfig`          | Durability configuration for durable agent submissions. Controls recovery attempt limits and submission timeouts. Rejected on subagent profiles.                            |
+| `durability`    | `DurabilityConfig`          | Durability configuration for durable agent submissions. Controls recovery attempt limits and submission timeouts.               |
+| `cwd`           | `string`                    | Working directory inside the initialized environment.                                                                           |
 
-When a profile is selected as a subagent with `session.task()`, it is self-contained: `instructions`, `tools`, `skills`, and `subagents` apply only as declared on the profile (omitted means none), while `model`, `thinkingLevel`, and `compaction` inherit from the parent as defaults. See [Subagents](/docs/guide/subagents/#configuration-inheritance).
+Everything dynamic — instructions, tools, skills, subagents, sandbox — is composed inside the capability function with Flue Hooks; `FunctionAgentConfig` holds only what's fixed for the agent's whole lifetime.
+
+#### `FunctionAgentDefinition`
+
+The opaque value `defineAgent(Capability, config)` returns:
+
+```ts
+interface FunctionAgentDefinition {
+  __flueFunctionAgent: true;
+  capability: Capability;
+  config: FunctionAgentConfig;
+  route(): Hono;
+}
+```
+
+`route()` builds the agent's mountable HTTP sub-app (`POST /:id` prompt, `GET|HEAD /:id` conversation stream, `POST /:id/abort`, and the opt-in attachment route). It is a pure factory with no registration side effects — registration comes from the `'use agent'` scan — and it throws when the definition carries no identity. See the [Routing API](/docs/api/routing-api/) for the full route table and middleware semantics.
 
 #### `DurabilityConfig`
 
 | Field         | Type     | Default   | Description                                                                                                                                                                                                                                                                                              |
-| ------------- | -------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ------------- | -------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `maxAttempts` | `number` | `10`      | Maximum total attempts before the submission is terminalized as failed. The initial run counts as the first attempt; each interruption that requires a new attempt consumes another.                                                                                                                     |
 | `timeoutMs`   | `number` | `3600000` | Maximum wall-clock milliseconds for a single submission. Submissions exceeding this limit are aborted and settled as failed. Set higher for long-running agents (e.g. `21_600_000` for a 6-hour agent). The timeout is checked cooperatively at turn boundaries, not preemptively during provider calls. |
 
 #### `CompactionConfig`
 
 | Field              | Type     | Default                        | Description                                                                                                                     |
-| ------------------ | -------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| ------------------ | -------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `reserveTokens`    | `number` | model-aware; capped at `20000` | Token headroom reserved before automatic compaction. Smaller model output limits and small context windows reduce this default. |
-| `keepRecentTokens` | `number` | `8000`                         | Recent tokens preserved unsummarized after compaction.                                                                          |
-| `model`            | `string` | session model                  | Model specifier override used for compaction summaries.                                                                         |
+| `keepRecentTokens` | `number` | `8000`                          | Recent tokens preserved unsummarized after compaction.                                                                          |
+| `model`            | `string` | session model                   | Model specifier override used for compaction summaries.                                                                         |
 
-#### `Skill`
+## Flue Hooks
+
+Flue Hooks are the functions called inside a capability's body to attach behavior for the current render — tools, instructions, skills, subagents, durable state, and more. All hooks throw when called outside an active render (i.e. anywhere other than the agent function or a `use()`-mounted capability it calls).
+
+### `use(...)`
 
 ```ts
-type Skill =
-  | SkillReference
-  | {
-      name: string;
-      description: string;
-    };
+function use(capability: Capability): void;
+function use<TProps>(capability: Capability<TProps>, props: TProps): void;
 ```
 
-Skill metadata registered with an agent, harness, or profile. Imported `SkillReference` values bundle application-owned skill content. Inline metadata adds only a named catalog entry; it does not package or inject an instruction body. Initialization rejects a registered skill whose name collides with a workspace-discovered skill. See [Skills](/docs/guide/skills/).
+Mounts a [capability](#capability) for this render. Flue invokes the capability — pass the function itself, never its result — and any tools or instructions attached in its body are attributed to it.
+
+```ts
+function Retention({ active }: { active: () => boolean }) {
+  useTool({
+    ...offerCredit,
+    run: (ctx) => (active() ? offerCredit.run(ctx) : 'Refused: no churn risk on record.'),
+  });
+  return 'Only while the customer is weighing cancellation: you may offer retention incentives.';
+}
+
+function Support() {
+  use(Retention, { active: () => sentiment === 'churn-risk' });
+  return 'Support agent.';
+}
+```
+
+`use()` is never conditional and the set of mounted capabilities must be identical across renders. State informs the agent — through props, guards, and interpolated text — it does not reshape the agent. Capabilities may `use()` other capabilities; all mounts record flat, in mount order.
+
+#### `Capability`
+
+```ts
+type Capability<TProps = void> = TProps extends void
+  ? () => string | undefined | void
+  : (props: TProps) => string | undefined | void;
+```
+
+A plain synchronous function that composes agent behavior: Flue Hooks in the body attach what it provides, and the returned string is its instruction — the prose that teaches the model what this capability is and how to use it. Return nothing for a tools-only capability. Capabilities must return synchronously; async work lives in tools, `useEffect()`, or resource factories.
+
+### `useTool(...)`
+
+```ts
+function useTool(tool: {
+  name: string;
+  description: string;
+  input?: ToolInputSchema;
+  output?: ToolOutputSchema;
+  harness?: boolean;
+  run: ToolDefinition['run'];
+}): void;
+```
+
+Mounts a model-callable tool for the current render. Accepts a `defineTool(...)` value or an inline definition object (same validation, applied here). Called directly in the agent body or inside a capability — either way the tool joins the render's single flat tool set:
+
+```ts
+function Retention() {
+  useTool(offerCredit);
+  return 'You may offer retention incentives.';
+}
+```
+
+Duplicate active tool names across the whole render fail fast. See [`defineTool(...)`](#definetool) for the full tool contract, including `harness`.
+
+### `useInstruction(...)`
+
+```ts
+function useInstruction(text: string): void;
+```
+
+Appends raw instruction text for the current render — the deliberately low-level escape hatch. Called in the agent body, text lands after the base instruction, in call order; called inside a component, it lands in that component's capability section. No structure, no identity, no change tracking: prefer a component (`use()`) for anything coherent.
+
+```ts
+export default function marketing() {
+  useInstruction('Write in Acme voice: warm, concise.');
+  if (LAUNCH_WEEK) useInstruction('Mention the v2 launch when relevant.');
+  return undefined;
+}
+```
+
+### `useState(...)`
+
+```ts
+function useState<T>(name: string, defaultValue: T): [T, StateSetter<T>];
+function useState<T = unknown>(name: string): [T | undefined, StateSetter<T>];
+```
+
+Durable agent state: an API over the record log of the agent instance. Reads the value as of this render (reduced from the instance's `state_write` records) and returns a setter that persists a new value.
+
+```ts
+export default function SupportAgent() {
+  const [phase, setPhase] = useState<'gathering' | 'drafting'>('phase', 'gathering');
+
+  useTool({
+    name: 'begin_draft',
+    description: 'Call once the case facts are verified.',
+    run: () => setPhase('drafting'),
+  });
+
+  return `Current phase: ${phase}.`;
+}
+```
+
+Values are JSON: writes are normalized through a JSON round-trip and throw on non-serializable input. There is no unset — a name, once written, always has a value (`defaultValue` fills in before the first write and is never persisted itself). Writing the current value again is a no-op. The setter throws during render — write from tool `run` functions and other runtime callbacks. State is scoped to the agent instance and keyed by `name`; declaring the same name twice in one render throws. Not available in a subagent render (delegates run detached tasks with no state channel).
+
+### `useSkill(...)`
+
+```ts
+function useSkill(skill: Skill): void;
+```
+
+Mounts a skill in the agent's catalog. Skills are progressive disclosure: every mounted skill costs one always-present catalog line (name + description) in the system prompt, and the model pulls the full instructions on demand with the framework's `activate_skill` tool.
+
+```ts
+import triageSkill from '../skills/triage/SKILL.md' with { type: 'skill' };
+
+function ReproducePhase() {
+  useSkill(triageSkill);
+  return 'Activate the `triage` skill before starting this phase.';
+}
+```
+
+Accepts a `SkillReference` (a `SKILL.md` import `with { type: 'skill' }`, or [`defineSkill(...)`](#defineskill)) or a bare `{ name, description }` catalog entry for content the model reads from the workspace itself. Duplicate names across the render fail fast. See [Skills](/docs/guide/skills/).
+
+### `useSubagent(...)`
+
+```ts
+function useSubagent(subagent: SubagentDefinition): void;
+```
+
+Declares a delegate the model can hand focused work to via the framework's `task` tool. `capabilities` defines the delegate's whole world — it is rendered at delegation time, in its own frame, fresh per task — and the delegate is isolated from the parent's capabilities: nothing flows in except the shared environment and, unless overridden here, the parent's model and reasoning effort.
+
+```ts
+function Reproducer() {
+  useSkill(reproduceSkill);
+  return 'You reproduce one issue. Write your findings to report.md.';
+}
+
+function ReproducePhase() {
+  useSubagent({
+    name: 'reproducer',
+    description: 'Sets up the reproduction for one issue and writes report.md.',
+    capabilities: Reproducer,
+  });
+  return 'Delegate the reproduction to the `reproducer` subagent.';
+}
+```
+
+#### `SubagentDefinition`
+
+| Field           | Type            | Description                                                                                             |
+| --------------- | --------------- | --------------------------------------------------------------------------------------------------------- |
+| `name`          | `string`        | Catalog name the model uses to select this delegate on the `task` tool.                                   |
+| `description`   | `string`        | Catalog line — how the model decides when to delegate to this agent.                                      |
+| `capabilities`  | `Capability`    | Capability function defining the delegate's whole world.                                                  |
+| `model`         | `string`        | Model specifier override. Inherits the parent's model when omitted.                                       |
+| `thinkingLevel` | `ThinkingLevel` | Reasoning-effort override. Inherits when omitted.                                                          |
+
+Inside the delegate's render, `use()`, `useTool()`, `useInstruction()`, `useSkill()`, and nested `useSubagent()` all compose as usual; `useState()` and `useSandbox()` throw (durable state is instance-scoped and delegates share the parent environment). Duplicate delegate names in one render fail fast. Select a declared subagent from a `session.task()` call with `options.agent`; see [`session.task(...)`](#sessiontask).
+
+### `useSandbox(...)`
+
+```ts
+function useSandbox(sandbox: SandboxFactory): void;
+```
+
+Attaches the environment this agent instance runs in: the sandbox adapter's `createSessionEnv()` builds the filesystem/exec surface at initialization (once per initialized harness), and its `tools()` — when present — replaces the framework's default model-facing tool set. Re-renders never rebuild the environment.
+
+```ts
+function IssueTriage() {
+  useSandbox(local({ env: { GH_TOKEN: process.env.GH_TOKEN } }));
+  // ...
+}
+```
+
+Callable from the agent body, a capability, or a custom hook — but at most once per render (an agent has one environment), and never conditionally. Without it, the runtime's default virtual sandbox applies. Not available in a subagent render (delegates share the parent agent's environment; scope work with the task call's `cwd` instead). See [Sandboxes](/docs/guide/sandboxes/).
+
+### `useDelivery()`
+
+```ts
+function useDelivery(): DeliveredMessage;
+```
+
+Reads the delivered message that triggered the current run — the same validated [`DeliveredMessage`](#deliveredmessage) a `dispatch()` call or a direct HTTP prompt admitted, verbatim.
+
+```ts
+// dispatch(triage, { id: `issue-${n}`, message: { kind: 'signal',
+//   type: 'issue.triage', body: '...', attributes: { issue: String(n) } } })
+export default function IssueTriage() {
+  const delivery = useDelivery();
+  const issue = delivery.kind === 'signal' ? Number(delivery.attributes?.issue) : undefined;
+
+  useTool({
+    name: 'load_issue',
+    description: 'Fetch the GitHub issue named by the dispatch. Call this first.',
+    run: async () => loadIssueDigest(issue),
+  });
+}
+```
+
+Constant across every render of one run. In a subagent render, the delivery is the parent's task prompt as a `kind: 'user'` message. Always present — every agent run is triggered by a delivered message.
+
+### `useEffect(...)`
+
+```ts
+function useEffect(run: (ctx: EffectContext) => void | Promise<void>, deps: readonly unknown[]): void;
+```
+
+Runs a side effect at the start of a submission — after the delivered input is durable, before the model's first turn — with a deps array as the whole cadence contract: `[delivery]` runs every message, `[]` once per agent instance lifetime, `[someState]` when that durable value moved since the effect's last run.
+
+```ts
+export default function IssueTriage() {
+  const delivery = useDelivery();
+  const append = useAppend();
+
+  useEffect(async ({ harness, log }) => {
+    const issue = await loadIssue(deliveredIssueNumber(delivery));
+    await harness.fs.writeFile(`triage/gh-${issue.number}/issue.md`, digest(issue));
+    setIssue(issue);
+    append({ type: 'intake', body: `Issue #${issue.number} loaded.` });
+  }, [delivery]);
+}
+```
+
+`run` may be async and is awaited; it returns void — no cleanup function. `run` receives `{ harness, log, signal }`. Effects are NOT reactive: they evaluate once per delivered submission, in declaration order, sequentially. Identity is call order — across deploys, append new effects after existing ones. At-least-once: an interrupted run re-runs on the re-attempt; a completed run is adopted, never repeated. Not available in a subagent render.
+
+### `useAppend()`
+
+```ts
+function useAppend(): (signal: AgentSignalAppend) => void;
+```
+
+Gets a write-only function that appends a signal to the current agent's conversation history — the same first-class record a `kind: 'signal'` dispatch delivers, but authored by *code* mid-run: it annotates the running conversation and never wakes the agent.
+
+```ts
+export default function IssueTriage() {
+  const append = useAppend();
+
+  useTool({
+    name: 'run_intake',
+    description: 'Load the issue and decide whether triage is warranted.',
+    harness: true,
+    run: async ({ harness }) => {
+      const issue = await loadIssue(harness);
+      append({
+        type: 'intake',
+        body: `Issue #${issue.number} loaded; triage warranted.`,
+        attributes: { issue: String(issue.number) },
+      });
+      return 'Intake complete.';
+    },
+  });
+}
+```
+
+Appends are legal only during an active submission — from tool `run` functions and other callbacks that run while the agent is responding; the writer throws during render and when the agent is idle. Appends are durable and ordered; the model sees them at the next turn boundary. `tagName` becomes the signal's XML envelope in model context. Not available in a subagent render (a delegate returns what it produced as its task result instead).
+
+### `useMessageData(...)`
+
+```ts
+function useMessageData<TSchema extends v.GenericSchema>(options: {
+  name: string;
+  schema: TSchema;
+}): (data: v.InferOutput<TSchema>) => void;
+function useMessageData(options: { name: string }): (data: unknown) => void;
+```
+
+Declares a named, client-facing data part and returns a write-only function that streams it. Output is one-way and non-reactive: the model never sees data parts, writes never re-run the agent. Each write is appended durably and streamed to clients immediately, so a part can show live progress mid-tool-run.
+
+```ts
+function useCaseContext() {
+  const writeCaseCardData = useMessageData({
+    name: 'caseCard',
+    schema: v.object({ caseId: v.string(), status: v.picklist(['loading', 'loaded']) }),
+  });
+  useTool({
+    name: 'load_case',
+    description: 'Load the case and stream a live card to the operator.',
+    input: v.object({ caseId: v.string() }),
+    run: async ({ input }) => {
+      writeCaseCardData({ caseId: input.caseId, status: 'loading' });
+      const found = await fetchCase(input.caseId);
+      writeCaseCardData({ caseId: input.caseId, status: 'loaded' });
+      return found.summary;
+    },
+  });
+}
+```
+
+Values are JSON; `schema` (when given) validates before each write. Writes are legal only while the agent is responding to a tracked submission. Names are unique per render and part of the render's structural identity — never mount `useMessageData` conditionally. Not available in a subagent render.
+
+### `useMessageMetadata(...)`
+
+```ts
+function useMessageMetadata<TPoint extends MessageMetadataPoint>(
+  point: TPoint,
+  produce: (event: Extract<MessageMetadataEvent, { point: TPoint }>) => Record<string, unknown> | undefined,
+): void;
+```
+
+Attaches a synchronous metadata producer to the response message. `'start'` runs once per response, before the first model call; `'finish'` runs after the response's last model step completes, with the response's aggregate usage on the event. Whatever the producer returns is deep-merged onto the response message's `metadata`.
+
+```ts
+function useTimestamps() {
+  useMessageMetadata('start', () => ({ timestamp: new Date().toISOString() }));
+  useMessageMetadata('finish', () => ({ finishedAt: Date.now() }));
+}
+
+function useUsageStats() {
+  useMessageMetadata('finish', (event) => ({ totalTokens: event.usage.totalTokens }));
+}
+```
+
+Output is non-reactive and model-invisible: producers never re-run the agent and their output never reaches the prompt. Producers are fail-fast — a throw fails the submission. Not available in a subagent render.
 
 ## `defineTool(...)`
 
@@ -125,28 +480,31 @@ Skill metadata registered with an agent, harness, or profile. Imported `SkillRef
 function defineTool<
   TInput extends ToolInputSchema | undefined = undefined,
   TOutput extends ToolOutputSchema | undefined = undefined,
+  THarness extends boolean = false,
 >(options: {
   name: string;
   description: string;
   input?: TInput;
   output?: TOutput;
-  run: ToolDefinition<TInput, TOutput>['run'];
-}): ToolDefinition<TInput, TOutput>;
+  harness?: THarness;
+  run: ToolDefinition<TInput, TOutput, THarness>['run'];
+}): ToolDefinition<TInput, TOutput, THarness>;
 ```
 
-Validates a custom model-callable tool and returns a frozen definition. Tool names are checked for collisions with other active tools when a session assembles its tool list.
+Validates a custom model-callable tool and returns a frozen definition. Pass the returned value to [`useTool(...)`](#usetool) (or a `tools` array on a session operation). Tool names are checked for collisions with other active tools when a session assembles its tool list.
 
 `input` and `output` are optional Valibot schemas. `input` must be a top-level object schema. Model-supplied input is validated and parsed before `run` receives it; validation failures become tool errors so the model can retry. When present, `output` validates and parses the returned value. Structured output is snapshotted as JSON-compatible data and JSON-stringified for the model. Without an `output` schema, returning `undefined` sends `null` to the model.
 
 #### `ToolDefinition`
 
-| Field         | Type                                      | Description                                                                                                 |
-| ------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `name`        | `string`                                  | Tool name. Must be unique across active built-in and custom tools.                                          |
-| `description` | `string`                                  | Tells the model when and how to use this tool.                                                              |
-| `input`       | `ToolInputSchema`                         | Optional top-level Valibot object schema.                                                                   |
-| `output`      | `ToolOutputSchema`                        | Optional Valibot schema for typed, validated output.                                                        |
-| `run`         | `({ input, signal }) => value \| Promise` | Receives parsed input when declared and an optional `AbortSignal`. Returns JSON-compatible structured data. |
+| Field         | Type               | Description                                                                                                  |
+| ------------- | ------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `name`        | `string`           | Tool name. Must be unique across active built-in and custom tools.                                              |
+| `description` | `string`           | Tells the model when and how to use this tool.                                                                  |
+| `input`       | `ToolInputSchema`  | Optional top-level Valibot object schema.                                                                       |
+| `output`      | `ToolOutputSchema` | Optional Valibot schema for typed, validated output.                                                            |
+| `harness`     | `boolean`          | Connects the tool to the agent's runtime: `run` receives `harness`, the one interface to the sandbox (`harness.shell()`, `harness.fs`) and to models (`harness.session()`). Tools without it are pure functions of their input. |
+| `run`         | `(context) => value \| Promise` | Receives a [`ToolContext`](#toolcontext). Returns JSON-compatible structured data.                                 |
 
 ```ts
 import { defineTool } from '@flue/runtime';
@@ -163,9 +521,71 @@ const lookupPolicy = defineTool({
 });
 ```
 
+A `harness: true` tool gets the agent's runtime surface for the duration of the call:
+
+```ts
+const runIntake = defineTool({
+  name: 'run_intake',
+  description: 'Load the issue and decide whether triage is warranted.',
+  harness: true,
+  async run({ harness }) {
+    const session = await harness.session();
+    const { text } = await session.prompt('Summarize the loaded issue.');
+    return text;
+  },
+});
+```
+
+Harness invocations are scoped to the tool call, count against the delegation-depth cap, and retain any child conversations they open. Harness tools only run inside an agent session — never standalone (`validateAndRunTool` throws for one).
+
+#### `ToolContext`
+
+```ts
+type ToolContext<S, H> = {
+  readonly signal?: AbortSignal;
+  readonly log: FlueLogger;
+} & (S extends ToolInputSchema ? { readonly input: v.InferOutput<S> } : {}) &
+  (H extends true ? { readonly harness: FlueHarness } : {});
+```
+
+Every tool's `run` receives `log` (streamed into the conversation as progress events, never seen by the model) and the tool call's `signal`. `input` is present when the definition declares an `input` schema; `harness` is present when the definition declares `harness: true`.
+
 ### Breaking migration
 
 The old `parameters` and `execute` markers now throw when a tool is defined. Rename `parameters` to `input`, rename `execute(args, signal)` to `run({ input, signal })`, and return structured JSON-compatible data directly instead of calling `JSON.stringify(...)`. Add `output` when the returned shape should be typed and validated.
+
+## `defineSkill(...)`
+
+```ts
+function defineSkill(options: DefineSkillOptions): SkillReference;
+```
+
+Defines a packaged skill and returns a `SkillReference` ready to pass to [`useSkill(...)`](#useskill) or `session.skill(...)`. Use this when a skill's instructions are authored inline in code rather than in a `SKILL.md` file.
+
+```ts
+import { defineSkill } from '@flue/runtime';
+
+const triageSkill = defineSkill({
+  name: 'triage',
+  description: 'Triage a GitHub issue — reproduce, assess severity, and optionally fix.',
+  instructions: 'Given the issue number: reproduce it, assess severity, and write a summary.',
+});
+```
+
+#### `DefineSkillOptions`
+
+| Field           | Type                             | Description                                                                                     |
+| --------------- | --------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `name`          | `string`                          | Skill name. Lowercase letters, numbers, and single hyphens only; at most 64 characters.           |
+| `description`   | `string`                         | Catalog line shown to the model. At most 1024 characters.                                         |
+| `instructions`  | `string`                          | Full instruction body, disclosed to the model when the skill is activated.                        |
+| `license`       | `string`                          | Optional license identifier recorded in the packaged `SKILL.md` frontmatter.                      |
+| `compatibility` | `string`                          | Optional compatibility note recorded in frontmatter. At most 500 characters.                       |
+| `metadata`      | `Record<string, string>`          | Optional string-to-string metadata recorded in frontmatter.                                        |
+| `allowedTools`  | `string`                          | Optional allowed-tools restriction recorded in frontmatter.                                        |
+| `files`         | `Record<string, string \| Uint8Array>` | Optional supporting files packaged alongside `SKILL.md`, keyed by safe relative path.        |
+
+Throws `SkillDefinitionValidationError` when required fields are missing, too long, or a file path is unsafe (absolute, `SKILL.md` itself, or containing `.`/`..` segments).
 
 ## `connectMcpServer(...)`
 
@@ -173,21 +593,21 @@ The old `parameters` and `execute` markers now throw when a tool is defined. Ren
 function connectMcpServer(name: string, options: McpServerOptions): Promise<McpServerConnection>;
 ```
 
-Connects to a remote MCP server and returns its listed tools as Flue tool definitions ready to pass directly in `tools` arrays.
+Connects to a remote MCP server and returns its listed tools as Flue tool definitions ready to pass directly to `useTool(...)` or in `tools` arrays.
 
 Adapted tool names use `mcp__<server>__<tool>`. Unsupported characters are replaced with underscores, and duplicate adapted names are rejected. Do not wrap these tools with `defineTool()`. Close the returned connection when its tools are no longer needed.
 
 #### `McpServerOptions`
 
 | Field                    | Type                         | Default             | Description                                                                      |
-| ------------------------ | ---------------------------- | ------------------- | -------------------------------------------------------------------------------- |
-| `url`                    | `string \| URL`              | —                   | MCP server endpoint.                                                             |
-| `transport`              | `'streamable-http' \| 'sse'` | `'streamable-http'` | Remote MCP transport. Use `'sse'` for legacy servers.                            |
-| `headers`                | `HeadersInit`                | —                   | Headers merged into MCP transport requests.                                      |
-| `requestInit`            | `RequestInit`                | —                   | Additional MCP transport request configuration.                                  |
-| `fetch`                  | `typeof fetch`               | —                   | Custom fetch implementation used by the MCP transport.                           |
-| `timeoutMs`              | `number`                     | `60000`             | Per-request timeout in milliseconds for MCP requests.                            |
-| `resetTimeoutOnProgress` | `boolean`                    | `false`             | Reset the per-request timeout whenever the server sends a progress notification. |
+| ------------------------ | ---------------------------- | ------------------- | --------------------------------------------------------------------------------- |
+| `url`                    | `string \| URL`              | —                    | MCP server endpoint.                                                             |
+| `transport`              | `'streamable-http' \| 'sse'` | `'streamable-http'` | Remote MCP transport. Use `'sse'` for legacy servers.                             |
+| `headers`                | `HeadersInit`                | —                    | Headers merged into MCP transport requests.                                       |
+| `requestInit`            | `RequestInit`                | —                    | Additional MCP transport request configuration.                                   |
+| `fetch`                  | `typeof fetch`               | —                    | Custom fetch implementation used by the MCP transport.                            |
+| `timeoutMs`              | `number`                     | `60000`             | Per-request timeout in milliseconds for MCP requests.                             |
+| `resetTimeoutOnProgress` | `boolean`                    | `false`             | Reset the per-request timeout whenever the server sends a progress notification.  |
 
 #### `McpServerConnection`
 
@@ -205,73 +625,10 @@ interface McpServerConnection {
 | `tools`   | MCP tools ready to pass directly in `tools` arrays. |
 | `close()` | Close the underlying MCP client connection.         |
 
-## `defineAgent(...)`
-
-```ts
-function defineAgent<TEnv = Record<string, any>>(
-  initialize: (
-    context: AgentInitializerContext<TEnv>,
-  ) => AgentRuntimeConfig | Promise<AgentRuntimeConfig>,
-): AgentDefinition<TEnv>;
-```
-
-Defines an agent initializer. Default-export the returned value from a module whose first statement is the `'use agent'` directive to make the agent part of the application:
-
-```ts title="src/agents/triage.ts"
-'use agent';
-import { defineAgent } from '@flue/runtime';
-
-export default defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-  instructions: '...',
-}));
-```
-
-The directive gives the agent its durable identity (the file basename) and registers it with the built application — there is no name-based addressing beyond that identity. To expose the agent over HTTP, mount `agent.route()` in `app.ts`; see the [Routing API](/docs/api/routing-api/). A dispatch-only agent needs no mount. `flue run <path>` and raw `defineAgent` values in unit tests do not require the directive.
-
-The initializer runs whenever a runner initializes a root harness from the agent definition. Do not treat it as a one-time constructor for a persistent agent instance id. Return a runtime config object with `model: '<provider>/<model>'` or a profile with its own model field.
-
-#### `AgentInitializerContext`
-
-| Field | Type     | Description                                            |
-| ----- | -------- | ------------------------------------------------------ |
-| `id`  | `string` | The agent instance (conversation) id.                  |
-| `env` | `TEnv`   | Platform environment bindings supplied by the runtime. |
-
-#### `AgentRuntimeConfig`
-
-| Field           | Type                        | Description                                                                                                                                                                                                                                              |
-| --------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `description`   | `string`                    | Optional organizational metadata describing what this agent does. Overrides the profile description when set. Per-initialization metadata only — for static, statically-collectable metadata, use the agent module's `description` named export instead. |
-| `profile`       | `AgentProfile`              | Reusable baseline profile. Agent-definition fields replace or extend profile values.                                                                                                                                                                     |
-| `model`         | `string`                    | Default model specifier.                                                                                                                                                                                                                                 |
-| `instructions`  | `string`                    | Instructions prepended to discovered workspace context.                                                                                                                                                                                                  |
-| `skills`        | `Skill[]`                   | Additional registered skills available to initialized sessions.                                                                                                                                                                                          |
-| `tools`         | `ToolDefinition[]`          | Additional custom model-callable tools available to initialized sessions.                                                                                                                                                                                |
-| `actions`       | `ActionDefinition[]`        | Additional reusable Actions exposed as framework-managed model tools.                                                                                                                                                                                    |
-| `subagents`     | `AgentProfile[]`            | Additional named profiles available for delegated `session.task()` operations.                                                                                                                                                                           |
-| `thinkingLevel` | `ThinkingLevel`             | Default reasoning effort. Individual operations may override this value.                                                                                                                                                                                 |
-| `compaction`    | `false \| CompactionConfig` | Automatic conversation-compaction configuration. `false` disables threshold compaction; overflow recovery and explicit `session.compact()` calls still compact when needed.                                                                              |
-| `durability`    | `DurabilityConfig`          | Durability configuration for durable agent submissions. Controls recovery attempt limits and submission timeouts.                                                                                                                                        |
-| `cwd`           | `string`                    | Working directory inside the initialized sandbox.                                                                                                                                                                                                        |
-| `sandbox`       | `SandboxFactory`            | Sandbox factory used to construct the initialized environment. Omit for the default in-memory sandbox; use `bash(...)` to wrap a custom just-bash factory (`BashFactory`). See [Sandboxes](/docs/guide/sandboxes/).                                      |
-
-#### `AgentDefinition`
-
-`AgentDefinition` is the opaque initializer value returned by `defineAgent()`. It carries one method:
-
-```ts
-interface AgentDefinition<TEnv> {
-  route(): Hono;
-}
-```
-
-`route()` builds the agent's mountable HTTP sub-app (`POST /:id` prompt, `GET|HEAD /:id` conversation stream, `POST /:id/abort`, and the opt-in attachment route). It is a pure factory with no registration side effects — registration comes from the `'use agent'` scan — and it throws when the definition carries no identity. See the [Routing API](/docs/api/routing-api/) for the full route table and middleware semantics.
-
 ## `dispatch(...)`
 
 ```ts
-function dispatch(agent: AgentDefinition, request: AgentDispatchRequest): Promise<DispatchReceipt>;
+function dispatch(agent: AgentModuleValue, request: AgentDispatchRequest): Promise<DispatchReceipt>;
 
 interface AgentDispatchRequest {
   id: string;
@@ -284,7 +641,7 @@ interface DispatchReceipt {
 }
 ```
 
-Delivers a message for asynchronous processing by a continuing agent instance. The `agent` argument is a registered agent definition (a `'use agent'` module's default export) — no HTTP mount is required.
+Delivers a message for asynchronous processing by a continuing agent instance. The `agent` argument is a registered agent module value — the default export of a `'use agent'` module — so no HTTP mount is required.
 
 | Field        | Description                                                             |
 | ------------ | ----------------------------------------------------------------------- |
@@ -309,7 +666,7 @@ type DeliveredMessage =
     };
 ```
 
-The single unified message shape delivered into an agent's session, whether it arrives through `dispatch(...)` or a direct HTTP prompt.
+The single unified message shape delivered into an agent's session, whether it arrives through `dispatch(...)`, a direct HTTP prompt, or [`useDelivery()`](#usedelivery).
 
 `kind: 'user'` is a real, user-attributed chat turn. It produces a canonical `user_message` record and projects into the model conversation like any other user message. Use it when one person is talking directly to the assistant — a direct 1:1 chat surface such as an SDK-driven chat UI — optionally carrying image attachments.
 
@@ -340,11 +697,11 @@ Delivery durability depends on the generated target. Node uses a process-lifetim
 
 ## Agent
 
-An agent definition is the opaque value returned by `defineAgent()`. Default-export it from a `'use agent'` module to register it with the application; mount `agent.route()` in `app.ts` to make its conversations addressable over HTTP.
+A `FunctionAgentDefinition` is the opaque value returned by `defineAgent(Capability, config)`. Default-export it from a `'use agent'` module to register it with the application; mount `agent.route()` in `app.ts` to make its conversations addressable over HTTP.
 
 ## Harness
 
-A harness is an initialized agent environment supplied by the active runner. Actions receive it as `context.harness`; application code does not name or initialize harnesses itself.
+A harness is an initialized agent environment supplied by the active runner. `harness: true` tools receive it as `context.harness`; application code does not name or initialize harnesses itself.
 
 #### `FlueHarness`
 
@@ -431,12 +788,12 @@ Runs a model operation with a text instruction.
 #### `PromptOptions`
 
 | Field           | Type               | Description                                                           |
-| --------------- | ------------------ | --------------------------------------------------------------------- |
+| --------------- | ------------------ | ----------------------------------------------------------------------- |
 | `result`        | Valibot schema     | Require validated structured data and resolve with `response.data`.   |
 | `tools`         | `ToolDefinition[]` | Additional custom model-callable tools for this operation.            |
 | `model`         | `string`           | Model specifier override for this operation.                          |
 | `thinkingLevel` | `ThinkingLevel`    | Reasoning-effort override for this operation.                         |
-| `signal`        | `AbortSignal`      | Cancel this operation.                                                |
+| `signal`        | `AbortSignal`      | Cancel this operation.                                                 |
 | `images`        | `PromptImage[]`    | Images attached to the user message. Requires a vision-capable model. |
 
 #### `PromptImage`
@@ -507,17 +864,30 @@ interface SkillReference {
 }
 ```
 
-Opaque imported packaged-skill reference accepted by `session.skill()`. Import a `SKILL.md` value rather than constructing one manually.
+Opaque skill reference accepted by `useSkill()` and `session.skill()`. Produced by importing a `SKILL.md` value or by [`defineSkill(...)`](#defineskill).
+
+#### `Skill`
+
+```ts
+type Skill =
+  | SkillReference
+  | {
+      name: string;
+      description: string;
+    };
+```
+
+Skill metadata mountable with `useSkill()`. Imported `SkillReference` values bundle application-owned skill content. Inline metadata adds only a named catalog entry; it does not package or inject an instruction body. See [Skills](/docs/guide/skills/).
 
 #### `SkillOptions`
 
 | Field           | Type                      | Description                                                                   |
-| --------------- | ------------------------- | ----------------------------------------------------------------------------- |
+| --------------- | ------------------------- | -------------------------------------------------------------------------------- |
 | `args`          | `Record<string, unknown>` | Arguments included with the skill instruction.                                |
 | `result`        | Valibot schema            | Require validated structured data and resolve with `response.data`.           |
 | `tools`         | `ToolDefinition[]`        | Additional custom model-callable tools for this operation.                    |
 | `model`         | `string`                  | Model specifier override for this operation.                                  |
-| `thinkingLevel` | `ThinkingLevel`           | Reasoning-effort override for this operation.                                 |
+| `thinkingLevel` | `ThinkingLevel`           | Reasoning-effort override for this operation.                                  |
 | `signal`        | `AbortSignal`             | Cancel this operation.                                                        |
 | `images`        | `PromptImage[]`           | Images attached to the skill's user message. Requires a vision-capable model. |
 
@@ -527,20 +897,22 @@ Opaque imported packaged-skill reference accepted by `session.skill()`. Import a
 task(text: string, options?: TaskOptions): CallHandle<PromptResponse>;
 ```
 
-Delegates work to a detached child session. Pass `options.agent` to select a named subagent profile and `options.result` to require validated data.
+Delegates work to a detached child session. Pass `options.agent` to select a subagent by the name declared with [`useSubagent(...)`](#usesubagent) and `options.result` to require validated data.
 
 #### `TaskOptions`
 
 | Field           | Type               | Description                                                                          |
-| --------------- | ------------------ | ------------------------------------------------------------------------------------ |
-| `agent`         | `string`           | Named subagent profile selected for this delegated task.                             |
+| --------------- | ------------------ | --------------------------------------------------------------------------------------- |
+| `agent`         | `string`           | Name of the subagent (declared with `useSubagent()`) to delegate to for this call.      |
 | `result`        | Valibot schema     | Require validated structured data and resolve with `response.data`.                  |
 | `tools`         | `ToolDefinition[]` | Additional custom model-callable tools for this operation.                           |
 | `model`         | `string`           | Model specifier override for this operation.                                         |
-| `thinkingLevel` | `ThinkingLevel`    | Reasoning-effort override for this operation.                                        |
+| `thinkingLevel` | `ThinkingLevel`    | Reasoning-effort override for this operation.                                         |
 | `cwd`           | `string`           | Working directory for the detached task session. Defaults to the parent session cwd. |
-| `signal`        | `AbortSignal`      | Cancel this task.                                                                    |
+| `signal`        | `AbortSignal`      | Cancel this task.                                                                     |
 | `images`        | `PromptImage[]`    | Images attached to the task's initial user message. Requires a vision-capable model. |
+
+Rejects with `SubagentNotDeclaredError` when `options.agent` names a subagent that was not declared with `useSubagent()` in the current render.
 
 ### `session.shell(...)`
 
@@ -553,7 +925,7 @@ Runs a shell command and records its command exchange in conversation state.
 #### `ShellOptions`
 
 | Field       | Type                     | Description                                                                             |
-| ----------- | ------------------------ | --------------------------------------------------------------------------------------- |
+| ----------- | ------------------------ | ----------------------------------------------------------------------------------------- |
 | `env`       | `Record<string, string>` | Environment variables supplied to the command.                                          |
 | `cwd`       | `string`                 | Working directory supplied to the command.                                              |
 | `timeoutMs` | `number`                 | Wall-clock deadline in milliseconds, forwarded to the sandbox adapter's native timeout. |

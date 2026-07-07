@@ -51,14 +51,23 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  * ```typescript
  * 'use agent';
  * import { Compute } from '@boxd-sh/sdk';
- * import { defineAgent } from '@flue/runtime';
+ * import { defineAgent, useSandbox } from '@flue/runtime';
  * import { boxd } from './sandboxes/boxd';
  *
- * export default defineAgent(async ({ env }) => {
- *   const client = new Compute({ apiKey: env.BOXD_API_KEY });
- *   const box = await client.box.create({ name: 'my-agent' });
- *   return { sandbox: boxd(box), model: 'anthropic/claude-sonnet-4-6' };
- * });
+ * function Assistant() {
+ *   useSandbox({
+ *     // Lazy, per the SandboxFactory contract: constructing this object is
+ *     // cheap; the expensive boxd VM creation happens once, inside
+ *     // createSessionEnv(), at initialization — never on a re-render.
+ *     async createSessionEnv(options) {
+ *       const client = new Compute({ apiKey: process.env.BOXD_API_KEY });
+ *       const box = await client.box.create({ name: 'my-agent' });
+ *       return boxd(box).createSessionEnv(options);
+ *     },
+ *   });
+ *   return 'You are a helpful assistant with a full sandbox.';
+ * }
+ * export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
  * ```
  */
 import { createSandboxSessionEnv } from '@flue/runtime';
@@ -307,21 +316,28 @@ share this snippet so they can wire it up themselves.
 ```ts
 'use agent';
 import { Compute } from '@boxd-sh/sdk';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useSandbox } from '@flue/runtime';
 import { boxd } from '../sandboxes/boxd'; // adjust path to match the user's layout
 
-export default defineAgent(async ({ env }) => {
-  const client = new Compute({ apiKey: env.BOXD_API_KEY });
-  try {
-    const box = await client.box.create({ name: `agent-${Date.now()}` });
-    return {
-      sandbox: boxd(box),
-      model: 'anthropic/claude-sonnet-4-6',
-    };
-  } finally {
-    await client.close();
-  }
-});
+function Assistant() {
+	useSandbox({
+		// Lazy, per the SandboxFactory contract: constructing this object is
+		// cheap; the expensive boxd VM creation happens once, inside
+		// createSessionEnv(), at initialization — never on a re-render.
+		async createSessionEnv(options) {
+			const client = new Compute({ apiKey: process.env.BOXD_API_KEY });
+			try {
+				const box = await client.box.create({ name: `agent-${Date.now()}` });
+				return boxd(box).createSessionEnv(options);
+			} finally {
+				await client.close();
+			}
+		},
+	});
+	return 'You are a helpful assistant with a full sandbox.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 The `'use agent'` directive at the top is what registers the module with

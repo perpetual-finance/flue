@@ -123,22 +123,30 @@ The short version, for your reference:
    the npm package.)
 
 5. Use it in an agent. The binding name from `wrangler.jsonc` (`Sandbox`
-   above) is the key on `env`:
+   above) is the key on `env`. `cloudflareSandbox(getSandbox(env.Sandbox, id))`
+   needs this Worker's `env` bindings and the agent's instance id, both of
+   which are only available where your application already has request/DO
+   scope — there's no stable hook-level API for reaching platform env from
+   inside the agent body yet (that's a pending design question). Build the
+   `SandboxFactory` value there and pass it in:
 
    ```ts
    'use agent';
-   import { getSandbox } from '@cloudflare/sandbox';
-   import { defineAgent } from '@flue/runtime';
-   import { cloudflareSandbox } from '@flue/runtime/cloudflare';
+   import { defineAgent, useSandbox } from '@flue/runtime';
+   import { cloudflareSandboxFactory } from '../cloudflare-sandbox'; // your own module — see note above
 
-   export default defineAgent(({ id, env }) => ({
-     sandbox: cloudflareSandbox(getSandbox(env.Sandbox, id)),
-     model: 'anthropic/claude-opus-4-7',
-   }));
+   function Assistant() {
+     useSandbox(cloudflareSandboxFactory);
+     return 'You are a helpful assistant with a full sandbox.';
+   }
+
+   export default defineAgent(Assistant, { model: 'anthropic/claude-opus-4-7' });
    ```
 
-   Pass the result of `getSandbox()` through `cloudflareSandbox(...)` before
-   supplying it to `defineAgent()`. The wrapper is provided by
+   `cloudflareSandboxFactory` above stands in for whatever `SandboxFactory`
+   value your application constructs from
+   `cloudflareSandbox(getSandbox(env.Sandbox, id))` wherever it has access to
+   those bindings. The wrapper itself is provided by
    `@flue/runtime/cloudflare`, so no project-owned adapter file is needed.
    The `'use agent'` directive is what registers the agent; mount
    `agent.route()` in `app.ts`

@@ -1,12 +1,12 @@
 ---
 title: Skills
 description: Add Agent Skills to Flue agents and invoke them from sessions.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-07
 ---
 
 Flue supports [Agent Skills](https://agentskills.io/specification): reusable instructions and supporting resources that agents can load for specialized, repeatable work, such as applying a review process, following an operational workflow, or using shared project guidance. Skills can be bundled with your application or supplied by the runtime workspace where an agent operates.
 
-Skills guide agent work; they do not add executable capabilities. Use [tools](/docs/guide/tools/) or [sandboxes](/docs/guide/sandboxes/) when an agent needs actions or workspace access.
+Skills guide agent work; they do not add executable capabilities. Use [tools](/docs/guide/tools/) or [sandboxes](/docs/guide/sandboxes/) when an agent needs to act or needs workspace access.
 
 ## Add a skill
 
@@ -29,22 +29,26 @@ The example stores the skill in `src/skills/` alongside other authored source, b
 
 ## Import a skill
 
-Import your skills with the `skill` import attribute (a new feature in modern JavaScript). Once imported, pass the imported reference to the agent's `skills` configuration:
+Import your skills with the `skill` import attribute (a new feature in modern JavaScript). Once imported, pass the imported reference to `useSkill(...)` inside the agent's capability function:
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useSkill } from '@flue/runtime';
 import review from '../skills/review/SKILL.md' with { type: 'skill' };
 import triage from '../skills/triage/SKILL.md' with { type: 'skill' };
 import investigate from '../skills/investigate/SKILL.md' with { type: 'skill' };
 
-export default defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-  skills: [review, triage, investigate],
-}));
+function Assistant() {
+  useSkill(review);
+  useSkill(triage);
+  useSkill(investigate);
+  return 'Use the skills below as needed to complete the request.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
-Each import produces a skill reference and includes that skill directory in the application build. Passing those references in `skills` makes the skills available to this agent by their declared names.
+Each import produces a skill reference and includes that skill directory in the application build. Mounting a reference with `useSkill(...)` makes the skill available to this agent by its declared name. Skills mount unconditionally like any other hook — a skill mounted by one capability is cataloged on every render, whether or not the current phase calls for it; write the capability's instruction to say when to activate it.
 
 Skills can also be imported from installed packages:
 
@@ -68,7 +72,7 @@ Flue also loads skills from the sandbox where a harness runs, with no import req
             └─ checklist.md
 ```
 
-Each discovered skill is available by its declared name without a TypeScript import or an entry in `skills`, and its supporting files remain in that sandbox workspace. This lets a repository checkout, CI environment, or prepared runtime workspace provide its own skills to a harness. See [Sandboxes](/docs/guide/sandboxes/) for controlling the filesystem and working directory visible at runtime.
+Each discovered skill is available by its declared name without a TypeScript import or a `useSkill(...)` call, and its supporting files remain in that sandbox workspace. This lets a repository checkout, CI environment, or prepared runtime workspace provide its own skills to a harness. See [Sandboxes](/docs/guide/sandboxes/) for controlling the filesystem and working directory visible at runtime.
 
 If an imported skill registered on an agent and a discovered workspace skill declare the same name, initialization fails rather than choosing one implicitly.
 
@@ -91,16 +95,17 @@ Unknown frontmatter fields are ignored, so skills that carry extra host-specific
 
 Normally you can trust the agent to use the skills you provide it, as needed, to complete its work.
 
-In application-controlled code such as an [Action](/docs/guide/actions/), you can manually trigger a skill through the `session.skill(name: string)` API method. This works with both registered imported skills and workspace-discovered skills.
+In application-controlled code such as a [harness tool](/docs/guide/tools/#harness-tools), you can manually trigger a skill through the `session.skill(name: string)` API method. This works with both registered imported skills and workspace-discovered skills.
 
-```ts title="src/actions/review-change.ts"
-import { defineAction } from '@flue/runtime';
+```ts title="src/shared/review-tools.ts"
+import { defineTool } from '@flue/runtime';
 import * as v from 'valibot';
 
-export const reviewChange = defineAction({
+export const reviewChange = defineTool({
   name: 'review_change',
   description: 'Apply the review skill to one proposed change.',
   input: v.object({ change: v.string() }),
+  harness: true,
 
   async run({ harness, input }) {
     const response = await (
@@ -117,7 +122,7 @@ export const reviewChange = defineAction({
 });
 ```
 
-`args` provides input for this invocation of the skill. The `result` schema makes `response.data` a validated structured result; omit it when you want text output from `response.text`. The string passed to `session.skill(...)` is the declared skill name, not a path to `SKILL.md` — here the agent that exposes this Action registers the `review` skill in its `skills` configuration.
+`args` provides input for this invocation of the skill. The `result` schema makes `response.data` a validated structured result; omit it when you want text output from `response.text`. The string passed to `session.skill(...)` is the declared skill name, not a path to `SKILL.md` — here the agent that mounts this tool also mounts the `review` skill with `useSkill(...)`.
 
 See the [Agent API](/docs/api/agent-api/) for operation options and response types.
 
@@ -130,7 +135,7 @@ Skills are most useful when:
 - instructions need supporting templates, examples, or reference files;
 - a workspace should provide its own guidance without changing application code.
 
-For executable application capabilities, use a [tool](/docs/guide/tools/). For application-controlled, multi-step agent work, use an [Action](/docs/guide/actions/).
+For executable application capabilities, use a [tool](/docs/guide/tools/).
 
 ## Next steps
 

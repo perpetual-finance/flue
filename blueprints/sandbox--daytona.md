@@ -47,14 +47,23 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  * ```typescript
  * 'use agent';
  * import { Daytona } from '@daytona/sdk';
- * import { defineAgent } from '@flue/runtime';
+ * import { defineAgent, useSandbox } from '@flue/runtime';
  * import { daytona } from './sandboxes/daytona';
  *
- * export default defineAgent(async ({ env }) => {
- *   const client = new Daytona({ apiKey: env.DAYTONA_API_KEY });
- *   const sandbox = await client.create({ image: 'ubuntu:latest' });
- *   return { sandbox: daytona(sandbox), model: 'anthropic/claude-sonnet-4-6' };
- * });
+ * function Assistant() {
+ *   useSandbox({
+ *     // Lazy, per the SandboxFactory contract: constructing this object is
+ *     // cheap; the expensive Daytona sandbox creation happens once, inside
+ *     // createSessionEnv(), at initialization — never on a re-render.
+ *     async createSessionEnv(options) {
+ *       const client = new Daytona({ apiKey: process.env.DAYTONA_API_KEY });
+ *       const sandbox = await client.create({ image: 'ubuntu:latest' });
+ *       return daytona(sandbox).createSessionEnv(options);
+ *     },
+ *   });
+ *   return 'You are a helpful assistant with a full sandbox.';
+ * }
+ * export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
  * ```
  */
 import { createSandboxSessionEnv, SandboxOperationUnsupportedError } from '@flue/runtime';
@@ -204,16 +213,24 @@ share this snippet so they can wire it up themselves.
 ```ts
 'use agent';
 import { Daytona } from '@daytona/sdk';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useSandbox } from '@flue/runtime';
 import { daytona } from '../sandboxes/daytona'; // adjust path to match the user's layout
 
-export default defineAgent(async ({ env }) => {
-  const client = new Daytona({ apiKey: env.DAYTONA_API_KEY });
-  return {
-    sandbox: daytona(await client.create()),
-    model: 'anthropic/claude-sonnet-4-6',
-  };
-});
+function Assistant() {
+	useSandbox({
+		// Lazy, per the SandboxFactory contract: constructing this object is
+		// cheap; the expensive Daytona sandbox creation happens once, inside
+		// createSessionEnv(), at initialization — never on a re-render.
+		async createSessionEnv(options) {
+			const client = new Daytona({ apiKey: process.env.DAYTONA_API_KEY });
+			const sandbox = await client.create();
+			return daytona(sandbox).createSessionEnv(options);
+		},
+	});
+	return 'You are a helpful assistant with a full sandbox.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 The `'use agent'` directive at the top is what registers the module with

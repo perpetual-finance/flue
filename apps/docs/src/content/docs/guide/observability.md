@@ -1,23 +1,24 @@
 ---
 title: Observability
 description: Monitor agent activity and export telemetry from your application.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-07
 ---
 
-Observability helps you understand whether Flue work completed, failed, became slow, or used more model resources than expected. Use `observe(...)` to monitor agent activity across your application, and Action logging to record application-specific facts inside bounded operations.
+Observability helps you understand whether Flue work completed, failed, became slow, or used more model resources than expected. Use `observe(...)` to monitor agent activity across your application, and tool logging to record application-specific facts inside a tool call.
 
-## Log inside Actions
+## Log inside tools
 
-Use the Action context's `log` methods to record application-specific facts that runtime activity alone cannot explain. For example, a summarization Action can report the size of the accepted document and the usage of the completed operation:
+Every tool's `run` context includes `log`, regardless of whether the tool is a pure function of its input or a [harness tool](/docs/guide/tools/#harness-tools). Use it to record application-specific facts that runtime activity alone cannot explain — for example, a summarization tool can report the size of the accepted document and the usage of the completed operation:
 
-```ts title="src/actions/summarize.ts"
-import { defineAction } from '@flue/runtime';
+```ts title="src/shared/summarize-tools.ts"
+import { defineTool } from '@flue/runtime';
 import * as v from 'valibot';
 
-export const summarize = defineAction({
+export const summarizeDocument = defineTool({
   name: 'summarize_document',
   description: 'Summarize the supplied document clearly and concisely.',
   input: v.object({ text: v.string() }),
+  harness: true,
 
   async run({ harness, log, input }) {
     log.info('Summarization requested', { characters: input.text.length });
@@ -33,7 +34,7 @@ export const summarize = defineAction({
 });
 ```
 
-`log.info(...)`, `log.warn(...)`, and `log.error(...)` accept structured attributes. Use attributes for values that you may later search, aggregate, or forward to a monitoring system. These logs surface as `log` events to observers registered with `observe(...)`. See [`ActionContext`](/docs/api/action-api/#actioncontext) for the Action logging contract.
+`log.info(...)`, `log.warn(...)`, and `log.error(...)` accept structured attributes. Use attributes for values that you may later search, aggregate, or forward to a monitoring system. These logs surface as `log` events to observers registered with `observe(...)`. See the [Agent API](/docs/api/agent-api/) for the complete tool run context.
 
 ## Observe application activity
 
@@ -64,7 +65,7 @@ app.route('/agents/triage', triage.route());
 export default app;
 ```
 
-An operation is the useful finite boundary for agent activity, such as prompting a session, running a skill or action, or delegating work. Direct and dispatched agent input can therefore be monitored as bounded units without any separate job abstraction.
+An operation is the useful finite boundary for agent activity, such as prompting a session, running a skill, or delegating work with a task. Direct and dispatched agent input can therefore be monitored as bounded units without any separate job abstraction.
 
 When an operation is slow or unexpectedly expensive, its nested activity can provide the explanation. One prompt operation may include multiple model turns or tool calls. Model turns expose latency, token usage, and cost; tool activity shows where the agent spent time or encountered an error.
 
@@ -97,6 +98,6 @@ Restrict subscriptions to required event types and review the retention, access,
 ## Next steps
 
 - [Events reference](/docs/api/events-reference/) — inspect the complete observable event contract.
-- [Actions](/docs/guide/actions/) — bounded operations with application-owned logging.
+- [Tools](/docs/guide/tools/) — bounded operations with application-owned logging.
 - [Agents](/docs/guide/building-agents/) — create agents and deliver direct or dispatched input.
 - [Routing](/docs/guide/routing/) — the application entrypoint where telemetry observers are registered.

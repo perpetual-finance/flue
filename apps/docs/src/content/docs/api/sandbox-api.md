@@ -97,7 +97,7 @@ export interface SandboxFactory {
 ```ts
 export type SessionToolFactory = (
   env: SessionEnv,
-  options: { subagents: Record<string, AgentProfile> },
+  options: { subagents: Record<string, DeclaredSubagent> },
 ) => AgentTool<any>[];
 ```
 

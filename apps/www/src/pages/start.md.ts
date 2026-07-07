@@ -32,7 +32,7 @@ Determine the following. Ask the user only for information you do not already kn
    - Let their answer determine the smallest useful starter shape.
    - If they do not answer, or are not sure yet, create a minimal \`hello-world\` agent module only.
    - The primitive is always an **agent**: a continuing assistant or event-driven agent with an identity and durable conversations. Examples: a chat assistant, support agent, coding agent, or message-driven triage agent.
-   - When they also need a bounded, deterministic job (summarize a ticket, generate a report, run a scheduled task), model it as an **action** on the agent: a \`defineAction({ name, description, run({ harness }) { ... } })\` listed in the agent's \`actions: [...]\`, with instructions telling the model when to call it. Do not add an action merely to test an agent — use \`flue run <path-to-agent-module> --message "..."\` for one local prompt.
+   - When they also need a bounded, deterministic job (summarize a ticket, generate a report, run a scheduled task), model it as a **tool** the agent can call: a \`useTool({ name, description, harness: true, run: ({ harness }) => { ... } })\` call inside the agent function, with the returned instruction telling the model when to call it. Do not add a tool merely to test an agent — use \`flue run <path-to-agent-module> --message "..."\` for one local prompt.
 2. Where should the project live on disk?
    - Use filesystem tools to inspect the current working directory first, then confirm the target directory with the user.
    - Flue resolves the project's source root by picking the first existing directory: \`.flue/\`, then \`src/\`, then the project root. \`app.ts\` lives at the source root; agent modules conventionally live in the source root's \`agents/\` directory.
@@ -54,7 +54,7 @@ ${DEPLOY_GUIDE_LIST}
 Before implementing, restate the chosen requirements to yourself as an implementation contract:
 
 - Agent purpose: \`<purpose>\`
-- Starter shape: \`agent only\` or \`agent + action\`
+- Starter shape: \`agent only\` or \`agent + tool\`
 - Project directory: \`<absolute or relative path>\`
 - Source layout: \`.flue\`, \`src\`, or \`root\`
 - Agent module path: \`./.flue/agents/<name>.ts\`, \`./src/agents/<name>.ts\`, or \`./agents/<name>.ts\`
@@ -68,8 +68,8 @@ Before implementing, restate the chosen requirements to yourself as an implement
 3. Always create one minimal **agent module** matching the user's idea, keeping it closer to "hello world" than a production app.
    - Put it in the selected layout's immediate \`agents/\` directory, using a lower-kebab-case filename such as \`src/agents/hello-world.ts\`.
    - Its first statement must be the \`'use agent';\` directive — that is how the module joins the application (the build scans for marked modules; the file basename becomes the agent's durable identity).
-   - It must default-export \`defineAgent(() => ({ model: '<exact model specifier>', instructions: '<short purpose-specific instruction>' }))\`.
-   - For an \`agent + action\` starter, add one \`defineAction\` to the agent's \`actions: [...]\` and mention it in the instructions.
+   - Write it as a plain function that returns its instruction as a string (\`<short purpose-specific instruction>\`), and default-export \`defineAgent(<the function>, { model: '<exact model specifier>' })\`.
+   - For an \`agent + tool\` starter, call \`useTool({ name, description, harness: true, run: ({ harness }) => { ... } })\` inside the function and mention the tool in the returned instruction.
 4. Create \`app.ts\` at the source root — the application's route map and the only required entry file. Mount the agent explicitly:
    \`\`\`ts
    import { Hono } from 'hono';
@@ -135,7 +135,7 @@ In your final response, include a short checklist with the project directory, so
 
 - Important: Never invent API keys or secrets.
   - Instead: You can scaffold out obvious placeholders, but always ask the user to provide the API secrets/keys/tokens themselves. You can still help the user by showing them the command to run to set the secret, based on their local dev setup and chosen host.
-- Important: Flue has no separate "workflow" primitive. A bounded job is an agent action; a durable conversation is the only durable unit. Do not import or reference \`defineWorkflow\` — it does not exist.
+- Important: Flue has no separate "workflow" primitive. A bounded job is a tool the agent calls (add \`harness: true\` for one that needs sandbox or model access); a durable conversation is the only durable unit. Do not import or reference \`defineWorkflow\` — it does not exist.
 - Important: Once \`@flue/cli\` is installed in the project, the full Flue documentation is available offline through the CLI and always matches the installed version. Prefer it over fetching website URLs for follow-up questions:
   - \`npx flue docs search <query>\` — search the documentation (JSON results)
   - \`npx flue docs read <path>\` — print one documentation page as Markdown

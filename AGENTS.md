@@ -5,23 +5,24 @@ Framework where projects containing agents are built into deployable server arti
 ## Terminology
 
 ```
-Agent profile                 — one reusable `defineAgentProfile(...)` value
-Agent definition              — one runtime initializer from `defineAgent(...)`
+Capability                    — a plain function; Flue Hooks in its body attach tools, instructions, and
+                                state, and its returned string is its instruction
+Agent definition              — one `defineAgent(Capability, config)` value
 Agent module                  — a source file whose first statement is the `'use agent'` directive and
                                 that default-exports an agent definition; the file basename is the
                                 agent's durable identity
-└─ AgentInstance              — URL `<id>`; provided to `defineAgent(({ id }))`
+└─ AgentInstance              — URL `<id>`; the agent's durable identity, independent of authoring
    └─ Harness                 — runtime-initialized agent environment; defaults to name `"default"`
       └─ Session              — one `harness.session(name?)`; defaults to `"default"`
          └─ Operation        — one `session.prompt` / `skill` / `task` / `shell` call
             └─ Turn          — one LLM round-trip inside pi-agent-core
 ```
 
-There are no workflows or runs: conversations are the only durable unit, and a bounded job is a `defineAction(...)` in an agent's `actions: [...]`. Direct HTTP agent prompts and dispatched agent inputs operate within persistent sessions and must not be described as runs; `dispatch(...)` is identified by `dispatchId`.
+There are no workflows or runs: conversations are the only durable unit, and a bounded code job is a tool with `harness: true` (`useTool({ ..., harness: true, run: ({ harness }) => ... })` — `run` receives `harness`, the interface to the sandbox and to models). Direct HTTP agent prompts and dispatched agent inputs operate within persistent sessions and must not be described as runs; `dispatch(...)` is identified by `dispatchId`.
 
 Routing is explicit: `app.ts` is the application's route map, mounting each HTTP-reachable agent (`app.route('/agents/<name>', agent.route())`) and channel (`app.route('/channels/<x>', channel.route())`). Registration comes from the `'use agent'` scan, not from mounting; `.route()` is a pure router factory.
 
-Use `harness` as the variable name for the harness an action's `run({ harness })` receives. Agent instances have ids; harnesses and sessions have names; operations have generated ids.
+Use `harness` as the variable name for the harness a `harness: true` tool's `run({ harness })` receives. Agent instances have ids; harnesses and sessions have names; operations have generated ids.
 
 A blueprint is a Markdown implementation guide returned by `flue add`; its kind is `sandbox`, `database`, `channel`, or `tooling`. Use “sandbox adapter” for project-owned implementations and generated `src/sandboxes/` paths while preserving serialized/runtime API identifiers and Microsoft Bot Connector terminology.
 

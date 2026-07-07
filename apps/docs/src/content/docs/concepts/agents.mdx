@@ -1,7 +1,7 @@
 ---
 title: What is an agent?
 description: What an AI agent actually is, why a model alone isn't one, and what makes a Flue agent different.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-07
 ---
 
 Ask ten people what an "AI agent" is and you'll get ten answers: a chatbot, a clever prompt, a workflow, a model with tools. But none of these fully capture it.
@@ -31,16 +31,17 @@ Flue's built-in agent harness gives you all of these pieces in TypeScript, ready
 ```ts
 // Example: src/agents/triage.ts
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useSandbox, useSkill, useTool } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
-export default defineAgent(() => ({
-	model: 'anthropic/claude-sonnet-4-6',
-	instructions, // who the agent is and how it works
-	tools, // what it can do
-	skills, // expertise it can load on demand
-	sandbox: local(), // where it runs, safely
-}));
+function Triage() {
+	useTool(tool); // what it can do
+	useSkill(skill); // expertise it can load on demand
+	useSandbox(local()); // where it runs, safely
+	return instructions; // who the agent is and how it works
+}
+
+export default defineAgent(Triage, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 Building an agent is really less about coding and more about building up the context that you provide your agent — choosing the model, instructions, tools, skills, and environment it runs in.
@@ -61,12 +62,11 @@ Some of the most popular agent harnesses today were designed for coding. Flue is
 
 ```ts
 // Compose the agent: its model, capabilities, and environment.
-const agent = defineAgent(() => ({
-	model: 'anthropic/claude-sonnet-4-6',
-	tools,
-	skills,
-	actions: [triageIssue], // application-controlled operations the model can run
-}));
+function IssueTriage() {
+	useTool(triageIssue); // an application-controlled capability the model can run
+	return instructions;
+}
+const agent = defineAgent(IssueTriage, { model: 'anthropic/claude-sonnet-4-6' });
 
 // Drive it in code: mount its routes, dispatch events into its
 // conversations, or run it one-shot from the CLI.
@@ -90,5 +90,4 @@ Out of the box, Flue provides a lightweight virtual sandbox — an in-memory fil
 
 - [Why Flue](/docs/introduction/why-flue/) — the case for building agents this way.
 - [Agents](/docs/guide/building-agents/) — defining an agent, its sessions, and its runtime configuration.
-- [Actions](/docs/guide/actions/) — finite, application-controlled operations an agent can run.
 - [Sandboxes](/docs/guide/sandboxes/), [Tools](/docs/guide/tools/), [Skills](/docs/guide/skills/), and [Subagents](/docs/guide/subagents/) — the pieces of the harness, in depth.

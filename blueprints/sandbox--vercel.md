@@ -47,13 +47,22 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  * ```typescript
  * 'use agent';
  * import { Sandbox } from '@vercel/sandbox';
- * import { defineAgent } from '@flue/runtime';
+ * import { defineAgent, useSandbox } from '@flue/runtime';
  * import { vercel } from './sandboxes/vercel';
  *
- * export default defineAgent(async () => {
- *   const sandbox = await Sandbox.create({ runtime: 'node24' });
- *   return { sandbox: vercel(sandbox), model: 'anthropic/claude-sonnet-4-6' };
- * });
+ * function Assistant() {
+ *   useSandbox({
+ *     // Lazy, per the SandboxFactory contract: constructing this object is
+ *     // cheap; the expensive Vercel sandbox creation happens once, inside
+ *     // createSessionEnv(), at initialization — never on a re-render.
+ *     async createSessionEnv(options) {
+ *       const sandbox = await Sandbox.create({ runtime: 'node24' });
+ *       return vercel(sandbox).createSessionEnv(options);
+ *     },
+ *   });
+ *   return 'You are a helpful assistant with a full sandbox.';
+ * }
+ * export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
  * ```
  */
 import { createSandboxSessionEnv } from '@flue/runtime';
@@ -233,16 +242,23 @@ share this snippet so they can wire it up themselves.
 ```ts
 'use agent';
 import { Sandbox } from '@vercel/sandbox';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useSandbox } from '@flue/runtime';
 import { vercel } from '../sandboxes/vercel'; // adjust path to match the user's layout
 
-export default defineAgent(async () => {
-  const sandbox = await Sandbox.create({ runtime: 'node24' });
-  return {
-    sandbox: vercel(sandbox),
-    model: 'anthropic/claude-sonnet-4-6',
-  };
-});
+function Assistant() {
+	useSandbox({
+		// Lazy, per the SandboxFactory contract: constructing this object is
+		// cheap; the expensive Vercel sandbox creation happens once, inside
+		// createSessionEnv(), at initialization — never on a re-render.
+		async createSessionEnv(options) {
+			const sandbox = await Sandbox.create({ runtime: 'node24' });
+			return vercel(sandbox).createSessionEnv(options);
+		},
+	});
+	return 'You are a helpful assistant with a full sandbox.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 The `'use agent'` directive at the top is what registers the module with

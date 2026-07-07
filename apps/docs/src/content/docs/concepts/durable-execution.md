@@ -82,7 +82,7 @@ Persisting a conversation does not make sandbox files durable. The default virtu
 
 ## Finite work is a conversation too
 
-Flue has no separate durable job primitive. Bounded, job-like work — a nightly report, a document review, a CI task — is an agent (usually with an [Action](/docs/guide/actions/) owning the reliability-critical steps) driven through a conversation whose id the caller chooses: a fresh id per occurrence for independent runs, or a stable id for work that should remember its history. The conversation is the run record; read it back with the SDK's `history()` or `observe()`.
+Flue has no separate durable job primitive. Bounded, job-like work — a nightly report, a document review, a CI task — is an agent (usually with a [harness tool](/docs/guide/tools/#harness-tools) owning the reliability-critical steps) driven through a conversation whose id the caller chooses: a fresh id per occurrence for independent runs, or a stable id for work that should remember its history. The conversation is the run record; read it back with the SDK's `history()` or `observe()`.
 
 Flue does not checkpoint arbitrary TypeScript execution and resume a function from its last completed line. Your application decides whether repeating interrupted work is safe: delivering the message again (a new `dispatch(...)` or a new `flue run` invocation) is a new operation in the conversation, and the durable record shows what the previous attempt completed. Use application-owned idempotency keys around external effects whose earlier outcome may be unknown. If a job requires resumable checkpointed steps, use a durable orchestration system suited to that requirement.
 
