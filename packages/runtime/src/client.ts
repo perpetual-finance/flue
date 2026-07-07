@@ -287,7 +287,13 @@ export async function initializeRootHarness(
 		// The delivery is constant for the harness lifetime (one submission
 		// attempt), so the first render and every per-turn re-render read the
 		// same triggering input through `useDelivery()`.
-		renderState = { snapshot: reduced.state, store: hookState, output: outputChannel, delivery };
+		renderState = {
+			snapshot: reduced.state,
+			store: hookState,
+			output: outputChannel,
+			delivery,
+			instanceId: config.id,
+		};
 		const first = renderAgentFunctionWithStructure(
 			functionAgent.capability,
 			functionAgent.config,

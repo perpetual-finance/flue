@@ -49,6 +49,12 @@ export interface RenderStateContext {
 	snapshot: ReadonlyMap<string, unknown>;
 	store: HookStateStore | undefined;
 	/**
+	 * The agent instance id backing this render, threaded into the root
+	 * capability as `AgentProps.id`. Absent on bare tooling/test renders —
+	 * reading `props.id` there throws.
+	 */
+	instanceId?: string;
+	/**
 	 * The client-facing output channel (`useMessageData` writes, metadata
 	 * producers). Absent when there is no durable runtime behind the render —
 	 * data writers then throw on call.

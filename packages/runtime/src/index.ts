@@ -81,6 +81,7 @@ export type {
 	AgentInitializerContext,
 	AgentModuleValue,
 	AgentProfile,
+	AgentProps,
 	AgentRouteHandler,
 	AgentRuntimeConfig,
 	AttachedAgentEvent,

@@ -140,7 +140,21 @@ POST /agents/support-assistant/ticket-8472
                                └─────────┘ id
 ```
 
-It's up to the developer to decide what `id` means and whether it maps to important application data, such as a user ID, customer support ticket, or GitHub issue. A randomly generated ID can also work. The `id` keys the conversation's durable storage; the capability function itself does not receive it.
+It's up to the developer to decide what `id` means and whether it maps to important application data, such as a user ID, customer support ticket, or GitHub issue. A randomly generated ID can also work. The `id` keys the conversation's durable storage, and the runtime passes it to the top-level capability function as a prop — the way a web framework passes route params to the page component:
+
+```ts
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
+import { channel, replyInThread } from '../channels/slack.ts';
+
+function Assistant({ id }: AgentProps) {
+  useTool(replyInThread(channel.parseConversationKey(id)));
+  return 'Reply in the bound Slack thread when appropriate.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+```
+
+Only the top-level function receives `AgentProps`; a capability mounted with `use()` gets the props its caller passes, and a subagent's capability function gets nothing — a delegate runs in isolation from its parent, so share a value with it explicitly (close over it) or not at all. Agents that don't need the id keep the zero-argument form.
 
 Authorize access to an `id` in the [`route`](#interacting-with-your-agent) handler. For work that arrives as a dispatched or signal-kind message — a webhook, a chat platform event — carry the identifier your application already validated in the message's `attributes` and read it inside the agent with `useDelivery()`; see [Tools](/docs/guide/tools/#protect-access) for the pattern.
 

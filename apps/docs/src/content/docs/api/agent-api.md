@@ -87,7 +87,7 @@ import {
 ## `defineAgent(...)`
 
 ```ts
-function defineAgent(agent: Capability, config: FunctionAgentConfig): FunctionAgentDefinition;
+function defineAgent(agent: Capability<AgentProps>, config: FunctionAgentConfig): FunctionAgentDefinition;
 ```
 
 Defines an addressable agent. An agent is a [capability](#capability) given a model: the capability function composes the agent's behavior with Flue Hooks — attaching tools, instructions, skills, subagents, and durable state — and returns the agent's instruction string; `config` is the static identity (model, tuning) that never renders.
@@ -116,6 +116,22 @@ export default defineAgent(Support, { model: 'anthropic/claude-sonnet-4-6' });
 The directive gives the agent its durable identity (the file basename) and registers it with the built application — there is no name-based addressing beyond that identity. To expose the agent over HTTP, mount `agent.route()` in `app.ts`; see the [Routing API](/docs/api/routing-api/). A dispatch-only agent needs no mount. `flue run <path>` and raw `defineAgent()` values in unit tests do not require the directive.
 
 The capability re-renders every turn as durable state changes — it must return synchronously and the set of mounted capabilities (`use()`, `useTool()`, `useSkill()`, `useSubagent()`) must stay identical across renders. Async work belongs in tools, `useEffect()`, or resource factories, never in the capability body itself.
+
+The runtime passes the top-level capability an `AgentProps` object — the agent's route data, the way a web framework passes route params to the page component. Zero-argument capabilities stay assignable unchanged. Only the root receives it: `use()` children get the props their caller passes, and subagent capabilities get nothing (a delegate runs in isolation from the parent).
+
+```ts
+interface AgentProps {
+  /** This agent instance's id — the `:id` segment of the agent's route, or the `--id` passed to `flue run`. */
+  id: string;
+}
+```
+
+```ts
+function Assistant({ id }: AgentProps) {
+  useTool(replyInThread(channel.parseConversationKey(id)));
+  return 'Reply in the bound Slack thread when appropriate.';
+}
+```
 
 #### `FunctionAgentConfig`
 

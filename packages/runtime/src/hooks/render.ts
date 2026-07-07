@@ -1,6 +1,7 @@
 import { ToolNameConflictError } from '../errors.ts';
 import type {
 	AgentProfile,
+	AgentProps,
 	AgentRuntimeConfig,
 	Capability,
 	DeliveredMessage,
@@ -15,6 +16,25 @@ import {
 } from './frame.ts';
 
 /**
+ * The props the runtime passes to the ROOT capability. On a bare render with
+ * no backing instance (tests/tooling), reading `id` throws — the same
+ * contract as `useDelivery()` on an unbacked render. Subagent capabilities
+ * never receive props: a delegate runs in isolation from the parent.
+ */
+function agentPropsFor(state: RenderStateContext | undefined): AgentProps {
+	if (state?.instanceId !== undefined) return { id: state.instanceId };
+	const props = {};
+	Object.defineProperty(props, 'id', {
+		get(): string {
+			throw new Error(
+				'[flue] This render has no agent instance behind it, so `props.id` is unavailable. Pass `instanceId` in the render state to back it in tests and tooling.',
+			);
+		},
+	});
+	return props as AgentProps;
+}
+
+/**
  * Run one render of an agent's capability function: invoke it inside a fresh
  * frame, validate the returned instruction, and map the static config + hook
  * attachments onto the internal runtime-config shape the initialization path
@@ -23,7 +43,7 @@ import {
  * fields) are validated downstream by the shared profile asserts.
  */
 export function renderAgentFunction(
-	capability: Capability,
+	capability: Capability<AgentProps>,
 	config: FunctionAgentConfig,
 	state?: RenderStateContext,
 ): AgentRuntimeConfig {
@@ -56,11 +76,12 @@ export interface AgentRenderStructure {
 
 /** `renderAgentFunction` plus the render's structural fingerprint. */
 export function renderAgentFunctionWithStructure(
-	capability: Capability,
+	capability: Capability<AgentProps>,
 	config: FunctionAgentConfig,
 	state?: RenderStateContext,
 ): { config: AgentRuntimeConfig; structure: AgentRenderStructure } {
-	const { result, frame } = renderWithFrame(capability, state);
+	const props = agentPropsFor(state);
+	const { result, frame } = renderWithFrame(() => capability(props), state);
 	assertAgentInstruction(result);
 	assertUniqueToolNames(frame);
 	// Hand the render's metadata producers and effect declarations to the

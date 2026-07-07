@@ -5,6 +5,7 @@ import type {
 	AgentDefinition,
 	AgentInitializerContext,
 	AgentProfile,
+	AgentProps,
 	AgentRuntimeConfig,
 	Capability,
 	DeclaredSubagent,
@@ -107,13 +108,13 @@ export function defineAgent<TEnv = Record<string, any>>(
 	) => AgentRuntimeConfig | Promise<AgentRuntimeConfig>,
 ): AgentDefinition<TEnv>;
 export function defineAgent(
-	agent: Capability,
+	agent: Capability<AgentProps>,
 	config: FunctionAgentConfig,
 ): FunctionAgentDefinition;
 export function defineAgent<TEnv = Record<string, any>>(
 	initializeOrAgent:
 		| ((context: AgentInitializerContext<TEnv>) => AgentRuntimeConfig | Promise<AgentRuntimeConfig>)
-		| Capability,
+		| Capability<AgentProps>,
 	config?: FunctionAgentConfig,
 ): AgentDefinition<TEnv> | FunctionAgentDefinition {
 	if (typeof initializeOrAgent !== 'function') {
@@ -132,7 +133,7 @@ export function defineAgent<TEnv = Record<string, any>>(
 		}
 		const agent: FunctionAgentDefinition = {
 			__flueFunctionAgent: true as const,
-			capability: initializeOrAgent as Capability,
+			capability: initializeOrAgent as Capability<AgentProps>,
 			config,
 			// Pure router factory over the module's bound identity/metadata — see
 			// createAgentRouter for the served routes and resolution rules.

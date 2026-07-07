@@ -523,6 +523,34 @@ export type Capability<TProps = void> = TProps extends void
 		(props: TProps) => string | undefined | void;
 
 /**
+ * Props the runtime passes to the top-level agent function — the agent's
+ * route data, the way a web framework passes route params to the page
+ * component. Only the ROOT capability receives them: `use()` children get
+ * the props their caller passes, and subagent capabilities get nothing (a
+ * delegate runs in isolation from the parent, intentionally — close over a
+ * value explicitly to share it).
+ *
+ * ```ts
+ * function Assistant({ id }: AgentProps) {
+ *   useTool(replyInThread(channel.parseConversationKey(id)));
+ *   return 'Reply in the bound Slack thread when appropriate.';
+ * }
+ * export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+ * ```
+ *
+ * Agents that don't need route data keep the zero-argument form — `() =>`
+ * capabilities stay assignable unchanged.
+ */
+export interface AgentProps {
+	/**
+	 * This agent instance's id — the `:id` segment of the agent's route
+	 * (`/agents/<name>/:id`), or the `--id` passed to `flue run`. Constant
+	 * for the instance's whole life.
+	 */
+	id: string;
+}
+
+/**
  * Static agent identity for {@link defineAgent}'s two-argument form: the
  * fields that never render. Everything dynamic (instructions, tools, state)
  * is composed inside the capability function; everything here is fixed for
@@ -563,7 +591,7 @@ export interface FunctionAgentConfig {
  */
 export interface FunctionAgentDefinition {
 	__flueFunctionAgent: true;
-	capability: Capability;
+	capability: Capability<AgentProps>;
 	config: FunctionAgentConfig;
 	/**
 	 * Hono router serving this agent's HTTP surface. May be mounted multiple
