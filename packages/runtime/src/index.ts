@@ -1,7 +1,7 @@
 /// <reference path="../types/skill-md.d.ts" />
 /// <reference path="../types/markdown-md.d.ts" />
 
-export { createAgent, defineAgent, defineAgentProfile } from './agent-definition.ts';
+export { defineAgent, defineAgentProfile } from './agent-definition.ts';
 export {
 	AttachmentNotAvailableError,
 	DelegationDepthExceededError,
@@ -76,9 +76,7 @@ export { bash, createSandboxSessionEnv, type SandboxApi } from './sandbox.ts';
 export { type DefineSkillOptions, defineSkill } from './skill-definition.ts';
 export { defineTool } from './tool.ts';
 export type {
-	AgentDefinition,
 	AgentDispatchRequest,
-	AgentInitializerContext,
 	AgentModuleValue,
 	AgentProfile,
 	AgentProps,

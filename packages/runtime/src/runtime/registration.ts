@@ -346,21 +346,12 @@ function assertAgentDefinitionValue(
 			`[flue] Agent "${identity}" default-exports a bare function. Wrap it: defineAgent(${value.name || 'Agent'}, { model: 'provider-id/model-id' }).`,
 		);
 	}
-	const candidate = value as {
-		__flueAgentDefinition?: unknown;
-		initialize?: unknown;
-		__flueFunctionAgent?: unknown;
-	} | null;
-	const isLegacy =
-		!!candidate &&
-		typeof candidate === 'object' &&
-		candidate.__flueAgentDefinition === true &&
-		typeof candidate.initialize === 'function';
+	const candidate = value as { __flueFunctionAgent?: unknown } | null;
 	const isFunctionAgent =
 		!!candidate && typeof candidate === 'object' && candidate.__flueFunctionAgent === true;
-	if (!isLegacy && !isFunctionAgent) {
+	if (!isFunctionAgent) {
 		throw new Error(
-			`[flue] Agent "${identity}" must default-export defineAgent(...) — defineAgent(Agent, { model }) or a legacy initializer.`,
+			`[flue] Agent "${identity}" must default-export defineAgent(Agent, { model }).`,
 		);
 	}
 }

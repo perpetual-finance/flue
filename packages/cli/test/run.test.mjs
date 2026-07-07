@@ -348,7 +348,7 @@ test('a module without an agent default export fails clearly', async () => {
 	assert.equal(result.code, 1);
 	assert.match(
 		result.stderr,
-		/Agent "bad" must default-export defineAgent\(\.\.\.\)/,
+		/Agent "bad" must default-export defineAgent\(Agent, \{ model \}\)/,
 	);
 });
 

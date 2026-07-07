@@ -22,7 +22,6 @@ import { createCwdSessionEnv } from './sandbox.ts';
 import type { SessionRerender } from './session.ts';
 import type {
 	AgentConfig,
-	AgentDefinition,
 	AgentModuleValue,
 	AgentProfile,
 	AgentRuntimeConfig,
@@ -262,58 +261,36 @@ export async function initializeRootHarness(
 	emitEvent: (event: FlueEventInput, observation?: FlueObservationDetail) => void,
 	delivery?: DeliveredMessage,
 ): Promise<Harness> {
-	// A defineAgent(Capability, config) value renders synchronously (Flue
-	// Hooks compose the config); a legacy defineAgent value runs its
-	// initializer, as ever.
-	const functionAgent =
-		'__flueFunctionAgent' in agent && agent.__flueFunctionAgent === true ? agent : undefined;
-	const isFunctionAgent = functionAgent !== undefined;
-	const label = isFunctionAgent ? 'The agent' : 'defineAgent()';
+	const label = 'The agent';
 	if (!config.conversationWriter || !config.attachmentStore) {
 		throw new Error('[flue] Canonical conversation runtime is not configured.');
 	}
 	// useState reads the instance's reduced state snapshot at render time and
 	// writes through this buffer, which the session drains into the tool
 	// batch's append. One buffer per harness lifetime (one submission attempt).
-	let hookState: HookStateBuffer | undefined;
-	let outputChannel: AgentOutputChannel | undefined;
-	let renderState: RenderStateContext | undefined;
-	let lastStructure: AgentRenderStructure | undefined;
-	let resolvedOptions: AgentRuntimeConfig;
-	if (functionAgent) {
-		const reduced = await config.conversationWriter.loadReducedState();
-		hookState = createHookStateBuffer(reduced.state);
-		outputChannel = createAgentOutputChannel();
-		// The delivery is constant for the harness lifetime (one submission
-		// attempt), so the first render and every per-turn re-render read the
-		// same triggering input through `useDelivery()`.
-		renderState = {
-			snapshot: reduced.state,
-			store: hookState,
-			output: outputChannel,
-			delivery,
-			instanceId: config.id,
-		};
-		const first = renderAgentFunctionWithStructure(
-			functionAgent.capability,
-			functionAgent.config,
-			renderState,
-		);
-		resolvedOptions = first.config;
-		lastStructure = first.structure;
-	} else {
-		resolvedOptions = await (agent as AgentDefinition).initialize({
-			id: config.id,
-			env: config.env,
-		});
-	}
+	const reduced = await config.conversationWriter.loadReducedState();
+	const hookState = createHookStateBuffer(reduced.state);
+	const outputChannel = createAgentOutputChannel();
+	// The delivery is constant for the harness lifetime (one submission
+	// attempt), so the first render and every per-turn re-render read the
+	// same triggering input through `useDelivery()`.
+	const renderState: RenderStateContext = {
+		snapshot: reduced.state,
+		store: hookState,
+		output: outputChannel,
+		delivery,
+		instanceId: config.id,
+	};
+	const first = renderAgentFunctionWithStructure(agent.capability, agent.config, renderState);
+	const resolvedOptions: AgentRuntimeConfig = first.config;
+	let lastStructure: AgentRenderStructure = first.structure;
 	const definition = assertResolvedAgentProfile(
 		extendAgentProfile(resolveAgentProfile(resolvedOptions), {}),
 		label,
 	);
 	if (typeof definition.model !== 'string') {
 		throw new Error(
-			`[flue] ${label} requires a model. ${isFunctionAgent ? 'Pass { model: "provider-id/model-id" } to defineAgent(Agent, config)' : 'Return { model: "provider-id/model-id" } or a profile with a model'}.`,
+			`[flue] ${label} requires a model. Pass { model: "provider-id/model-id" } to defineAgent(Agent, config).`,
 		);
 	}
 	const resolvedModel = config.agentConfig.resolveModel(definition.model);
@@ -356,24 +333,15 @@ export async function initializeRootHarness(
 	// applies the result at each turn boundary, so mid-run state writes reach
 	// the very next model call (guards read current truth; interpolated text
 	// stays live).
-	let rerender: SessionRerender | undefined;
-	if (functionAgent && renderState && lastStructure) {
-		const state = renderState;
-		let previous = lastStructure;
-		rerender = () => {
-			const next = renderAgentFunctionWithStructure(
-				functionAgent.capability,
-				functionAgent.config,
-				state,
-			);
-			assertRenderStructureInvariance(previous, next.structure);
-			previous = next.structure;
-			return {
-				systemPrompt: localContext.recompose(next.config.instructions),
-				tools: next.config.tools ?? [],
-			};
+	const rerender: SessionRerender = () => {
+		const next = renderAgentFunctionWithStructure(agent.capability, agent.config, renderState);
+		assertRenderStructureInvariance(lastStructure, next.structure);
+		lastStructure = next.structure;
+		return {
+			systemPrompt: localContext.recompose(next.config.instructions),
+			tools: next.config.tools ?? [],
 		};
-	}
+	};
 	return new Harness(
 		config.id,
 		'default',

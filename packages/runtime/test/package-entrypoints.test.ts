@@ -52,7 +52,7 @@ describe('package entrypoints', () => {
 		const declarations = readFileSync('dist/index.d.mts', 'utf8');
 
 		expect(declarations).toContain('FlueEventContext');
-		expect(declarations).toContain('AgentInitializerContext');
+		expect(declarations).not.toContain('AgentInitializerContext');
 		expect(declarations).not.toContain('FlueContext,');
 		expect(declarations).not.toContain('AgentCreateContext');
 		expect(declarations).not.toContain('inputJsonSchema');

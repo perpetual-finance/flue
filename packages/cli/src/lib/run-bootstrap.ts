@@ -23,7 +23,7 @@
  * `Request` values.
  */
 
-import type { AgentDefinition, DeliveredMessage } from '@flue/runtime';
+import type { DeliveredMessage, FunctionAgentDefinition } from '@flue/runtime';
 import {
 	Bash,
 	bashFactoryToSessionEnv,
@@ -124,7 +124,7 @@ export async function createFlueRunSession(
 		// mirroring the generated Node entry's startup.
 		return await runWithInstrumentationOwner(instrumentationOwner, async () => {
 			const agentModule = await options.loadModule(options.agentModulePath);
-			const definition = agentModule.default as AgentDefinition;
+			const definition = agentModule.default as FunctionAgentDefinition;
 			// Validates the default export (defineAgent value) and the identity,
 			// and makes `.route()` / definition-addressed `dispatch()` resolvable.
 			registerFlueAgents([{ identity: options.identity, definition }]);

@@ -115,7 +115,7 @@ export function createCwdSessionEnv(parentEnv: SessionEnv, cwd: string): Session
 
 /**
  * Wrap a just-bash factory into a {@link SandboxFactory}:
- * `defineAgent(() => ({ sandbox: bash(() => new Bash({ fs })) }))`.
+ * `useSandbox(bash(() => new Bash({ fs })))`.
  */
 export function bash(factory: BashFactory): SandboxFactory {
 	return {

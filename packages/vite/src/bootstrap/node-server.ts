@@ -18,7 +18,7 @@ import { format } from 'node:util';
 import { scannedAgentModules } from 'virtual:flue/agents';
 import userApp from 'virtual:flue/app';
 import userPersistenceAdapter from 'virtual:flue/db';
-import type { AgentDefinition } from '@flue/runtime';
+import type { FunctionAgentDefinition } from '@flue/runtime';
 import type {
 	AgentRecord,
 	CreateAgentContextOptions,
@@ -106,7 +106,7 @@ function createAgentRegistrations(): FlueAgentRegistration[] {
 	return scannedAgentModules.map(({ identity, module }) => {
 		const registration: FlueAgentRegistration = {
 			identity,
-			definition: module.default as AgentDefinition,
+			definition: module.default as FunctionAgentDefinition,
 		};
 		if (module.route !== undefined) {
 			registration.route = module.route as FlueAgentRegistration['route'];

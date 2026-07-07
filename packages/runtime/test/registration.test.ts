@@ -9,7 +9,7 @@ import {
 	resetFlueAgentRegistrationForTests,
 	resolveAgentModuleBinding,
 } from '../src/runtime/registration.ts';
-import type { AgentDefinition, FunctionAgentDefinition } from '../src/types.ts';
+import type { FunctionAgentDefinition } from '../src/types.ts';
 
 afterEach(() => {
 	resetFlueAgentRegistrationForTests();
@@ -54,9 +54,9 @@ describe('registerFlueAgents()', () => {
 	it('rejects a value that is not a defineAgent(...) product', () => {
 		expect(() =>
 			registerFlueAgents([
-				{ definition: { initialize: () => ({}) } as unknown as AgentDefinition, identity: 'bogus' },
+				{ definition: { initialize: () => ({}) } as unknown as FunctionAgentDefinition, identity: 'bogus' },
 			]),
-		).toThrow('Agent "bogus" must default-export defineAgent(...)');
+		).toThrow('Agent "bogus" must default-export defineAgent(Agent, { model })');
 	});
 
 	it('rejects duplicate identities', () => {

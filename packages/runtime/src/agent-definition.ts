@@ -2,8 +2,6 @@ import * as v from 'valibot';
 import { createAgentRouter } from './runtime/registration.ts';
 import { assertToolDefinition } from './tool.ts';
 import type {
-	AgentDefinition,
-	AgentInitializerContext,
 	AgentProfile,
 	AgentProps,
 	AgentRuntimeConfig,
@@ -83,12 +81,11 @@ const FunctionAgentConfigSchema = v.strictObject(
 
 /**
  * Defines an addressable agent. Default-export the returned value from a
- * `'use agent'` module. Two forms:
+ * `'use agent'` module.
  *
- * **`defineAgent(Capability, config)`** — an agent is a capability given a
- * model. The capability function composes behavior with Flue Hooks and
- * returns the agent's instruction string; `config` is the static identity
- * (model, tuning) that never renders:
+ * An agent is a capability given a model: the capability function composes
+ * behavior with Flue Hooks and returns the agent's instruction string;
+ * `config` is the static identity (model, tuning) that never renders:
  *
  * ```ts
  * function Support() {
@@ -98,71 +95,33 @@ const FunctionAgentConfigSchema = v.strictObject(
  * export default defineAgent(Support, { model: 'anthropic/claude-sonnet-4-6' });
  * ```
  *
- * **`defineAgent(initializer)`** (legacy) — an async initializer returning a
- * static runtime config. Runs whenever a runner initializes a root harness;
- * do not treat it as a one-time constructor for a persistent instance id.
  */
-export function defineAgent<TEnv = Record<string, any>>(
-	initialize: (
-		context: AgentInitializerContext<TEnv>,
-	) => AgentRuntimeConfig | Promise<AgentRuntimeConfig>,
-): AgentDefinition<TEnv>;
 export function defineAgent(
 	agent: Capability<AgentProps>,
 	config: FunctionAgentConfig,
-): FunctionAgentDefinition;
-export function defineAgent<TEnv = Record<string, any>>(
-	initializeOrAgent:
-		| ((context: AgentInitializerContext<TEnv>) => AgentRuntimeConfig | Promise<AgentRuntimeConfig>)
-		| Capability<AgentProps>,
-	config?: FunctionAgentConfig,
-): AgentDefinition<TEnv> | FunctionAgentDefinition {
-	if (typeof initializeOrAgent !== 'function') {
+): FunctionAgentDefinition {
+	if (typeof agent !== 'function') {
+		throw new Error('[flue] defineAgent() requires a function: defineAgent(Capability, { model }).');
+	}
+	const parsed = v.safeParse(FunctionAgentConfigSchema, config);
+	if (!parsed.success) {
 		throw new Error(
-			'[flue] defineAgent() requires a function: defineAgent(Capability, { model }) or defineAgent(initializer).',
+			`[flue] defineAgent() config is invalid: ${parsed.issues
+				.map((issue) => issue.message)
+				.join('; ')}.`,
 		);
 	}
-	if (config !== undefined) {
-		const parsed = v.safeParse(FunctionAgentConfigSchema, config);
-		if (!parsed.success) {
-			throw new Error(
-				`[flue] defineAgent() config is invalid: ${parsed.issues
-					.map((issue) => issue.message)
-					.join('; ')}.`,
-			);
-		}
-		const agent: FunctionAgentDefinition = {
-			__flueFunctionAgent: true as const,
-			capability: initializeOrAgent as Capability<AgentProps>,
-			config,
-			// Pure router factory over the module's bound identity/metadata — see
-			// createAgentRouter for the served routes and resolution rules.
-			route: () => createAgentRouter(agent),
-		};
-		Object.freeze(agent);
-		agentDefinitions.add(agent);
-		return agent;
-	}
-	const initialize = initializeOrAgent as (
-		context: AgentInitializerContext<TEnv>,
-	) => AgentRuntimeConfig | Promise<AgentRuntimeConfig>;
-	const agent: AgentDefinition<TEnv> = {
-		__flueAgentDefinition: true as const,
-		initialize,
-		route: () => createAgentRouter(agent as AgentDefinition),
+	const definition: FunctionAgentDefinition = {
+		__flueFunctionAgent: true as const,
+		capability: agent,
+		config,
+		// Pure router factory over the module's bound identity/metadata — see
+		// createAgentRouter for the served routes and resolution rules.
+		route: () => createAgentRouter(definition),
 	};
-	Object.freeze(agent);
-	agentDefinitions.add(agent);
-	return agent;
-}
-
-/** @deprecated Renamed to {@link defineAgent}. */
-export function createAgent<TEnv = Record<string, any>>(
-	initialize: (
-		context: AgentInitializerContext<TEnv>,
-	) => AgentRuntimeConfig | Promise<AgentRuntimeConfig>,
-): AgentDefinition<TEnv> {
-	return defineAgent(initialize);
+	Object.freeze(definition);
+	agentDefinitions.add(definition);
+	return definition;
 }
 
 export function assertResolvedAgentProfile(profile: AgentProfile, label: string): AgentProfile {

@@ -102,13 +102,7 @@ export async function dispatch(
 function isAgentDefinitionValue(value: unknown): value is AgentModuleValue {
 	// Twin: `assertAgentDefinitionValue` in registration.ts — keep in sync.
 	if (typeof value !== 'object' || value === null) return false;
-	if ('__flueFunctionAgent' in value && value.__flueFunctionAgent === true) return true;
-	return (
-		'__flueAgentDefinition' in value &&
-		value.__flueAgentDefinition === true &&
-		'initialize' in value &&
-		typeof value.initialize === 'function'
-	);
+	return '__flueFunctionAgent' in value && value.__flueFunctionAgent === true;
 }
 
 function resolveAgentDefinitionDispatchRequest(

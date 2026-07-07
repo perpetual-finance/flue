@@ -45,8 +45,8 @@ export function agent(value: AgentModuleValue): { route(): Hono } {
 	const isDefinition =
 		typeof value === 'object' &&
 		value !== null &&
-		(('__flueAgentDefinition' in value && value.__flueAgentDefinition === true) ||
-			('__flueFunctionAgent' in value && value.__flueFunctionAgent === true));
+		'__flueFunctionAgent' in value &&
+		value.__flueFunctionAgent === true;
 	if (!isDefinition) {
 		throw new Error(
 			"[flue] agent() requires a 'use agent' module's default export (a defineAgent(...) value).",

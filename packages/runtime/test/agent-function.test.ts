@@ -163,7 +163,7 @@ describe('function agents (Flue Hooks)', () => {
 		const writer = defineAgent(() => 'Writer.', { model: MODEL });
 		expect(() => registerFlueAgents([{ identity: 'writer', definition: writer }])).not.toThrow();
 		expect(() => registerFlueAgents([{ identity: 'broken', definition: {} as never }])).toThrow(
-			'must default-export defineAgent(...)',
+			'must default-export defineAgent(Agent, { model })',
 		);
 	});
 
@@ -496,39 +496,5 @@ describe('agent() routing helper', () => {
 		expect(() => agentRouteHelper((() => 'bare') as never)).toThrow(
 			"requires a 'use agent' module",
 		);
-	});
-});
-
-describe('defineAgent coexistence', () => {
-	it('initializes legacy defineAgent values through the same submission path', async () => {
-		const provider = createProvider();
-		provider.setResponses([fauxAssistantMessage('ok')]);
-		const legacy = defineAgent(() => ({
-			model: `${provider.getModel().provider}/${provider.getModel().id}`,
-			instructions: 'Legacy instructions.',
-		}));
-		const input: AgentSubmissionInput = {
-			kind: 'direct',
-			submissionId: `direct:${crypto.randomUUID()}`,
-			agent: 'legacy',
-			id: 'guild:legacy-coexists',
-			message: { kind: 'user', body: 'Hello legacy' },
-			acceptedAt: '2026-07-03T00:00:00.000Z',
-		};
-		const ctx = createFlueContext({
-			id: input.id,
-			env: {},
-			agentConfig: { subagents: {}, resolveModel: () => provider.getModel() },
-			createDefaultEnv: async () => createNoopSessionEnv({ cwd: '/' }),
-		});
-
-		// Success = the submission settles without rejecting.
-		await expect(
-			createAgentSubmissionSessionHandler(legacy, input, (s) =>
-				s.processSubmissionInput(input, {
-					submissionAttempt: { submissionId: input.submissionId, attemptId: 'attempt-1' },
-				}),
-			)(ctx),
-		).resolves.toBeUndefined();
 	});
 });
