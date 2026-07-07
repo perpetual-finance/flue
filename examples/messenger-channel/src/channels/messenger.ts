@@ -57,10 +57,10 @@ export function postMessage(ref: MessengerConversationRef) {
 		name: 'post_messenger_message',
 		description: 'Post a message to the Facebook Messenger conversation bound to this agent.',
 		input: v.object({ text: v.pipe(v.string(), v.minLength(1)) }),
-		async run({ input }) {
+		async run({ data }) {
 			const result = await client.messages.sendText({
 				to: ref.participant,
-				text: input.text,
+				text: data.text,
 			});
 			return {
 				...(result.messageId === undefined ? {} : { messageId: result.messageId }),

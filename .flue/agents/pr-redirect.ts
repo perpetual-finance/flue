@@ -85,8 +85,8 @@ function PrRedirect() {
 			'Returns the action taken and the destination URL.',
 		input: v.object({ prNumber: v.pipe(v.number(), v.integer()) }),
 		harness: true,
-		async run({ input, harness, log }) {
-			const { prNumber } = input;
+		async run({ data, harness, log }) {
+			const { prNumber } = data;
 			const session = await harness.session();
 
 			// ─── LLM phase ──────────────────────────────────────────────────

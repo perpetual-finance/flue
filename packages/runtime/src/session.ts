@@ -2653,7 +2653,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					log: this.createToolLogger(toolDef.name, toolCallId),
 				});
 				return {
-					args: parsed.input,
+					args: parsed.data,
 					run: async () => {
 						// The harness materializes at run time (a refused/aborted call
 						// never creates one) and closes when the run settles. The

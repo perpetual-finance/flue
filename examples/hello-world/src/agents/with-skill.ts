@@ -10,13 +10,13 @@ function WithSkill() {
 		description: 'Run the packaged `greet` skill for a name and return its structured greeting.',
 		input: v.object({ name: v.optional(v.string()) }),
 		harness: true,
-		async run({ harness, input }) {
+		async run({ harness, data }) {
 			const session = await harness.session();
-			const { data } = await session.skill('greet', {
-				args: { name: input.name ?? 'World' },
+			const { data: result } = await session.skill('greet', {
+				args: { name: data.name ?? 'World' },
 				result: v.object({ greeting: v.string() }),
 			});
-			return data;
+			return result;
 		},
 	});
 	return 'When asked to run a demo, call the `greet-with-skill` tool and report its result.';

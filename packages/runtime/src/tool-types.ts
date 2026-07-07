@@ -8,10 +8,10 @@ export type ToolOutputSchema = v.GenericSchema<any, NonNullable<unknown> | null>
 /**
  * The context passed to a tool's `run`. Every tool gets `log` (streamed into
  * the conversation as progress events) and the tool call's `signal`. Flags on
- * the definition extend it: an `input` schema adds `input`; `harness: true`
- * adds `harness` — the agent's runtime surface (sandbox `shell`/`fs`,
- * sessions, model calls). Tools without `harness` are pure functions of their
- * input.
+ * the definition extend it: an `input` schema adds `data` — the call's
+ * arguments, parsed by that schema; `harness: true` adds `harness` — the
+ * agent's runtime surface (sandbox `shell`/`fs`, sessions, model calls).
+ * Tools without `harness` are pure functions of their data.
  */
 export type ToolContext<
 	S extends ToolInputSchema | undefined,
@@ -24,7 +24,7 @@ export type ToolContext<
 	 * are not part of the tool result and the model never sees them.
 	 */
 	readonly log: FlueLogger;
-} & (S extends ToolInputSchema ? { readonly input: v.InferOutput<S> } : Record<never, never>) &
+} & (S extends ToolInputSchema ? { readonly data: v.InferOutput<S> } : Record<never, never>) &
 	// Non-distributive on purpose: for the default `boolean | undefined` the
 	// harness property is absent, so generic ToolDefinition consumers see the
 	// base context.

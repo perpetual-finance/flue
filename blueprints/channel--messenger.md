@@ -124,8 +124,8 @@ export function postMessage(ref: MessengerConversationRef) {
     name: 'post_messenger_message',
     description: 'Post to the Messenger conversation bound to this agent.',
     input: v.object({ text: v.pipe(v.string(), v.minLength(1)) }),
-    async run({ input }) {
-      const { text } = input;
+    async run({ data }) {
+      const { text } = data;
       const result = await client.messages.sendText({
         to: ref.participant,
         text,

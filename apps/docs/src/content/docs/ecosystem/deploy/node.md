@@ -148,12 +148,12 @@ function Reporter() {
     description: 'Compile the weekly metrics report.',
     input: v.object({ period: v.string() }),
     harness: true,
-    async run({ harness, input }) {
+    async run({ harness, data }) {
       const session = await harness.session();
-      const { data } = await session.prompt(`Compile the metrics report for ${input.period}.`, {
+      const response = await session.prompt(`Compile the metrics report for ${data.period}.`, {
         result: v.object({ summary: v.string() }),
       });
-      return data;
+      return response.data;
     },
   });
   return 'When asked for a report, call the `compile-report` tool.';

@@ -157,8 +157,8 @@ export function postMessage(ref: WhatsAppConversationRef) {
     input: v.object({
       text: v.pipe(v.string(), v.minLength(1), v.maxLength(4096)),
     }),
-    async run({ input }) {
-      const { text } = input;
+    async run({ data }) {
+      const { text } = data;
       const result = await sendTextMessage(ref, text);
       const messageId = result.messages[0]?.id;
       return { ...(messageId === undefined ? {} : { messageId }) };

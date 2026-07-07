@@ -44,10 +44,10 @@ const checkSpam = defineTool({
 		reasoning: v.string(),
 	}),
 	harness: true,
-	async run({ harness, input }) {
+	async run({ harness, data }) {
 		const session = await harness.session();
 		const result = await session.skill('spam-filter', {
-			args: { message: input.message },
+			args: { message: data.message },
 			result: v.object({
 				spam: v.boolean(),
 				confidence: v.picklist(['low', 'medium', 'high']),

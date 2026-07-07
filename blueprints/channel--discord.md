@@ -93,8 +93,8 @@ export function postMessage(ref: DiscordDestinationRef) {
     name: 'post_discord_message',
     description: 'Post a message to the Discord destination bound to this agent.',
     input: v.object({ content: v.pipe(v.string(), v.minLength(1)) }),
-    async run({ input }) {
-      const { content } = input;
+    async run({ data }) {
+      const { content } = data;
       const result = (await client.post(`/channels/${ref.channelId}/messages`, {
         body: { content },
       })) as { id?: string };

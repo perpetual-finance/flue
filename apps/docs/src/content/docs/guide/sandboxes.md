@@ -24,8 +24,8 @@ export const reviewDocument = defineTool({
   input: v.object({ document: v.string() }),
   harness: true,
 
-  async run({ harness, input }) {
-    await harness.fs.writeFile('document.md', input.document);
+  async run({ harness, data }) {
+    await harness.fs.writeFile('document.md', data.document);
     await (
       await harness.session()
     ).prompt('Review document.md and write your findings to review.md.');

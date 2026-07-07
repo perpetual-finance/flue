@@ -103,9 +103,9 @@ function Support() {
 		name: 'update_sentiment',
 		description: 'Record whether the customer is at risk of churning, based on what they say.',
 		input: v.object({ sentiment: v.picklist(['neutral', 'churn-risk']) }),
-		run: ({ input }) => {
-			setSentiment(input.sentiment);
-			return `Sentiment recorded: ${input.sentiment}.`;
+		run: ({ data }) => {
+			setSentiment(data.sentiment);
+			return `Sentiment recorded: ${data.sentiment}.`;
 		},
 	});
 

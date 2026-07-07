@@ -86,8 +86,8 @@ export function postMessage(ref: TelegramConversationRef) {
 		name: 'post_telegram_message',
 		description: 'Post a message to the Telegram conversation bound to this agent.',
 		input: v.object({ text: v.pipe(v.string(), v.minLength(1)) }),
-		async run({ input }) {
-			const message = await client.sendMessage(ref.chatId, input.text, {
+		async run({ data }) {
+			const message = await client.sendMessage(ref.chatId, data.text, {
 				...(ref.type === 'business-chat'
 					? { business_connection_id: ref.businessConnectionId }
 					: {}),

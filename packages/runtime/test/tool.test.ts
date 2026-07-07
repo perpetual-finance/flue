@@ -61,10 +61,10 @@ describe('defineTool()', () => {
 			description: 'Look up a value.',
 			input: v.object({ count: v.pipe(v.string(), v.transform(Number)) }),
 			output: v.pipe(v.number(), v.transform(String)),
-			run({ input, signal }) {
-				expectTypeOf(input).toEqualTypeOf<{ count: number }>();
+			run({ data, signal }) {
+				expectTypeOf(data).toEqualTypeOf<{ count: number }>();
 				expectTypeOf(signal).toEqualTypeOf<AbortSignal | undefined>();
-				return input.count;
+				return data.count;
 			},
 		});
 
@@ -72,12 +72,12 @@ describe('defineTool()', () => {
 		expectTypeOf<ToolOutput<typeof tool>>().toEqualTypeOf<string>();
 	});
 
-	it('omits input from run context when no input schema is declared', () => {
+	it('omits data from run context when no input schema is declared', () => {
 		defineTool({
 			name: 'refresh',
 			description: 'Refresh values.',
 			run(context) {
-				expectTypeOf(context).not.toHaveProperty('input');
+				expectTypeOf(context).not.toHaveProperty('data');
 				return undefined;
 			},
 		});
@@ -116,8 +116,8 @@ describe('defineTool()', () => {
 		).toThrow('top-level object schema');
 	});
 
-	it('applies input defaults and transforms before run receives input', async () => {
-		const run = vi.fn(({ input }: { input: { limit: number } }) => input.limit);
+	it('applies input defaults and transforms before run receives data', async () => {
+		const run = vi.fn(({ data }: { data: { limit: number } }) => data.limit);
 		const tool = defineTool({
 			name: 'lookup',
 			description: 'Look up recent values.',
@@ -130,7 +130,7 @@ describe('defineTool()', () => {
 		await expect(validateAndRunTool(tool, {})).resolves.toBe(10);
 		expect(run).toHaveBeenCalledWith(
 			expect.objectContaining({
-				input: { limit: 10 },
+				data: { limit: 10 },
 				signal: undefined,
 			}),
 		);
@@ -306,7 +306,7 @@ describe('custom tools', () => {
 								name: 'lookup',
 								description: 'Look up values.',
 								input: v.object({ limit: v.pipe(v.string(), v.transform(Number)) }),
-								run: async ({ input }) => input.limit,
+								run: async ({ data }) => data.limit,
 							}),
 						);
 					},
@@ -677,7 +677,7 @@ describe('custom tools', () => {
 		provider.setResponses([
 			fauxAssistantMessage(fauxToolCall('lookup', { count: 2 }), { stopReason: 'toolUse' }),
 		]);
-		let receivedInput: unknown;
+		let receivedData: unknown;
 		let receivedSignal: AbortSignal | undefined;
 		let markStarted: () => void = () => {};
 		const started = new Promise<void>((resolve) => {
@@ -687,8 +687,8 @@ describe('custom tools', () => {
 			name: 'lookup',
 			description: 'Look up a count.',
 			input: v.object({ count: v.number() }),
-			async run({ input, signal }) {
-				receivedInput = input;
+			async run({ data, signal }) {
+				receivedData = data;
 				receivedSignal = signal;
 				markStarted();
 				await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve()));
@@ -710,7 +710,7 @@ describe('custom tools', () => {
 		operation.abort('stop');
 
 		await expect(operation).rejects.toMatchObject({ name: 'AbortError' });
-		expect(receivedInput).toEqual({ count: 2 });
+		expect(receivedData).toEqual({ count: 2 });
 		expect(receivedSignal?.aborted).toBe(true);
 	});
 

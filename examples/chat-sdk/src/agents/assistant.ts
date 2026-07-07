@@ -56,8 +56,8 @@ const replyToChatThread = defineTool({
 		threadId: v.string(),
 		text: v.string(),
 	}),
-	async run({ input }) {
-		await bot.thread(input.threadId).post(input.text);
+	async run({ data }) {
+		await bot.thread(data.threadId).post(data.text);
 		return 'Reply sent.';
 	},
 });

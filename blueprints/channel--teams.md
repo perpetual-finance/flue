@@ -99,8 +99,8 @@ export function postMessage(ref: TeamsConversationRef) {
     name: 'post_teams_message',
     description: 'Post a message to the Microsoft Teams conversation bound to this agent.',
     input: v.object({ text: v.pipe(v.string(), v.minLength(1)) }),
-    async run({ input }) {
-      const { text } = input;
+    async run({ data }) {
+      const { text } = data;
       const result = await client.postMessage(ref, text);
       return { activityId: result.id };
     },

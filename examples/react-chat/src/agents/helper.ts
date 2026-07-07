@@ -42,13 +42,13 @@ function Helper() {
 		description:
 			'Look up the current weather for a city and stream a live weather card to the user.',
 		input: v.object({ city: v.string("The city to look up, e.g. 'Tokyo'.") }),
-		run: async ({ input }) => {
-			writeWeatherData({ city: input.city, status: 'loading' });
+		run: async ({ data }) => {
+			writeWeatherData({ city: data.city, status: 'loading' });
 			// Pretend lookup latency so the loading card is actually visible.
 			await new Promise((resolve) => setTimeout(resolve, 1200));
-			const forecast = pretendForecast(input.city);
-			writeWeatherData({ city: input.city, status: 'loaded', ...forecast });
-			return `${input.city}: ${forecast.tempC}°C, ${forecast.condition}. (Simulated demo data — the user already sees a weather card; answer in one short sentence.)`;
+			const forecast = pretendForecast(data.city);
+			writeWeatherData({ city: data.city, status: 'loaded', ...forecast });
+			return `${data.city}: ${forecast.tempC}°C, ${forecast.condition}. (Simulated demo data — the user already sees a weather card; answer in one short sentence.)`;
 		},
 	});
 
@@ -58,9 +58,9 @@ function Helper() {
 		input: v.object({
 			expression: v.string('A JavaScript arithmetic expression, e.g. "7 * 6".'),
 		}),
-		// Demo only: evaluates model-supplied input. Never ship arbitrary `Function`
+		// Demo only: evaluates model-supplied data. Never ship arbitrary `Function`
 		// evaluation of untrusted input in a real tool — use a sandbox or a parser.
-		run: async ({ input }) => String(Function(`"use strict"; return (${input.expression})`)()),
+		run: async ({ data }) => String(Function(`"use strict"; return (${data.expression})`)()),
 	});
 
 	useSubagent({

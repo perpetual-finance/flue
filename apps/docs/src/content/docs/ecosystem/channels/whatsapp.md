@@ -230,7 +230,7 @@ export function postMessage(ref: WhatsAppConversationRef) {
     input: v.object({
       text: v.pipe(v.string(), v.minLength(1), v.maxLength(4096)),
     }),
-    async run({ input: { text } }) {
+    async run({ data: { text } }) {
       const result = await sendTextMessage(ref, text);
       return { messageId: result.messages[0]?.id ?? null };
     },

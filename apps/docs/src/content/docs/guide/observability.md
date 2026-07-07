@@ -20,9 +20,9 @@ export const summarizeDocument = defineTool({
   input: v.object({ text: v.string() }),
   harness: true,
 
-  async run({ harness, log, input }) {
-    log.info('Summarization requested', { characters: input.text.length });
-    const response = await (await harness.session()).prompt(input.text);
+  async run({ harness, log, data }) {
+    log.info('Summarization requested', { characters: data.text.length });
+    const response = await (await harness.session()).prompt(data.text);
 
     log.info('Summarization completed', {
       tokens: response.usage.totalTokens,

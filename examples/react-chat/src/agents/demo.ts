@@ -50,16 +50,16 @@ function Demo() {
 		name: 'run_demo',
 		description: 'Run the demo background job: logs progress and returns a structured receipt.',
 		input: v.object({ requestedAt: v.string() }),
-		async run({ input, log }) {
-			log.info('demo job started', { requestedAt: input.requestedAt });
+		async run({ data, log }) {
+			log.info('demo job started', { requestedAt: data.requestedAt });
 			writeJobCardData({ status: 'running', step: 'starting' });
 			await new Promise((resolve) => setTimeout(resolve, 500));
-			log.info('demo job received input', { input });
+			log.info('demo job received data', { data });
 			writeJobCardData({ status: 'running', step: 'processing input' });
 			await new Promise((resolve) => setTimeout(resolve, 500));
 			log.info('demo job completed');
 			writeJobCardData({ status: 'done', step: 'finished' });
-			return { ok: true, requestedAt: input.requestedAt };
+			return { ok: true, requestedAt: data.requestedAt };
 		},
 	});
 	return 'When asked to run the demo, call the run_demo tool and report its result.';

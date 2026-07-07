@@ -78,23 +78,23 @@ export interface ToolRunFacilities {
 
 export function parseToolInput<TTool extends ToolDefinition>(
 	tool: TTool,
-	input?: unknown,
+	data?: unknown,
 	signal?: AbortSignal,
 	facilities?: ToolRunFacilities,
-): { context: Parameters<TTool['run']>[0]; input: unknown } {
+): { context: Parameters<TTool['run']>[0]; data: unknown } {
 	const base: Record<string, unknown> = {
 		signal,
 		log: facilities?.log ?? NOOP_LOGGER,
 		...(facilities?.harness ? { harness: facilities.harness } : {}),
 	};
-	if (!tool.input) return { context: base as Parameters<TTool['run']>[0], input: undefined };
-	const parsedInput = parseValibot(tool.input, input === undefined ? {} : input);
-	if (!parsedInput.success) {
-		throw new ToolInputValidationError({ tool: tool.name, issues: parsedInput.issues });
+	if (!tool.input) return { context: base as Parameters<TTool['run']>[0], data: undefined };
+	const parsed = parseValibot(tool.input, data === undefined ? {} : data);
+	if (!parsed.success) {
+		throw new ToolInputValidationError({ tool: tool.name, issues: parsed.issues });
 	}
 	return {
-		context: { ...base, input: parsedInput.output } as Parameters<TTool['run']>[0],
-		input: parsedInput.output,
+		context: { ...base, data: parsed.output } as Parameters<TTool['run']>[0],
+		data: parsed.output,
 	};
 }
 
@@ -128,7 +128,7 @@ export function validateToolOutput<TTool extends ToolDefinition>(
 
 export async function validateAndRunTool<TTool extends ToolDefinition>(
 	tool: TTool,
-	input?: unknown,
+	data?: unknown,
 	signal?: AbortSignal,
 ): Promise<ToolOutput<TTool>> {
 	if (tool.harness) {
@@ -136,7 +136,7 @@ export async function validateAndRunTool<TTool extends ToolDefinition>(
 			`[flue] Tool "${tool.name}" declares \`harness: true\` and can only run inside an agent session — a standalone run has no harness.`,
 		);
 	}
-	const parsed = parseToolInput(tool, input, signal);
+	const parsed = parseToolInput(tool, data, signal);
 	return validateToolOutput(tool, await tool.run(parsed.context));
 }
 

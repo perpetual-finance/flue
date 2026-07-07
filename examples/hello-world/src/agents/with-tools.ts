@@ -18,7 +18,7 @@ function WithTools() {
 				name: 'calculator',
 				description: 'Perform arithmetic. Returns the numeric result as a string.',
 				input: v.object({ expression: v.string() }),
-				run: async ({ input }) => String(Function(`"use strict"; return (${input.expression})`)()),
+				run: async ({ data }) => String(Function(`"use strict"; return (${data.expression})`)()),
 			});
 			const { text } = await session.prompt(
 				'Use the calculator tool to compute 7 * 6. Tell me the result.',

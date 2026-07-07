@@ -266,10 +266,10 @@ function AutoTriage() {
     description: 'Triage one GitLab issue and auto-fix critical reproducible ones.',
     input: v.object({ issueIid: v.number() }),
     harness: true,
-    async run({ harness, input }) {
+    async run({ harness, data }) {
       const session = await harness.session();
-      const { data } = await session.skill('triage', {
-        args: { issueIid: input.issueIid },
+      const { data: triage } = await session.skill('triage', {
+        args: { issueIid: data.issueIid },
         result: v.object({
           severity: v.picklist(['low', 'medium', 'high', 'critical']),
           reproducible: v.boolean(),
@@ -277,13 +277,13 @@ function AutoTriage() {
         }),
       });
 
-      if (data.severity === 'critical' && data.reproducible) {
+      if (triage.severity === 'critical' && triage.reproducible) {
         await session.skill('auto-fix', {
-          args: { issueIid: input.issueIid },
+          args: { issueIid: data.issueIid },
           result: v.object({ fix_applied: v.boolean(), branch: v.optional(v.string()) }),
         });
       }
-      return data;
+      return triage;
     },
   });
   return 'When given an issue IID, call the `triage-issue` tool and report its result.';

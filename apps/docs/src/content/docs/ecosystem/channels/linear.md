@@ -192,7 +192,7 @@ export function postMessage(ref: LinearConversationRef) {
     name: 'post_linear_message',
     description: 'Post to the Linear conversation bound to this agent.',
     input: v.object({ text: v.pipe(v.string(), v.minLength(1)) }),
-    async run({ input: { text } }) {
+    async run({ data: { text } }) {
       if (ref.type === 'agent-session') {
         const result = await client.createAgentActivity({
           agentSessionId: ref.agentSessionId,

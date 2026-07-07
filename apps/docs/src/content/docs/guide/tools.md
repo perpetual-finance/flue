@@ -30,8 +30,8 @@ export const lookupOrderStatus = defineTool({
   output: v.object({
     status: v.nullable(v.string()),
   }),
-  async run({ input, signal }) {
-    const status = orderStatuses.get(input.orderId) ?? null;
+  async run({ data, signal }) {
+    const status = orderStatuses.get(data.orderId) ?? null;
     return { status };
   },
 });
@@ -43,7 +43,7 @@ A custom tool has these parts:
 - `description` helps the model decide when the capability is appropriate.
 - `input` is an optional top-level [Valibot](https://valibot.dev) object schema for model-supplied input. Flue validates and parses it before `run`; when validation fails, the model receives a tool error and can retry.
 - `output` is an optional Valibot schema for typed structured output. Flue validates the result, snapshots it as JSON-compatible data, and JSON-stringifies it for the model.
-- `run({ input, log, signal })` performs the application-controlled work. `input` is available when declared, `log` records structured progress (see [Observability](/docs/guide/observability/)), and `signal` can cancel downstream work. Without an `output` schema, return JSON-compatible data; returning `undefined` sends `null` to the model.
+- `run({ data, log, signal })` performs the application-controlled work. `data` is the call's arguments parsed by the `input` schema, available when the schema is declared; `log` records structured progress (see [Observability](/docs/guide/observability/)); and `signal` can cancel downstream work. Without an `output` schema, return JSON-compatible data; returning `undefined` sends `null` to the model.
 
 Use clear action-oriented names, such as `lookup_order_status` or `create_support_ticket`. Tools active in the same render must have distinct names.
 
@@ -81,9 +81,9 @@ export const reviewChange = defineTool({
   description: 'Have a scoped model call assess one proposed change.',
   input: v.object({ change: v.string() }),
   harness: true,
-  async run({ harness, input }) {
+  async run({ harness, data }) {
     const session = await harness.session();
-    const response = await session.prompt(`Review this change:\n\n${input.change}`);
+    const response = await session.prompt(`Review this change:\n\n${data.change}`);
     return response.text;
   },
 });
@@ -111,8 +111,8 @@ function CustomerOrders() {
     name: 'lookup_customer_order',
     description: 'Look up one order belonging to this customer.',
     input: v.object({ orderId: v.string() }),
-    async run({ input }) {
-      const status = customerId ? await orders.getStatus(customerId, input.orderId) : undefined;
+    async run({ data }) {
+      const status = customerId ? await orders.getStatus(customerId, data.orderId) : undefined;
       return status ?? 'No accessible order was found.';
     },
   });
@@ -149,12 +149,12 @@ export function commentOnIssue(ref: { owner: string; repo: string; issueNumber: 
     input: v.object({
       body: v.string(),
     }),
-    async run({ input, signal }) {
+    async run({ data, signal }) {
       await client.rest.issues.createComment({
         owner: ref.owner,
         repo: ref.repo,
         issue_number: ref.issueNumber,
-        body: input.body,
+        body: data.body,
         request: { signal },
       });
       return { posted: true };

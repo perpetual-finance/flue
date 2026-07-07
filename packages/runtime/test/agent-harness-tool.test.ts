@@ -187,10 +187,10 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 				description: 'Ask a model through the harness.',
 				input: v.object({ question: v.string() }),
 				harness: true,
-				run: async ({ input, harness, log }) => {
-					log.info('asking', { question: input.question });
+				run: async ({ data, harness, log }) => {
+					log.info('asking', { question: data.question });
 					const session = await harness.session();
-					const response = await session.prompt(input.question);
+					const response = await session.prompt(data.question);
 					harnessAnswer = response.text;
 					return response.text;
 				},
@@ -218,7 +218,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 		await coordinator.shutdown();
 
 		// Plain tools: log + signal, no harness surface.
-		expect(pureContextKeys).toEqual(['input', 'log', 'signal']);
+		expect(pureContextKeys).toEqual(['data', 'log', 'signal']);
 		// The harness tool drove a real child model call.
 		expect(harnessAnswer).toBe('CHILD-ANSWER');
 		// ctx.log streams for BOTH kinds of tool, attributed to the call.

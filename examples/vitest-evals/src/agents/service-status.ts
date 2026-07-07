@@ -12,7 +12,7 @@ function ServiceStatus() {
 		name: 'get_service_status',
 		description: 'Look up the current operational status for a service.',
 		input: v.object({ service: v.string() }),
-		run: async ({ input }) => `${input.service}: operational`,
+		run: async ({ data }) => `${data.service}: operational`,
 	});
 	return 'Use the service status tool before answering questions about system health.';
 }

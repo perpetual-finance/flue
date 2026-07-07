@@ -307,7 +307,7 @@ function Support() {
     description: 'Answer one support request using the workspace articles.',
     input: v.object({ message: v.string() }),
     harness: true,
-    async run({ harness, input }) {
+    async run({ harness, data }) {
       await harness.fs.writeFile(
         '/workspace/articles/reset-password.md',
         '# Reset your password\n\nUse the account settings page to request a password reset email.',
@@ -315,7 +315,7 @@ function Support() {
 
       const session = await harness.session();
       const { text } = await session.prompt(
-        `Search the workspace for articles relevant to this request, then write a helpful response.\n\nCustomer: ${input.message}`,
+        `Search the workspace for articles relevant to this request, then write a helpful response.\n\nCustomer: ${data.message}`,
       );
       return text;
     },

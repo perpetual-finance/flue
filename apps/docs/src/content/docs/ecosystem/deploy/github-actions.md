@@ -256,10 +256,10 @@ function AutoTriage() {
     description: 'Triage one GitHub issue and auto-fix critical reproducible ones.',
     input: v.object({ issueNumber: v.number() }),
     harness: true,
-    async run({ harness, input }) {
+    async run({ harness, data }) {
       const session = await harness.session();
-      const { data } = await session.skill('triage', {
-        args: { issueNumber: input.issueNumber },
+      const { data: triage } = await session.skill('triage', {
+        args: { issueNumber: data.issueNumber },
         result: v.object({
           severity: v.picklist(['low', 'medium', 'high', 'critical']),
           reproducible: v.boolean(),
@@ -267,13 +267,13 @@ function AutoTriage() {
         }),
       });
 
-      if (data.severity === 'critical' && data.reproducible) {
+      if (triage.severity === 'critical' && triage.reproducible) {
         await session.skill('auto-fix', {
-          args: { issueNumber: input.issueNumber },
+          args: { issueNumber: data.issueNumber },
           result: v.object({ fix_applied: v.boolean(), pr_url: v.optional(v.string()) }),
         });
       }
-      return data;
+      return triage;
     },
   });
   return 'When given an issue number, call the `triage-issue` tool and report its result.';

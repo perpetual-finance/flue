@@ -6,7 +6,7 @@ const lookup = defineTool({
 	name: 'lookup_weather',
 	description: 'Look up current weather for a city.',
 	input: v.object({ city: v.string() }),
-	run: async ({ input }) => `${input.city}: sunny, 72 F`,
+	run: async ({ data }) => `${data.city}: sunny, 72 F`,
 });
 
 /** A tool-using agent: tool calls show up as `tool` spans in Braintrust. */

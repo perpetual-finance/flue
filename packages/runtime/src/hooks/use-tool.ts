@@ -6,7 +6,7 @@ import { currentScope, requireRenderFrame } from './frame.ts';
  * Mount a model-callable tool for the current render.
  *
  * Accepts a `defineTool(...)` value or an inline definition object (same
- * validation, applied here; `run`'s input is typed from the `input` schema).
+ * validation, applied here; `run`'s `data` is typed from the `input` schema).
  * Called directly in the agent body or inside a capability — either way the
  * tool joins the render's single flat tool set:
  *
@@ -32,7 +32,7 @@ export function useTool<
 	 * Connect this tool to the agent's runtime: `run` receives `harness` —
 	 * the one interface to the sandbox (`harness.shell()`, `harness.fs`) and
 	 * to models (`harness.session()`). Tools without it are pure functions of
-	 * their input.
+	 * their data.
 	 */
 	harness?: THarness;
 	run: ToolDefinition<TInput, TOutput, THarness>['run'];

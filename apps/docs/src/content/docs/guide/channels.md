@@ -259,12 +259,12 @@ export function commentOnIssue(ref: { owner: string; repo: string; issueNumber: 
     name: 'comment_on_github_issue',
     description: 'Comment on the GitHub issue bound to this agent.',
     input: v.object({ body: v.string() }),
-    async run({ input, signal }) {
+    async run({ data, signal }) {
       await client.rest.issues.createComment({
         owner: ref.owner,
         repo: ref.repo,
         issue_number: ref.issueNumber,
-        body: input.body,
+        body: data.body,
         request: { signal },
       });
       return { posted: true };

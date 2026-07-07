@@ -477,10 +477,10 @@ function useCaseContext() {
     name: 'load_case',
     description: 'Load the case and stream a live card to the operator.',
     input: v.object({ caseId: v.string() }),
-    run: async ({ input }) => {
-      writeCaseCardData({ caseId: input.caseId, status: 'loading' });
-      const found = await fetchCase(input.caseId);
-      writeCaseCardData({ caseId: input.caseId, status: 'loaded' });
+    run: async ({ data }) => {
+      writeCaseCardData({ caseId: data.caseId, status: 'loading' });
+      const found = await fetchCase(data.caseId);
+      writeCaseCardData({ caseId: data.caseId, status: 'loaded' });
       return found.summary;
     },
   });
@@ -554,8 +554,8 @@ const lookupPolicy = defineTool({
   description: 'Read one approved policy by topic.',
   input: v.object({ topic: v.string() }),
   output: v.object({ title: v.string(), body: v.string() }),
-  async run({ input, signal }) {
-    return readPolicy(input.topic, { signal });
+  async run({ data, signal }) {
+    return readPolicy(data.topic, { signal });
   },
 });
 ```
@@ -583,15 +583,15 @@ Harness invocations are scoped to the tool call, count against the delegation-de
 type ToolContext<S, H> = {
   readonly signal?: AbortSignal;
   readonly log: FlueLogger;
-} & (S extends ToolInputSchema ? { readonly input: v.InferOutput<S> } : {}) &
+} & (S extends ToolInputSchema ? { readonly data: v.InferOutput<S> } : {}) &
   (H extends true ? { readonly harness: FlueHarness } : {});
 ```
 
-Every tool's `run` receives `log` (streamed into the conversation as progress events, never seen by the model) and the tool call's `signal`. `input` is present when the definition declares an `input` schema; `harness` is present when the definition declares `harness: true`.
+Every tool's `run` receives `log` (streamed into the conversation as progress events, never seen by the model) and the tool call's `signal`. `data` — the call's arguments parsed by the `input` schema — is present when the definition declares an `input` schema; `harness` is present when the definition declares `harness: true`.
 
 ### Breaking migration
 
-The old `parameters` and `execute` markers now throw when a tool is defined. Rename `parameters` to `input`, rename `execute(args, signal)` to `run({ input, signal })`, and return structured JSON-compatible data directly instead of calling `JSON.stringify(...)`. Add `output` when the returned shape should be typed and validated.
+The old `parameters` and `execute` markers now throw when a tool is defined. Rename `parameters` to `input`, rename `execute(args, signal)` to `run({ data, signal })`, and return structured JSON-compatible data directly instead of calling `JSON.stringify(...)`. Add `output` when the returned shape should be typed and validated.
 
 ## `defineSkill(...)`
 

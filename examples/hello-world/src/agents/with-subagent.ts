@@ -17,13 +17,16 @@ function WithSubagent() {
 		description: 'Delegate a greeting to the `greeter` subagent and return the structured result.',
 		input: v.object({ name: v.optional(v.string()) }),
 		harness: true,
-		async run({ harness, input }) {
+		async run({ harness, data }) {
 			const session = await harness.session();
-			const { data } = await session.task(`Greet the user named "${input.name ?? 'Developer'}".`, {
-				agent: 'greeter',
-				result: v.object({ greeting: v.string() }),
-			});
-			return data;
+			const { data: result } = await session.task(
+				`Greet the user named "${data.name ?? 'Developer'}".`,
+				{
+					agent: 'greeter',
+					result: v.object({ greeting: v.string() }),
+				},
+			);
+			return result;
 		},
 	});
 	return 'When asked to run a demo, call the `subagent-greet` tool and report its result.';

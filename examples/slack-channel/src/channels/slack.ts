@@ -58,11 +58,11 @@ export function replyInThread(ref: { channelId: string; threadTs: string }) {
 		name: 'reply_in_slack_thread',
 		description: 'Reply in the Slack thread bound to this agent.',
 		input: v.object({ text: v.pipe(v.string(), v.minLength(1)) }),
-		async run({ input }) {
+		async run({ data }) {
 			const result = await client.chat.postMessage({
 				channel: ref.channelId,
 				thread_ts: ref.threadTs,
-				text: input.text,
+				text: data.text,
 			});
 			return {
 				...(result.channel === undefined ? {} : { channel: result.channel }),

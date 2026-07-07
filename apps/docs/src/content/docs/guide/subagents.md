@@ -74,10 +74,10 @@ export const reviewChange = defineTool({
   input: v.object({ change: v.string() }),
   harness: true,
 
-  async run({ harness, input }) {
+  async run({ harness, data }) {
     const response = await (
       await harness.session()
-    ).task(input.change, {
+    ).task(data.change, {
       agent: 'reviewer',
       result: Review,
     });

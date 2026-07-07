@@ -25,10 +25,10 @@ import { isRendering, requireRenderFrame } from './frame.ts';
  *     name: 'load_case',
  *     description: 'Load the case and stream a live card to the operator.',
  *     input: v.object({ caseId: v.string() }),
- *     run: async ({ input }) => {
- *       writeCaseCardData({ caseId: input.caseId, status: 'loading' });
- *       const found = await fetchCase(input.caseId);
- *       writeCaseCardData({ caseId: input.caseId, status: 'loaded' });
+ *     run: async ({ data }) => {
+ *       writeCaseCardData({ caseId: data.caseId, status: 'loading' });
+ *       const found = await fetchCase(data.caseId);
+ *       writeCaseCardData({ caseId: data.caseId, status: 'loaded' });
  *       return found.summary;
  *     },
  *   });

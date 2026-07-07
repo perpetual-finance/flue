@@ -107,11 +107,11 @@ export const reviewChange = defineTool({
   input: v.object({ change: v.string() }),
   harness: true,
 
-  async run({ harness, input }) {
+  async run({ harness, data }) {
     const response = await (
       await harness.session()
     ).skill('review', {
-      args: { change: input.change },
+      args: { change: data.change },
       result: v.object({
         approved: v.boolean(),
         summary: v.string(),

@@ -102,8 +102,8 @@ export function postMessage(ref: GoogleChatConversationRef) {
 		name: 'post_google_chat_message',
 		description: 'Post a message to the Google Chat conversation bound to this agent.',
 		input: v.object({ text: v.pipe(v.string(), v.minLength(1)) }),
-		async run({ input }) {
-			const message = await client.postMessage(ref, input.text);
+		async run({ data }) {
+			const message = await client.postMessage(ref, data.text);
 			return { message: message.name };
 		},
 	});
