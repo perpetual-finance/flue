@@ -1,8 +1,8 @@
 import { defineTool, dispatch } from '@flue/runtime';
-import { createTeamsChannel, type TeamsConversationRef } from '@flue/teams';
+import { createTeamsChannel } from '@flue/teams';
 import * as v from 'valibot';
 import assistant from '../agents/assistant.ts';
-import { createTeamsClient } from '../lib/teams-client.ts';
+import { createTeamsClient, type TeamsMessageRef } from '../lib/teams-client.ts';
 
 const appId = requiredEnv('TEAMS_APP_ID');
 const tenantId = requiredEnv('TEAMS_TENANT_ID');
@@ -26,8 +26,19 @@ export const channel = createTeamsChannel({
 	// Path: /channels/teams/activities
 	async activities({ activity }) {
 		if (activity.type !== 'message' || !activity.text) return;
+		const destination = channel.destination(activity);
 		await dispatch(assistant, {
-			id: channel.conversationKey(channel.destination(activity)),
+			id: channel.conversationKey(destination),
+			// Recorded once when this event creates the instance; ignored after.
+			data: {
+				serviceUrl: destination.serviceUrl,
+				conversationId: destination.conversationId,
+				botId: destination.botId,
+				...(destination.threadId === undefined ? {} : { threadId: destination.threadId }),
+				...(activity.conversation.name === undefined
+					? {}
+					: { conversationName: activity.conversation.name }),
+			},
 			message: {
 				kind: 'signal',
 				type: 'teams.message',
@@ -42,7 +53,7 @@ export const channel = createTeamsChannel({
 	},
 });
 
-export function postMessage(ref: TeamsConversationRef) {
+export function postMessage(ref: TeamsMessageRef) {
 	return defineTool({
 		name: 'post_teams_message',
 		description: 'Post a message to the Microsoft Teams conversation bound to this agent.',

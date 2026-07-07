@@ -32,6 +32,8 @@ export const channel = createStripeChannel({
 				};
 				await dispatch(assistant, {
 					id: stripeCustomerInstanceId(customer),
+					// Recorded once when this event creates the instance; ignored after.
+					data: customer,
 					message: {
 						kind: 'signal',
 						type: `stripe.${event.type}`,
@@ -85,49 +87,11 @@ export function stripeCustomerInstanceId(ref: StripeCustomerRef): string {
 	return `stripe-customer:${encodeURIComponent(JSON.stringify(ref))}`;
 }
 
-export function parseStripeCustomerInstanceId(id: string): StripeCustomerRef {
-	const prefix = 'stripe-customer:';
-	if (!id.startsWith(prefix)) {
-		throw new Error('Stripe agent instance id is invalid.');
-	}
-	let value: unknown;
-	try {
-		value = JSON.parse(decodeURIComponent(id.slice(prefix.length)));
-	} catch {
-		throw new Error('Stripe agent instance id is invalid.');
-	}
-	if (!isRecord(value) || !isStripeId(value.customerId, 'cus_')) {
-		throw new Error('Stripe agent instance id is invalid.');
-	}
-	if (value.accountId !== undefined && !isStripeId(value.accountId, 'acct_')) {
-		throw new Error('Stripe agent instance id is invalid.');
-	}
-	if (
-		value.context !== undefined &&
-		(typeof value.context !== 'string' || value.context.length === 0)
-	) {
-		throw new Error('Stripe agent instance id is invalid.');
-	}
-	return {
-		customerId: value.customerId,
-		...(value.accountId === undefined ? {} : { accountId: value.accountId }),
-		...(value.context === undefined ? {} : { context: value.context }),
-	};
-}
-
 function stripeCustomerId(
 	customer: string | Stripe.Customer | Stripe.DeletedCustomer | null,
 ): string | undefined {
 	if (typeof customer === 'string') return customer;
 	return customer?.id;
-}
-
-function isStripeId(value: unknown, prefix: string): value is string {
-	return typeof value === 'string' && value.startsWith(prefix) && value.length > prefix.length;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function requiredEnv(name: string): string {

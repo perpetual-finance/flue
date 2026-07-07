@@ -29,6 +29,11 @@ export const channel = createIntercomChannel({
 				};
 				await dispatch(assistant, {
 					id: channel.conversationKey(conversation),
+					// Recorded once when this event creates the instance; ignored after.
+					data: {
+						workspaceId: conversation.workspaceId,
+						conversationId: conversation.conversationId,
+					},
 					message: {
 						kind: 'signal',
 						type: `intercom.${notification.topic}`,

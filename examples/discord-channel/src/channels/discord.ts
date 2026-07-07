@@ -36,8 +36,14 @@ export const channel = createDiscordChannel({
 			interaction.data.type === 1
 				? interaction.data.options?.find((option) => option.type === 3)?.value
 				: undefined;
+		const channelName = interaction.channel?.name ?? undefined;
 		await dispatch(assistant, {
 			id: channel.conversationKey(destination),
+			// Recorded once when this event creates the instance; ignored after.
+			data: {
+				channelId: destination.channelId,
+				...(channelName === undefined ? {} : { channelName }),
+			},
 			message: {
 				kind: 'signal',
 				type: 'discord.command.ask',
@@ -52,7 +58,7 @@ export const channel = createDiscordChannel({
 	},
 });
 
-export function postMessage(ref: DiscordDestinationRef) {
+export function postMessage(ref: { channelId: string }) {
 	return defineTool({
 		name: 'post_discord_message',
 		description: 'Post a message to the Discord destination bound to this agent.',

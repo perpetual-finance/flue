@@ -1,5 +1,5 @@
 import { defineTool, dispatch } from '@flue/runtime';
-import { createTwilioChannel, type TwilioConversationRef } from '@flue/twilio';
+import { createTwilioChannel } from '@flue/twilio';
 import * as v from 'valibot';
 import assistant from '../agents/assistant.ts';
 import { TwilioClient } from '../twilio-client.ts';
@@ -37,6 +37,19 @@ export const channel = createTwilioChannel({
 		}
 		await dispatch(assistant, {
 			id: channel.conversationKey(conversation),
+			// Recorded once when this event creates the instance; ignored after.
+			data:
+				conversation.type === 'messaging-service'
+					? {
+							type: conversation.type,
+							messagingServiceSid: conversation.messagingServiceSid,
+							participant: conversation.participant,
+						}
+					: {
+							type: conversation.type,
+							address: conversation.address,
+							participant: conversation.participant,
+						},
 			message: {
 				kind: 'signal',
 				type: 'twilio.message',
@@ -47,7 +60,11 @@ export const channel = createTwilioChannel({
 	},
 });
 
-export function postMessage(ref: TwilioConversationRef) {
+export function postMessage(
+	ref:
+		| { type: 'address'; address: string; participant: string }
+		| { type: 'messaging-service'; messagingServiceSid: string; participant: string },
+) {
 	return defineTool({
 		name: 'post_twilio_message',
 		description: 'Post a message to the Twilio conversation bound to this agent.',

@@ -91,6 +91,12 @@ export const channel = createShopifyChannel({
         const eventId = c.req.header('x-shopify-event-id');
         await dispatch(orders, {
           id: orderInstanceId(shopDomain, order.id),
+          // Recorded once when this event creates the instance; ignored after.
+          data: {
+            shopDomain,
+            orderId: order.id,
+            orderName: order.name,
+          },
           message: {
             kind: 'signal',
             type: 'shopify.orders/create',
@@ -98,7 +104,6 @@ export const channel = createShopifyChannel({
             attributes: {
               shopDomain,
               orderId: order.id,
-              orderName: order.name,
               ...(webhookId === undefined ? {} : { webhookId }),
               ...(eventId === undefined ? {} : { eventId }),
             },
@@ -187,32 +192,6 @@ export function orderInstanceId(shopDomain: string, orderId: string): string {
   }
   return `${ORDER_INSTANCE_PREFIX}${encodeURIComponent(shopDomain)}:${encodeURIComponent(orderId)}`;
 }
-
-export function orderRefFromInstanceId(id: string): {
-  shopDomain: string;
-  orderId: string;
-} {
-  if (!id.startsWith(ORDER_INSTANCE_PREFIX)) {
-    throw new TypeError('Expected a local Shopify order instance id.');
-  }
-  const encoded = id.slice(ORDER_INSTANCE_PREFIX.length);
-  const separator = encoded.indexOf(':');
-  if (separator < 1) {
-    throw new TypeError('Expected a local Shopify order instance id.');
-  }
-  let shopDomain: string;
-  let orderId: string;
-  try {
-    shopDomain = decodeURIComponent(encoded.slice(0, separator));
-    orderId = decodeURIComponent(encoded.slice(separator + 1));
-  } catch {
-    throw new TypeError('Expected a local Shopify order instance id.');
-  }
-  if (!shopDomain || !orderId) {
-    throw new TypeError('Expected a local Shopify order instance id.');
-  }
-  return { shopDomain, orderId };
-}
 ```
 
 ## Mount the channel
@@ -254,29 +233,44 @@ client from trusted configuration and uses the header only to reject an
 unexpected route context. A multi-shop application must resolve installations
 through its own authenticated state and authorization policy.
 
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the shop and order identity — the agent reads them with
+`useInitialData()` instead of parsing the instance id — plus the order name
+already parsed from the payload. Per-message facts stay on the signal's
+`attributes`.
+
 ## Wire the agent
 
 Bind the trusted shop and order selected by application code:
 
 ```ts
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import {
-  orderRefFromInstanceId,
-  retrieveOrder,
-} from '../channels/shopify.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { retrieveOrder } from '../channels/shopify.ts';
 
-function Orders({ id }: AgentProps) {
-	const { shopDomain, orderId } = orderRefFromInstanceId(id);
-	if (shopDomain !== process.env.SHOPIFY_SHOP_DOMAIN) {
+const input = v.object({
+  shopDomain: v.string(),
+  orderId: v.string(),
+  orderName: v.string(),
+});
+
+function Orders() {
+	const data = useInitialData<v.InferOutput<typeof input>>();
+	if (!data) throw new Error('This agent is created by the Shopify channel dispatch.');
+	if (data.shopDomain !== process.env.SHOPIFY_SHOP_DOMAIN) {
 		throw new TypeError('Unexpected Shopify shop.');
 	}
-	useTool(retrieveOrder(orderId));
-	return 'Review the newly created Shopify order and summarize any fulfillment or payment follow-up.';
+	useTool(retrieveOrder(data.orderId));
+	return `Review the newly created Shopify order ${data.orderName} and summarize any fulfillment or payment follow-up.`;
 }
 
-export default defineAgent(Orders, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Orders, { model: 'anthropic/claude-haiku-4-5', input });
 ```
+
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

@@ -99,6 +99,11 @@ export const channel = createMessengerChannel({
         );
         await dispatch(assistant, {
           id: channel.conversationKey(conversation),
+          // Recorded once when this event creates the instance; ignored after.
+          data: {
+            pageId: conversation.pageId,
+            participant: conversation.participant,
+          },
           message: {
             kind: 'signal',
             type: 'messenger.message',
@@ -163,16 +168,30 @@ provider URL accordingly.
 
 ```ts
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, postMessage } from '../channels/messenger.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { postMessage } from '../channels/messenger.ts';
 
-function Assistant({ id }: AgentProps) {
-	useTool(postMessage(channel.parseConversationKey(id)));
+const input = v.object({
+	pageId: v.string(),
+	participant: v.variant('type', [
+		v.object({ type: v.literal('page-scoped-id'), id: v.string() }),
+		v.object({ type: v.literal('user-ref'), id: v.string() }),
+	]),
+});
+
+function Assistant() {
+	const data = useInitialData<v.InferOutput<typeof input>>();
+	if (!data) throw new Error('This agent is created by the Messenger channel dispatch.');
+	useTool(postMessage(data));
 	return 'Reply concisely in the bound Facebook Messenger conversation.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
+
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback
@@ -233,6 +252,13 @@ verified deliveries.
 native messaging event. Page-scoped ids and `user_ref` values are distinct
 canonical participant types. Bind the derived conversation to a tool in trusted
 code; do not let the model choose a recipient id.
+
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the conversation's `pageId` and `participant` — the agent
+reads them with `useInitialData()` instead of parsing the instance id. The
+webhook carries no profile name, so there is no further context to fold in.
+Per-message facts stay on the signal's `attributes`.
 
 Opt-in events may contain a `notification_messages_token`. Treat it as a
 short-lived provider capability. Keep tokens and full native payloads out of

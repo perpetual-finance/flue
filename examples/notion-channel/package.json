@@ -12,7 +12,8 @@
 		"@flue/notion": "workspace:*",
 		"@flue/runtime": "workspace:*",
 		"@notionhq/client": "*",
-		"hono": "^4.7.0"
+		"hono": "^4.7.0",
+		"valibot": "^1.0.0"
 	},
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "^1.39.2",

@@ -12,7 +12,8 @@
 		"@flue/runtime": "workspace:*",
 		"@flue/zendesk": "workspace:*",
 		"hono": "^4.7.0",
-		"lossless-json": "*"
+		"lossless-json": "*",
+		"valibot": "^1.0.0"
 	},
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "^1.39.2",

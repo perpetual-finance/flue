@@ -36,11 +36,7 @@ message, event policy, and tool:
 
 ```ts
 // flue-blueprint: channel/linear@1
-import {
-  createLinearChannel,
-  type LinearConversationRef,
-  type LinearWebhookPayload,
-} from '@flue/linear';
+import { createLinearChannel, type LinearWebhookPayload } from '@flue/linear';
 import { defineTool, dispatch } from '@flue/runtime';
 import { LinearClient } from '@linear/sdk';
 import * as v from 'valibot';
@@ -74,6 +70,13 @@ export const channel = createLinearChannel({
           issueId: comment.issueId,
           ...(comment.parentId ? { threadCommentId: comment.parentId } : {}),
         }),
+        // Recorded once when this event creates the instance; ignored after.
+        data: {
+          type: 'issue',
+          issueId: comment.issueId,
+          ...(comment.parentId ? { threadCommentId: comment.parentId } : {}),
+          ...(comment.issue?.title ? { issueTitle: comment.issue.title } : {}),
+        },
         message: {
           kind: 'signal',
           type: 'linear.comment.created',
@@ -95,6 +98,14 @@ export const channel = createLinearChannel({
           organizationId: payload.organizationId,
           agentSessionId: payload.agentSession.id,
         }),
+        // Recorded once when this event creates the instance; ignored after.
+        data: {
+          type: 'agent-session',
+          agentSessionId: payload.agentSession.id,
+          ...(payload.agentSession.issue?.title
+            ? { issueTitle: payload.agentSession.issue.title }
+            : {}),
+        },
         message: {
           kind: 'signal',
           type: `linear.agent_session.${payload.action}`,
@@ -124,7 +135,12 @@ function isAgentSessionEvent(
   return payload.type === 'AgentSessionEvent' && 'agentSession' in payload;
 }
 
-export function postMessage(ref: LinearConversationRef) {
+/** The subset of `LinearConversationRef` actually needed to post a message. */
+export type LinearMessageRef =
+  | { type: 'agent-session'; agentSessionId: string }
+  | { type: 'issue'; issueId: string; threadCommentId?: string };
+
+export function postMessage(ref: LinearMessageRef) {
   return defineTool({
     name: 'post_linear_message',
     description: 'Post a message to the Linear conversation bound to this agent.',
@@ -182,20 +198,48 @@ The optional organization and webhook ids pin one endpoint to a fixed
 integration. Omit them only when the application intentionally accepts every
 organization or webhook authorized by the signing secret.
 
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the issue or agent-session fields the tool needs — the
+agent reads them with `useInitialData()` instead of parsing the instance id —
+plus the issue title when the webhook includes one. Per-message facts stay on
+the signal's `attributes`.
+
 ## Wire the agent
 
 ```ts
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, postMessage } from '../channels/linear.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { postMessage } from '../channels/linear.ts';
 
-function Assistant({ id }: AgentProps) {
-	useTool(postMessage(channel.parseConversationKey(id)));
-	return 'Reply concisely in the bound Linear conversation.';
+const input = v.variant('type', [
+	v.object({
+		type: v.literal('agent-session'),
+		agentSessionId: v.string(),
+		issueTitle: v.optional(v.string()),
+	}),
+	v.object({
+		type: v.literal('issue'),
+		issueId: v.string(),
+		threadCommentId: v.optional(v.string()),
+		issueTitle: v.optional(v.string()),
+	}),
+]);
+
+function Assistant() {
+	const data = useInitialData<v.InferOutput<typeof input>>();
+	if (!data) throw new Error('This agent is created by the Linear channel dispatch.');
+	useTool(postMessage(data));
+	const issueTitle = data.issueTitle ? ` on "${data.issueTitle}"` : '';
+	return `Reply concisely in the bound Linear conversation${issueTitle}.`;
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
+
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

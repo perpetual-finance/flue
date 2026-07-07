@@ -1,8 +1,4 @@
-import {
-	createLinearChannel,
-	type LinearConversationRef,
-	type LinearWebhookPayload,
-} from '@flue/linear';
+import { createLinearChannel, type LinearWebhookPayload } from '@flue/linear';
 import { defineTool, dispatch } from '@flue/runtime';
 import { LinearClient } from '@linear/sdk';
 import type {
@@ -34,6 +30,13 @@ export const channel = createLinearChannel({
 					issueId: comment.issueId,
 					...(comment.parentId ? { threadCommentId: comment.parentId } : {}),
 				}),
+				// Recorded once when this event creates the instance; ignored after.
+				data: {
+					type: 'issue',
+					issueId: comment.issueId,
+					...(comment.parentId ? { threadCommentId: comment.parentId } : {}),
+					...(comment.issue?.title ? { issueTitle: comment.issue.title } : {}),
+				},
 				message: {
 					kind: 'signal',
 					type: 'linear.comment.created',
@@ -55,6 +58,14 @@ export const channel = createLinearChannel({
 					organizationId: payload.organizationId,
 					agentSessionId: payload.agentSession.id,
 				}),
+				// Recorded once when this event creates the instance; ignored after.
+				data: {
+					type: 'agent-session',
+					agentSessionId: payload.agentSession.id,
+					...(payload.agentSession.issue?.title
+						? { issueTitle: payload.agentSession.issue.title }
+						: {}),
+				},
 				message: {
 					kind: 'signal',
 					type: `linear.agent_session.${payload.action}`,
@@ -85,7 +96,12 @@ function isAgentSessionEvent(
 	return payload.type === 'AgentSessionEvent' && 'agentSession' in payload;
 }
 
-export function postMessage(ref: LinearConversationRef) {
+/** The subset of `LinearConversationRef` actually needed to post a message. */
+export type LinearMessageRef =
+	| { type: 'agent-session'; agentSessionId: string }
+	| { type: 'issue'; issueId: string; threadCommentId?: string };
+
+export function postMessage(ref: LinearMessageRef) {
 	return defineTool({
 		name: 'post_linear_message',
 		description: 'Post a message to the Linear conversation bound to this agent.',

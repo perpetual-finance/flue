@@ -58,9 +58,9 @@ message, event policy, and tool:
 // flue-blueprint: channel/teams@1
 import { defineTool, dispatch } from '@flue/runtime';
 import * as v from 'valibot';
-import { createTeamsChannel, type TeamsConversationRef } from '@flue/teams';
+import { createTeamsChannel } from '@flue/teams';
 import assistant from '../agents/assistant.ts';
-import { createTeamsClient } from '../lib/teams-client.ts';
+import { createTeamsClient, type TeamsMessageRef } from '../lib/teams-client.ts';
 
 const appId = process.env.TEAMS_APP_ID!;
 const tenantId = process.env.TEAMS_TENANT_ID!;
@@ -78,8 +78,19 @@ export const channel = createTeamsChannel({
   // Path: /channels/teams/activities
   async activities({ activity }) {
     if (activity.type !== 'message' || !activity.text) return;
+    const destination = channel.destination(activity);
     await dispatch(assistant, {
-      id: channel.conversationKey(channel.destination(activity)),
+      id: channel.conversationKey(destination),
+      // Recorded once when this event creates the instance; ignored after.
+      data: {
+        serviceUrl: destination.serviceUrl,
+        conversationId: destination.conversationId,
+        botId: destination.botId,
+        ...(destination.threadId === undefined ? {} : { threadId: destination.threadId }),
+        ...(activity.conversation.name === undefined
+          ? {}
+          : { conversationName: activity.conversation.name }),
+      },
       message: {
         kind: 'signal',
         type: 'teams.message',
@@ -94,7 +105,7 @@ export const channel = createTeamsChannel({
   },
 });
 
-export function postMessage(ref: TeamsConversationRef) {
+export function postMessage(ref: TeamsMessageRef) {
   return defineTool({
     name: 'post_teams_message',
     description: 'Post a message to the Microsoft Teams conversation bound to this agent.',
@@ -137,20 +148,43 @@ and other Bot Framework types) using Microsoft's documented field names.
 Returning nothing produces an empty `200`; return JSON for an invoke response
 body or use the Hono context for explicit status and response control.
 
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the destination facts the outbound tool needs to reach
+the conversation — the agent reads them with `useInitialData()` instead of
+parsing the instance id — plus small instance-constant context like the
+conversation's display name. Per-message facts stay on the signal's
+`attributes`.
+
 ## Wire the agent
 
 ```ts
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, postMessage } from '../channels/teams.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { postMessage } from '../channels/teams.ts';
 
-function Assistant({ id }: AgentProps) {
-	useTool(postMessage(channel.parseConversationKey(id)));
-	return 'Reply concisely in the bound Microsoft Teams conversation.';
+const input = v.object({
+	serviceUrl: v.string(),
+	conversationId: v.string(),
+	botId: v.string(),
+	threadId: v.optional(v.string()),
+	conversationName: v.optional(v.string()),
+});
+
+function Assistant() {
+	const data = useInitialData<v.InferOutput<typeof input>>();
+	if (!data) throw new Error('This agent is created by the Microsoft Teams channel dispatch.');
+	useTool(postMessage(data));
+	const conversationName = data.conversationName ? ` "${data.conversationName}"` : '';
+	return `Reply concisely in the bound Microsoft Teams conversation${conversationName}.`;
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
+
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

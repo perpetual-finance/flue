@@ -89,6 +89,11 @@ export const channel = createGoogleChatChannel({
           if (!ref) return;
           await dispatch(assistant, {
             id: channel.conversationKey(ref),
+            // Recorded once when this event creates the instance; ignored after.
+            data: {
+              space: ref.space,
+              ...(ref.thread === undefined ? {} : { thread: ref.thread }),
+            },
             message: {
               kind: 'signal',
               type: `google-chat.${payload.type}`,
@@ -204,20 +209,37 @@ within 30 seconds. The package deliberately does not race the callback against
 a non-cancelling timeout, so keep admission short and move durable work behind
 the dispatch boundary.
 
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the space and thread resource names — the agent reads
+them with `useInitialData()` instead of parsing the instance id. Per-message
+facts stay on the signal's `attributes`.
+
 ## Wire the agent
 
 ```ts
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, postMessage } from '../channels/google-chat.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { postMessage } from '../channels/google-chat.ts';
 
-function Assistant({ id }: AgentProps) {
-	useTool(postMessage(channel.parseConversationKey(id)));
+const input = v.object({
+	space: v.string(),
+	thread: v.optional(v.string()),
+});
+
+function Assistant() {
+	const data = useInitialData<v.InferOutput<typeof input>>();
+	if (!data) throw new Error('This agent is created by the Google Chat channel dispatch.');
+	useTool(postMessage(data));
 	return 'Reply concisely in the bound Google Chat conversation.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
+
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

@@ -82,10 +82,16 @@ export const channel = createWhatsAppChannel({
                 message.interactive.list_reply?.title ??
                 message.interactive.nfm_reply?.body ??
                 '');
+          const ref = conversationRef(entry.id, change.value, message);
           await dispatch(assistant, {
-            id: channel.conversationKey(
-              conversationRef(entry.id, change.value, message),
-            ),
+            id: channel.conversationKey(ref),
+            // Recorded once when this event creates the instance; ignored after.
+            data: {
+              phoneNumberId: ref.phoneNumberId,
+              destination: ref.type === 'individual' ? ref.destination : undefined,
+              groupId: ref.type === 'group' ? ref.groupId : undefined,
+              contactName: change.value.contacts?.[0]?.profile?.name,
+            },
             message: {
               kind: 'signal',
               type: `whatsapp.${message.type}`,
@@ -118,8 +124,19 @@ function conversationRef(
   };
 }
 
+// The `WhatsAppConversationRef` fields `sendTextMessage()` actually sends on.
+export type WhatsAppSendRef =
+  | {
+      type: 'individual';
+      phoneNumberId: string;
+      destination:
+        | { type: 'phone-number'; phoneNumber: string }
+        | { type: 'user-id'; userId: string };
+    }
+  | { type: 'group'; phoneNumberId: string; groupId: string };
+
 function sendTextMessage(
-  ref: WhatsAppConversationRef,
+  ref: WhatsAppSendRef,
   body: string,
 ): Promise<SendMessageResponse> {
   if (ref.type === 'group') {
@@ -150,7 +167,7 @@ function sendTextMessage(
   });
 }
 
-export function postMessage(ref: WhatsAppConversationRef) {
+export function postMessage(ref: WhatsAppSendRef) {
   return defineTool({
     name: 'post_whatsapp_message',
     description: 'Post to the WhatsApp conversation bound to this agent.',
@@ -191,20 +208,54 @@ relative to the mount path. The `// Paths:` comment in this guide assumes the
 conventional `/channels/whatsapp` mount; a different mount path shifts every
 provider URL accordingly.
 
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the conversation's destination facts — the agent reads
+them with `useInitialData()` instead of parsing the instance id — plus small
+instance-constant context like the contact's display name. Per-message facts
+stay on the signal's `attributes`.
+
 ## Wire the agent
 
 ```ts
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, postMessage } from '../channels/whatsapp.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { postMessage, type WhatsAppSendRef } from '../channels/whatsapp.ts';
 
-function Assistant({ id }: AgentProps) {
-	useTool(postMessage(channel.parseConversationKey(id)));
-	return 'Reply concisely in the bound WhatsApp conversation.';
+const input = v.object({
+	phoneNumberId: v.string(),
+	destination: v.optional(
+		v.union([
+			v.object({ type: v.literal('phone-number'), phoneNumber: v.string() }),
+			v.object({ type: v.literal('user-id'), userId: v.string() }),
+		]),
+	),
+	groupId: v.optional(v.string()),
+	contactName: v.optional(v.string()),
+});
+
+function Assistant() {
+	const data = useInitialData<v.InferOutput<typeof input>>();
+	if (!data) throw new Error('This agent is created by the WhatsApp channel dispatch.');
+	let ref: WhatsAppSendRef;
+	if (data.groupId !== undefined) {
+		ref = { type: 'group', phoneNumberId: data.phoneNumberId, groupId: data.groupId };
+	} else if (data.destination !== undefined) {
+		ref = { type: 'individual', phoneNumberId: data.phoneNumberId, destination: data.destination };
+	} else {
+		throw new Error('WhatsApp instance data is missing a destination.');
+	}
+	useTool(postMessage(ref));
+	const contactName = data.contactName ? ` with ${data.contactName}` : '';
+	return `Reply concisely in the bound WhatsApp conversation${contactName}.`;
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
+
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

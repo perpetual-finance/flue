@@ -32,6 +32,11 @@ export const channel = createZendeskChannel({
 				};
 				await dispatch(assistant, {
 					id: channel.ticketKey(ticket),
+					// Recorded once when this event creates the instance; ignored after.
+					data: {
+						accountId: ticket.accountId,
+						ticketId: ticket.ticketId,
+					},
 					message: {
 						kind: 'signal',
 						type: `zendesk.${payload.type}`,

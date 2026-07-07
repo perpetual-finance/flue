@@ -64,6 +64,8 @@ export const channel = createStripeChannel({
 
         await dispatch(billing, {
           id: customerId,
+          // Recorded once when this event creates the instance; ignored after.
+          data: { customerId },
           message: {
             kind: 'signal',
             type: `stripe.${event.type}`,
@@ -133,22 +135,38 @@ example tool. Never let the model choose arbitrary Stripe accounts,
 credentials, customer ids, API paths, or request options unless the
 application has explicitly authorized that access.
 
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the customer identity the bound tool needs — the agent
+reads it with `useInitialData()` instead of parsing the instance id. Per-message
+facts stay on the signal's `attributes`.
+
 ## Wire the agent
 
 Bind the trusted customer id inside the agent component:
 
 ```ts
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
 import { retrieveCustomer } from '../channels/stripe.ts';
 
-function Billing({ id: customerId }: AgentProps) {
-	useTool(retrieveCustomer(customerId));
+const input = v.object({
+	customerId: v.string(),
+});
+
+function Billing() {
+	const data = useInitialData<v.InferOutput<typeof input>>();
+	if (!data) throw new Error('This agent is created by the Stripe channel dispatch.');
+	useTool(retrieveCustomer(data.customerId));
 	return 'Review the completed Checkout event and summarize any billing follow-up that is needed.';
 }
 
-export default defineAgent(Billing, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Billing, { model: 'anthropic/claude-haiku-4-5', input });
 ```
+
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

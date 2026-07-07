@@ -247,6 +247,16 @@ export const channel = createSalesforceMarketingCloudChannel({
     for (const { event, ref } of usefulEvents) {
       await dispatch(assistant, {
         id: emailEventInstanceId(ref),
+        // Recorded once when this event creates the instance; ignored after.
+        data: {
+          callbackId: ref.callbackId,
+          mid: ref.mid,
+          eid: ref.eid,
+          jobId: ref.jobId,
+          batchId: ref.batchId,
+          listId: ref.listId,
+          subscriberId: ref.subscriberId,
+        },
         message: {
           kind: 'signal',
           type: `salesforce-marketing-cloud.${event.eventCategoryType}`,
@@ -317,6 +327,12 @@ path shifts every provider URL accordingly.
 For each family, validate every provider-specific field before using it for
 routing, authorization, persistence, or tool binding.
 
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the validated email reference fields — the agent reads
+them with `useInitialData()` instead of parsing the instance id. Per-message
+facts stay on the signal's `attributes`.
+
 The route is always `POST /events`. Signed notifications require
 `SALESFORCE_MARKETING_CLOUD_SIGNATURE_KEY`. This is the opaque UTF-8 HMAC key
 returned during callback creation. Do not base64-decode it. Only the
@@ -371,18 +387,36 @@ Create an agent module such as `<source-dir>/agents/assistant.ts`:
 
 ```ts
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
 import { retrieveCallback } from '../channels/salesforce-marketing-cloud.ts';
-import { parseEmailEventInstanceId } from '../salesforce-marketing-cloud-email.ts';
 
-function Assistant({ id }: AgentProps) {
-	const email = parseEmailEventInstanceId(id);
-	useTool(retrieveCallback(email));
+const input = v.object({
+	callbackId: v.string(),
+	mid: v.string(),
+	eid: v.string(),
+	jobId: v.string(),
+	batchId: v.string(),
+	listId: v.string(),
+	subscriberId: v.string(),
+});
+
+function Assistant() {
+	const data = useInitialData<v.InferOutput<typeof input>>();
+	if (!data) {
+		throw new Error(
+			'This agent is created by the Salesforce Marketing Cloud channel dispatch.',
+		);
+	}
+	useTool(retrieveCallback(data));
 	return 'Review the inbound Salesforce Marketing Cloud email lifecycle event. Retrieve the configured ENS callback when callback status or delivery configuration is relevant.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
+
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

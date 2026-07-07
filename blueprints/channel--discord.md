@@ -72,8 +72,14 @@ export const channel = createDiscordChannel({
       interaction.data.type === 1
         ? interaction.data.options?.find((option) => option.type === 3)?.value
         : undefined;
+    const channelName = interaction.channel?.name ?? undefined;
     await dispatch(assistant, {
       id: channel.conversationKey(destination),
+      // Recorded once when this event creates the instance; ignored after.
+      data: {
+        channelId: destination.channelId,
+        ...(channelName === undefined ? {} : { channelName }),
+      },
       message: {
         kind: 'signal',
         type: 'discord.command.ask',
@@ -88,7 +94,7 @@ export const channel = createDiscordChannel({
   },
 });
 
-export function postMessage(ref: DiscordDestinationRef) {
+export function postMessage(ref: { channelId: string }) {
   return defineTool({
     name: 'post_discord_message',
     description: 'Post a message to the Discord destination bound to this agent.',
@@ -149,6 +155,13 @@ message, tools, model context, logs, and durable history. Some valid
 interactions have no durable destination, and private-channel interactions
 cannot be used as arbitrary bot-token message destinations.
 
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the structured destination facts — the agent reads them
+with `useInitialData()` instead of parsing the instance id — plus small
+instance-constant context like the channel name. Per-message facts stay on the
+signal's `attributes`.
+
 The package-root `@discordjs/rest` import selects its Fetch-based web export in
 Cloudflare Workers. Follow the project's Worker secret binding convention and
 verify the actual Worker build. Do not expose arbitrary channel ids, routes, or
@@ -158,16 +171,28 @@ bot tokens to the model.
 
 ```ts
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, postMessage } from '../channels/discord.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { postMessage } from '../channels/discord.ts';
 
-function Assistant({ id }: AgentProps) {
-	useTool(postMessage(channel.parseConversationKey(id)));
-	return 'Post a concise answer to the bound Discord destination.';
+const input = v.object({
+	channelId: v.string(),
+	channelName: v.optional(v.string()),
+});
+
+function Assistant() {
+	const data = useInitialData<v.InferOutput<typeof input>>();
+	if (!data) throw new Error('This agent is created by the Discord channel dispatch.');
+	useTool(postMessage(data));
+	const channelName = data.channelName ? ` #${data.channelName}` : '';
+	return `Post a concise answer to the bound Discord destination${channelName}.`;
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
+
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

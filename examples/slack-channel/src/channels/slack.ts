@@ -23,6 +23,13 @@ export const channel = createSlackChannel({
 				};
 				await dispatch(assistant, {
 					id: channel.conversationKey(thread),
+					// Recorded once when this event creates the instance; ignored after.
+					data: {
+						channelId: thread.channelId,
+						threadTs: thread.threadTs,
+						startedBy: event.user,
+						startedAt: new Date(Number(event.ts) * 1000).toISOString(),
+					},
 					message: {
 						kind: 'signal',
 						type: 'slack.app_mention',

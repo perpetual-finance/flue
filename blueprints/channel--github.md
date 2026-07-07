@@ -59,6 +59,14 @@ export const channel = createGitHubChannel({
       };
       await dispatch(assistant, {
         id: channel.conversationKey(issueRef),
+        // Recorded once when this event creates the instance; ignored after.
+        data: {
+          owner: issueRef.owner,
+          repo: issueRef.repo,
+          issueNumber: issueRef.issueNumber,
+          openedBy: issue.user.login,
+          title: issue.title,
+        },
         message: {
           kind: 'signal',
           type: 'github.issue_comment.created',
@@ -87,6 +95,14 @@ export const channel = createGitHubChannel({
       };
       await dispatch(assistant, {
         id: channel.conversationKey(issueRef),
+        // Recorded once when this event creates the instance; ignored after.
+        data: {
+          owner: issueRef.owner,
+          repo: issueRef.repo,
+          issueNumber: issueRef.issueNumber,
+          openedBy: pull_request.user.login,
+          title: pull_request.title,
+        },
         message: {
           kind: 'signal',
           type: 'github.pull_request_review_comment.created',
@@ -165,22 +181,43 @@ If the user did not ask for issue comments, replace or omit the example tool.
 Never let the model choose arbitrary owners, repositories, issue numbers, API
 paths, or credentials unless the application has explicitly authorized that.
 
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the structured issue reference — the agent reads it with
+`useInitialData()` instead of parsing the instance id — plus small
+instance-constant context like who opened the issue or pull request and its
+title. Per-message facts stay on the signal's `attributes`.
+
 ## Wire the agent
 
 Bind the trusted conversation destination inside the agent component:
 
 ```ts
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, commentOnIssue } from '../channels/github.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { commentOnIssue } from '../channels/github.ts';
 
-function Assistant({ id }: AgentProps) {
-	useTool(commentOnIssue(channel.parseConversationKey(id)));
-	return 'Review the issue and post a concise triage comment when appropriate.';
+const input = v.object({
+	owner: v.string(),
+	repo: v.string(),
+	issueNumber: v.number(),
+	openedBy: v.string(),
+	title: v.string(),
+});
+
+function Assistant() {
+	const data = useInitialData<v.InferOutput<typeof input>>();
+	if (!data) throw new Error('This agent is created by the GitHub channel dispatch.');
+	useTool(commentOnIssue(data));
+	return `Review the issue and post a concise triage comment when appropriate. "${data.title}" was opened by ${data.openedBy}.`;
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
+
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

@@ -29,6 +29,11 @@ export const channel = createGoogleChatChannel({
 					if (!ref) return;
 					await dispatch(assistant, {
 						id: channel.conversationKey(ref),
+						// Recorded once when this event creates the instance; ignored after.
+						data: {
+							space: ref.space,
+							...(ref.thread === undefined ? {} : { thread: ref.thread }),
+						},
 						message: {
 							kind: 'signal',
 							type: `google-chat.${payload.type}`,

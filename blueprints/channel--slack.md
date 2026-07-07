@@ -58,6 +58,13 @@ export const channel = createSlackChannel({
         };
         await dispatch(assistant, {
           id: channel.conversationKey(thread),
+          // Recorded once when this event creates the instance; ignored after.
+          data: {
+            channelId: thread.channelId,
+            threadTs: thread.threadTs,
+            startedBy: event.user,
+            startedAt: new Date(Number(event.ts) * 1000).toISOString(),
+          },
           message: {
             kind: 'signal',
             type: 'slack.app_mention',
@@ -140,6 +147,13 @@ surfaces commented out. If the application does not need thread replies,
 replace or omit the example tool. Keep channel ids, credentials, and arbitrary
 Slack API methods out of tool arguments unless explicitly authorized.
 
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the structured thread facts — the agent reads them with
+`useInitialData()` instead of parsing the instance id — plus small
+instance-constant context like who started the conversation. Per-message facts
+stay on the signal's `attributes`.
+
 `trigger_id`, `response_url`, and view `response_urls` are short-lived provider
 capabilities. Use them only in immediate trusted request handling. Never copy
 them into a dispatched message, model context, logs, or durable session data.
@@ -148,16 +162,30 @@ them into a dispatched message, model context, logs, or durable session data.
 
 ```ts
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, replyInThread } from '../channels/slack.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { replyInThread } from '../channels/slack.ts';
 
-function Assistant({ id }: AgentProps) {
-	useTool(replyInThread(channel.parseConversationKey(id)));
-	return 'Reply in the bound Slack thread when appropriate.';
+const input = v.object({
+	channelId: v.string(),
+	threadTs: v.string(),
+	startedBy: v.optional(v.string()),
+	startedAt: v.pipe(v.string(), v.isoTimestamp()),
+});
+
+function Assistant() {
+	const data = useInitialData<v.InferOutput<typeof input>>();
+	if (!data) throw new Error('This agent is created by the Slack channel dispatch.');
+	useTool(replyInThread(data));
+	const startedBy = data.startedBy ? ` by <@${data.startedBy}>` : '';
+	return `Reply in the bound Slack thread when appropriate. This conversation was started${startedBy} at ${data.startedAt}.`;
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
+
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

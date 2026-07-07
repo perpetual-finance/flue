@@ -17,6 +17,8 @@ export const channel = createTelegramChannel({
 			const conversation = conversationFromMessage(incoming);
 			await dispatch(assistant, {
 				id: channel.conversationKey(conversation),
+				// Recorded once when this event creates the instance; ignored after.
+				data: conversationData(conversation, incoming),
 				message: {
 					kind: 'signal',
 					type: 'telegram.message',
@@ -31,8 +33,11 @@ export const channel = createTelegramChannel({
 			const query = update.callback_query;
 			await client.answerCallbackQuery(query.id);
 			if (!query.message) return;
+			const conversation = conversationFromMessage(query.message);
 			await dispatch(assistant, {
-				id: channel.conversationKey(conversationFromMessage(query.message)),
+				id: channel.conversationKey(conversation),
+				// Recorded once when this event creates the instance; ignored after.
+				data: conversationData(conversation, query.message),
 				message: {
 					kind: 'signal',
 					type: 'telegram.callback_query',
@@ -79,6 +84,24 @@ function conversationFromMessage(message: Message): TelegramConversationRef {
 				...topic,
 			}
 		: { type: 'chat', chatId: message.chat.id, ...topic };
+}
+
+/** Instance-creation data: the destination ref plus small instance-constant context. */
+function conversationData(conversation: TelegramConversationRef, message: Message) {
+	return {
+		type: conversation.type,
+		chatId: conversation.chatId,
+		...(conversation.type === 'business-chat'
+			? { businessConnectionId: conversation.businessConnectionId }
+			: {}),
+		...(conversation.messageThreadId === undefined
+			? {}
+			: { messageThreadId: conversation.messageThreadId }),
+		...(conversation.directMessagesTopicId === undefined
+			? {}
+			: { directMessagesTopicId: conversation.directMessagesTopicId }),
+		...(message.chat.title === undefined ? {} : { chatTitle: message.chat.title }),
+	};
 }
 
 export function postMessage(ref: TelegramConversationRef) {

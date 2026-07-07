@@ -218,6 +218,11 @@ export const channel = createZendeskChannel({
         };
         await dispatch(assistant, {
           id: channel.ticketKey(ticket),
+          // Recorded once when this event creates the instance; ignored after.
+          data: {
+            accountId: ticket.accountId,
+            ticketId: ticket.ticketId,
+          },
           message: {
             kind: 'signal',
             type: `zendesk.${payload.type}`,
@@ -328,23 +333,39 @@ headers. The package requires those headers and checks payload `account_id`
 against the account header, but they remain provider routing metadata rather
 than independent authorization capabilities.
 
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the ticket identity — the agent reads it with
+`useInitialData()` instead of parsing the instance id. Per-message facts stay
+on the signal's `attributes`.
+
 ## Wire the agent
 
 Bind the account and ticket selected by verified application code:
 
 ```ts
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, retrieveTicket } from '../channels/zendesk.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { retrieveTicket } from '../channels/zendesk.ts';
 
-function Assistant({ id }: AgentProps) {
-	const ticket = channel.parseTicketKey(id);
-	useTool(retrieveTicket(ticket));
+const input = v.object({
+	accountId: v.string(),
+	ticketId: v.string(),
+});
+
+function Assistant() {
+	const data = useInitialData<v.InferOutput<typeof input>>();
+	if (!data) throw new Error('This agent is created by the Zendesk channel dispatch.');
+	useTool(retrieveTicket(data));
 	return 'Review the inbound Zendesk ticket event. Retrieve the current ticket when more context is needed.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
+
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

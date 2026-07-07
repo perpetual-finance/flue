@@ -32,6 +32,11 @@ export const channel = createMessengerChannel({
 				);
 				await dispatch(assistant, {
 					id: channel.conversationKey(conversation),
+					// Recorded once when this event creates the instance; ignored after.
+					data: {
+						pageId: conversation.pageId,
+						participant: conversation.participant,
+					},
 					message: {
 						kind: 'signal',
 						type: 'messenger.message',

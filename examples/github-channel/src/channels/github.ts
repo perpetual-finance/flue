@@ -22,6 +22,14 @@ export const channel = createGitHubChannel({
 			};
 			await dispatch(assistant, {
 				id: channel.conversationKey(issueRef),
+				// Recorded once when this event creates the instance; ignored after.
+				data: {
+					owner: issueRef.owner,
+					repo: issueRef.repo,
+					issueNumber: issueRef.issueNumber,
+					openedBy: issue.user.login,
+					title: issue.title,
+				},
 				message: {
 					kind: 'signal',
 					type: 'github.issue_comment.created',
@@ -50,6 +58,14 @@ export const channel = createGitHubChannel({
 			};
 			await dispatch(assistant, {
 				id: channel.conversationKey(issueRef),
+				// Recorded once when this event creates the instance; ignored after.
+				data: {
+					owner: issueRef.owner,
+					repo: issueRef.repo,
+					issueNumber: issueRef.issueNumber,
+					openedBy: pull_request.user.login,
+					title: pull_request.title,
+				},
 				message: {
 					kind: 'signal',
 					type: 'github.pull_request_review_comment.created',

@@ -83,6 +83,10 @@ export const channel = createNotionChannel({
       case 'page.unlocked': {
         await dispatch(assistant, {
           id: pageInstanceId(event.entity.id),
+          // Recorded once when this event creates the instance; ignored after.
+          data: {
+            pageId: event.entity.id,
+          },
           message: {
             kind: 'signal',
             type: `notion.${event.type}`,
@@ -125,15 +129,6 @@ export function pageInstanceId(pageId: string): string {
   if (!pageId) throw new TypeError('Notion page id must be non-empty.');
   return `${PAGE_INSTANCE_PREFIX}${encodeURIComponent(pageId)}`;
 }
-
-export function pageIdFromInstanceId(id: string): string {
-  if (!id.startsWith(PAGE_INSTANCE_PREFIX)) {
-    throw new TypeError('Expected a local Notion page instance id.');
-  }
-  const pageId = decodeURIComponent(id.slice(PAGE_INSTANCE_PREFIX.length));
-  if (!pageId) throw new TypeError('Expected a local Notion page instance id.');
-  return pageId;
-}
 ```
 
 ## Mount the channel
@@ -175,21 +170,36 @@ when they matter. Comment events expose `event.data.page_id`; group the selected
 comment cases into the same local page identity only when that matches the
 application's agent policy.
 
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the page id the agent's tool binds to — the agent reads
+it with `useInitialData()` instead of parsing the instance id. Per-message
+facts stay on the signal's `attributes`.
+
 ## Wire the agent
 
 ```ts
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { pageIdFromInstanceId, retrievePage } from '../channels/notion.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { retrievePage } from '../channels/notion.ts';
 
-function Assistant({ id }: AgentProps) {
-	const pageId = pageIdFromInstanceId(id);
-	useTool(retrievePage(pageId));
+const input = v.object({
+	pageId: v.string(),
+});
+
+function Assistant() {
+	const data = useInitialData<v.InferOutput<typeof input>>();
+	if (!data) throw new Error('This agent is created by the Notion channel dispatch.');
+	useTool(retrievePage(data.pageId));
 	return 'Review the Notion page change. Retrieve the current page when its properties are needed.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
+
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

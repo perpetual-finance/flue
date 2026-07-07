@@ -120,6 +120,11 @@ export const channel = createIntercomChannel({
         };
         await dispatch(assistant, {
           id: channel.conversationKey(conversation),
+          // Recorded once when this event creates the instance; ignored after.
+          data: {
+            workspaceId: conversation.workspaceId,
+            conversationId: conversation.conversationId,
+          },
           message: {
             kind: 'signal',
             type: `intercom.${notification.topic}`,
@@ -176,6 +181,12 @@ function requiredEnv(name: string): string {
 }
 ```
 
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the workspace and conversation identifiers the tool
+needs — the agent reads them with `useInitialData()` instead of parsing the
+instance id. Per-message facts stay on the signal's `attributes`.
+
 ## Mount the channel
 
 A channel serves HTTP routes only where `app.ts` mounts it. Mount the
@@ -223,17 +234,27 @@ Bind the verified workspace and conversation selected by trusted code:
 
 ```ts
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, retrieveConversation } from '../channels/intercom.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { retrieveConversation } from '../channels/intercom.ts';
 
-function Assistant({ id }: AgentProps) {
-	const conversation = channel.parseConversationKey(id);
-	useTool(retrieveConversation(conversation));
+const input = v.object({
+	workspaceId: v.string(),
+	conversationId: v.string(),
+});
+
+function Assistant() {
+	const data = useInitialData<v.InferOutput<typeof input>>();
+	if (!data) throw new Error('This agent is created by the Intercom channel dispatch.');
+	useTool(retrieveConversation(data));
 	return 'Help with the inbound Intercom conversation. Retrieve the current conversation when more context is needed.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
+
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

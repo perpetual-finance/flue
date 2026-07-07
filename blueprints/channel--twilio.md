@@ -61,10 +61,7 @@ message, destination mode, and tool:
 
 ```ts
 // flue-blueprint: channel/twilio@1
-import {
-  createTwilioChannel,
-  type TwilioConversationRef,
-} from '@flue/twilio';
+import { createTwilioChannel } from '@flue/twilio';
 import { defineTool, dispatch } from '@flue/runtime';
 import * as v from 'valibot';
 import assistant from '../agents/assistant.ts';
@@ -103,6 +100,19 @@ export const channel = createTwilioChannel({
     }
     await dispatch(assistant, {
       id: channel.conversationKey(conversation),
+      // Recorded once when this event creates the instance; ignored after.
+      data:
+        conversation.type === 'messaging-service'
+          ? {
+              type: conversation.type,
+              messagingServiceSid: conversation.messagingServiceSid,
+              participant: conversation.participant,
+            }
+          : {
+              type: conversation.type,
+              address: conversation.address,
+              participant: conversation.participant,
+            },
       message: {
         kind: 'signal',
         type: 'twilio.message',
@@ -113,7 +123,11 @@ export const channel = createTwilioChannel({
   },
 });
 
-export function postMessage(ref: TwilioConversationRef) {
+export function postMessage(
+  ref:
+    | { type: 'address'; address: string; participant: string }
+    | { type: 'messaging-service'; messagingServiceSid: string; participant: string },
+) {
   return defineTool({
     name: 'post_twilio_message',
     description: 'Post to the Twilio conversation bound to this agent.',
@@ -163,20 +177,41 @@ relative to the mount path. The `// Path:` comments in this guide assume the
 conventional `/channels/twilio` mount; a different mount path shifts every
 provider URL accordingly.
 
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the conversation ref fields the reply tool needs — the
+agent reads them with `useInitialData()` instead of parsing the instance id.
+Per-message facts stay on the signal's `attributes`.
+
 ## Wire the agent
 
 ```ts
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, postMessage } from '../channels/twilio.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { postMessage } from '../channels/twilio.ts';
 
-function Assistant({ id }: AgentProps) {
-	useTool(postMessage(channel.parseConversationKey(id)));
+const input = v.variant('type', [
+	v.object({ type: v.literal('address'), address: v.string(), participant: v.string() }),
+	v.object({
+		type: v.literal('messaging-service'),
+		messagingServiceSid: v.string(),
+		participant: v.string(),
+	}),
+]);
+
+function Assistant() {
+	const data = useInitialData<v.InferOutput<typeof input>>();
+	if (!data) throw new Error('This agent is created by the Twilio channel dispatch.');
+	useTool(postMessage(data));
 	return 'Reply concisely in the bound Twilio conversation.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
+
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

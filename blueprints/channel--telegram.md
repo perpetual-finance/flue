@@ -61,8 +61,11 @@ export const channel = createTelegramChannel({
     const incoming =
       update.message ?? update.channel_post ?? update.business_message;
     if (incoming) {
+      const conversation = conversationFromMessage(incoming);
       await dispatch(assistant, {
-        id: channel.conversationKey(conversationFromMessage(incoming)),
+        id: channel.conversationKey(conversation),
+        // Recorded once when this event creates the instance; ignored after.
+        data: conversationData(conversation, incoming),
         message: {
           kind: 'signal',
           type: 'telegram.message',
@@ -77,8 +80,11 @@ export const channel = createTelegramChannel({
       const query = update.callback_query;
       await client.answerCallbackQuery(query.id);
       if (!query.message) return;
+      const conversation = conversationFromMessage(query.message);
       await dispatch(assistant, {
-        id: channel.conversationKey(conversationFromMessage(query.message)),
+        id: channel.conversationKey(conversation),
+        // Recorded once when this event creates the instance; ignored after.
+        data: conversationData(conversation, query.message),
         message: {
           kind: 'signal',
           type: 'telegram.callback_query',
@@ -125,6 +131,24 @@ function conversationFromMessage(message: Message): TelegramConversationRef {
         ...topic,
       }
     : { type: 'chat', chatId: message.chat.id, ...topic };
+}
+
+// Instance-creation data: the destination ref plus small instance-constant context.
+function conversationData(conversation: TelegramConversationRef, message: Message) {
+  return {
+    type: conversation.type,
+    chatId: conversation.chatId,
+    ...(conversation.type === 'business-chat'
+      ? { businessConnectionId: conversation.businessConnectionId }
+      : {}),
+    ...(conversation.messageThreadId === undefined
+      ? {}
+      : { messageThreadId: conversation.messageThreadId }),
+    ...(conversation.directMessagesTopicId === undefined
+      ? {}
+      : { directMessagesTopicId: conversation.directMessagesTopicId }),
+    ...(message.chat.title === undefined ? {} : { chatTitle: message.chat.title }),
+  };
 }
 
 export function postMessage(ref: TelegramConversationRef) {
@@ -176,16 +200,40 @@ provider URL accordingly.
 
 ```ts
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, postMessage } from '../channels/telegram.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { postMessage } from '../channels/telegram.ts';
 
-function Assistant({ id }: AgentProps) {
-	useTool(postMessage(channel.parseConversationKey(id)));
-	return 'Reply concisely in the bound Telegram conversation.';
+const chatData = v.object({
+	type: v.literal('chat'),
+	chatId: v.number(),
+	messageThreadId: v.optional(v.number()),
+	directMessagesTopicId: v.optional(v.number()),
+	chatTitle: v.optional(v.string()),
+});
+const businessChatData = v.object({
+	type: v.literal('business-chat'),
+	businessConnectionId: v.string(),
+	chatId: v.number(),
+	messageThreadId: v.optional(v.number()),
+	directMessagesTopicId: v.optional(v.number()),
+	chatTitle: v.optional(v.string()),
+});
+const input = v.variant('type', [chatData, businessChatData]);
+
+function Assistant() {
+	const data = useInitialData<v.InferOutput<typeof input>>();
+	if (!data) throw new Error('This agent is created by the Telegram channel dispatch.');
+	useTool(postMessage(data));
+	const chatTitle = data.chatTitle ? ` ("${data.chatTitle}")` : '';
+	return `Reply concisely in the bound Telegram conversation${chatTitle}.`;
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
+
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback
@@ -244,6 +292,13 @@ Regular and business chats need different conversation types. When you derive a
 conversation key from a native `Message`, preserve `business_connection_id`,
 `message_thread_id`, and `direct_messages_topic.topic_id` so replies reach the
 same destination.
+
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the structured conversation facts — the agent reads them
+with `useInitialData()` instead of parsing the instance id — plus small
+instance-constant context like the chat's title. Per-message facts stay on the
+signal's `attributes`.
 
 Do not build a durable conversation key for `update.guest_message`. Its
 `message.guest_query_id` is a short-lived capability for `answerGuestQuery`, not

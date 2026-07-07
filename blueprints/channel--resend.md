@@ -56,6 +56,13 @@ export const channel = createResendChannel({
       case 'email.received': {
         await dispatch(assistant, {
           id: emailInstanceId(event.data.email_id),
+          // Recorded once when this event creates the instance; ignored after.
+          data: {
+            emailId: event.data.email_id,
+            from: event.data.from,
+            subject: event.data.subject,
+            receivedAt: new Date(event.data.created_at).toISOString(),
+          },
           message: {
             kind: 'signal',
             type: 'resend.email.received',
@@ -64,9 +71,7 @@ export const channel = createResendChannel({
             body: event.data.subject,
             attributes: {
               deliveryId: delivery.id,
-              emailId: event.data.email_id,
               messageId: event.data.message_id,
-              from: event.data.from,
               to: event.data.to.join(', '),
               ...(event.data.cc.length === 0 ? {} : { cc: event.data.cc.join(', ') }),
               ...(event.data.attachments.length === 0
@@ -98,15 +103,6 @@ export function retrieveReceivedEmail(emailId: string) {
 export function emailInstanceId(emailId: string): string {
   if (!emailId) throw new TypeError('Resend email id must be non-empty.');
   return `${EMAIL_INSTANCE_PREFIX}${encodeURIComponent(emailId)}`;
-}
-
-export function emailIdFromInstanceId(id: string): string {
-  if (!id.startsWith(EMAIL_INSTANCE_PREFIX)) {
-    throw new TypeError('Expected a local Resend email instance id.');
-  }
-  const emailId = decodeURIComponent(id.slice(EMAIL_INSTANCE_PREFIX.length));
-  if (!emailId) throw new TypeError('Expected a local Resend email instance id.');
-  return emailId;
 }
 ```
 
@@ -144,26 +140,42 @@ reply tool must bind credentials, sender, recipient policy, and the relevant
 message in trusted application code rather than accepting arbitrary values from
 the model.
 
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the structured envelope facts — the agent reads them with
+`useInitialData()` instead of parsing the instance id — plus small
+instance-constant context like who the email is from and its subject.
+Per-message facts stay on the signal's `attributes`.
+
 ## Wire the agent
 
-Bind the trusted inbound email id inside the agent component:
+Bind the trusted inbound email fields inside the agent component:
 
 ```ts
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import {
-  emailIdFromInstanceId,
-  retrieveReceivedEmail,
-} from '../channels/resend.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { retrieveReceivedEmail } from '../channels/resend.ts';
 
-function Assistant({ id }: AgentProps) {
-	const emailId = emailIdFromInstanceId(id);
-	useTool(retrieveReceivedEmail(emailId));
-	return 'Review the inbound support email. Retrieve the complete email when its body or headers are needed.';
+const input = v.object({
+  emailId: v.string(),
+  from: v.string(),
+  subject: v.string(),
+  receivedAt: v.pipe(v.string(), v.isoTimestamp()),
+});
+
+function Assistant() {
+	const data = useInitialData<v.InferOutput<typeof input>>();
+	if (!data) throw new Error('This agent is created by the Resend channel dispatch.');
+	useTool(retrieveReceivedEmail(data.emailId));
+	return `Review the inbound support email, handling an email from ${data.from} about ${data.subject} received at ${data.receivedAt}. Retrieve the complete email when its body or headers are needed.`;
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
+
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback
