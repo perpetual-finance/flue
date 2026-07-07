@@ -141,6 +141,7 @@ import type {
 	AgentConfig,
 	AgentProfile,
 	CallHandle,
+	DeliveredMessage,
 	FlueEvent,
 	FlueEventInput,
 	FlueEventInputCallback,
@@ -1500,12 +1501,28 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			(block): block is Extract<typeof block, { type: 'toolCall' }> =>
 				block.type === 'toolCall' && block.id === toolCallId,
 		);
-		const args = (toolCallBlock?.arguments ?? {}) as { agent?: string; cwd?: string };
+		const args = (toolCallBlock?.arguments ?? {}) as {
+			agent?: string;
+			cwd?: string;
+			prompt?: string;
+			attachments?: Array<{ id: string }>;
+		};
 		// D-B: a renamed/removed subagent across a deploy is deterministically
 		// unrecoverable — fall back to an error outcome for this one call only.
 		let taskAgent: AgentProfile | undefined;
 		try {
-			taskAgent = args.agent ? this.resolveDeclaredSubagent(args.agent) : undefined;
+			// Rebuild the delegate's delivered message from the durable tool call
+			// so the resume render's `useDelivery()` sees what attempt one saw.
+			const delivery =
+				args.agent && typeof args.prompt === 'string'
+					? taskDeliveryMessage(
+							args.prompt,
+							await this.resolveCanonicalImages([
+								...new Set((args.attachments ?? []).map((attachment) => attachment.id)),
+							]),
+						)
+					: undefined;
+			taskAgent = args.agent ? this.resolveDeclaredSubagent(args.agent, delivery) : undefined;
 		} catch (error) {
 			if (error instanceof SubagentNotDeclaredError) {
 				return this.taskResumeFailureOutcomeRecord(assistantEntryId, toolCallId, error);
@@ -2683,7 +2700,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 
 	// ─── Tasks ────────────────────────────────────────────────────────────────
 
-	private resolveDeclaredSubagent(name: string): AgentProfile {
+	private resolveDeclaredSubagent(name: string, delivery?: DeliveredMessage): AgentProfile {
 		const subagents = this.config.subagents ?? {};
 		const subagent = subagents[name];
 		if (!subagent) {
@@ -2692,7 +2709,8 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		// Capability-backed delegates render here — at delegation time, fresh
 		// per task (resume included), outside any parent render — into the same
 		// self-contained profile shape the task machinery has always consumed.
-		if (isSubagentDefinition(subagent)) return resolveSubagentDefinition(subagent);
+		// The parent's task prompt rides in as the delegate's delivered message.
+		if (isSubagentDefinition(subagent)) return resolveSubagentDefinition(subagent, delivery);
 		return subagent;
 	}
 
@@ -2759,7 +2777,9 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		if (signal?.aborted) throw abortErrorFor(signal);
 
 		const taskId = crypto.randomUUID();
-		const taskAgent = options?.agent ? this.resolveDeclaredSubagent(options.agent) : undefined;
+		const taskAgent = options?.agent
+			? this.resolveDeclaredSubagent(options.agent, taskDeliveryMessage(text, options?.images))
+			: undefined;
 		let child: Session | undefined;
 		let abortListener: (() => void) | undefined;
 
@@ -4202,6 +4222,15 @@ function encodeCanonicalId(id: string): string {
 
 function submissionEntryId(kind: 'direct' | 'dispatch', id: string): string {
 	return `entry_${kind}_${encodeCanonicalId(id)}`;
+}
+
+/**
+ * The parent's task prompt as the delegate's delivered message — the same
+ * `kind: 'user'` shape the child conversation records as its input, so a
+ * delegate's `useDelivery()` mirrors a root agent's exactly.
+ */
+function taskDeliveryMessage(text: string, images?: PromptImage[]): DeliveredMessage {
+	return { kind: 'user', body: text, ...(images?.length ? { attachments: images } : {}) };
 }
 
 function durationSince(start: number | undefined): number {

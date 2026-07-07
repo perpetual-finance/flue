@@ -3,6 +3,7 @@ import type {
 	AgentProfile,
 	AgentRuntimeConfig,
 	Capability,
+	DeliveredMessage,
 	FunctionAgentConfig,
 	SubagentDefinition,
 } from '../types.ts';
@@ -102,11 +103,18 @@ export function renderAgentFunctionWithStructure(
  * hooks (`useState`, `useSandbox`); nested `useSubagent` declarations pass
  * through for the delegate's own task tool, governed by the delegation
  * depth cap.
+ *
+ * `delivery` is the parent's task prompt as a `DeliveredMessage` — the
+ * delegate's triggering input, readable via `useDelivery()` exactly like a
+ * root agent reads its dispatch.
  */
-export function resolveSubagentDefinition(subagent: SubagentDefinition): AgentProfile {
+export function resolveSubagentDefinition(
+	subagent: SubagentDefinition,
+	delivery?: DeliveredMessage,
+): AgentProfile {
 	const { result, frame } = renderWithFrame(
 		subagent.capabilities as () => unknown,
-		undefined,
+		delivery ? { snapshot: new Map(), store: undefined, delivery } : undefined,
 		'subagent',
 	);
 	assertAgentInstruction(result);
