@@ -14,10 +14,8 @@ For example, `flue docs search "durable execution"` searches with the query `dur
 <!-- flue-docs-catalog:start -->
 
 ```text
-api/action-api -- Action API
-  Reference for defining reusable finite Actions with @flue/runtime.
 api/agent-api -- Agent API
-  Reference for defining agents and running agent operations with @flue/runtime.
+  Reference for defining agents, composing capabilities with Flue Hooks, and running agent operations with @flue/runtime.
 api/data-persistence-api -- Data Persistence API
   Reference for Flue persistence adapters and stores.
 api/errors-reference -- Errors Reference
@@ -99,8 +97,6 @@ ecosystem/tooling/sentry -- Sentry
 ecosystem/tooling/vitest-evals -- Vitest Evals
 getting-started/quickstart -- Getting Started
   Set up a Flue project automatically or create your first agent manually.
-guide/actions -- Actions
-  Define finite agent-backed operations the model can run reliably.
 guide/building-agents -- Agents
   Create an agent, configure its capabilities, and send it messages over time.
 guide/channels -- Channels
@@ -109,8 +105,6 @@ guide/database -- Database
   Configure database-backed state for Flue agent conversations.
 guide/evals -- Evals
   Evaluate Flue agents with repeatable Vitest suites using vitest-evals.
-guide/migration -- Migration Guide
-  Move a pre-redesign Flue project to the Vite plugin, explicit routing, and conversation-URL clients.
 guide/models -- LLM (Models & Providers)
   Select models, configure providers, and tune reasoning behavior in Flue agents.
 guide/observability -- Observability
