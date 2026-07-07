@@ -94,9 +94,10 @@ import { resolveSubagentDefinition } from './hooks/render.ts';
 import type { HookStateBuffer, HookStateWrite } from './hooks/state.ts';
 import {
 	type AgentOutputChannel,
+	type AgentSignalAppend,
 	runMessageMetadataProducers,
 } from './message-output.ts';
-import { renderSignalMessage } from './message-rendering.ts';
+import { createUserContextMessage, renderSignalMessage } from './message-rendering.ts';
 import { assertImagesWithinLimit } from './persisted-images.ts';
 import {
 	buildPackagedSkillPrompt,
@@ -576,6 +577,21 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	private responseStartMetadata: Record<string, unknown> | undefined;
 	/** Ordered append chain for `useMessageData` writes; awaited before the response settles. */
 	private outputWriteQueue: Promise<unknown> = Promise.resolve();
+	/**
+	 * `useAppend` signals buffered since the last flush point, in call order.
+	 * Appends are steered into the live loop immediately (the model sees them
+	 * at the next turn boundary) but their canonical records must respect the
+	 * conversation's linear topology, so they flush at turn_end — riding the
+	 * tool batch's commit append, exactly like buffered `useState` writes.
+	 */
+	private pendingSignalAppends: Array<{
+		messageId: string;
+		timestamp: string;
+		signalType: string;
+		tagName?: string;
+		content: string;
+		attributes?: Record<string, string>;
+	}> = [];
 
 	private emitTurnRequestAndStream: StreamFn = async (model, context, options) => {
 		if (this.activeTurnId === undefined) this.activeTurnId = generateTurnId();
@@ -683,6 +699,92 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		// The queue is consumed by flushResponseOutput; this handler only keeps
 		// an interim rejection from surfacing as an unhandled-rejection warning.
 		pending.catch(() => {});
+	}
+
+	/**
+	 * Sink for `useAppend` writers. The signal is steered into the live agent
+	 * loop immediately — pi drains the steering queue at each turn boundary, so
+	 * the model sees it before its next response — and buffered for canonical
+	 * append at the next flush point (`drainSignalAppendRecords`). Steering and
+	 * the durable flush happen in the same order at the same boundary, so the
+	 * live context and a rehydrated one can never disagree.
+	 */
+	private enqueueSignalAppend(signal: AgentSignalAppend): void {
+		if (!this.activeSubmissionId) {
+			throw new Error(
+				'[flue] append() is only legal while the agent is responding to a submission — call it from tool run functions (and other callbacks that run during one). An appended signal annotates the running conversation; to send input to an idle agent, use dispatch().',
+			);
+		}
+		const timestamp = new Date().toISOString();
+		this.pendingSignalAppends.push({
+			messageId: generateConversationEntryId(),
+			timestamp,
+			signalType: signal.type,
+			...(signal.tagName ? { tagName: signal.tagName } : {}),
+			content: signal.body,
+			...(signal.attributes ? { attributes: signal.attributes } : {}),
+		});
+		// Steer the exact message the canonical projection rebuilds from the
+		// durable record (signals reach the model as rendered user-context
+		// messages — see buildConversationContext), so the live loop and a
+		// rehydrated context can never disagree about what the model saw.
+		this.agentLoop.steer(
+			createUserContextMessage(
+				renderSignalMessage({
+					role: 'signal',
+					type: signal.type,
+					tagName: signal.tagName,
+					content: signal.body,
+					attributes: signal.attributes,
+					timestamp: new Date(timestamp).getTime(),
+				}),
+				timestamp,
+			),
+		);
+	}
+
+	/**
+	 * Turn buffered `useAppend` signals into canonical `signal` records chained
+	 * linearly after `parentId`, returning the new leaf. Callers must append
+	 * the records in the same batch (or immediately after) whatever made
+	 * `parentId` the conversation tail.
+	 */
+	private drainSignalAppendRecords(parentId: string | null): {
+		records: ConversationRecord[];
+		leafId: string | null;
+	} {
+		if (this.pendingSignalAppends.length === 0) return { records: [], leafId: parentId };
+		const drained = this.pendingSignalAppends;
+		this.pendingSignalAppends = [];
+		let leafId = parentId;
+		const records = drained.map((pending): ConversationRecord => {
+			const record: ConversationRecord = {
+				...this.canonicalEnvelope('signal'),
+				timestamp: pending.timestamp,
+				type: 'signal',
+				messageId: pending.messageId,
+				parentId: leafId,
+				signalType: pending.signalType,
+				...(pending.tagName ? { tagName: pending.tagName } : {}),
+				content: pending.content,
+				...(pending.attributes ? { attributes: pending.attributes } : {}),
+			};
+			leafId = pending.messageId;
+			return record;
+		});
+		return { records, leafId };
+	}
+
+	/**
+	 * Flush signals appended after the run's last turn boundary (a straggling
+	 * callback). The model never saw them live; they extend the durable leaf so
+	 * the next run's rebuilt context picks them up.
+	 */
+	private async flushTrailingSignalAppends(): Promise<void> {
+		if (this.pendingSignalAppends.length === 0) return;
+		const parentId = await this.conversationWriter.getConversationLeaf(this.conversationId);
+		const { records } = this.drainSignalAppendRecords(parentId);
+		await this.appendCanonical(records);
 	}
 
 	/**
@@ -858,6 +960,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		this.rerender = options.rerender;
 		this.outputChannel = options.output;
 		this.outputChannel?.connect((name, data) => this.enqueueMessageDataWrite(name, data));
+		this.outputChannel?.connectSignals((signal) => this.enqueueSignalAppend(signal));
 
 		const systemPrompt = this.config.systemPrompt;
 
@@ -881,6 +984,10 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			onPayload: (payload, model) => this.applyProviderPayloadOverrides(payload, model),
 			streamFn: this.emitTurnRequestAndStream,
 			toolExecution: 'parallel',
+			// The steering queue carries `useAppend` signals; every signal appended
+			// during a turn must reach the model together at the next boundary
+			// (the default one-at-a-time mode would spread them across turns).
+			steeringMode: 'all',
 			sessionId: this.affinityKey,
 			// Render-per-turn (function agents): runs after the turn_end handler
 			// has committed the tool batch (state writes durable), so the next
@@ -1279,10 +1386,25 @@ export class Session implements FlueSession, AgentSubmissionSession {
 							if (!outcome) throw new Error('[flue] Canonical tool result has no durable outcome.');
 							return outcome.recordId;
 						});
-						// Buffered useState writes land in the same append batch as the
-						// commit marker — one store.append, one durability point. If
-						// recovery settles this batch as interrupted, the writes never
-						// happened, exactly like the tool side effects they rode with.
+						const finalToolResult = event.toolResults.at(-1);
+						if (!finalToolResult) {
+							throw new ConversationRecordInvariantError({
+								recordId: `record_tool_results_committed_${encodeCanonicalId(assistantMessageId)}`,
+								recordType: 'tool_results_committed',
+								reason: 'A committed canonical tool-result batch must contain at least one result.',
+							});
+						}
+						// Signals appended during this batch chain after its final tool
+						// result — the same position the steering queue injects them into
+						// the live loop, so durable order equals what the model saw.
+						const signalAppends = this.drainSignalAppendRecords(
+							toolResultEntryId(assistantMessageId, finalToolResult.toolCallId),
+						);
+						// Buffered useState writes and signal appends land in the same
+						// append batch as the commit marker — one store.append, one
+						// durability point. If recovery settles this batch as interrupted,
+						// the writes never happened, exactly like the tool side effects
+						// they rode with.
 						await this.appendCanonical([
 							...this.drainHookStateRecords(),
 							{
@@ -1295,29 +1417,22 @@ export class Session implements FlueSession, AgentSubmissionSession {
 								parentId,
 								outcomeIds,
 							},
+							...signalAppends.records,
 						]);
 						for (const toolResult of event.toolResults) {
 							this.pendingToolPublications.get(toolResult.toolCallId)?.();
 							this.pendingToolPublications.delete(toolResult.toolCallId);
 						}
-						const finalToolResult = event.toolResults.at(-1);
-						if (!finalToolResult) {
-							throw new ConversationRecordInvariantError({
-								recordId: `record_tool_results_committed_${encodeCanonicalId(assistantMessageId)}`,
-								recordType: 'tool_results_committed',
-								reason: 'A committed canonical tool-result batch must contain at least one result.',
-							});
-						}
-						this.canonicalToolResultParentId = toolResultEntryId(
-							assistantMessageId,
-							finalToolResult.toolCallId,
-						);
+						this.canonicalToolResultParentId =
+							signalAppends.leafId ??
+							toolResultEntryId(assistantMessageId, finalToolResult.toolCallId);
 						this.canonicalToolRequestMessageId = undefined;
 					} else {
 						// No tool batch this turn: persist any stray buffered writes on
 						// their own so nothing sits in memory past the turn boundary.
 						const stateWrites = this.drainHookStateRecords();
 						if (stateWrites.length > 0) await this.appendCanonical(stateWrites);
+						await this.flushTrailingSignalAppends();
 					}
 					this.emit({
 						type: 'turn_messages',
@@ -3971,8 +4086,15 @@ export class Session implements FlueSession, AgentSubmissionSession {
 						errorLabel: options.errorLabel,
 						signal: options.signal,
 					});
+					await this.flushTrailingSignalAppends();
 					await this.flushResponseOutput();
 				} finally {
+					// A failed attempt drops its unflushed signal appends (they never
+					// happened, like the state writes and tool batch they rode with)
+					// and clears the steering queue so nothing leaks into a re-attempt
+					// whose context is rebuilt from canonical records.
+					this.pendingSignalAppends = [];
+					this.agentLoop.clearSteeringQueue();
 					this.activeSubmissionId = undefined;
 					this.activeSubmissionAttemptId = undefined;
 					this.activeTimeoutAt = undefined;

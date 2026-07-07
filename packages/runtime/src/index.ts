@@ -51,6 +51,7 @@ export type {
 } from './execution-interceptor.ts';
 export { type StateSetter, useState } from './hooks/state.ts';
 export { use } from './hooks/use.ts';
+export { useAppend } from './hooks/use-append.ts';
 export { useDelivery } from './hooks/use-delivery.ts';
 export { useInstruction } from './hooks/use-instruction.ts';
 export { useMessageData } from './hooks/use-message-data.ts';
@@ -63,6 +64,7 @@ export { type FlueInstrumentation, instrument } from './instrumentation.ts';
 export type { McpServerConnection, McpServerOptions, McpTransport } from './mcp.ts';
 export { connectMcpServer } from './mcp.ts';
 export type {
+	AgentSignalAppend,
 	MessageMetadataEvent,
 	MessageMetadataPoint,
 	MessageMetadataProducer,

@@ -1,10 +1,12 @@
 import type { PromptUsage } from './types.ts';
 
 /**
- * Client-facing message output: the shared plumbing behind the output hooks
- * (`useMessageData`, `useMessageMetadata`). Output is write-only and
- * non-reactive — it decorates the agent's response message for clients and
- * never re-runs the agent or reaches the model.
+ * The write channels behind the output hooks. Client-facing output
+ * (`useMessageData`, `useMessageMetadata`) decorates the agent's response
+ * message for clients and never reaches the model; model-facing appends
+ * (`useAppend`) write signal records into the agent's own conversation
+ * history. Both are write-only and non-reactive — nothing here re-runs the
+ * agent.
  */
 
 /** Lifecycle points a `useMessageMetadata` producer can attach to. */
@@ -35,11 +37,26 @@ export interface MessageMetadataProducers {
 }
 
 /**
+ * One `append()` call from a `useAppend()` writer: a signal authored by agent
+ * code into the current agent's conversation history. Field-for-field the
+ * code-side twin of a `kind: 'signal'` delivered message (same validation,
+ * same rendering) — minus delivery semantics: an append annotates the running
+ * conversation and never wakes the agent.
+ */
+export interface AgentSignalAppend {
+	type: string;
+	body: string;
+	attributes?: Record<string, string>;
+	tagName?: string;
+}
+
+/**
  * The output channel shared between renders and the session, mirroring the
  * `useState` buffer pattern: created once per harness lifetime, handed to
  * both sides. Renders replace `producers` wholesale each render (fresh
- * closures) and `useMessageData` writers call `writeMessageData`; the session
- * connects the sink that appends durable records.
+ * closures); `useMessageData` writers call `writeMessageData` and `useAppend`
+ * writers call `appendSignal`; the session connects the sinks that append
+ * durable records.
  */
 export interface AgentOutputChannel {
 	/** Metadata producers from the latest render. */
@@ -47,10 +64,14 @@ export interface AgentOutputChannel {
 	/** Wire the session-side sink data writes flow into. */
 	connect(sink: (name: string, data: unknown) => void): void;
 	writeMessageData(name: string, data: unknown): void;
+	/** Wire the session-side sink signal appends flow into. */
+	connectSignals(sink: (signal: AgentSignalAppend) => void): void;
+	appendSignal(signal: AgentSignalAppend): void;
 }
 
 export function createAgentOutputChannel(): AgentOutputChannel {
 	let sink: ((name: string, data: unknown) => void) | undefined;
+	let signalSink: ((signal: AgentSignalAppend) => void) | undefined;
 	return {
 		producers: { start: [], finish: [] },
 		connect(next) {
@@ -63,6 +84,17 @@ export function createAgentOutputChannel(): AgentOutputChannel {
 				);
 			}
 			sink(name, data);
+		},
+		connectSignals(next) {
+			signalSink = next;
+		},
+		appendSignal(signal) {
+			if (!signalSink) {
+				throw new Error(
+					'[flue] append() has no durable runtime behind this render, so signal appends are unavailable.',
+				);
+			}
+			signalSink(signal);
 		},
 	};
 }
