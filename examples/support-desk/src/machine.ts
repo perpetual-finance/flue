@@ -19,11 +19,10 @@ export function useMachine<P extends string>(options: {
 	phases: readonly P[];
 	initial: P;
 }) {
-	const [phase, setPhase] = useState({
-		name: options.name,
-		schema: v.picklist(options.phases),
-		default: options.initial,
-	});
+	const [phase, setPhase] = useState<P>(options.name, options.initial);
+	// The core hook is untyped at runtime; a composed hook layers its own
+	// guarantee — a persisted phase from before a rename fails loudly here.
+	v.assert(v.picklist(options.phases), phase);
 	useInstruction(
 		`You operate a phased workflow: ${options.phases.join(' → ')}. Your current phase is ` +
 			"announced by transition tool results. Trust your judgment about when a phase's work is done.",

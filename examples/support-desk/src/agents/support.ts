@@ -97,11 +97,7 @@ function Support() {
 		phases: ['gathering', 'drafting', 'committing', 'done'] as const,
 		initial: 'gathering',
 	});
-	const [sentiment, setSentiment] = useState({
-		name: 'sentiment',
-		schema: v.picklist(['neutral', 'churn-risk']),
-		default: 'neutral',
-	});
+	const [sentiment, setSentiment] = useState<'neutral' | 'churn-risk'>('sentiment', 'neutral');
 
 	useTool({
 		name: 'update_sentiment',

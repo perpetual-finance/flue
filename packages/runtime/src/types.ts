@@ -558,7 +558,7 @@ export interface FunctionAgentConfig {
  * ```ts
  * 'use agent';
  * function Support() {
- *   const [phase] = useState({ name: 'phase', default: 'gathering' });
+ *   const [phase] = useState('phase', 'gathering');
  *   use(GatheringPhase, { ... });
  *   return 'Operator-facing support agent. Work only from verified evidence.';
  * }

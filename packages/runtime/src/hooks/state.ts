@@ -1,4 +1,3 @@
-import * as v from 'valibot';
 import { type HookStateStore, isRendering, requireRenderFrame } from './frame.ts';
 
 /**
@@ -8,15 +7,11 @@ import { type HookStateStore, isRendering, requireRenderFrame } from './frame.ts
  * `state_write` records) and returns a setter that persists a new value.
  * Reads are render-time snapshots; writes are silent — they never post a
  * message, never wake the agent, and never re-render mid-run. The next
- * input-triggered run reads the latest persisted values ("fresh at next run").
+ * turn's render reads the latest persisted values.
  *
  * ```ts
  * export default function SupportAgent() {
- *   const [phase, setPhase] = useState({
- *     name: 'phase',
- *     schema: v.picklist(['gathering', 'drafting', 'done']),
- *     default: 'gathering',
- *   });
+ *   const [phase, setPhase] = useState<Phase>('phase', 'gathering');
  *
  *   useTool({
  *     name: 'begin_draft',
@@ -24,15 +19,15 @@ import { type HookStateStore, isRendering, requireRenderFrame } from './frame.ts
  *     run: () => setPhase('drafting'),
  *   });
  *
- *   return { model: '...', instruction: `Current phase: ${phase}.` };
+ *   return `Current phase: ${phase}.`;
  * }
  * ```
  *
  * Semantics:
  * - Values are JSON: writes are normalized through a JSON round-trip and
  *   throw on non-serializable input. There is no unset — a name, once
- *   written, always has a value (`default` fills in before the first write
- *   and is never persisted itself).
+ *   written, always has a value (`defaultValue` fills in before the first
+ *   write and is never persisted itself).
  * - Writing the current value again is a no-op: no record is appended.
  * - Writes made by tools become durable atomically with the tool batch that
  *   made them — if the batch settles, the write is durable; if recovery
@@ -41,30 +36,26 @@ import { type HookStateStore, isRendering, requireRenderFrame } from './frame.ts
  *   stream. Write from tool `run` functions and other runtime callbacks.
  * - State is scoped to the agent instance (its whole stream), keyed by
  *   `name`; declaring the same name twice in one render throws.
+ * - The type parameter is a compile-time convenience only — nothing parses
+ *   persisted values. For runtime enforcement, assert at the call site
+ *   (`v.assert(schema, value)`) or compose your own hook over this one
+ *   (e.g. a `useStateWithSchema(name, schema, defaultValue)` that parses
+ *   reads and validates writes).
  */
-export function useState<TSchema extends v.GenericSchema>(options: {
-	name: string;
-	schema: TSchema;
-	default: v.InferOutput<TSchema>;
-}): [v.InferOutput<TSchema>, StateSetter<v.InferOutput<TSchema>>];
-export function useState<TSchema extends v.GenericSchema>(options: {
-	name: string;
-	schema: TSchema;
-}): [v.InferOutput<TSchema> | undefined, StateSetter<v.InferOutput<TSchema>>];
-export function useState<T>(options: { name: string; default: T }): [T, StateSetter<T>];
-export function useState<T = unknown>(options: { name: string }): [T | undefined, StateSetter<T>];
-export function useState(options: {
-	name: string;
-	schema?: v.GenericSchema;
-	default?: unknown;
-}): [unknown, StateSetter<unknown>] {
+export function useState<T>(name: string, defaultValue: T): [T, StateSetter<T>];
+export function useState<T = unknown>(name: string): [T | undefined, StateSetter<T>];
+export function useState(name: string, defaultValue?: unknown): [unknown, StateSetter<unknown>] {
 	const frame = requireRenderFrame('useState');
 	if (frame.kind === 'subagent') {
 		throw new Error(
 			'[flue] useState() is not available in a subagent render. Durable state is scoped to the agent instance; delegates run detached tasks with no state channel. Pass what the delegate needs through the task prompt instead.',
 		);
 	}
-	const { name, schema } = assertUseStateOptions(options);
+	if (typeof name !== 'string' || name.length === 0) {
+		throw new Error(
+			'[flue] useState(name, defaultValue?) takes the state name as its first argument — a non-empty string.',
+		);
+	}
 	if (frame.stateNames.has(name)) {
 		throw new Error(
 			`[flue] Duplicate useState name "${name}" in one render. State names identify a value across renders and must be unique.`,
@@ -74,32 +65,18 @@ export function useState(options: {
 
 	const store = frame.state?.store;
 	const persisted = readPersisted(name, frame.state?.snapshot, store);
-	let value: unknown;
-	if (persisted) {
-		value = schema ? parsePersisted(name, schema, persisted.value) : persisted.value;
-	} else {
-		value = options.default;
-	}
+	const value = persisted ? persisted.value : defaultValue;
 
 	const setValue: StateSetter<unknown> = (next) => {
 		if (isRendering()) {
 			throw new Error(
-				`[flue] State "${name}" was written during render. Renders are pure reads of the record stream — write from tool run functions or other runtime callbacks, and use \`default\` for the initial value.`,
+				`[flue] State "${name}" was written during render. Renders are pure reads of the record stream — write from tool run functions or other runtime callbacks, and use the default value for the initial value.`,
 			);
 		}
 		if (!store) {
 			throw new Error(
 				`[flue] State "${name}" has no durable runtime behind this render, so writes are unavailable.`,
 			);
-		}
-		if (schema) {
-			const parsed = v.safeParse(schema, next);
-			if (!parsed.success) {
-				throw new Error(
-					`[flue] State "${name}" write does not match its schema: ${formatIssues(parsed.issues)}.`,
-				);
-			}
-			next = parsed.output;
 		}
 		store.write(name, normalizeStateValue(name, next));
 	};
@@ -150,44 +127,6 @@ export function createHookStateBuffer(snapshot: ReadonlyMap<string, unknown>): H
 	};
 }
 
-const UseStateOptionsSchema = v.strictObject(
-	{
-		name: v.pipe(v.string(), v.minLength(1)),
-		schema: v.optional(v.custom<v.GenericSchema>(looksLikeSchema)),
-		default: v.optional(v.unknown()),
-	},
-	(issue) =>
-		issue.expected === 'never'
-			? `received unknown useState option ${issue.received}`
-			: issue.message,
-);
-
-function assertUseStateOptions(options: unknown): { name: string; schema?: v.GenericSchema } {
-	const parsed = v.safeParse(UseStateOptionsSchema, options);
-	if (!parsed.success) {
-		throw new Error(`[flue] useState() options are invalid: ${formatIssues(parsed.issues)}.`);
-	}
-	const { name, schema } = parsed.output;
-	if (schema && 'default' in (options as object)) {
-		const checked = v.safeParse(schema, (options as { default?: unknown }).default);
-		if (!checked.success) {
-			throw new Error(
-				`[flue] State "${name}" default does not match its schema: ${formatIssues(checked.issues)}.`,
-			);
-		}
-	}
-	return { name, ...(schema ? { schema } : {}) };
-}
-
-function looksLikeSchema(value: unknown): boolean {
-	return (
-		typeof value === 'object' &&
-		value !== null &&
-		(value as { kind?: unknown }).kind === 'schema' &&
-		(value as { async?: unknown }).async === false
-	);
-}
-
 function readPersisted(
 	name: string,
 	snapshot: ReadonlyMap<string, unknown> | undefined,
@@ -199,16 +138,6 @@ function readPersisted(
 	if (current) return current;
 	if (snapshot?.has(name)) return { value: snapshot.get(name) };
 	return undefined;
-}
-
-function parsePersisted(name: string, schema: v.GenericSchema, value: unknown): unknown {
-	const parsed = v.safeParse(schema, value);
-	if (!parsed.success) {
-		throw new Error(
-			`[flue] Persisted value for state "${name}" does not match its schema: ${formatIssues(parsed.issues)}. The stored value likely predates a schema change — migrate the value or widen the schema.`,
-		);
-	}
-	return parsed.output;
 }
 
 function normalizeStateValue(name: string, value: unknown): unknown {
@@ -229,8 +158,4 @@ function normalizeStateValue(name: string, value: unknown): unknown {
 		throw new Error(`[flue] State "${name}" value is not JSON-serializable.`);
 	}
 	return JSON.parse(text);
-}
-
-function formatIssues(issues: readonly { message: string }[]): string {
-	return issues.map((issue) => issue.message).join('; ');
 }

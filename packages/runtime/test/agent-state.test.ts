@@ -90,8 +90,8 @@ describe('useState (render)', () => {
 	it('returns the default when nothing is persisted, undefined without one', () => {
 		renderAgentFunction(
 			() => {
-				const [count] = useState({ name: 'count', default: 0 });
-				const [note] = useState({ name: 'note' });
+				const [count] = useState('count', 0);
+				const [note] = useState('note');
 				expect(count).toBe(0);
 				expect(note).toBeUndefined();
 			},
@@ -103,7 +103,7 @@ describe('useState (render)', () => {
 	it('reads the persisted snapshot value over the default', () => {
 		renderAgentFunction(
 			() => {
-				const [count] = useState({ name: 'count', schema: v.number(), default: 0 });
+				const [count] = useState('count', 0);
 				expect(count).toBe(7);
 			},
 			CONFIG,
@@ -116,7 +116,7 @@ describe('useState (render)', () => {
 		state.store.write('count', 2);
 		renderAgentFunction(
 			() => {
-				const [count] = useState({ name: 'count', default: 0 });
+				const [count] = useState('count', 0);
 				expect(count).toBe(2);
 			},
 			CONFIG,
@@ -128,8 +128,8 @@ describe('useState (render)', () => {
 		expect(() =>
 			renderAgentFunction(
 				() => {
-					useState({ name: 'count' });
-					useState({ name: 'count' });
+					useState('count');
+					useState('count');
 				},
 				CONFIG,
 				renderStateContext(),
@@ -138,13 +138,13 @@ describe('useState (render)', () => {
 	});
 
 	it('throws outside an agent render', () => {
-		expect(() => useState({ name: 'count' })).toThrow(/outside an agent function/);
+		expect(() => useState('count')).toThrow(/outside an agent function/);
 	});
 
 	it('throws when written during render', () => {
 		renderAgentFunction(
 			() => {
-				const [, setCount] = useState({ name: 'count', default: 0 });
+				const [, setCount] = useState('count', 0);
 				expect(() => setCount(1)).toThrow(/written during render/);
 			},
 			CONFIG,
@@ -155,68 +155,41 @@ describe('useState (render)', () => {
 	it('throws on writes when the render has no durable runtime behind it', () => {
 		let setCount: StateSetter<number> | undefined;
 		renderAgentFunction(() => {
-			[, setCount] = useState({ name: 'count', default: 0 });
+			[, setCount] = useState('count', 0);
 		}, CONFIG);
 		expect(() => setCount?.(1)).toThrow(/no durable runtime/);
 	});
 
-	it('validates options: unknown fields and empty names throw', () => {
+	it('rejects a non-string or empty name', () => {
 		expect(() =>
 			renderAgentFunction(
 				() => {
-					useState({ name: 'count', persist: true } as never);
+					useState('');
 				},
 				CONFIG,
 				renderStateContext(),
 			),
-		).toThrow(/unknown useState option/);
+		).toThrow(/takes the state name as its first argument/);
 		expect(() =>
 			renderAgentFunction(
 				() => {
-					useState({ name: '' });
+					useState({ name: 'count' } as never);
 				},
 				CONFIG,
 				renderStateContext(),
 			),
-		).toThrow(/useState\(\) options are invalid/);
+		).toThrow(/takes the state name as its first argument/);
 	});
 
-	it('validates the default against the schema', () => {
-		expect(() =>
-			renderAgentFunction(
-				() => {
-					useState({ name: 'count', schema: v.number(), default: 'nope' as never });
-				},
-				CONFIG,
-				renderStateContext(),
-			),
-		).toThrow(/default does not match its schema/);
-	});
-
-	it('throws when a persisted value no longer parses under the schema', () => {
-		expect(() =>
-			renderAgentFunction(
-				() => {
-					useState({ name: 'count', schema: v.number(), default: 0 });
-				},
-				CONFIG,
-				renderStateContext([['count', 'legacy']]),
-			),
-		).toThrow(/Persisted value for state "count" does not match its schema/);
-	});
-
-	it('rejects invalid, undefined, and non-serializable written values', () => {
-		let setCount: StateSetter<number> | undefined;
+	it('rejects undefined and non-serializable written values', () => {
 		let setAny: StateSetter<unknown> | undefined;
 		renderAgentFunction(
 			() => {
-				[, setCount] = useState({ name: 'count', schema: v.number(), default: 0 });
-				[, setAny] = useState({ name: 'anything' });
+				[, setAny] = useState('anything');
 			},
 			CONFIG,
 			renderStateContext(),
 		);
-		expect(() => setCount?.('x' as never)).toThrow(/does not match its schema/);
 		expect(() => setAny?.(undefined)).toThrow(/cannot be set to undefined/);
 		const circular: Record<string, unknown> = {};
 		circular.self = circular;
@@ -309,7 +282,7 @@ describe('useState end to end (node coordinator, faux provider)', () => {
 
 		const renderedCounts: number[] = [];
 		function assistant() {
-			const [count, setCount] = useState({ name: 'count', schema: v.number(), default: 0 });
+			const [count, setCount] = useState('count', 0);
 			renderedCounts.push(count);
 			useTool({
 				name: 'bump',
@@ -405,7 +378,7 @@ describe('useState end to end (node coordinator, faux provider)', () => {
 		]);
 
 		function assistant() {
-			const [count, setCount] = useState({ name: 'count', schema: v.number(), default: 0 });
+			const [count, setCount] = useState('count', 0);
 			useTool({
 				name: 'bump',
 				description: 'Increment the counter.',
@@ -475,7 +448,7 @@ describe('useState end to end (node coordinator, faux provider)', () => {
 			return 'Conditionally mounted — illegal.';
 		}
 		function assistant() {
-			const [count, setCount] = useState({ name: 'count', schema: v.number(), default: 0 });
+			const [count, setCount] = useState('count', 0);
 			if (count > 0) use(Extra);
 			useTool({
 				name: 'bump',

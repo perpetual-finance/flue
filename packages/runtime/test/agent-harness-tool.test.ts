@@ -326,7 +326,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 
 		let renderedNote: string | undefined;
 		function assistant() {
-			const [note, setNote] = useState({ name: 'note', default: 'unset' });
+			const [note, setNote] = useState('note', 'unset');
 			renderedNote = note;
 			useTool({
 				name: 'record_note',

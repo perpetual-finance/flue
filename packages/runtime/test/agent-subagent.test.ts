@@ -211,7 +211,7 @@ describe('resolveSubagentDefinition() (delegation-time render)', () => {
 
 	it('rejects root-scoped hooks in the delegate render', () => {
 		function WithState() {
-			useState({ name: 'count', default: 0 });
+			useState('count', 0);
 			return 'Nope.';
 		}
 		expect(() =>
