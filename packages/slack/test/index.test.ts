@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	createSlackChannel,
-	InvalidSlackConversationKeyError,
+	InvalidSlackInstanceIdError,
 	type SlackChannel,
 	type SlackEventsApiPayload,
 } from '../src/index.ts';
@@ -548,11 +548,11 @@ describe('createSlackChannel()', () => {
 			events() {},
 		});
 		const ref = { teamId: 'T:123', channelId: 'C/123', threadTs: '1717.00?#' };
-		const key = slack.conversationKey(ref);
+		const id = slack.instanceId(ref);
 
-		expect(slack.parseConversationKey(key)).toEqual(ref);
-		expect(() => slack.parseConversationKey(`github:v1:${key}`)).toThrow(
-			InvalidSlackConversationKeyError,
+		expect(slack.parseInstanceId(id)).toEqual(ref);
+		expect(() => slack.parseInstanceId(`github:v1:${id}`)).toThrow(
+			InvalidSlackInstanceIdError,
 		);
 	});
 });

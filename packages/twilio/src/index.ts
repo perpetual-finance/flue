@@ -1,9 +1,9 @@
 import { createChannelRouter } from '@flue/runtime';
 import type { Context, Env, Handler, Hono } from 'hono';
-import { InvalidTwilioConversationKeyError, InvalidTwilioInputError } from './errors.ts';
+import { InvalidTwilioInputError, InvalidTwilioInstanceIdError } from './errors.ts';
 import { createTwilioStatusCallbackHandler, createTwilioWebhookHandler } from './webhook.ts';
 
-export { InvalidTwilioConversationKeyError, InvalidTwilioInputError } from './errors.ts';
+export { InvalidTwilioInputError, InvalidTwilioInstanceIdError } from './errors.ts';
 
 export interface ChannelRoute<E extends Env = Env> {
 	readonly method: string;
@@ -151,10 +151,13 @@ export interface TwilioChannel<E extends Env = Env> {
 	 * to the mount point: `app.route('/channels/twilio', channel.route())`.
 	 */
 	route(): Hono<E>;
-	/** Serializes a canonical namespaced identifier. It is not an authorization capability. */
-	conversationKey(ref: TwilioConversationRef): string;
-	/** Parses only canonical keys produced by `conversationKey()`. */
-	parseConversationKey(id: string): TwilioConversationRef;
+	/** Derives the agent instance id: a canonical namespaced identifier. It is not an authorization capability. */
+	instanceId(ref: TwilioConversationRef): string;
+	/**
+	 * Parses only canonical instance ids produced by `instanceId()`. Escape hatch: agents
+	 * normally receive structured facts as creation data rather than parsing them from the id.
+	 */
+	parseInstanceId(id: string): TwilioConversationRef;
 }
 
 /**
@@ -187,7 +190,7 @@ export function createTwilioChannel<E extends Env = Env>(
 	const channel: TwilioChannel<E> = {
 		routes,
 		route: () => createChannelRouter(routes),
-		conversationKey(ref) {
+		instanceId(ref) {
 			assertConversationRef(ref);
 			const base = ['twilio', 'v1', 'account', encodeURIComponent(ref.accountSid)];
 			return ref.type === 'address'
@@ -208,7 +211,7 @@ export function createTwilioChannel<E extends Env = Env>(
 						encodeURIComponent(ref.participant),
 					].join(':');
 		},
-		parseConversationKey(id) {
+		parseInstanceId(id) {
 			try {
 				const address = /^twilio:v1:account:([^:]+):address:([^:]+):participant:([^:]+)$/.exec(id);
 				const service =
@@ -219,7 +222,7 @@ export function createTwilioChannel<E extends Env = Env>(
 				if (address) {
 					const [, accountSid, destination, participant] = address;
 					if (!accountSid || !destination || !participant) {
-						throw new InvalidTwilioConversationKeyError();
+						throw new InvalidTwilioInstanceIdError();
 					}
 					ref = {
 						type: 'address',
@@ -230,7 +233,7 @@ export function createTwilioChannel<E extends Env = Env>(
 				} else if (service) {
 					const [, accountSid, messagingServiceSid, destination, participant] = service;
 					if (!accountSid || !messagingServiceSid || !destination || !participant) {
-						throw new InvalidTwilioConversationKeyError();
+						throw new InvalidTwilioInstanceIdError();
 					}
 					ref = {
 						type: 'messaging-service',
@@ -240,16 +243,16 @@ export function createTwilioChannel<E extends Env = Env>(
 						participant: decodeURIComponent(participant),
 					};
 				} else {
-					throw new InvalidTwilioConversationKeyError();
+					throw new InvalidTwilioInstanceIdError();
 				}
 				assertConversationRef(ref);
-				if (channel.conversationKey(ref) !== id) {
-					throw new InvalidTwilioConversationKeyError();
+				if (channel.instanceId(ref) !== id) {
+					throw new InvalidTwilioInstanceIdError();
 				}
 				return ref;
 			} catch (error) {
-				if (error instanceof InvalidTwilioConversationKeyError) throw error;
-				throw new InvalidTwilioConversationKeyError();
+				if (error instanceof InvalidTwilioInstanceIdError) throw error;
+				throw new InvalidTwilioInstanceIdError();
 			}
 		},
 	};

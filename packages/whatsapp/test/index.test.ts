@@ -2,8 +2,8 @@ import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	createWhatsAppChannel,
-	InvalidWhatsAppConversationKeyError,
 	InvalidWhatsAppInputError,
+	InvalidWhatsAppInstanceIdError,
 	type WhatsAppChannel,
 	type WhatsAppConversationRef,
 	type WhatsAppWebhookPayload,
@@ -533,7 +533,7 @@ describe('createWhatsAppChannel()', () => {
 		expect(thrownResponse.status).toBe(500);
 	});
 
-	it('round-trips collision-safe phone, BSUID, and group conversation keys', () => {
+	it('round-trips collision-safe phone, BSUID, and group instance ids', () => {
 		const whatsapp = createWhatsAppChannel({
 			appSecret: 'app_secret_keys',
 			verifyToken: 'verify_token_keys',
@@ -564,19 +564,19 @@ describe('createWhatsAppChannel()', () => {
 			groupId: 'group:west/7',
 		};
 
-		const phoneKey = whatsapp.conversationKey(phone);
-		const userIdKey = whatsapp.conversationKey(userId);
-		const groupKey = whatsapp.conversationKey(group);
+		const phoneKey = whatsapp.instanceId(phone);
+		const userIdKey = whatsapp.instanceId(userId);
+		const groupKey = whatsapp.instanceId(group);
 
 		expect(phoneKey).not.toBe(userIdKey);
-		expect(whatsapp.parseConversationKey(phoneKey)).toEqual(phone);
-		expect(whatsapp.parseConversationKey(userIdKey)).toEqual(userId);
-		expect(whatsapp.parseConversationKey(groupKey)).toEqual(group);
-		expect(() => whatsapp.parseConversationKey(`${phoneKey}%2f`)).toThrow(
-			InvalidWhatsAppConversationKeyError,
+		expect(whatsapp.parseInstanceId(phoneKey)).toEqual(phone);
+		expect(whatsapp.parseInstanceId(userIdKey)).toEqual(userId);
+		expect(whatsapp.parseInstanceId(groupKey)).toEqual(group);
+		expect(() => whatsapp.parseInstanceId(`${phoneKey}%2f`)).toThrow(
+			InvalidWhatsAppInstanceIdError,
 		);
 		expect(() =>
-			whatsapp.conversationKey({
+			whatsapp.instanceId({
 				...userId,
 				destination: {
 					type: 'user-id',

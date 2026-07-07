@@ -309,8 +309,8 @@ export default defineAgent(Orders, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
 The local `shopify-order:` id includes shop and order identity because Shopify
-has no universal conversation key. It is still an identifier, not an
-authorization capability. Apply normal access control to direct agent routes.
+has no universal thread concept to derive an instance id from. It is still an
+identifier, not an authorization capability. Apply normal access control to direct agent routes.
 
 ## Verification and event shape
 

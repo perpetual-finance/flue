@@ -38,7 +38,7 @@ export const channel = createWhatsAppChannel({
 								'');
 					const ref = inboundConversationRef(entry.id, value, message);
 					await dispatch(assistant, {
-						id: channel.conversationKey(ref),
+						id: channel.instanceId(ref),
 						// Recorded once when this event creates the instance; ignored after.
 						data: {
 							phoneNumberId: ref.phoneNumberId,

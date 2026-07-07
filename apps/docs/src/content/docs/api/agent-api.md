@@ -131,10 +131,16 @@ interface AgentProps {
 
 ```ts
 function Assistant({ id }: AgentProps) {
-  useTool(replyInThread(channel.parseConversationKey(id)));
-  return 'Reply in the bound Slack thread when appropriate.';
+  const thread = useInitialData<SlackThreadRef>();
+  useTool(replyInThread(thread!));
+  return `Reply in the Slack thread bound to conversation ${id}.`;
 }
 ```
+
+`id` is the opaque address; structured facts such as the thread ref are read
+from creation data with [`useInitialData()`](#useinitialdata) rather than
+parsed from `id`. Channel packages still expose a `parseInstanceId(id)` escape
+hatch for the rare caller that must recover them from the id itself.
 
 #### `FunctionAgentConfig`
 

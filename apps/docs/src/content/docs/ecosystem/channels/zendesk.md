@@ -44,7 +44,7 @@ export const channel = createZendeskChannel({
     if (!ticketId) return;
 
     await dispatch(assistant, {
-      id: channel.ticketKey({ accountId: payload.account_id, ticketId }),
+      id: channel.instanceId({ accountId: payload.account_id, ticketId }),
       message: {
         kind: 'signal',
         type: `zendesk.${payload.type}`,
@@ -145,7 +145,12 @@ export const channel = createZendeskChannel({
           ticketId,
         };
         await dispatch(assistant, {
-          id: channel.ticketKey(ticket),
+          id: channel.instanceId(ticket),
+          // Recorded once when this event creates the instance; ignored after.
+          data: {
+            accountId: ticket.accountId,
+            ticketId: ticket.ticketId,
+          },
           message: {
             kind: 'signal',
             type: `zendesk.${payload.type}`,
@@ -323,22 +328,35 @@ instead of being rounded.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, retrieveTicket } from '../channels/zendesk.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { retrieveTicket } from '../channels/zendesk.ts';
 
-function Assistant({ id }: AgentProps) {
-  const ticket = channel.parseTicketKey(id);
-  useTool(retrieveTicket(ticket));
+const input = v.object({
+  accountId: v.string(),
+  ticketId: v.string(),
+});
+
+function Assistant() {
+  const data = useInitialData<v.InferOutput<typeof input>>();
+  if (!data) throw new Error('This agent is created by the Zendesk channel dispatch.');
+  useTool(retrieveTicket(data));
   return 'Review the inbound Zendesk ticket event. Retrieve the current ticket when more context is needed.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. The agent reads it with `useInitialData()`, validated against the
+`input:` schema, instead of parsing the instance id.
+
 The tool accepts no account, ticket id, API host, or credential from the model.
-`ticketKey()` includes account and ticket identity because Zendesk resource ids
-are account-scoped. The key remains an identifier, not an authorization
-capability.
+`instanceId()` includes account and ticket identity because Zendesk resource
+ids are account-scoped. The id remains an identifier, not an authorization
+capability. `parseInstanceId()` remains available as an escape hatch for
+recovering that identity from the id directly.
 
 ## Verification
 

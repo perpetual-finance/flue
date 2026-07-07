@@ -24,7 +24,7 @@ export const channel = createLinearChannel({
 			const comment = payload.data;
 			if (payload.action !== 'create' || !comment.issueId) return;
 			await dispatch(assistant, {
-				id: channel.conversationKey({
+				id: channel.instanceId({
 					type: 'issue',
 					organizationId: payload.organizationId,
 					issueId: comment.issueId,
@@ -53,7 +53,7 @@ export const channel = createLinearChannel({
 
 		if (isAgentSessionEvent(payload)) {
 			await dispatch(assistant, {
-				id: channel.conversationKey({
+				id: channel.instanceId({
 					type: 'agent-session',
 					organizationId: payload.organizationId,
 					agentSessionId: payload.agentSession.id,

@@ -2,8 +2,8 @@ import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	createMessengerChannel,
-	InvalidMessengerConversationKeyError,
 	type InvalidMessengerInputError,
+	InvalidMessengerInstanceIdError,
 	type MessengerChannel,
 	type MessengerConversationRef,
 	type MessengerMessagingEvent,
@@ -378,12 +378,12 @@ describe('createMessengerChannel()', () => {
 			},
 		];
 		for (const ref of refs) {
-			const id = channel.conversationKey(ref);
-			expect(channel.parseConversationKey(id)).toEqual(ref);
+			const id = channel.instanceId(ref);
+			expect(channel.parseInstanceId(id)).toEqual(ref);
 		}
 		expect(() =>
-			channel.parseConversationKey('messenger:v1:page:page_oak_62:page-scoped-id:%70sid'),
-		).toThrow(InvalidMessengerConversationKeyError);
+			channel.parseInstanceId('messenger:v1:page:page_oak_62:page-scoped-id:%70sid'),
+		).toThrow(InvalidMessengerInstanceIdError);
 		expect(() =>
 			createMessengerChannel({
 				appSecret: '',

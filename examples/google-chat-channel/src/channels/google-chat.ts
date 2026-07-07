@@ -28,7 +28,7 @@ export const channel = createGoogleChatChannel({
 					const ref = conversationFromPayload(payload);
 					if (!ref) return;
 					await dispatch(assistant, {
-						id: channel.conversationKey(ref),
+						id: channel.instanceId(ref),
 						// Recorded once when this event creates the instance; ignored after.
 						data: {
 							space: ref.space,

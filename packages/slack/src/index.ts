@@ -1,14 +1,14 @@
 import { createChannelRouter } from '@flue/runtime';
 import type { SlackEvent } from '@slack/types';
 import type { Context, Env, Handler, Hono } from 'hono';
-import { InvalidSlackConversationKeyError, InvalidSlackInputError } from './errors.ts';
+import { InvalidSlackInputError, InvalidSlackInstanceIdError } from './errors.ts';
 import {
 	createSlackCommandsHandler,
 	createSlackEventsHandler,
 	createSlackInteractionsHandler,
 } from './routes.ts';
 
-export { InvalidSlackConversationKeyError, InvalidSlackInputError } from './errors.ts';
+export { InvalidSlackInputError, InvalidSlackInstanceIdError } from './errors.ts';
 export type { SlackEvent };
 
 export type JsonValue =
@@ -269,10 +269,13 @@ export interface SlackChannel<E extends Env = Env> {
 	 * to the mount point: `app.route('/channels/slack', channel.route())`.
 	 */
 	route(): Hono<E>;
-	/** Serializes a canonical namespaced identifier. It is not an authorization capability. */
-	conversationKey(ref: SlackThreadRef): string;
-	/** Parses only canonical keys produced by `conversationKey()`. */
-	parseConversationKey(id: string): SlackThreadRef;
+	/** Derives the agent instance id: a canonical namespaced identifier. It is not an authorization capability. */
+	instanceId(ref: SlackThreadRef): string;
+	/**
+	 * Parses only canonical instance ids produced by `instanceId()`. Escape hatch: agents
+	 * normally receive structured facts as creation data rather than parsing them from the id.
+	 */
+	parseInstanceId(id: string): SlackThreadRef;
 }
 
 /**
@@ -332,28 +335,28 @@ export function createSlackChannel<E extends Env = Env>(
 	const channel: SlackChannel<E> = {
 		routes,
 		route: () => createChannelRouter(routes),
-		conversationKey(ref) {
+		instanceId(ref) {
 			assertThreadRef(ref);
 			return `slack:v1:${encodeURIComponent(ref.teamId)}:${encodeURIComponent(ref.channelId)}:${encodeURIComponent(ref.threadTs)}`;
 		},
-		parseConversationKey(id) {
+		parseInstanceId(id) {
 			try {
 				const match = /^slack:v1:([^:]+):([^:]+):([^:]+)$/.exec(id);
 				const teamId = match?.[1];
 				const channelId = match?.[2];
 				const threadTs = match?.[3];
-				if (!teamId || !channelId || !threadTs) throw new InvalidSlackConversationKeyError();
+				if (!teamId || !channelId || !threadTs) throw new InvalidSlackInstanceIdError();
 				const ref = {
 					teamId: decodeURIComponent(teamId),
 					channelId: decodeURIComponent(channelId),
 					threadTs: decodeURIComponent(threadTs),
 				};
 				assertThreadRef(ref);
-				if (channel.conversationKey(ref) !== id) throw new InvalidSlackConversationKeyError();
+				if (channel.instanceId(ref) !== id) throw new InvalidSlackInstanceIdError();
 				return ref;
 			} catch (error) {
-				if (error instanceof InvalidSlackConversationKeyError) throw error;
-				throw new InvalidSlackConversationKeyError();
+				if (error instanceof InvalidSlackInstanceIdError) throw error;
+				throw new InvalidSlackInstanceIdError();
 			}
 		},
 	};

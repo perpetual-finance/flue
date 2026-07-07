@@ -217,7 +217,7 @@ export const channel = createZendeskChannel({
           ticketId,
         };
         await dispatch(assistant, {
-          id: channel.ticketKey(ticket),
+          id: channel.instanceId(ticket),
           // Recorded once when this event creates the instance; ignored after.
           data: {
             accountId: ticket.accountId,
@@ -374,7 +374,7 @@ needs no `app.ts` mounting. Add
 should also be reachable over HTTP directly.
 
 The tool accepts no account, ticket id, subdomain, token, or API host from the
-model. The canonical key is an identifier, not an authorization capability;
+model. The instance id is an identifier, not an authorization capability;
 apply the project's normal policy to direct agent routes.
 
 The channel-agent import cycle is supported because imported bindings are read
@@ -475,7 +475,7 @@ those bytes, and base64-encode the digest. Cover:
 - an unsafe numeric `account_id` preserved without rounding;
 - malformed UTF-8 and JSON, media type, and declared and streamed body limits;
 - no-value, JSON, and normal `Response` results;
-- a thrown callback failing closed with `409` and canonical ticket-key round trip.
+- a thrown callback failing closed with `409` and canonical instance-id round trip.
 
 Test the exported client in Node and workerd with injected fail-closed Fetch.
 Assert the exact `*.zendesk.com/api/v2/tickets/{id}.json` URL, `GET` method,

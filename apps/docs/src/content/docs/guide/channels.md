@@ -151,7 +151,7 @@ export const channel = createSlackChannel({
       case 'app_mention': {
         const event = payload.event;
         await dispatch(assistant, {
-          id: channel.conversationKey({
+          id: channel.instanceId({
             teamId: payload.team_id,
             channelId: event.channel,
             threadTs: event.thread_ts ?? event.ts,
@@ -206,7 +206,7 @@ a continuing agent:
 ```ts
 if (payload.type === 'event_callback' && payload.event.type === 'app_mention') {
   await dispatch(assistant, {
-    id: channel.conversationKey(thread),
+    id: channel.instanceId(thread),
     message: {
       kind: 'signal',
       type: 'slack.app_mention',
@@ -234,7 +234,7 @@ thread, issue, ticket, or conversation is often a useful instance boundary
 because later events continue the same agent session.
 
 Channels send unconditionally, on purpose: they never pass a `uid` send
-condition. A channel's derived id (`channel.conversationKey(thread)`) can't be
+condition. A channel's derived id (`channel.instanceId(thread)`) can't be
 typo'd the way a hand-picked id can, and "the instance already exists" is the
 normal case for every event after the first — a condition built for guarding
 against creating the wrong instance would misfire on the common path. Channels
@@ -244,7 +244,7 @@ event that actually creates the instance, and silently ignored on every later
 one. See [Creation data](/docs/guide/building-agents/#creation-data) and
 [Conditional sends](/docs/api/agent-api/#conditional-sends).
 
-Conversation keys are canonical identifiers, not authorization capabilities.
+Instance ids are canonical identifiers, not authorization capabilities.
 If a caller can select an agent id through another route, authorize that id
 before deriving provider destinations or outbound tools from it.
 

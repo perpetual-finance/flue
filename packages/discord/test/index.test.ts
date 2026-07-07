@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	createDiscordChannel,
 	type DiscordChannel,
-	InvalidDiscordConversationKeyError,
+	InvalidDiscordInstanceIdError,
 } from '../src/index.ts';
 
 const encoder = new TextEncoder();
@@ -204,29 +204,27 @@ describe('createDiscordChannel()', () => {
 		expect((await channelApp(discord).request(request)).status).toBe(400);
 	});
 
-	it('round-trips canonical destination references when keys are valid', () => {
+	it('round-trips canonical destination references when instance ids are valid', () => {
 		const discord = createDiscordChannel({ publicKey, interactions: () => messageResponse });
 		const ref = {
 			type: 'guild' as const,
 			guildId: 'G:1',
 			channelId: 'C/1?#',
 		};
-		const key = discord.conversationKey(ref);
+		const id = discord.instanceId(ref);
 
-		expect(discord.parseConversationKey(key)).toEqual(ref);
+		expect(discord.parseInstanceId(id)).toEqual(ref);
 		expect(
-			discord.parseConversationKey(discord.conversationKey({ type: 'private', channelId: 'P:1' })),
+			discord.parseInstanceId(discord.instanceId({ type: 'private', channelId: 'P:1' })),
 		).toEqual({ type: 'private', channelId: 'P:1' });
 	});
 
-	it('rejects noncanonical or foreign conversation keys when parsing', () => {
+	it('rejects noncanonical or foreign instance ids when parsing', () => {
 		const discord = createDiscordChannel({ publicKey, interactions: () => messageResponse });
 
-		expect(() => discord.parseConversationKey('slack:v1:C1')).toThrow(
-			InvalidDiscordConversationKeyError,
-		);
-		expect(() => discord.parseConversationKey('discord:v1:dm:C%31')).toThrow(
-			InvalidDiscordConversationKeyError,
+		expect(() => discord.parseInstanceId('slack:v1:C1')).toThrow(InvalidDiscordInstanceIdError);
+		expect(() => discord.parseInstanceId('discord:v1:dm:C%31')).toThrow(
+			InvalidDiscordInstanceIdError,
 		);
 	});
 });

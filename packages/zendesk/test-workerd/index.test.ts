@@ -111,7 +111,7 @@ describe('@flue/zendesk workerd ingress', () => {
 
 		expect(response.status).toBe(413);
 		expect(webhook).not.toHaveBeenCalled();
-		expect(zendesk.parseTicketKey(zendesk.ticketKey(ref))).toEqual(ref);
+		expect(zendesk.parseInstanceId(zendesk.instanceId(ref))).toEqual(ref);
 	});
 });
 

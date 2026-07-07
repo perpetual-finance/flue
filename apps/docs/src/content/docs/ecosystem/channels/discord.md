@@ -55,7 +55,7 @@ export const channel = createDiscordChannel({
         ? interaction.data.options?.find((option) => option.type === 3)?.value
         : undefined;
     await dispatch(assistant, {
-      id: channel.conversationKey(destination),
+      id: channel.instanceId(destination),
       message: {
         kind: 'signal',
         type: 'discord.command.ask',
@@ -200,15 +200,15 @@ Not every interaction represents a durable Discord channel conversation. When
 an interaction should continue an agent instance, application code can derive a
 `DiscordDestinationRef` from native `guild_id`, `channel.id`, `channel.type`, and
 `context` fields. The complete generated example from `flue add channel discord` shows
-that derivation and dispatches with `channel.conversationKey(ref)`.
+that derivation and dispatches with `channel.instanceId(ref)`.
 
 Some valid interactions, including modal submissions, may omit a channel.
 Private-channel interactions can be acknowledged through their interaction
 token, but that capability does not grant the bot arbitrary channel-message
 access.
 
-Use `channel.conversationKey(ref)` when a Discord destination should continue
-the same agent instance. Conversation keys are identifiers, not authorization
+Use `channel.instanceId(ref)` when a Discord destination should continue
+the same agent instance. Instance ids are identifiers, not authorization
 capabilities. See the shared [Channels guide](/docs/guide/channels/) for dispatch,
 authorization, and deduplication guidance.
 
@@ -233,10 +233,9 @@ trusted code:
 
 ```ts title="src/channels/discord.ts"
 import { defineTool } from '@flue/runtime';
-import type { DiscordDestinationRef } from '@flue/discord';
 import * as v from 'valibot';
 
-export function postMessage(ref: DiscordDestinationRef) {
+export function postMessage(ref: { channelId: string }) {
   return defineTool({
     name: 'post_discord_message',
     description: 'Post to the Discord destination bound to this agent.',
@@ -251,24 +250,33 @@ export function postMessage(ref: DiscordDestinationRef) {
 }
 ```
 
-Bind the destination when creating the agent:
+`data` is the instance's creation data, recorded once when the dispatching
+event creates the instance. Bind it when creating the agent instead of parsing
+the instance id:
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, postMessage } from '../channels/discord.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { postMessage } from '../channels/discord.ts';
 
-function Assistant({ id }: AgentProps) {
-  useTool(postMessage(channel.parseConversationKey(id)));
+const input = v.object({ channelId: v.string() });
+
+function Assistant() {
+  const data = useInitialData<v.InferOutput<typeof input>>();
+  if (!data) throw new Error('This agent is created by the Discord channel dispatch.');
+  useTool(postMessage(data));
   return 'Post a concise answer to the bound Discord destination.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
 The model selects message content. It does not select arbitrary Discord
 channels, credentials, or REST methods. This tool creates an ordinary bot-token
 channel message, not an interaction follow-up or guaranteed ephemeral response.
+`parseInstanceId()` remains available as an escape hatch for recovering the
+destination from the id directly.
 
 ## Delivery and runtime behavior
 

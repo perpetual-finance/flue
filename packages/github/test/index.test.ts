@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	createGitHubChannel,
 	type GitHubChannel,
-	InvalidGitHubConversationKeyError,
+	InvalidGitHubInstanceIdError,
 } from '../src/index.ts';
 
 const encoder = new TextEncoder();
@@ -363,12 +363,12 @@ describe('createGitHubChannel()', () => {
 			webhook() {},
 		});
 		const ref = { owner: 'with:astro', repo: 'flue/next?#', issueNumber: 42 };
-		const key = github.conversationKey(ref);
+		const id = github.instanceId(ref);
 
-		expect(key).toBe('github:v1:owner:with%3Aastro:repo:flue%2Fnext%3F%23:issue:42');
-		expect(github.parseConversationKey(key)).toEqual(ref);
-		expect(() => github.parseConversationKey('slack:v1:owner:acme:repo:widgets:issue:42')).toThrow(
-			InvalidGitHubConversationKeyError,
+		expect(id).toBe('github:v1:owner:with%3Aastro:repo:flue%2Fnext%3F%23:issue:42');
+		expect(github.parseInstanceId(id)).toEqual(ref);
+		expect(() => github.parseInstanceId('slack:v1:owner:acme:repo:widgets:issue:42')).toThrow(
+			InvalidGitHubInstanceIdError,
 		);
 	});
 });

@@ -38,7 +38,12 @@ export const channel = createIntercomChannel({
       conversationId,
     };
     await dispatch(assistant, {
-      id: channel.conversationKey(conversation),
+      id: channel.instanceId(conversation),
+      // Recorded once when this event creates the instance; ignored after.
+      data: {
+        workspaceId: conversation.workspaceId,
+        conversationId: conversation.conversationId,
+      },
       message: {
         kind: 'signal',
         type: 'intercom.conversation.user.replied',
@@ -126,7 +131,12 @@ export const channel = createIntercomChannel({
           conversationId,
         };
         await dispatch(assistant, {
-          id: channel.conversationKey(conversation),
+          id: channel.instanceId(conversation),
+          // Recorded once when this event creates the instance; ignored after.
+          data: {
+            workspaceId: conversation.workspaceId,
+            conversationId: conversation.conversationId,
+          },
           message: {
             kind: 'signal',
             type: `intercom.${notification.topic}`,
@@ -192,9 +202,15 @@ topics reach the same callback.
 The HMAC-verified body already carries `app_id`, so the channel does not
 re-check workspace identity. Resource ids are not globally unique across
 Intercom workspaces, so the example combines `notification.app_id` and the
-conversation id into a canonical key. An app that serves multiple workspaces
+conversation id into an instance id. An app that serves multiple workspaces
 filters on `notification.app_id` itself, or uses application-owned
 installation state to select credentials.
+
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. It carries the workspace and conversation identifiers the tool
+needs — the agent reads them with `useInitialData()` instead of parsing the
+instance id.
 
 ## Official client
 
@@ -252,24 +268,30 @@ official SDK supports it.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, retrieveConversation } from '../channels/intercom.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { retrieveConversation } from '../channels/intercom.ts';
 
-function Assistant({ id }: AgentProps) {
-  const conversation = channel.parseConversationKey(id);
-  useTool(retrieveConversation(conversation));
+const input = v.object({
+  workspaceId: v.string(),
+  conversationId: v.string(),
+});
+
+function Assistant() {
+  const data = useInitialData<v.InferOutput<typeof input>>();
+  if (!data) throw new Error('This agent is created by the Intercom channel dispatch.');
+  useTool(retrieveConversation(data));
   return 'Help with the inbound Intercom conversation. Retrieve the current conversation when more context is needed.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
 The tool retrieves only the conversation already selected from a verified
 notification. It accepts no workspace, conversation id, token, or API host
 from the model.
 
-`channel.conversationKey()` creates canonical workspace-scoped identity.
-Conversation keys remain identifiers, not authorization capabilities. Apply
+The instance id is an identifier, not an authorization capability. Apply
 the project's normal access control to direct agent routes, and verify the
 workspace again before selecting an installation token.
 
@@ -359,7 +381,7 @@ Worker target. Cloudflare projects may use typed bindings instead of
 Create original synthetic notification bodies and local HMAC-SHA1 signatures.
 Exercise valid and tampered exact bytes, `HEAD`, ping, future topics,
 malformed JSON, body limits, handler results, a thrown callback surfacing as
-`500`, and conversation-key round trips in Node and workerd.
+`500`, and instance-id round trips in Node and workerd.
 
 For outbound tests, inject fail-closed Fetch into the actual official client,
 disable retries, assert the exact host, path, method, authorization, version,

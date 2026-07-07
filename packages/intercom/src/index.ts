@@ -1,9 +1,9 @@
 import { createChannelRouter } from '@flue/runtime';
 import type { Context, Env, Handler, Hono } from 'hono';
-import { InvalidIntercomConversationKeyError, InvalidIntercomInputError } from './errors.ts';
+import { InvalidIntercomInputError, InvalidIntercomInstanceIdError } from './errors.ts';
 import { createIntercomValidationHandler, createIntercomWebhookHandler } from './webhook.ts';
 
-export { InvalidIntercomConversationKeyError, InvalidIntercomInputError } from './errors.ts';
+export { InvalidIntercomInputError, InvalidIntercomInstanceIdError } from './errors.ts';
 
 export type JsonValue =
 	| null
@@ -98,10 +98,14 @@ export interface IntercomChannel<E extends Env = Env> {
 	 * to the mount point: `app.route('/channels/intercom', channel.route())`.
 	 */
 	route(): Hono<E>;
-	/** Serializes a canonical identifier. It is not an authorization capability. */
-	conversationKey(ref: IntercomConversationRef): string;
-	/** Parses only canonical keys produced by `conversationKey()`. */
-	parseConversationKey(id: string): IntercomConversationRef;
+	/** Derives the agent instance id, the canonical identifier. It is not an authorization capability. */
+	instanceId(ref: IntercomConversationRef): string;
+	/**
+	 * Parses only instance ids produced by `instanceId()`. Escape hatch: agents
+	 * normally receive structured facts as creation data rather than parsing
+	 * them from the id.
+	 */
+	parseInstanceId(id: string): IntercomConversationRef;
 }
 
 /**
@@ -132,7 +136,7 @@ export function createIntercomChannel<E extends Env = Env>(
 	const channel: IntercomChannel<E> = {
 		routes,
 		route: () => createChannelRouter(routes),
-		conversationKey(ref) {
+		instanceId(ref) {
 			assertConversationRef(ref);
 			return [
 				'intercom',
@@ -143,24 +147,24 @@ export function createIntercomChannel<E extends Env = Env>(
 				encodeURIComponent(ref.conversationId),
 			].join(':');
 		},
-		parseConversationKey(id) {
+		parseInstanceId(id) {
 			try {
 				const match = /^intercom:v1:workspace:([^:]+):conversation:([^:]+)$/.exec(id);
 				if (!match?.[1] || !match[2]) {
-					throw new InvalidIntercomConversationKeyError();
+					throw new InvalidIntercomInstanceIdError();
 				}
 				const ref: IntercomConversationRef = {
 					workspaceId: decodeURIComponent(match[1]),
 					conversationId: decodeURIComponent(match[2]),
 				};
 				assertConversationRef(ref);
-				if (channel.conversationKey(ref) !== id) {
-					throw new InvalidIntercomConversationKeyError();
+				if (channel.instanceId(ref) !== id) {
+					throw new InvalidIntercomInstanceIdError();
 				}
 				return ref;
 			} catch (error) {
-				if (error instanceof InvalidIntercomConversationKeyError) throw error;
-				throw new InvalidIntercomConversationKeyError();
+				if (error instanceof InvalidIntercomInstanceIdError) throw error;
+				throw new InvalidIntercomInstanceIdError();
 			}
 		},
 	};

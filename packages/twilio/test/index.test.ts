@@ -3,8 +3,8 @@ import twilio from 'twilio';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	createTwilioChannel,
-	InvalidTwilioConversationKeyError,
 	type InvalidTwilioInputError,
+	InvalidTwilioInstanceIdError,
 	type TwilioChannel,
 	type TwilioConversationRef,
 } from '../src/index.ts';
@@ -432,7 +432,7 @@ describe('createTwilioChannel()', () => {
 		expect(webhook).toHaveBeenCalledOnce();
 	});
 
-	it('round-trips canonical address and Messaging Service conversation keys', () => {
+	it('round-trips canonical address and Messaging Service instance ids', () => {
 		const channel = createTwilioChannel({
 			accountSid: 'ACdddddddddddddddddddddddddddddddd',
 			authToken: 'auth-token-juniper',
@@ -457,12 +457,12 @@ describe('createTwilioChannel()', () => {
 		];
 
 		for (const ref of refs) {
-			const id = channel.conversationKey(ref);
-			expect(channel.parseConversationKey(id)).toEqual(ref);
+			const id = channel.instanceId(ref);
+			expect(channel.parseInstanceId(id)).toEqual(ref);
 		}
 		expect(() =>
-			channel.parseConversationKey('twilio:v1:account:ACbad:address:%2B1555:participant:%2b1666'),
-		).toThrow(InvalidTwilioConversationKeyError);
+			channel.parseInstanceId('twilio:v1:account:ACbad:address:%2B1555:participant:%2b1666'),
+		).toThrow(InvalidTwilioInstanceIdError);
 	});
 
 	it('validates required options and status callback pairs', () => {

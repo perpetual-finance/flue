@@ -491,12 +491,16 @@ export type Capability<TProps = void> = TProps extends void
  * value explicitly to share it).
  *
  * ```ts
+ * // dispatch(support, { id: `order-${orderId}`, message: {...} })
  * function Assistant({ id }: AgentProps) {
- *   useTool(replyInThread(channel.parseConversationKey(id)));
- *   return 'Reply in the bound Slack thread when appropriate.';
+ *   useTool(lookupOrder(id.replace(/^order-/, '')));
+ *   return 'Handle support for the one order this instance is bound to.';
  * }
  * export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
  * ```
+ *
+ * When the id encodes several structured facts, don't parse them back out of
+ * it — pass them as creation `data` and read them with `useInitialData()`.
  *
  * Agents that don't need route data keep the zero-argument form — `() =>`
  * capabilities stay assignable unchanged.

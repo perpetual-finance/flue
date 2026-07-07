@@ -33,8 +33,11 @@ export const channel = createTelegramChannel({
   async webhook({ update }) {
     const incoming = update.message ?? update.channel_post ?? update.business_message;
     if (!incoming) return;
+    const conversation = conversationFromMessage(incoming);
     await dispatch(assistant, {
-      id: channel.conversationKey(conversationFromMessage(incoming)),
+      id: channel.instanceId(conversation),
+      // Recorded once when this event creates the instance; ignored after.
+      data: conversationData(conversation, incoming),
       message: {
         kind: 'signal',
         type: 'telegram.message',
@@ -46,8 +49,9 @@ export const channel = createTelegramChannel({
 });
 ```
 
-The abridged example omits the generated `conversationFromMessage` and
-`messageBody` helpers, callback-query branch, and message tool. Once configured, an incoming message
+The abridged example omits the generated `conversationFromMessage`,
+`conversationData`, and `messageBody` helpers, callback-query branch, and
+message tool. Once configured, an incoming message
 continues the agent instance for its chat, business chat, or topic, and the
 bound grammY tool replies to that same destination. grammY's Fetch export runs
 on Node and Cloudflare Workers with Flue's `nodejs_compat` setting.
@@ -129,8 +133,11 @@ export const channel = createTelegramChannel({
   async webhook({ update }) {
     const incoming = update.message ?? update.channel_post ?? update.business_message;
     if (incoming) {
+      const conversation = conversationFromMessage(incoming);
       await dispatch(assistant, {
-        id: channel.conversationKey(conversationFromMessage(incoming)),
+        id: channel.instanceId(conversation),
+        // Recorded once when this event creates the instance; ignored after.
+        data: conversationData(conversation, incoming),
         message: {
           kind: 'signal',
           type: 'telegram.message',
@@ -145,8 +152,11 @@ export const channel = createTelegramChannel({
       const query = update.callback_query;
       await client.answerCallbackQuery(query.id);
       if (!query.message) return;
+      const conversation = conversationFromMessage(query.message);
       await dispatch(assistant, {
-        id: channel.conversationKey(conversationFromMessage(query.message)),
+        id: channel.instanceId(conversation),
+        // Recorded once when this event creates the instance; ignored after.
+        data: conversationData(conversation, query.message),
         message: {
           kind: 'signal',
           type: 'telegram.callback_query',
@@ -195,6 +205,24 @@ function conversationFromMessage(message: Message): TelegramConversationRef {
     : { type: 'chat', chatId: message.chat.id, ...topic };
 }
 
+// Instance-creation data: the destination ref plus small instance-constant context.
+function conversationData(conversation: TelegramConversationRef, message: Message) {
+  return {
+    type: conversation.type,
+    chatId: conversation.chatId,
+    ...(conversation.type === 'business-chat'
+      ? { businessConnectionId: conversation.businessConnectionId }
+      : {}),
+    ...(conversation.messageThreadId === undefined
+      ? {}
+      : { messageThreadId: conversation.messageThreadId }),
+    ...(conversation.directMessagesTopicId === undefined
+      ? {}
+      : { directMessagesTopicId: conversation.directMessagesTopicId }),
+    ...(message.chat.title === undefined ? {} : { chatTitle: message.chat.title }),
+  };
+}
+
 export function postMessage(ref: TelegramConversationRef) {
   return defineTool({
     name: 'post_telegram_message',
@@ -218,17 +246,43 @@ export function postMessage(ref: TelegramConversationRef) {
 
 ## Bind the tool
 
+`data` is the instance's creation data: recorded once when the event creates the
+instance and ignored afterward, so the channel passes it on every dispatch. Bind
+the tool from the agent with `useInitialData()` instead of parsing the instance
+id:
+
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, postMessage } from '../channels/telegram.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { postMessage } from '../channels/telegram.ts';
 
-function Assistant({ id }: AgentProps) {
-  useTool(postMessage(channel.parseConversationKey(id)));
-  return 'Reply concisely in the bound Telegram conversation.';
+const chatData = v.object({
+  type: v.literal('chat'),
+  chatId: v.number(),
+  messageThreadId: v.optional(v.number()),
+  directMessagesTopicId: v.optional(v.number()),
+  chatTitle: v.optional(v.string()),
+});
+const businessChatData = v.object({
+  type: v.literal('business-chat'),
+  businessConnectionId: v.string(),
+  chatId: v.number(),
+  messageThreadId: v.optional(v.number()),
+  directMessagesTopicId: v.optional(v.number()),
+  chatTitle: v.optional(v.string()),
+});
+const input = v.variant('type', [chatData, businessChatData]);
+
+function Assistant() {
+  const data = useInitialData<v.InferOutput<typeof input>>();
+  if (!data) throw new Error('This agent is created by the Telegram channel dispatch.');
+  useTool(postMessage(data));
+  const chatTitle = data.chatTitle ? ` ("${data.chatTitle}")` : '';
+  return `Reply concisely in the bound Telegram conversation${chatTitle}.`;
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
 Trusted code binds the chat, business connection, and optional topic. The model
@@ -263,15 +317,15 @@ the Hono context for explicit status control.
 
 ## Conversation identity
 
-`conversationFromMessage` derives a canonical key from the native `Message`:
-regular chats, business chats, forum threads, and channel direct-message topics
-produce distinct keys. Business identity includes `businessConnectionId`
-because Telegram warns that business chat ids can match ordinary bot chat ids,
-and a thread id (`message_thread_id`) and direct-message topic id
-(`direct_messages_topic.topic_id`) are mutually exclusive.
+`conversationFromMessage` derives a canonical instance id from the native
+`Message`: regular chats, business chats, forum threads, and channel
+direct-message topics produce distinct ids. Business identity includes
+`businessConnectionId` because Telegram warns that business chat ids can match
+ordinary bot chat ids, and a thread id (`message_thread_id`) and direct-message
+topic id (`direct_messages_topic.topic_id`) are mutually exclusive.
 
-Some native updates have no durable chat destination, so do not build a
-conversation key from them. A guest message's `guest_query_id` authorizes one
+Some native updates have no durable chat destination, so do not build an
+instance id from them. A guest message's `guest_query_id` authorizes one
 short-lived `answerGuestQuery` response and must not enter model context, logs,
 durable session data, or agent identity. An inline `callback_query` without a
 `message` likewise supplies no accessible chat.

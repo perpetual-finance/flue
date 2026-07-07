@@ -37,7 +37,7 @@ dispatched message, handled update kinds, and tool:
 The callback receives one verified provider-native Telegram `Update` (the
 official `@grammyjs/types` shape, re-exported by `@flue/telegram` and by
 grammY). At most one of its optional fields is present per update, so branch on
-those fields directly. Derive the conversation key from the native `Message`.
+those fields directly. Derive the instance id from the native `Message`.
 
 ```ts
 // flue-blueprint: channel/telegram@1
@@ -63,7 +63,7 @@ export const channel = createTelegramChannel({
     if (incoming) {
       const conversation = conversationFromMessage(incoming);
       await dispatch(assistant, {
-        id: channel.conversationKey(conversation),
+        id: channel.instanceId(conversation),
         // Recorded once when this event creates the instance; ignored after.
         data: conversationData(conversation, incoming),
         message: {
@@ -82,7 +82,7 @@ export const channel = createTelegramChannel({
       if (!query.message) return;
       const conversation = conversationFromMessage(query.message);
       await dispatch(assistant, {
-        id: channel.conversationKey(conversation),
+        id: channel.instanceId(conversation),
         // Recorded once when this event creates the instance; ignored after.
         data: conversationData(conversation, query.message),
         message: {
@@ -288,8 +288,8 @@ polling lifecycle behavior to the Flue channel.
 
 ## Respect identity boundaries
 
-Regular and business chats need different conversation types. When you derive a
-conversation key from a native `Message`, preserve `business_connection_id`,
+Regular and business chats need different conversation types. When you derive an
+instance id from a native `Message`, preserve `business_connection_id`,
 `message_thread_id`, and `direct_messages_topic.topic_id` so replies reach the
 same destination.
 
@@ -300,7 +300,7 @@ with `useInitialData()` instead of parsing the instance id — plus small
 instance-constant context like the chat's title. Per-message facts stay on the
 signal's `attributes`.
 
-Do not build a durable conversation key for `update.guest_message`. Its
+Do not build a durable instance id for `update.guest_message`. Its
 `message.guest_query_id` is a short-lived capability for `answerGuestQuery`, not
 identity. Inline callback queries (`update.callback_query` without a
 `message`) likewise supply no accessible chat. Do not place either value in
@@ -316,7 +316,7 @@ cover:
   queries, and reactions, asserting the native `Update` is forwarded unchanged;
 - a future or otherwise unmodeled verified update variant;
 - malformed Update envelopes (no `update_id`, non-object body) and body limits;
-- regular, business, thread, and direct-topic conversation keys;
+- regular, business, thread, and direct-topic instance ids;
 - empty, JSON, Hono, thrown, and invalid handler responses;
 - real grammY `Api` calls against an injected fake Fetch transport in workerd;
 - the project typecheck and `vite build` for the configured target.

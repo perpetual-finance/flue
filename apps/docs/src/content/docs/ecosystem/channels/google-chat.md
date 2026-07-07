@@ -47,7 +47,12 @@ export const channel = createGoogleChatChannel({
       if (!ref) return;
 
       await dispatch(assistant, {
-        id: channel.conversationKey(ref),
+        id: channel.instanceId(ref),
+        // Recorded once when this event creates the instance; ignored after.
+        data: {
+          space: ref.space,
+          ...(ref.thread === undefined ? {} : { thread: ref.thread }),
+        },
         message: {
           kind: 'signal',
           type: `google-chat.${payload.type}`,
@@ -158,7 +163,12 @@ export const channel = createGoogleChatChannel({
           if (!ref) return c.body(null, 200);
 
           await dispatch(assistant, {
-            id: channel.conversationKey(ref),
+            id: channel.instanceId(ref),
+            // Recorded once when this event creates the instance; ignored after.
+            data: {
+              space: ref.space,
+              ...(ref.thread === undefined ? {} : { thread: ref.thread }),
+            },
             message: {
               kind: 'signal',
               type: `google-chat.${payload.type}`,
@@ -224,7 +234,7 @@ application.
 Derive the canonical space from `payload.space.name` or
 `payload.message.space.name`. Use `space.spaceType` for descriptive metadata,
 not the deprecated `space.type`, and accept a thread only when its resource name
-belongs to that exact space. Conversation keys are identifiers, not
+belongs to that exact space. Instance ids are identifiers, not
 authorization capabilities; see the shared [Channels guide](/docs/guide/channels/)
 for dispatch and authorization guidance.
 
@@ -319,22 +329,35 @@ export function postMessage(ref: GoogleChatConversationRef) {
 }
 ```
 
-Bind the destination when creating the agent:
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. Bind the tool from the agent with `useInitialData()` instead of
+parsing the instance id:
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, postMessage } from '../channels/google-chat.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { postMessage } from '../channels/google-chat.ts';
 
-function Assistant({ id }: AgentProps) {
-  useTool(postMessage(channel.parseConversationKey(id)));
+const input = v.object({
+  space: v.string(),
+  thread: v.optional(v.string()),
+});
+
+function Assistant() {
+  const data = useInitialData<v.InferOutput<typeof input>>();
+  if (!data) throw new Error('This agent is created by the Google Chat channel dispatch.');
+  useTool(postMessage(data));
   return 'Reply concisely in the bound Google Chat conversation.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-The model selects only message text. It does not select arbitrary service
+The `input:` schema validates the dispatched `data` when the instance is
+created; `useInitialData()` returns the parsed value on every render. The
+model selects only message text. It does not select arbitrary service
 accounts, spaces, threads, URLs, or REST operations.
 
 ## Delivery and runtime behavior

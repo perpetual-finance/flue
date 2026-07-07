@@ -213,7 +213,7 @@ arm. There is no synthetic `type: 'unknown'` variant, `eventType`, or `raw`
 mirror.
 
 The `notion-page:` id is a local application convention because
-`@flue/notion` does not invent one universal conversation key for unrelated
+`@flue/notion` does not invent one universal instance id for unrelated
 Notion resources. This example uses the page id because one project-owned
 client selects the installation. Include workspace or installation identity
 when one agent can cross credential domains.

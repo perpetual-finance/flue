@@ -22,7 +22,7 @@ address or a Messaging Service.
 Install `@flue/twilio` and `twilio@^6.0.2`. Flue owns signed webhook validation,
 exact public-URL handling, fixed account and destination identity, provider-native verified form
 fields, optional delivery-status callbacks, TwiML acknowledgement, and canonical
-conversation keys. The project owns credentials, outbound REST access, tools,
+instance ids. The project owns credentials, outbound REST access, tools,
 dispatch policy, and durable duplicate admission.
 
 Do not install the official `twilio` Node helper in a Cloudflare project. Its
@@ -99,7 +99,7 @@ export const channel = createTwilioChannel({
       }
     }
     await dispatch(assistant, {
-      id: channel.conversationKey(conversation),
+      id: channel.instanceId(conversation),
       // Recorded once when this event creates the instance; ignored after.
       data:
         conversation.type === 'messaging-service'
@@ -309,7 +309,7 @@ downloaded bytes wholesale into model context.
 ## Respect identity and retries
 
 The package rejects valid signatures for another account, phone/channel
-address, or Messaging Service. Conversation keys identify the fixed Twilio
+address, or Messaging Service. Instance ids identify the fixed Twilio
 destination plus the external participant; they are not authorization
 capabilities.
 
@@ -334,7 +334,7 @@ Create original synthetic form posts from current official schemas and cover:
   policy;
 - body limits, content types, malformed fields, TwiML defaults, and explicit
   `Response` control;
-- canonical conversation-key round trips;
+- canonical instance-id round trips;
 - real outbound Fetch requests against local fake transports in Node and
   workerd;
 - the project typecheck and `vite build` for the configured target.

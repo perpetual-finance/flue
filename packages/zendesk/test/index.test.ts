@@ -3,7 +3,7 @@ import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
 	createZendeskChannel,
 	InvalidZendeskInputError,
-	InvalidZendeskTicketKeyError,
+	InvalidZendeskInstanceIdError,
 	type ZendeskChannel,
 	type ZendeskWebhookHandlerInput,
 } from '../src/index.ts';
@@ -391,7 +391,7 @@ describe('createZendeskChannel()', () => {
 		expect(responses[2]?.headers.get('x-zendesk-result')).toBe('custom');
 	});
 
-	it('round trips account-scoped ticket identity when the key is canonical', () => {
+	it('round trips account-scoped ticket identity when the instance id is canonical', () => {
 		const zendesk = createZendeskChannel({
 			signingSecret: SIGNING_SECRET,
 			webhook() {},
@@ -400,26 +400,26 @@ describe('createZendeskChannel()', () => {
 			accountId: ACCOUNT_ID,
 			ticketId: '9007199254741997',
 		};
-		const key = zendesk.ticketKey(ref);
+		const id = zendesk.instanceId(ref);
 
-		expect(key).toBe('zendesk:v1:account:9223372036854775807:ticket:9007199254741997');
-		expect(zendesk.parseTicketKey(key)).toEqual(ref);
+		expect(id).toBe('zendesk:v1:account:9223372036854775807:ticket:9007199254741997');
+		expect(zendesk.parseInstanceId(id)).toEqual(ref);
 		expect(() =>
-			zendesk.ticketKey({
+			zendesk.instanceId({
 				accountId: '',
 				ticketId: '17',
 			}),
 		).toThrow(InvalidZendeskInputError);
 		expect(() =>
-			zendesk.ticketKey({
+			zendesk.instanceId({
 				accountId: ACCOUNT_ID,
 				ticketId: 'ticket-17',
 			}),
 		).toThrow(InvalidZendeskInputError);
-		expect(() => zendesk.parseTicketKey('zendesk:v1:account:1:ticket:01')).toThrow(
-			InvalidZendeskTicketKeyError,
+		expect(() => zendesk.parseInstanceId('zendesk:v1:account:1:ticket:01')).toThrow(
+			InvalidZendeskInstanceIdError,
 		);
-		expect(() => zendesk.parseTicketKey('zendesk:wrong')).toThrow(InvalidZendeskTicketKeyError);
+		expect(() => zendesk.parseInstanceId('zendesk:wrong')).toThrow(InvalidZendeskInstanceIdError);
 	});
 
 	it('validates options and publishes one fixed route when constructing the channel', () => {

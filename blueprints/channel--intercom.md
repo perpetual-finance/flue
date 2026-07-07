@@ -119,7 +119,7 @@ export const channel = createIntercomChannel({
           conversationId,
         };
         await dispatch(assistant, {
-          id: channel.conversationKey(conversation),
+          id: channel.instanceId(conversation),
           // Recorded once when this event creates the instance; ignored after.
           data: {
             workspaceId: conversation.workspaceId,
@@ -263,7 +263,7 @@ needs no `app.ts` mounting. Add
 should also be reachable over HTTP directly.
 
 The tool accepts no workspace, token, host, or conversation id from the model.
-The canonical key is an identifier, not an authorization capability; apply the
+The instance id is an identifier, not an authorization capability; apply the
 project's normal access policy to direct agent routes. The channel-agent import
 cycle is supported because imported bindings are read only inside deferred
 callbacks and capability functions.
@@ -348,7 +348,7 @@ Cover:
 - `ping`, selected conversation topics, and an original future topic;
 - malformed JSON, media type, declared and streamed body limits;
 - no-value, JSON, and normal `Response` results;
-- a thrown callback surfacing as `500`, and canonical conversation-key round trip.
+- a thrown callback surfacing as `500`, and canonical instance-id round trip.
 
 Test the real exported client with an injected fail-closed Fetch transport in
 both Node and workerd:

@@ -15,10 +15,10 @@ import type {
 	WebhookValue,
 } from '@whatsapp-cloudapi/types/webhook';
 import type { Context, Env, Handler, Hono } from 'hono';
-import { InvalidWhatsAppConversationKeyError, InvalidWhatsAppInputError } from './errors.ts';
+import { InvalidWhatsAppInputError, InvalidWhatsAppInstanceIdError } from './errors.ts';
 import { createWhatsAppVerificationHandler, createWhatsAppWebhookHandler } from './webhook.ts';
 
-export { InvalidWhatsAppConversationKeyError, InvalidWhatsAppInputError } from './errors.ts';
+export { InvalidWhatsAppInputError, InvalidWhatsAppInstanceIdError } from './errors.ts';
 
 /**
  * Provider-shaped WhatsApp Cloud API webhook payload types, re-exported from
@@ -116,10 +116,10 @@ export interface WhatsAppChannel<E extends Env = Env> {
 	 * to the mount point: `app.route('/channels/whatsapp', channel.route())`.
 	 */
 	route(): Hono<E>;
-	/** Serializes a canonical namespaced identifier. It is not an authorization capability. */
-	conversationKey(ref: WhatsAppConversationRef): string;
-	/** Parses only canonical keys produced by `conversationKey()`. */
-	parseConversationKey(id: string): WhatsAppConversationRef;
+	/** Derives the agent instance id: a canonical namespaced identifier. It is not an authorization capability. */
+	instanceId(ref: WhatsAppConversationRef): string;
+	/** Parses only canonical ids produced by `instanceId()`. Escape hatch: agents normally receive structured facts as creation data rather than parsing them from the id. */
+	parseInstanceId(id: string): WhatsAppConversationRef;
 }
 
 /**
@@ -152,7 +152,7 @@ export function createWhatsAppChannel<E extends Env = Env>(
 	const channel: WhatsAppChannel<E> = {
 		routes,
 		route: () => createChannelRouter(routes),
-		conversationKey(ref) {
+		instanceId(ref) {
 			assertConversationRef(ref);
 			const base = [
 				'whatsapp',
@@ -175,7 +175,7 @@ export function createWhatsAppChannel<E extends Env = Env>(
 						),
 					].join(':');
 		},
-		parseConversationKey(id) {
+		parseInstanceId(id) {
 			try {
 				const groupMatch =
 					/^whatsapp:v1:business-account:([^:]+):phone-number:([^:]+):group:([^:]+)$/.exec(id);
@@ -184,10 +184,10 @@ export function createWhatsAppChannel<E extends Env = Env>(
 						id,
 					);
 				const match = groupMatch ?? individualMatch;
-				if (!match) throw new InvalidWhatsAppConversationKeyError();
+				if (!match) throw new InvalidWhatsAppInstanceIdError();
 				const [, businessAccountId, phoneNumberId] = match;
 				if (!businessAccountId || !phoneNumberId) {
-					throw new InvalidWhatsAppConversationKeyError();
+					throw new InvalidWhatsAppInstanceIdError();
 				}
 				const common = {
 					businessAccountId: decodeURIComponent(businessAccountId),
@@ -196,13 +196,13 @@ export function createWhatsAppChannel<E extends Env = Env>(
 				let ref: WhatsAppConversationRef;
 				if (groupMatch) {
 					const groupId = groupMatch[3];
-					if (!groupId) throw new InvalidWhatsAppConversationKeyError();
+					if (!groupId) throw new InvalidWhatsAppInstanceIdError();
 					ref = { type: 'group', ...common, groupId: decodeURIComponent(groupId) };
 				} else {
 					const destinationType = individualMatch?.[3];
 					const destinationValue = individualMatch?.[4];
 					if (!destinationType || !destinationValue) {
-						throw new InvalidWhatsAppConversationKeyError();
+						throw new InvalidWhatsAppInstanceIdError();
 					}
 					ref = {
 						type: 'individual',
@@ -220,13 +220,13 @@ export function createWhatsAppChannel<E extends Env = Env>(
 					};
 				}
 				assertConversationRef(ref);
-				if (channel.conversationKey(ref) !== id) {
-					throw new InvalidWhatsAppConversationKeyError();
+				if (channel.instanceId(ref) !== id) {
+					throw new InvalidWhatsAppInstanceIdError();
 				}
 				return ref;
 			} catch (error) {
-				if (error instanceof InvalidWhatsAppConversationKeyError) throw error;
-				throw new InvalidWhatsAppConversationKeyError();
+				if (error instanceof InvalidWhatsAppInstanceIdError) throw error;
+				throw new InvalidWhatsAppInstanceIdError();
 			}
 		},
 	};

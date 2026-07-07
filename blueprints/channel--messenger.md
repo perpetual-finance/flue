@@ -21,7 +21,7 @@ owns.
 
 Install `@flue/messenger`. Flue owns GET verification, exact-body
 `X-Hub-Signature-256` validation, fixed Page identity, the provider-native
-payload, and canonical conversation keys. The project owns Page access tokens,
+payload, and canonical instance ids. The project owns Page access tokens,
 outbound Graph API behavior, tools, dispatch policy, and durable duplicate
 admission.
 
@@ -98,7 +98,7 @@ export const channel = createMessengerChannel({
           (attachment) => attachment.type,
         );
         await dispatch(assistant, {
-          id: channel.conversationKey(conversation),
+          id: channel.instanceId(conversation),
           // Recorded once when this event creates the instance; ignored after.
           data: {
             pageId: conversation.pageId,
@@ -298,7 +298,7 @@ cover:
 - both `entry.messaging` and documented `entry.changes` forms;
 - body limits, malformed events, handler failures, `EVENT_RECEIVED`,
   JSON returns, and explicit `Response` control;
-- canonical Page-scoped-id and `user_ref` key round trips;
+- canonical Page-scoped-id and `user_ref` instance id round trips;
 - real outbound Fetch requests against local fake transports in Node and
   workerd;
 - the project typecheck and `vite build` for the configured target.

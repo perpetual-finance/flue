@@ -2,7 +2,7 @@ import { createChannelRouter } from '@flue/runtime';
 import type { Activity } from 'botframework-schema';
 import type { Context, Env, Handler, Hono } from 'hono';
 import { defaultBotFrameworkOpenIdMetadataUrl, defaultBotFrameworkTokenIssuer } from './auth.ts';
-import { InvalidTeamsConversationKeyError, InvalidTeamsInputError } from './errors.ts';
+import { InvalidTeamsInputError, InvalidTeamsInstanceIdError } from './errors.ts';
 import { createTeamsActivitiesHandler, deriveDestination } from './routes.ts';
 
 /**
@@ -19,7 +19,7 @@ export type {
 	Mention,
 	MessageReaction,
 } from 'botframework-schema';
-export { InvalidTeamsConversationKeyError, InvalidTeamsInputError } from './errors.ts';
+export { InvalidTeamsInputError, InvalidTeamsInstanceIdError } from './errors.ts';
 
 export type JsonValue =
 	| null
@@ -95,10 +95,17 @@ export interface TeamsChannel<E extends Env = Env> {
 	 * minimal structure needed to address a reply.
 	 */
 	destination(activity: Activity): TeamsConversationRef;
-	/** Serializes a canonical namespaced identifier. It is not an authorization capability. */
-	conversationKey(ref: TeamsConversationRef): string;
-	/** Parses only canonical keys produced by `conversationKey()`. */
-	parseConversationKey(id: string): TeamsConversationRef;
+	/**
+	 * Derives the agent instance id: a canonical namespaced identifier. It is
+	 * not an authorization capability.
+	 */
+	instanceId(ref: TeamsConversationRef): string;
+	/**
+	 * Parses only canonical ids produced by `instanceId()`. Escape hatch:
+	 * agents normally receive structured facts as creation data rather than
+	 * parsing them from the id.
+	 */
+	parseInstanceId(id: string): TeamsConversationRef;
 }
 
 /**
@@ -135,7 +142,7 @@ export function createTeamsChannel<E extends Env = Env>(
 			if (!ref) throw new InvalidTeamsInputError('activity');
 			return ref;
 		},
-		conversationKey(ref) {
+		instanceId(ref) {
 			assertConversationRef(ref);
 			return [
 				'teams',
@@ -150,11 +157,11 @@ export function createTeamsChannel<E extends Env = Env>(
 				encodeURIComponent(ref.channelId ?? ''),
 			].join(':');
 		},
-		parseConversationKey(id) {
+		parseInstanceId(id) {
 			try {
 				const parts = id.split(':');
 				if (parts.length !== 10 || parts[0] !== 'teams' || parts[1] !== 'v1') {
-					throw new InvalidTeamsConversationKeyError();
+					throw new InvalidTeamsInstanceIdError();
 				}
 				const scope = parts[3];
 				if (
@@ -163,7 +170,7 @@ export function createTeamsChannel<E extends Env = Env>(
 					scope !== 'channel' &&
 					scope !== 'unknown'
 				) {
-					throw new InvalidTeamsConversationKeyError();
+					throw new InvalidTeamsInstanceIdError();
 				}
 				const ref: TeamsConversationRef = {
 					tenantId: decodeURIComponent(requiredPart(parts[2])),
@@ -176,11 +183,11 @@ export function createTeamsChannel<E extends Env = Env>(
 					...(parts[9] ? { channelId: decodeURIComponent(parts[9]) } : {}),
 				};
 				assertConversationRef(ref);
-				if (channel.conversationKey(ref) !== id) throw new InvalidTeamsConversationKeyError();
+				if (channel.instanceId(ref) !== id) throw new InvalidTeamsInstanceIdError();
 				return ref;
 			} catch (error) {
-				if (error instanceof InvalidTeamsConversationKeyError) throw error;
-				throw new InvalidTeamsConversationKeyError();
+				if (error instanceof InvalidTeamsInstanceIdError) throw error;
+				throw new InvalidTeamsInstanceIdError();
 			}
 		},
 	};
@@ -245,6 +252,6 @@ function assertConfiguredUrl(value: unknown, field: string): asserts value is st
 }
 
 function requiredPart(value: string | undefined): string {
-	if (!value) throw new InvalidTeamsConversationKeyError();
+	if (!value) throw new InvalidTeamsInstanceIdError();
 	return value;
 }

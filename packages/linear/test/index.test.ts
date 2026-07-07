@@ -2,8 +2,8 @@ import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	createLinearChannel,
-	InvalidLinearConversationKeyError,
 	InvalidLinearInputError,
+	InvalidLinearInstanceIdError,
 	type LinearChannel,
 } from '../src/index.ts';
 
@@ -422,7 +422,7 @@ describe('createLinearChannel()', () => {
 		expect(webhook).not.toHaveBeenCalled();
 	});
 
-	it('round-trips canonical issue-thread and agent-session keys', () => {
+	it('round-trips canonical issue-thread and agent-session instance ids', () => {
 		const linear = createLinearChannel({ webhookSecret: 'secret', webhook: () => undefined });
 		const issueRef = {
 			type: 'issue' as const,
@@ -436,25 +436,25 @@ describe('createLinearChannel()', () => {
 			agentSessionId: 'session/cobalt',
 		};
 
-		const issueKey = linear.conversationKey(issueRef);
-		const sessionKey = linear.conversationKey(sessionRef);
+		const issueId = linear.instanceId(issueRef);
+		const sessionId = linear.instanceId(sessionRef);
 
-		expect(issueKey).toBe(
+		expect(issueId).toBe(
 			'linear:v1:organization:org%3Aglacier:issue:issue%2Famber:thread:comment%3Aroot',
 		);
-		expect(sessionKey).toBe('linear:v1:organization:org%3Aglacier:agent-session:session%2Fcobalt');
-		expect(linear.parseConversationKey(issueKey)).toEqual(issueRef);
-		expect(linear.parseConversationKey(sessionKey)).toEqual(sessionRef);
+		expect(sessionId).toBe('linear:v1:organization:org%3Aglacier:agent-session:session%2Fcobalt');
+		expect(linear.parseInstanceId(issueId)).toEqual(issueRef);
+		expect(linear.parseInstanceId(sessionId)).toEqual(sessionRef);
 	});
 
-	it('rejects non-canonical keys and invalid conversation references', () => {
+	it('rejects non-canonical instance ids and invalid conversation references', () => {
 		const linear = createLinearChannel({ webhookSecret: 'secret', webhook: () => undefined });
 
-		expect(() => linear.parseConversationKey('linear:v1:issue:missing')).toThrow(
-			InvalidLinearConversationKeyError,
+		expect(() => linear.parseInstanceId('linear:v1:issue:missing')).toThrow(
+			InvalidLinearInstanceIdError,
 		);
 		expect(() =>
-			linear.conversationKey({
+			linear.instanceId({
 				type: 'issue',
 				organizationId: 'org',
 				issueId: '',

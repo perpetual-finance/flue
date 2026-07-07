@@ -1,10 +1,10 @@
 import { createChannelRouter } from '@flue/runtime';
 import type { Update } from '@grammyjs/types';
 import type { Context, Env, Handler, Hono } from 'hono';
-import { InvalidTelegramConversationKeyError, InvalidTelegramInputError } from './errors.ts';
+import { InvalidTelegramInputError, InvalidTelegramInstanceIdError } from './errors.ts';
 import { createTelegramWebhookHandler } from './webhook.ts';
 
-export { InvalidTelegramConversationKeyError, InvalidTelegramInputError } from './errors.ts';
+export { InvalidTelegramInputError, InvalidTelegramInstanceIdError } from './errors.ts';
 
 /**
  * Provider-native Telegram Bot API `Update`.
@@ -48,7 +48,7 @@ export interface TelegramChannelOptions<E extends Env = Env> {
  *
  * This is an identifier, not an authorization capability. A caller able to
  * choose an agent id by another route must be authorized before its
- * conversation key is trusted to derive destinations or tools.
+ * instance id is trusted to derive destinations or tools.
  */
 export type TelegramConversationRef =
 	| {
@@ -89,10 +89,15 @@ export interface TelegramChannel<E extends Env = Env> {
 	 * to the mount point: `app.route('/channels/telegram', channel.route())`.
 	 */
 	route(): Hono<E>;
-	/** Serializes a canonical namespaced identifier. It is not an authorization capability. */
-	conversationKey(ref: TelegramConversationRef): string;
-	/** Parses only canonical keys produced by `conversationKey()`. */
-	parseConversationKey(id: string): TelegramConversationRef;
+	/** Derives the agent instance id: a canonical namespaced identifier. It is not an authorization capability. */
+	instanceId(ref: TelegramConversationRef): string;
+	/**
+	 * Parses only canonical instance ids produced by `instanceId()`.
+	 *
+	 * Escape hatch: agents normally receive structured facts as creation data
+	 * rather than parsing them from the id.
+	 */
+	parseInstanceId(id: string): TelegramConversationRef;
 }
 
 /**
@@ -116,7 +121,7 @@ export function createTelegramChannel<E extends Env = Env>(
 	const channel: TelegramChannel<E> = {
 		routes,
 		route: () => createChannelRouter(routes),
-		conversationKey(ref) {
+		instanceId(ref) {
 			assertConversationRef(ref);
 			const common = [
 				'chat',
@@ -136,7 +141,7 @@ export function createTelegramChannel<E extends Env = Env>(
 					].join(':')
 				: ['telegram', 'v1', 'regular', ...common].join(':');
 		},
-		parseConversationKey(id) {
+		parseInstanceId(id) {
 			try {
 				const business =
 					/^telegram:v1:business:([^:]+):chat:([^:]+):thread:([^:]*):direct:([^:]*)$/.exec(id);
@@ -154,15 +159,15 @@ export function createTelegramChannel<E extends Env = Env>(
 						...optionalNumericIdentity('directMessagesTopicId', business[4]),
 					};
 					assertConversationRef(ref);
-					if (channel.conversationKey(ref) !== id) {
-						throw new InvalidTelegramConversationKeyError();
+					if (channel.instanceId(ref) !== id) {
+						throw new InvalidTelegramInstanceIdError();
 					}
 					return ref;
 				}
 
 				const regular = /^telegram:v1:regular:chat:([^:]+):thread:([^:]*):direct:([^:]*)$/.exec(id);
 				if (!regular?.[1] || regular[2] === undefined || regular[3] === undefined) {
-					throw new InvalidTelegramConversationKeyError();
+					throw new InvalidTelegramInstanceIdError();
 				}
 				const ref: TelegramConversationRef = {
 					type: 'chat',
@@ -171,13 +176,13 @@ export function createTelegramChannel<E extends Env = Env>(
 					...optionalNumericIdentity('directMessagesTopicId', regular[3]),
 				};
 				assertConversationRef(ref);
-				if (channel.conversationKey(ref) !== id) {
-					throw new InvalidTelegramConversationKeyError();
+				if (channel.instanceId(ref) !== id) {
+					throw new InvalidTelegramInstanceIdError();
 				}
 				return ref;
 			} catch (error) {
-				if (error instanceof InvalidTelegramConversationKeyError) throw error;
-				throw new InvalidTelegramConversationKeyError();
+				if (error instanceof InvalidTelegramInstanceIdError) throw error;
+				throw new InvalidTelegramInstanceIdError();
 			}
 		},
 	};
@@ -239,11 +244,11 @@ function assertPositiveInteger(value: number, field: string): void {
 function parseIdentifier(value: string): number {
 	const decoded = decodeURIComponent(value);
 	if (!/^-?[1-9]\d*$/.test(decoded)) {
-		throw new InvalidTelegramConversationKeyError();
+		throw new InvalidTelegramInstanceIdError();
 	}
 	const parsed = Number(decoded);
 	if (!Number.isSafeInteger(parsed) || parsed === 0) {
-		throw new InvalidTelegramConversationKeyError();
+		throw new InvalidTelegramInstanceIdError();
 	}
 	return parsed;
 }
@@ -254,11 +259,11 @@ function optionalNumericIdentity<TKey extends 'messageThreadId' | 'directMessage
 ): Partial<Record<TKey, number>> {
 	if (value === '') return {};
 	if (!/^[1-9]\d*$/.test(value)) {
-		throw new InvalidTelegramConversationKeyError();
+		throw new InvalidTelegramInstanceIdError();
 	}
 	const parsed = Number(value);
 	if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-		throw new InvalidTelegramConversationKeyError();
+		throw new InvalidTelegramInstanceIdError();
 	}
 	return { [key]: parsed } as Partial<Record<TKey, number>>;
 }

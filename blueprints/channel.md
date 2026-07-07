@@ -138,7 +138,7 @@ client. Bind trusted destinations, repositories, or channel ids in application
 code. Do not expose credentials, arbitrary API paths, or unrestricted provider
 destinations as model arguments without an explicit authorization design.
 
-Conversation keys identify destinations; they are not authorization
+Instance ids identify destinations; they are not authorization
 capabilities. Direct agent routes must authorize caller-selected instance ids
 before using them to bind SDK operations.
 

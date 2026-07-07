@@ -44,7 +44,12 @@ export const channel = createMessengerChannel({
           (attachment) => attachment.type,
         );
         await dispatch(assistant, {
-          id: channel.conversationKey(conversation),
+          id: channel.instanceId(conversation),
+          // Recorded once when this event creates the instance; ignored after.
+          data: {
+            pageId: conversation.pageId,
+            participant: conversation.participant,
+          },
           message: {
             kind: 'signal',
             type: 'messenger.message',
@@ -149,7 +154,12 @@ export const channel = createMessengerChannel({
           (attachment) => attachment.type,
         );
         await dispatch(assistant, {
-          id: channel.conversationKey(conversation),
+          id: channel.instanceId(conversation),
+          // Recorded once when this event creates the instance; ignored after.
+          data: {
+            pageId: conversation.pageId,
+            participant: conversation.participant,
+          },
           message: {
             kind: 'signal',
             type: 'messenger.message',
@@ -187,8 +197,34 @@ export function postMessage(ref: MessengerConversationRef) {
 ```
 
 The blueprint creates `src/messenger-client.ts` with the Fetch client used above.
-Bind the tool from the agent with
-`postMessage(channel.parseConversationKey(id))`.
+`data` is the instance's creation data: recorded once when the event creates the
+instance and ignored afterward, so the channel passes it on every dispatch. Bind
+the tool from the agent with `useInitialData()` instead of parsing the instance
+id:
+
+```ts title="src/agents/assistant.ts"
+'use agent';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { postMessage } from '../channels/messenger.ts';
+
+const input = v.object({
+  pageId: v.string(),
+  participant: v.variant('type', [
+    v.object({ type: v.literal('page-scoped-id'), id: v.string() }),
+    v.object({ type: v.literal('user-ref'), id: v.string() }),
+  ]),
+});
+
+function Assistant() {
+  const data = useInitialData<v.InferOutput<typeof input>>();
+  if (!data) throw new Error('This agent is created by the Messenger channel dispatch.');
+  useTool(postMessage(data));
+  return 'Reply concisely in the bound Facebook Messenger conversation.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
+```
 
 ## Delivery behavior
 
@@ -220,12 +256,12 @@ message ids before dispatch when duplicate admission is unacceptable.
 
 ## Identity and capabilities
 
-Conversation keys combine the fixed Page with either a Page-scoped person id
+Instance ids combine the fixed Page with either a Page-scoped person id
 (PSID) or a `user_ref`. Those participant types are not interchangeable.
 `channel.conversationRef(event)` derives the counterpart participant for a
-native messaging event; parse or derive the key in trusted code and bind the
-destination to application-owned tools rather than letting the model choose a
-recipient id.
+native messaging event; parse or derive the instance id in trusted code and
+bind the destination to application-owned tools rather than letting the model
+choose a recipient id.
 
 Messaging-opt-in (`event.optin`) events may expose a
 `notification_messages_token` — the recurring-notification capability that pairs

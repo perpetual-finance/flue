@@ -28,7 +28,7 @@ export const channel = createTeamsChannel({
 		if (activity.type !== 'message' || !activity.text) return;
 		const destination = channel.destination(activity);
 		await dispatch(assistant, {
-			id: channel.conversationKey(destination),
+			id: channel.instanceId(destination),
 			// Recorded once when this event creates the instance; ignored after.
 			data: {
 				serviceUrl: destination.serviceUrl,

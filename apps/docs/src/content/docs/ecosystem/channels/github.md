@@ -42,7 +42,15 @@ export const channel = createGitHubChannel({
     };
 
     await dispatch(assistant, {
-      id: channel.conversationKey(issueRef),
+      id: channel.instanceId(issueRef),
+      // Recorded once when this event creates the instance; ignored after.
+      data: {
+        owner: issueRef.owner,
+        repo: issueRef.repo,
+        issueNumber: issueRef.issueNumber,
+        openedBy: issue.user.login,
+        title: issue.title,
+      },
       message: {
         kind: 'signal',
         type: 'github.issue_comment.created',
@@ -135,7 +143,15 @@ export const channel = createGitHubChannel({
         issueNumber: issue.number,
       };
       await dispatch(assistant, {
-        id: channel.conversationKey(issueRef),
+        id: channel.instanceId(issueRef),
+        // Recorded once when this event creates the instance; ignored after.
+        data: {
+          owner: issueRef.owner,
+          repo: issueRef.repo,
+          issueNumber: issueRef.issueNumber,
+          openedBy: issue.user.login,
+          title: issue.title,
+        },
         message: {
           kind: 'signal',
           type: 'github.issue_comment.created',
@@ -163,7 +179,15 @@ export const channel = createGitHubChannel({
         issueNumber: pull_request.number,
       };
       await dispatch(assistant, {
-        id: channel.conversationKey(issueRef),
+        id: channel.instanceId(issueRef),
+        // Recorded once when this event creates the instance; ignored after.
+        data: {
+          owner: issueRef.owner,
+          repo: issueRef.repo,
+          issueNumber: issueRef.issueNumber,
+          openedBy: pull_request.user.login,
+          title: pull_request.title,
+        },
         message: {
           kind: 'signal',
           type: 'github.pull_request_review_comment.created',
@@ -225,21 +249,36 @@ callback.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, commentOnIssue } from '../channels/github.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { commentOnIssue } from '../channels/github.ts';
 
-function Assistant({ id }: AgentProps) {
-  useTool(commentOnIssue(channel.parseConversationKey(id)));
-  return 'Review the issue and post a concise triage comment when appropriate.';
+const input = v.object({
+  owner: v.string(),
+  repo: v.string(),
+  issueNumber: v.number(),
+  openedBy: v.string(),
+  title: v.string(),
+});
+
+function Assistant() {
+  const data = useInitialData<v.InferOutput<typeof input>>();
+  if (!data) throw new Error('This agent is created by the GitHub channel dispatch.');
+  useTool(commentOnIssue(data));
+  return `Review the issue and post a concise triage comment when appropriate. "${data.title}" was opened by ${data.openedBy}.`;
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-Pull requests use their issue number for issue comments. The model selects the
-comment body; trusted code binds the repository and issue. The channel-agent
-import cycle is supported because both imported bindings are read only inside
-deferred callbacks or the agent's capability function.
+`data` is the instance's creation data: recorded once when the event creates
+the instance and ignored afterward, so the channel passes it on every
+dispatch. The `input:` schema validates the dispatched `data` when the
+instance is created; `useInitialData()` returns the parsed value on every
+render. Pull requests use their issue number for issue comments. The model
+selects the comment body; trusted code binds the repository and issue. The
+channel-agent import cycle is supported because both imported bindings are
+read only inside deferred callbacks or the agent's capability function.
 
 GitHub expects a `2xx` response within ten seconds and does not auto-retry.
 The package does not enforce a handler deadline; treat the ten-second window as

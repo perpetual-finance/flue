@@ -4,8 +4,8 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import {
 	createGoogleChatChannel,
 	type GoogleChatChannel,
-	InvalidGoogleChatConversationKeyError,
 	InvalidGoogleChatInputError,
+	InvalidGoogleChatInstanceIdError,
 } from '../src/index.ts';
 
 const CHAT_IDENTITY = 'chat@system.gserviceaccount.com';
@@ -521,19 +521,19 @@ describe('createGoogleChatChannel()', () => {
 		expect(events.routes.map((route) => route.path)).toEqual(['/events']);
 	});
 
-	it('round trips canonical conversation keys when space and thread match', () => {
+	it('round trips canonical instance ids when space and thread match', () => {
 		const channel = endpointChannel(() => undefined);
 		const reference = {
 			space: 'spaces/canonical-space',
 			thread: 'spaces/canonical-space/threads/canonical-thread',
 		};
-		const key = channel.conversationKey(reference);
+		const id = channel.instanceId(reference);
 
-		expect(channel.parseConversationKey(key)).toEqual(reference);
-		expect(channel.conversationKey({ ...reference, spaceType: 'FUTURE_SPACE_TYPE' })).toBe(key);
+		expect(channel.parseInstanceId(id)).toEqual(reference);
+		expect(channel.instanceId({ ...reference, spaceType: 'FUTURE_SPACE_TYPE' })).toBe(id);
 	});
 
-	it('rejects conversation keys when the thread belongs to another space', () => {
+	it('rejects instance ids when the thread belongs to another space', () => {
 		const channel = endpointChannel(() => undefined);
 		const mismatched = {
 			space: 'spaces/one',
@@ -541,10 +541,8 @@ describe('createGoogleChatChannel()', () => {
 		};
 		const encoded = 'google-chat:v1:spaces%2Fone:spaces%2Ftwo%2Fthreads%2Fthread';
 
-		expect(() => channel.conversationKey(mismatched)).toThrow(InvalidGoogleChatInputError);
-		expect(() => channel.parseConversationKey(encoded)).toThrow(
-			InvalidGoogleChatConversationKeyError,
-		);
+		expect(() => channel.instanceId(mismatched)).toThrow(InvalidGoogleChatInputError);
+		expect(() => channel.parseInstanceId(encoded)).toThrow(InvalidGoogleChatInstanceIdError);
 	});
 });
 

@@ -3,8 +3,8 @@ import { exportJWK, generateKeyPair, type JWK, SignJWT } from 'jose';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	createTeamsChannel,
-	InvalidTeamsConversationKeyError,
 	InvalidTeamsInputError,
+	InvalidTeamsInstanceIdError,
 	type TeamsChannel,
 } from '../src/index.ts';
 
@@ -359,12 +359,10 @@ describe('createTeamsChannel()', () => {
 			teamId: 'team:1',
 			channelId: 'channel/1',
 		};
-		const key = teams.conversationKey(ref);
+		const id = teams.instanceId(ref);
 
-		expect(teams.parseConversationKey(key)).toEqual(ref);
-		expect(() => teams.parseConversationKey(`slack:${key}`)).toThrow(
-			InvalidTeamsConversationKeyError,
-		);
+		expect(teams.parseInstanceId(id)).toEqual(ref);
+		expect(() => teams.parseInstanceId(`slack:${id}`)).toThrow(InvalidTeamsInstanceIdError);
 	});
 
 	it('rejects invalid constructor and conversation inputs', () => {
@@ -378,7 +376,7 @@ describe('createTeamsChannel()', () => {
 		).toThrow(InvalidTeamsInputError);
 		const teams = testChannel({ activities() {} });
 		expect(() =>
-			teams.conversationKey({
+			teams.instanceId({
 				tenantId: TENANT_ID,
 				serviceUrl: 'http://unsafe.example.test/',
 				conversationId: 'C1',

@@ -28,7 +28,7 @@ export const channel = createIntercomChannel({
 					conversationId,
 				};
 				await dispatch(assistant, {
-					id: channel.conversationKey(conversation),
+					id: channel.instanceId(conversation),
 					// Recorded once when this event creates the instance; ignored after.
 					data: {
 						workspaceId: conversation.workspaceId,

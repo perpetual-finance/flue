@@ -84,7 +84,7 @@ export const channel = createWhatsAppChannel({
                 '');
           const ref = conversationRef(entry.id, change.value, message);
           await dispatch(assistant, {
-            id: channel.conversationKey(ref),
+            id: channel.instanceId(ref),
             // Recorded once when this event creates the instance; ignored after.
             data: {
               phoneNumberId: ref.phoneNumberId,
@@ -358,7 +358,7 @@ Create original synthetic payloads from the current official schemas and cover:
 - text, media, location, contacts, interactive replies, reactions,
   unsupported messages, and unknown future message types forwarded natively;
 - malformed JSON, content type, body limits, and response behavior;
-- phone, BSUID, and group conversation-key round trips without namespace
+- phone, BSUID, and group instance-id round trips without namespace
   collisions;
 - real SDK helper and low-level BSUID requests against an injected fake Fetch
   transport in workerd;

@@ -16,7 +16,7 @@ export const channel = createTelegramChannel({
 		if (incoming) {
 			const conversation = conversationFromMessage(incoming);
 			await dispatch(assistant, {
-				id: channel.conversationKey(conversation),
+				id: channel.instanceId(conversation),
 				// Recorded once when this event creates the instance; ignored after.
 				data: conversationData(conversation, incoming),
 				message: {
@@ -35,7 +35,7 @@ export const channel = createTelegramChannel({
 			if (!query.message) return;
 			const conversation = conversationFromMessage(query.message);
 			await dispatch(assistant, {
-				id: channel.conversationKey(conversation),
+				id: channel.instanceId(conversation),
 				// Recorded once when this event creates the instance; ignored after.
 				data: conversationData(conversation, query.message),
 				message: {

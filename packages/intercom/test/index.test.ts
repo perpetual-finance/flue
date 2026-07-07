@@ -4,8 +4,8 @@ import {
 	createIntercomChannel,
 	type IntercomChannel,
 	type IntercomWebhookHandlerInput,
-	InvalidIntercomConversationKeyError,
 	InvalidIntercomInputError,
+	InvalidIntercomInstanceIdError,
 } from '../src/index.ts';
 
 const encoder = new TextEncoder();
@@ -286,17 +286,17 @@ describe('createIntercomChannel()', () => {
 			workspaceId: 'workspace:us/east',
 			conversationId: 'conversation:42/part',
 		};
-		const key = intercom.conversationKey(ref);
+		const key = intercom.instanceId(ref);
 
-		expect(intercom.parseConversationKey(key)).toEqual(ref);
+		expect(intercom.parseInstanceId(key)).toEqual(ref);
 		expect(() =>
-			intercom.conversationKey({
+			intercom.instanceId({
 				workspaceId: '',
 				conversationId: 'conversation-1',
 			}),
 		).toThrow(InvalidIntercomInputError);
-		expect(() => intercom.parseConversationKey('intercom:wrong')).toThrow(
-			InvalidIntercomConversationKeyError,
+		expect(() => intercom.parseInstanceId('intercom:wrong')).toThrow(
+			InvalidIntercomInstanceIdError,
 		);
 	});
 

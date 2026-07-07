@@ -35,7 +35,7 @@ export const channel = createSlackChannel({
 
     const event = payload.event;
     await dispatch(assistant, {
-      id: channel.conversationKey({
+      id: channel.instanceId({
         teamId: payload.team_id,
         channelId: event.channel,
         threadTs: event.thread_ts ?? event.ts,
@@ -114,7 +114,14 @@ export const channel = createSlackChannel({
           threadTs: event.thread_ts ?? event.ts,
         };
         await dispatch(assistant, {
-          id: channel.conversationKey(thread),
+          id: channel.instanceId(thread),
+          // Recorded once when this event creates the instance; ignored after.
+          data: {
+            channelId: thread.channelId,
+            threadTs: thread.threadTs,
+            startedBy: event.user,
+            startedAt: new Date(Number(event.ts) * 1000).toISOString(),
+          },
           message: {
             kind: 'signal',
             type: 'slack.app_mention',
@@ -243,22 +250,38 @@ export function replyInThread(ref: { channelId: string; threadTs: string }) {
 }
 ```
 
-Bind the destination in trusted code:
+Bind the destination in trusted code. `data` is the instance's creation data —
+recorded once when the dispatch above creates the instance — so the agent
+reads the structured thread facts with `useInitialData()` instead of parsing
+them from the instance id:
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, replyInThread } from '../channels/slack.ts';
+import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { replyInThread } from '../channels/slack.ts';
 
-function Assistant({ id }: AgentProps) {
-  useTool(replyInThread(channel.parseConversationKey(id)));
-  return 'Reply in the bound Slack thread when appropriate.';
+const input = v.object({
+  channelId: v.string(),
+  threadTs: v.string(),
+  startedBy: v.optional(v.string()),
+  startedAt: v.pipe(v.string(), v.isoTimestamp()),
+});
+
+function Assistant() {
+  const data = useInitialData<v.InferOutput<typeof input>>();
+  if (!data) throw new Error('This agent is created by the Slack channel dispatch.');
+  useTool(replyInThread(data));
+  const startedBy = data.startedBy ? ` by <@${data.startedBy}>` : '';
+  return `Reply in the bound Slack thread when appropriate. This conversation was started${startedBy} at ${data.startedAt}.`;
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-The model selects message text. It does not select arbitrary workspaces,
+`channel.parseInstanceId(id)` remains available as an escape hatch for routes
+that receive only the id without creation data. The model selects message
+text. It does not select arbitrary workspaces,
 channels, credentials, or Web API methods.
 
 ## Show Assistant status

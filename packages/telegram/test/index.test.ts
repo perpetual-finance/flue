@@ -2,8 +2,8 @@ import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	createTelegramChannel,
-	InvalidTelegramConversationKeyError,
 	InvalidTelegramInputError,
+	InvalidTelegramInstanceIdError,
 	type TelegramChannel,
 	type TelegramConversationRef,
 } from '../src/index.ts';
@@ -287,7 +287,7 @@ describe('createTelegramChannel()', () => {
 		expect((await channelApp(bigintReturn).request(request(raw, 'secret'))).status).toBe(500);
 	});
 
-	it('round-trips regular, business, thread, and direct-topic conversation keys', () => {
+	it('round-trips regular, business, thread, and direct-topic instance ids', () => {
 		const telegram = createTelegramChannel({
 			secretToken: 'secret',
 			webhook: () => undefined,
@@ -307,15 +307,15 @@ describe('createTelegramChannel()', () => {
 		];
 
 		for (const ref of refs) {
-			const key = telegram.conversationKey(ref);
-			expect(telegram.parseConversationKey(key)).toEqual(ref);
+			const id = telegram.instanceId(ref);
+			expect(telegram.parseInstanceId(id)).toEqual(ref);
 		}
-		expect(telegram.conversationKey(refs[2] as TelegramConversationRef)).toBe(
+		expect(telegram.instanceId(refs[2] as TelegramConversationRef)).toBe(
 			'telegram:v1:business:business%3Acyan:chat:998201:thread::direct:',
 		);
 	});
 
-	it('rejects non-canonical keys, overlapping topic identity, and invalid setup', () => {
+	it('rejects non-canonical ids, overlapping topic identity, and invalid setup', () => {
 		expect(() =>
 			createTelegramChannel({
 				secretToken: 'contains space',
@@ -327,7 +327,7 @@ describe('createTelegramChannel()', () => {
 			webhook: () => undefined,
 		});
 		expect(() =>
-			telegram.conversationKey({
+			telegram.instanceId({
 				type: 'chat',
 				chatId: 1,
 				messageThreadId: 2,
@@ -335,8 +335,8 @@ describe('createTelegramChannel()', () => {
 			}),
 		).toThrow(InvalidTelegramInputError);
 		expect(() =>
-			telegram.parseConversationKey('telegram:v1:regular:chat:01:thread::direct:'),
-		).toThrow(InvalidTelegramConversationKeyError);
+			telegram.parseInstanceId('telegram:v1:regular:chat:01:thread::direct:'),
+		).toThrow(InvalidTelegramInstanceIdError);
 		expect(telegram.routes).toHaveLength(1);
 		expect(telegram.routes[0]).toMatchObject({
 			method: 'POST',

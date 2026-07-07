@@ -1,11 +1,11 @@
 import { createChannelRouter } from '@flue/runtime';
 import type { EventPayloadMap, WebhookEventName } from '@octokit/webhooks-types';
 import type { Context, Env, Handler, Hono } from 'hono';
-import { InvalidGitHubConversationKeyError, InvalidGitHubInputError } from './errors.ts';
+import { InvalidGitHubInputError, InvalidGitHubInstanceIdError } from './errors.ts';
 import { createGitHubWebhookHandler } from './webhook.ts';
 
 export type { EventPayloadMap, WebhookEvent, WebhookEventName } from '@octokit/webhooks-types';
-export { InvalidGitHubConversationKeyError, InvalidGitHubInputError } from './errors.ts';
+export { InvalidGitHubInputError, InvalidGitHubInstanceIdError } from './errors.ts';
 
 export type JsonValue =
 	| null
@@ -84,10 +84,13 @@ export interface GitHubChannel<E extends Env = Env> {
 	 * to the mount point: `app.route('/channels/github', channel.route())`.
 	 */
 	route(): Hono<E>;
-	/** Serializes a canonical namespaced identifier. It is not an authorization capability. */
-	conversationKey(ref: GitHubIssueRef): string;
-	/** Parses only canonical keys produced by `conversationKey()`. */
-	parseConversationKey(id: string): GitHubIssueRef;
+	/** Derives the agent instance id: a canonical namespaced identifier. It is not an authorization capability. */
+	instanceId(ref: GitHubIssueRef): string;
+	/**
+	 * Parses only canonical instance ids produced by `instanceId()`. Escape hatch: agents
+	 * normally receive structured facts as creation data rather than parsing them from the id.
+	 */
+	parseInstanceId(id: string): GitHubIssueRef;
 }
 
 /**
@@ -113,28 +116,28 @@ export function createGitHubChannel<E extends Env = Env>(
 	const channel: GitHubChannel<E> = {
 		routes,
 		route: () => createChannelRouter(routes),
-		conversationKey(ref) {
+		instanceId(ref) {
 			assertIssueRef(ref);
 			return `github:v1:owner:${encodeURIComponent(ref.owner)}:repo:${encodeURIComponent(ref.repo)}:issue:${ref.issueNumber}`;
 		},
-		parseConversationKey(id) {
+		parseInstanceId(id) {
 			try {
 				const match = /^github:v1:owner:([^:]+):repo:([^:]+):issue:([1-9]\d*)$/.exec(id);
 				const owner = match?.[1];
 				const repo = match?.[2];
 				const issueNumberText = match?.[3];
-				if (!owner || !repo || !issueNumberText) throw new InvalidGitHubConversationKeyError();
+				if (!owner || !repo || !issueNumberText) throw new InvalidGitHubInstanceIdError();
 				const ref = {
 					owner: decodeURIComponent(owner),
 					repo: decodeURIComponent(repo),
 					issueNumber: Number(issueNumberText),
 				};
 				assertIssueRef(ref);
-				if (channel.conversationKey(ref) !== id) throw new InvalidGitHubConversationKeyError();
+				if (channel.instanceId(ref) !== id) throw new InvalidGitHubInstanceIdError();
 				return ref;
 			} catch (error) {
-				if (error instanceof InvalidGitHubConversationKeyError) throw error;
-				throw new InvalidGitHubConversationKeyError();
+				if (error instanceof InvalidGitHubInstanceIdError) throw error;
+				throw new InvalidGitHubInstanceIdError();
 			}
 		},
 	};

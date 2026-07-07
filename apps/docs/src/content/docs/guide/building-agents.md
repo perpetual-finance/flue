@@ -143,18 +143,23 @@ POST /agents/support-assistant/ticket-8472
 It's up to the developer to decide what `id` means and whether it maps to important application data, such as a user ID, customer support ticket, or GitHub issue. A randomly generated ID can also work. The `id` keys the conversation's durable storage, and the runtime passes it to the top-level capability function as a prop — the way a web framework passes route params to the page component:
 
 ```ts
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
-import { channel, replyInThread } from '../channels/slack.ts';
+import { type AgentProps, defineAgent, useInitialData, useTool } from '@flue/runtime';
+import type { SlackThreadRef } from '@flue/slack';
+import { replyInThread } from '../channels/slack.ts';
 
 function Assistant({ id }: AgentProps) {
-  useTool(replyInThread(channel.parseConversationKey(id)));
-  return 'Reply in the bound Slack thread when appropriate.';
+  const thread = useInitialData<SlackThreadRef>();
+  useTool(replyInThread(thread!));
+  return `Reply in the Slack thread bound to conversation ${id}.`;
 }
 
 export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
-Only the top-level function receives `AgentProps`; a capability mounted with `use()` gets the props its caller passes, and a subagent's capability function gets nothing — a delegate runs in isolation from its parent, so share a value with it explicitly (close over it) or not at all. Agents that don't need the id keep the zero-argument form.
+The `id` is the opaque address; structured facts like the thread ref arrive as
+creation data (below), not by parsing `id` — channel packages expose a
+`parseInstanceId(id)` escape hatch for the rare caller that must recover them
+from the id itself. Only the top-level function receives `AgentProps`; a capability mounted with `use()` gets the props its caller passes, and a subagent's capability function gets nothing — a delegate runs in isolation from its parent, so share a value with it explicitly (close over it) or not at all. Agents that don't need the id keep the zero-argument form.
 
 ## Creation data
 
@@ -210,7 +215,7 @@ await dispatch(triage, { id: 'issue-17307', uid: receipt.uid, message }); // con
 await dispatch(triage, { id: 'issue-17307', uid: null, data: { issue: 17307 }, message }); // create only, fresh
 ```
 
-Reach for a uid condition in programmatic callers that mint their own ids and want to guard against a typo'd id silently continuing the wrong conversation, or against a stale reference reaching an instance that was deleted and re-created under the same id. Most callers don't need this: quick starts and a first prototype send unconditionally, and so do channels — a channel's derived conversation key can't be typo'd, and "already exists" is its normal case for every message after the first (see [Channels](/docs/guide/channels/)). `uid: '<string>'` combined with `data` is a contradiction Flue rejects: the condition forbids creation, so the seed could never apply. See the [Agent API](/docs/api/agent-api/#conditional-sends) for the full condition semantics and error shapes, including `getAgentInstance()` for code that wants to condition a send it did not originate.
+Reach for a uid condition in programmatic callers that mint their own ids and want to guard against a typo'd id silently continuing the wrong conversation, or against a stale reference reaching an instance that was deleted and re-created under the same id. Most callers don't need this: quick starts and a first prototype send unconditionally, and so do channels — a channel's derived instance id can't be typo'd, and "already exists" is its normal case for every message after the first (see [Channels](/docs/guide/channels/)). `uid: '<string>'` combined with `data` is a contradiction Flue rejects: the condition forbids creation, so the seed could never apply. See the [Agent API](/docs/api/agent-api/#conditional-sends) for the full condition semantics and error shapes, including `getAgentInstance()` for code that wants to condition a send it did not originate.
 
 Instances created before this feature shipped have no uid: uid-conditioned sends against them are rejected, bare sends work as before, and their receipts omit `uid`.
 
