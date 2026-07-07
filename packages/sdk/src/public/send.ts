@@ -28,6 +28,13 @@ export type DeliveredMessage =
 /** Options for delivering one message into the conversation. */
 export interface AgentPromptOptions {
 	message: DeliveredMessage;
+	/**
+	 * Instance-creation data. Takes effect only when this message is the
+	 * conversation's first contact: validated against the agent's `input:`
+	 * schema (when declared) and recorded once; the agent reads it with
+	 * `useInitialData()`. Ignored when the conversation already exists.
+	 */
+	data?: unknown;
 	signal?: AbortSignal;
 }
 
@@ -51,7 +58,8 @@ export async function sendConversationMessage(
 ): Promise<AgentSendResult> {
 	return http.json<AgentSendResult>({
 		method: 'POST',
-		body: options.message,
+		body:
+			options.data !== undefined ? { data: options.data, ...options.message } : options.message,
 		signal: options.signal,
 	});
 }

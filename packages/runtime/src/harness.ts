@@ -86,6 +86,12 @@ export class Harness implements FlueHarness {
 		private rerender?: SessionRerender,
 		/** Client-facing output channel (useMessageData/useMessageMetadata); same routing as hookState. */
 		private output?: AgentOutputChannel,
+		/**
+		 * Instance-creation data, present only when this harness is the
+		 * instance's first contact (already schema-parsed). Recorded on the
+		 * root conversation's birth record.
+		 */
+		private creationData?: unknown,
 	) {
 		this.fs = createFlueFs(env);
 		if (scopeSignal) {
@@ -183,6 +189,7 @@ export class Harness implements FlueHarness {
 					session: sessionName,
 					affinityKey: identity.affinityKey,
 					createdAt: identity.createdAt,
+					...(this.creationData !== undefined ? { data: this.creationData } : {}),
 				});
 			conversation = await this.conversationWriter.findConversation(harnessScope, sessionName);
 			if (!conversation)

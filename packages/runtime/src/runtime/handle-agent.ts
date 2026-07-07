@@ -5,7 +5,7 @@ import { InvalidRequestError, parseJsonBody, toHttpResponse } from '../errors.ts
 import { extractTraceCarrier } from '../execution-interceptor.ts';
 import type { AttachedAgentSubmissionAdmission } from './agent-submissions.ts';
 import type { DispatchInput } from './dispatch-queue.ts';
-import { parseDeliveredMessage } from './schemas.ts';
+import { parseDeliveredInput } from './schemas.ts';
 
 export function assertAgentDispatchAdmissionInput(input: unknown): asserts input is DispatchInput {
 	if (!isDispatchInput(input))
@@ -99,13 +99,14 @@ export async function handleAgentRequest(opts: HandleAgentOptions): Promise<Resp
 					"Await completion with the SDK client's `wait()`, or read the conversation stream (GET this URL).",
 			});
 		}
-		// The wire body IS a DeliveredMessage — the same validated shape a
+		// The wire body IS a DeliveredMessage (plus an optional reserved `data`
+		// sibling for instance creation) — the same validated shape a
 		// `dispatch()` call admits, so both transports share one schema and
 		// produce the same structured InvalidRequestError on bad input.
-		const message = parseDeliveredMessage(await parseJsonBody(request));
+		const { message, data } = parseDeliveredInput(await parseJsonBody(request));
 		const traceCarrier = extractTraceCarrier(request.headers);
 		const streamUrl = invocationStreamUrl(request);
-		const receipt = await opts.admitAttachedSubmission(message, traceCarrier);
+		const receipt = await opts.admitAttachedSubmission(message, traceCarrier, data);
 		return admissionResponse(
 			{ streamUrl, offset: receipt.offset, submissionId: receipt.submissionId },
 			streamUrl,

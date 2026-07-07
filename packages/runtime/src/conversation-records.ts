@@ -51,6 +51,12 @@ export type ConversationCreatedRecord = ConversationCreatedRecordBase &
 				taskId?: never;
 				actionInvocationId?: never;
 				agent?: never;
+				/**
+				 * Instance-creation data, recorded exactly once at birth (the
+				 * schema-parsed value when the agent declares `input:`). Read by
+				 * `useInitialData()`; never re-validated after creation.
+				 */
+				data?: unknown;
 		  }
 		| {
 				kind: 'task';

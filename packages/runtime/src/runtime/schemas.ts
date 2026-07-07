@@ -74,6 +74,24 @@ export function parseDeliveredMessage(value: unknown): DeliveredMessage {
 	});
 }
 
+/**
+ * Validate a raw direct-HTTP body as a delivered input: a
+ * {@link DeliveredMessage} with an optional `data` sibling carrying
+ * instance-creation data. `data` is a reserved top-level key on the message
+ * wire — it is peeled off before message validation and takes effect only on
+ * the instance's first contact.
+ */
+export function parseDeliveredInput(value: unknown): {
+	message: DeliveredMessage;
+	data?: unknown;
+} {
+	if (value && typeof value === 'object' && !Array.isArray(value) && 'data' in value) {
+		const { data, ...rest } = value as Record<string, unknown>;
+		return { message: parseDeliveredMessage(rest), ...(data !== undefined ? { data } : {}) };
+	}
+	return { message: parseDeliveredMessage(value) };
+}
+
 /** `?wait` query contract for the agent prompt route. */
 export const InvocationQuerySchema = v.object({
 	wait: v.optional(v.literal('result')),

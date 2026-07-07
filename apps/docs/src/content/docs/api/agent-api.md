@@ -141,6 +141,7 @@ function Assistant({ id }: AgentProps) {
 | `compaction`    | `false \| CompactionConfig` | Automatic conversation-compaction configuration. `false` disables threshold compaction; overflow recovery and explicit `session.compact()` calls still compact when needed. |
 | `durability`    | `DurabilityConfig`          | Durability configuration for durable agent submissions. Controls recovery attempt limits and submission timeouts.               |
 | `cwd`           | `string`                    | Working directory inside the initialized environment.                                                                           |
+| `input`         | Valibot schema              | Schema for the instance's creation data, validated once at instance creation (a mismatch — including absence, unless the schema accepts `undefined` — rejects the creating call). Read the recorded value with [`useInitialData()`](#useinitialdata). |
 
 Everything dynamic — instructions, tools, skills, subagents, sandbox — is composed inside the capability function with Flue Hooks; `FunctionAgentConfig` holds only what's fixed for the agent's whole lifetime.
 
@@ -399,6 +400,29 @@ export default function IssueTriage() {
 ```
 
 `run` may be async and is awaited; it returns void — no cleanup function. `run` receives `{ harness, log, signal }`. Effects are NOT reactive: they evaluate once per delivered submission, in declaration order, sequentially. Identity is call order — across deploys, append new effects after existing ones. At-least-once: an interrupted run re-runs on the re-attempt; a completed run is adopted, never repeated. Not available in a subagent render.
+
+### `useInitialData()`
+
+```ts
+function useInitialData<T = unknown>(): T | undefined;
+```
+
+Read the instance's creation data — the `data` a caller sent with this instance's first contact, recorded exactly once at creation and constant for the instance's whole life. This is the third leg of the input model: `useInitialData()` is what the instance is *about*, `useDelivery()` is what *this message* says, and `useState` is what the agent has *learned*.
+
+```ts
+const input = v.object({ issue: v.pipe(v.number(), v.integer()) });
+
+function Triage() {
+  const data = useInitialData<v.InferOutput<typeof input>>();
+  return `Triage GitHub issue #${data!.issue} end-to-end.`;
+}
+
+export default defineAgent(Triage, { model: 'anthropic/claude-opus-4-6', input });
+```
+
+Creation data rides the instance's first contact: `dispatch(triage, { id, data, message })`, a `data` field beside the direct-HTTP message body, `client.send({ message, data })`, or `flue run --data '<json>'`. Declare an `input:` schema on `defineAgent` to validate it at creation — a mismatch (including absence, unless the schema accepts `undefined`) rejects the creating call, so with a required schema the value is always present here, as the schema-parsed output. Without a schema, whatever the creator sent is recorded and returned untyped.
+
+The value is immutable — `data` on messages to an existing instance is ignored, and evolving facts belong in `useState`. Returns `undefined` when creation carried no data, on bare tooling/test renders (back it with `initialData` in the render-state context), and in subagent renders (a delegate has no creation data of its own; close over a value to share it). The recorded value is part of the instance's durable record stream but is never served to clients; still, it is not a secrets channel — keys and tokens stay in the environment.
 
 ### `useAppend()`
 

@@ -1,3 +1,4 @@
+import * as v from 'valibot';
 import { SUBMISSION_SESSION_NAME } from '../adapter-helpers.ts';
 import type {
 	AgentSubmission,
@@ -9,6 +10,7 @@ import type { FlueContextInternal } from '../client.ts';
 import type { ConversationRecordWriter } from '../conversation-writer.ts';
 import {
 	FlueError,
+	InvalidRequestError,
 	SubmissionAbortedError,
 	SubmissionInterruptedError,
 	SubmissionRetryExhaustedError,
@@ -33,6 +35,12 @@ export interface AgentSubmissionInput {
 	readonly agent: string;
 	readonly id: string;
 	readonly message: DeliveredMessage;
+	/**
+	 * Instance-creation data riding this submission. Consulted only when the
+	 * submission turns out to be the instance's first contact; ignored on
+	 * existing instances.
+	 */
+	readonly data?: unknown;
 	readonly acceptedAt: string;
 	readonly traceCarrier?: FlueTraceCarrier;
 }
@@ -105,7 +113,38 @@ interface AttachedAgentSubmissionReceipt {
 export type AttachedAgentSubmissionAdmission = (
 	message: DeliveredMessage,
 	traceCarrier?: FlueTraceCarrier,
+	data?: unknown,
 ) => Promise<AttachedAgentSubmissionReceipt>;
+
+/**
+ * Admission-side gate for instance-creation data. When the agent declares an
+ * `input:` schema and the instance does not exist yet, the incoming `data`
+ * (or its absence) must satisfy the schema — rejected here, synchronously,
+ * BEFORE anything durable is admitted, so an invalid creation attempt leaves
+ * no queued submission behind. Existing instances skip the check entirely
+ * (their data is ignored downstream). `initializeRootHarness` re-validates as
+ * the processing-path backstop.
+ */
+export async function assertAdmissibleCreationData(options: {
+	agent: AgentModuleValue;
+	data: unknown;
+	loadReducedState: () => Promise<{ initialData?: { value: unknown } } | undefined>;
+}): Promise<void> {
+	const schema = options.agent.config?.input;
+	if (schema === undefined) return;
+	const reduced = await options.loadReducedState();
+	if (!reduced || reduced.initialData) return;
+	const parsed = v.safeParse(schema, options.data);
+	if (!parsed.success) {
+		throw new InvalidRequestError({
+			reason:
+				`The agent requires creation data matching its input schema: ${parsed.issues
+					.map((issue) => issue.message)
+					.join('; ')}. ` +
+				'Creation data rides the instance\'s first message ({ data, ... } beside the message).',
+		});
+	}
+}
 
 export function createDispatchAgentSubmissionInput(input: DispatchInput): AgentSubmissionInput {
 	return {
@@ -114,6 +153,7 @@ export function createDispatchAgentSubmissionInput(input: DispatchInput): AgentS
 		agent: input.agent,
 		id: input.id,
 		message: input.message,
+		...(input.data !== undefined ? { data: input.data } : {}),
 		acceptedAt: input.acceptedAt,
 	};
 }
@@ -122,6 +162,7 @@ export function createDirectAgentSubmissionInput(options: {
 	agent: string;
 	id: string;
 	message: DeliveredMessage;
+	data?: unknown;
 	traceCarrier?: FlueTraceCarrier;
 }): AgentSubmissionInput {
 	return {
@@ -130,6 +171,7 @@ export function createDirectAgentSubmissionInput(options: {
 		agent: options.agent,
 		id: options.id,
 		message: options.message,
+		...(options.data !== undefined ? { data: options.data } : {}),
 		acceptedAt: new Date().toISOString(),
 		...(options.traceCarrier ? { traceCarrier: options.traceCarrier } : {}),
 	};
@@ -841,8 +883,9 @@ async function openAgentSubmissionSession(
 ): Promise<AgentSubmissionSession> {
 	// The submission's delivered message rides into the harness so renders can
 	// read it via `useDelivery()` — the durable input, so re-attempts see the
-	// same value.
-	const harness = await ctx.initializeRootHarness(agent, input.message);
+	// same value. The same goes for creation data: on the instance's first
+	// contact it validates and records; on existing instances it is ignored.
+	const harness = await ctx.initializeRootHarness(agent, input.message, input.data);
 	// External submissions always target the default session of the default
 	// harness. `harness.session()` hands out the public FlueSession facade;
 	// unwrap it to reach the internal durable submission executor surface.

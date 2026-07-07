@@ -156,6 +156,35 @@ export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
 
 Only the top-level function receives `AgentProps`; a capability mounted with `use()` gets the props its caller passes, and a subagent's capability function gets nothing — a delegate runs in isolation from its parent, so share a value with it explicitly (close over it) or not at all. Agents that don't need the id keep the zero-argument form.
 
+## Creation data
+
+An instance usually exists *about something* — a support ticket, a GitHub issue, a customer. That fact is known when the instance is created, is constant for its whole life, and shouldn't be re-parsed out of later messages (only the first message is shaped by the code that creates the instance). Send it as `data` on the instance's first contact and read it with `useInitialData()`:
+
+```ts
+import * as v from 'valibot';
+
+const input = v.object({ issue: v.pipe(v.number(), v.integer()) });
+
+function Triage() {
+  const data = useInitialData<v.InferOutput<typeof input>>();
+  return `Triage GitHub issue #${data!.issue} end-to-end.`;
+}
+
+export default defineAgent(Triage, { model: 'anthropic/claude-opus-4-6', input });
+```
+
+```ts
+await dispatch(triage, {
+  id: 'issue-17307',
+  data: { issue: 17307 },
+  message: { kind: 'signal', type: 'github.issue', body: '…' },
+});
+```
+
+The `input:` schema validates the data once, at instance creation — a creating call that omits or malforms it is rejected, so the value is guaranteed present and shaped from the first render on. Data sent to an existing instance is ignored; the recorded value never changes. Direct HTTP carries it the same way (`{ "data": {…}, "kind": "user", "body": "…" }`), as do `client.send({ message, data })` and `flue run --data '<json>'`.
+
+The three input channels each have one job: **`useInitialData()` is what the instance is about, `useDelivery()` is what this message says, and `useState` is what the agent has learned.**
+
 Authorize access to an `id` in the [`route`](#interacting-with-your-agent) handler. For work that arrives as a dispatched or signal-kind message — a webhook, a chat platform event — carry the identifier your application already validated in the message's `attributes` and read it inside the agent with `useDelivery()`; see [Tools](/docs/guide/tools/#protect-access) for the pattern.
 
 ## Interacting with your agent

@@ -71,6 +71,8 @@ export interface FlueRunSessionOptions {
 export interface FlueRunSubmitOptions {
 	/** Receives every conversation stream chunk as it is durably recorded. */
 	onEvent?: (chunk: ConversationStreamChunk) => void;
+	/** Instance-creation data; takes effect only on the conversation's first contact. */
+	data?: unknown;
 	/**
 	 * Abort intent (SIGINT). Aborting requests a durable instance abort and
 	 * keeps draining the stream until the aborted settlement is observed.
@@ -337,7 +339,7 @@ async function submitAndSettle(options: SubmitAndSettleOptions): Promise<FlueRun
 	throwIfAborted(options.signal);
 
 	const admit = coordinator.createAdmission(identity, conversationId);
-	const receipt = await admit(message);
+	const receipt = await admit(message, undefined, options.data);
 	const streamPath = agentStreamPath(identity, conversationId);
 
 	let abortRequested = false;

@@ -5,6 +5,8 @@ export interface DispatchInput {
 	agent: string;
 	id: string;
 	message: DeliveredMessage;
+	/** Instance-creation data; consulted only on the instance's first contact. */
+	data?: unknown;
 	acceptedAt: string;
 }
 

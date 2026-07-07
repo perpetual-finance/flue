@@ -11,6 +11,7 @@ import {
 	type AgentSubmissionInput,
 	type AttachedAgentSubmissionAdmission,
 	agentSubmissionDispatchId,
+	assertAdmissibleCreationData,
 	createDirectAgentSubmissionInput,
 	createDispatchAgentSubmissionInput,
 	materializeAgentSubmissionSession,
@@ -572,6 +573,16 @@ export function createNodeAgentCoordinator(options: {
 					throw new Error(`[flue] dispatch target agent "${input.agent}" has no agent definition.`);
 				}
 
+				await assertAdmissibleCreationData({
+					agent,
+					data: input.data,
+					loadReducedState: async () => {
+						const writer = await getConversationWriter(
+							createDispatchAgentSubmissionInput(input),
+						);
+						return writer?.loadReducedState();
+					},
+				});
 				const admission = await submissions.admitDispatch(input);
 				if (admission.kind !== 'submission') {
 					activityLease?.release();
@@ -629,6 +640,7 @@ export function createNodeAgentCoordinator(options: {
 			return async (
 				message: DeliveredMessage,
 				traceCarrier?: import('../execution-interceptor.ts').FlueTraceCarrier,
+				data?: unknown,
 			) => {
 				if (stopping) throw new Error('[flue] Coordinator is shutting down.');
 				const activityLease = activityGate?.enter();
@@ -642,10 +654,19 @@ export function createNodeAgentCoordinator(options: {
 					agent: agentName,
 					id: instanceId,
 					message,
+					data,
 					traceCarrier,
 				});
 
 				try {
+					await assertAdmissibleCreationData({
+						agent,
+						data,
+						loadReducedState: async () => {
+							const writer = await getConversationWriter(input);
+							return writer?.loadReducedState();
+						},
+					});
 					const admitted = await submissions.admitDirect(input);
 					if (admitted.canonicalReadyAt === null) {
 						await materializeSubmissionConversation(input, agent);

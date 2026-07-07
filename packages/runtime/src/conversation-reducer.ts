@@ -194,6 +194,13 @@ export interface ReducedInstanceState {
 	 * re-attempt adoption.
 	 */
 	effectRuns: Map<number, { fingerprint: string; submissionId?: string }>;
+	/**
+	 * Instance-creation data from the root conversation's
+	 * `conversation_created` record. Present (as a box) once the root
+	 * conversation exists — `value` may itself be undefined when creation
+	 * carried no data. Absent before first contact.
+	 */
+	initialData?: { value: unknown };
 }
 
 export interface ConversationProjectionOptions {
@@ -234,6 +241,7 @@ function cloneReducedInstanceState(state: ReducedInstanceState): ReducedInstance
 		recordsById: new Map(state.recordsById),
 		state: new Map(state.state),
 		effectRuns: new Map(state.effectRuns),
+		...(state.initialData ? { initialData: state.initialData } : {}),
 		conversations: new Map(
 			[...state.conversations].map(([id, conversation]) => [
 				id,
@@ -328,6 +336,9 @@ export function applyConversationRecord(
 		});
 		state.conversationScopes.set(scopeKey, record.conversationId);
 		state.recordsById.set(record.id, record);
+		if (record.kind === 'root') {
+			state.initialData = { value: record.data };
+		}
 		return;
 	}
 

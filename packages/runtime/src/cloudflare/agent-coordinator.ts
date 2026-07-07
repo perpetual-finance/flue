@@ -6,10 +6,11 @@ import type {
 } from '../agent-execution-store.ts';
 import type { FlueContextInternal } from '../client.ts';
 import { ConversationRecordWriter } from '../conversation-writer.ts';
-import { SubmissionAbortedError } from '../errors.ts';
+import { InvalidRequestError, SubmissionAbortedError } from '../errors.ts';
 import type { FlueTraceCarrier } from '../execution-interceptor.ts';
 import {
 	agentSubmissionDispatchId,
+	assertAdmissibleCreationData,
 	type createAgentSubmissionSessionHandler,
 	createDirectAgentSubmissionInput,
 	createDispatchAgentSubmissionInput,
@@ -272,7 +273,7 @@ class CloudflareAgentCoordinator {
 			request,
 			id: this.instance.name,
 			agentName: this.agentName,
-			admitAttachedSubmission: (message, traceCarrier) =>
+			admitAttachedSubmission: (message, traceCarrier, data) =>
 				this.admitAttachedSubmission(message, traceCarrier),
 		});
 	}
@@ -700,15 +701,22 @@ class CloudflareAgentCoordinator {
 	private async admitAttachedSubmission(
 		message: DeliveredMessage,
 		traceCarrier?: FlueTraceCarrier,
+		data?: unknown,
 	) {
 		const input = createDirectAgentSubmissionInput({
 			agent: this.agentName,
 			id: this.instance.name,
 			message,
+			data,
 			traceCarrier,
 		});
 		const agent = this.options.agents.find((record) => record.name === this.agentName)?.definition;
 		if (!agent) throw new Error('[flue] Agent target unavailable during durable admission.');
+		await assertAdmissibleCreationData({
+			agent,
+			data,
+			loadReducedState: async () => (await this.ensureConversationWriter()).loadReducedState(),
+		});
 		const admitted = await this.submissions.admitDirect(input);
 		if (admitted.canonicalReadyAt === null) {
 			await this.materializeSubmissionConversation(input, agent);
@@ -728,6 +736,18 @@ class CloudflareAgentCoordinator {
 		}
 		const agent = this.options.agents.find((record) => record.name === this.agentName)?.definition;
 		if (!agent) return new Response('Dispatch target unavailable.', { status: 404 });
+		try {
+			await assertAdmissibleCreationData({
+				agent,
+				data: input.data,
+				loadReducedState: async () => (await this.ensureConversationWriter()).loadReducedState(),
+			});
+		} catch (error) {
+			if (error instanceof InvalidRequestError) {
+				return new Response(error.message, { status: 400 });
+			}
+			throw error;
+		}
 		const admission = await this.submissions.admitDispatch(input);
 		if (admission.kind === 'retained_receipt') {
 			return Response.json({

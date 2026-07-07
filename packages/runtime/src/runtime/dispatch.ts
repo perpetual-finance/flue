@@ -18,6 +18,7 @@ export async function enqueueDispatch(options: {
 		agent,
 		id: options.request.id,
 		message,
+		...(options.request.data !== undefined ? { data: options.request.data } : {}),
 		acceptedAt: new Date().toISOString(),
 	});
 }

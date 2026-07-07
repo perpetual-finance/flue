@@ -23,7 +23,7 @@ import { BLUEPRINTS, KIND_ROOTS } from './_blueprints.generated.ts';
 function printUsage(log: (message: string) => void = console.error) {
 	log(
 		'Usage:\n' +
-			'  flue run    <path> --message <text> [--id <conversation-id>] [--env <path>] [--json]\n' +
+			'  flue run    <path> --message <text> [--id <conversation-id>] [--data <json>] [--env <path>] [--json]\n' +
 			'  flue init   --target <node|cloudflare> [--root <path>] [--force]\n' +
 			'  flue add    [<kind> <name|url>] [--print]\n' +
 			'  flue update <kind> <name|url> [--print]\n' +
@@ -42,6 +42,7 @@ function printUsage(log: (message: string) => void = console.error) {
 			'Flags:\n' +
 			'  --message <text>     (flue run) The user message submitted to the agent. Required.\n' +
 			'  --id <id>            (flue run) Conversation id to create or continue. Default: a fresh id, printed.\n' +
+			'  --data <json>        (flue run) Instance-creation data (JSON). Takes effect only on the conversation\'s first contact; read with useInitialData().\n' +
 			'  --json               (flue run) Print a JSON result envelope to stdout instead of the message text.\n' +
 			'  --env <path>         (flue run) Select one alternate .env-format file, loaded before the run.\n' +
 			'                       Without --env, `flue run` loads <project>/.env when present. Shell values win.\n' +
@@ -76,6 +77,7 @@ interface RunArgs {
 	modulePath: string;
 	message: string;
 	id: string | undefined;
+	data: unknown;
 	json: boolean;
 	envFile: string | undefined;
 }
@@ -351,10 +353,11 @@ function parseRunArgs(rest: string[]): RunArgs {
 		{
 			message: { type: 'string' },
 			id: { type: 'string' },
+			data: { type: 'string' },
 			json: { type: 'boolean' },
 			env: { type: 'string', multiple: true },
 		},
-		new Set(['--message', '--id', '--json', '--env']),
+		new Set(['--message', '--id', '--data', '--json', '--env']),
 	);
 
 	const [modulePath, ...extra] = positionals;
@@ -380,11 +383,22 @@ function parseRunArgs(rest: string[]): RunArgs {
 		fail('`--env` accepts one file. Combine values into one file or provide shell overrides.');
 	}
 
+	const rawData = stringFlag(values, 'data', 'Missing value for --data');
+	let data: unknown;
+	if (rawData !== undefined) {
+		try {
+			data = JSON.parse(rawData);
+		} catch {
+			fail('`--data` must be valid JSON, e.g. --data \'{"issue": 17307}\'.');
+		}
+	}
+
 	return {
 		command: 'run',
 		modulePath,
 		message,
 		id: stringFlag(values, 'id', 'Missing value for --id'),
+		data,
 		json: booleanFlag(values, 'json', '--json'),
 		envFile: envFiles[0],
 	};
@@ -487,6 +501,7 @@ async function run(args: RunArgs) {
 	const execution = createLocalAgentRun({
 		modulePath: args.modulePath,
 		message: args.message,
+		data: args.data,
 		conversationId: args.id,
 		onEvent: (chunk) => presenter.present(chunk as ConversationStreamChunk),
 		onRuntimeOutput: (line) => {

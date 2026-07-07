@@ -68,6 +68,13 @@ export interface RenderStateContext {
 	 * message triggered the run (tests/tooling renders, delegated operations).
 	 */
 	delivery?: DeliveredMessage;
+	/**
+	 * Instance-creation data (already schema-parsed when the agent declares
+	 * `input:`). Constant for the instance's life; read via `useInitialData()`.
+	 * Absent when creation carried none, on bare tooling/test renders, and in
+	 * subagent frames (delegates have no creation data of their own).
+	 */
+	initialData?: unknown;
 }
 
 /** The write channel `useState` setters push into; drained by the session. */

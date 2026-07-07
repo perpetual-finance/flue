@@ -1,5 +1,6 @@
 import * as v from 'valibot';
 import { createAgentRouter } from './runtime/registration.ts';
+import { isValibotSchema } from './schema.ts';
 import type {
 	AgentProps,
 	Capability,
@@ -26,6 +27,7 @@ const FunctionAgentConfigSchema = v.strictObject(
 		compaction: v.optional(v.union([v.literal(false), v.looseObject({})])),
 		durability: v.optional(v.looseObject({})),
 		cwd: v.optional(v.string()),
+		input: v.optional(v.unknown()),
 	},
 	(issue) =>
 		issue.expected === 'never'
@@ -67,6 +69,11 @@ export function defineAgent(
 	assertThinkingLevel(config.thinkingLevel, 'defineAgent() config');
 	assertCompaction(config.compaction, 'defineAgent() config');
 	assertDurability(config.durability, 'defineAgent() config');
+	if (config.input !== undefined && !isValibotSchema(config.input)) {
+		throw new Error(
+			'[flue] defineAgent() config.input must be a Valibot schema for the instance creation data.',
+		);
+	}
 	const definition: FunctionAgentDefinition = {
 		__flueFunctionAgent: true as const,
 		capability: agent,

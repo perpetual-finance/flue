@@ -1,5 +1,4 @@
-import {
-} from './agent-definition.ts';
+import * as v from 'valibot';
 import { discoverSessionContext } from './context.ts';
 import { ConversationRecordWriter } from './conversation-writer.ts';
 import { Harness } from './harness.ts';
@@ -62,7 +61,11 @@ export interface FlueContextInternal extends FlueEventContext {
 	 * `delivery` is the submission's delivered message; renders read it via
 	 * `useDelivery()`. Omit for invocations no delivered message triggered.
 	 */
-	initializeRootHarness(agent: AgentModuleValue, delivery?: DeliveredMessage): Promise<Harness>;
+	initializeRootHarness(
+		agent: AgentModuleValue,
+		delivery?: DeliveredMessage,
+		data?: unknown,
+	): Promise<Harness>;
 	createEvent(event: FlueEventInput): FlueEvent;
 	publishEvent(event: FlueEvent): void;
 	emitEvent(event: FlueEventInput, observation?: FlueObservationDetail): FlueEvent;
@@ -151,6 +154,7 @@ export function createFlueContext(config: FlueContextConfig): FlueContextInterna
 		async initializeRootHarness(
 			agent: AgentModuleValue,
 			delivery?: DeliveredMessage,
+			data?: unknown,
 		): Promise<Harness> {
 			if (!conversationWriter || !attachmentStore) {
 				localConversationRuntime ??= createLocalConversationRuntime(config);
@@ -163,6 +167,7 @@ export function createFlueContext(config: FlueContextConfig): FlueContextInterna
 				{ ...config, conversationWriter, attachmentStore },
 				emitEvent,
 				delivery,
+				data,
 			);
 		},
 
@@ -256,6 +261,7 @@ export async function initializeRootHarness(
 	config: FlueContextConfig,
 	emitEvent: (event: FlueEventInput, observation?: FlueObservationDetail) => void,
 	delivery?: DeliveredMessage,
+	data?: unknown,
 ): Promise<Harness> {
 	const label = 'The agent';
 	if (!config.conversationWriter || !config.attachmentStore) {
@@ -265,6 +271,32 @@ export async function initializeRootHarness(
 	// writes through this buffer, which the session drains into the tool
 	// batch's append. One buffer per harness lifetime (one submission attempt).
 	const reduced = await config.conversationWriter.loadReducedState();
+	// Instance-creation data. Once the root conversation exists, the recorded
+	// value wins forever (data on later messages is deliberately ignored, and
+	// nothing re-validates). On first contact — including re-attempts of the
+	// creating submission, which run before the birth record lands — the
+	// incoming value is validated against the agent's `input:` schema; the
+	// schema-parsed output is what renders see and what the birth record
+	// stores.
+	let initialData: unknown;
+	let creationData: unknown;
+	if (reduced.initialData) {
+		initialData = reduced.initialData.value;
+	} else {
+		initialData = data;
+		if (agent.config.input !== undefined) {
+			const parsedData = v.safeParse(agent.config.input, data);
+			if (!parsedData.success) {
+				throw new Error(
+					`[flue] ${label} requires creation data matching its input schema: ${parsedData.issues
+						.map((issue) => issue.message)
+						.join('; ')}. Creation data rides the instance's first message ({ data, ... }).`,
+				);
+			}
+			initialData = parsedData.output;
+		}
+		creationData = initialData;
+	}
 	const hookState = createHookStateBuffer(reduced.state);
 	const outputChannel = createAgentOutputChannel();
 	// The delivery is constant for the harness lifetime (one submission
@@ -276,6 +308,7 @@ export async function initializeRootHarness(
 		output: outputChannel,
 		delivery,
 		instanceId: config.id,
+		initialData,
 	};
 	const first = renderAgentFunctionWithStructure(agent.capability, agent.config, renderState);
 	const resolvedOptions: AgentRuntimeConfig = first.config;
@@ -351,6 +384,7 @@ export async function initializeRootHarness(
 		hookState,
 		rerender,
 		outputChannel,
+		creationData,
 	);
 }
 

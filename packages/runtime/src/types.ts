@@ -80,6 +80,13 @@ export interface AgentDispatchRequest {
 	id: string;
 	/** The message delivered to the session. Flue snapshots the value at admission time. */
 	message: DeliveredMessage;
+	/**
+	 * Instance-creation data. Takes effect only when this dispatch is the
+	 * instance's first contact: validated against the agent's `input:` schema
+	 * (when declared) and recorded once, readable forever via
+	 * `useInitialData()`. Ignored when the instance already exists.
+	 */
+	data?: unknown;
 }
 
 /**
@@ -505,6 +512,16 @@ export interface FunctionAgentConfig {
 	durability?: DurabilityConfig;
 	/** Working directory inside the initialized environment. */
 	cwd?: string;
+	/**
+	 * Schema for the instance's creation data — the `data` a caller sends
+	 * with the instance's first contact (`dispatch({ id, data, message })`,
+	 * or a `data` field beside the direct-HTTP message body). Validated once,
+	 * at instance creation; a mismatch (including absence, unless the schema
+	 * accepts `undefined`) fails the creating submission. Read the recorded
+	 * value with `useInitialData()`. Optional: without a schema, creation
+	 * data is still accepted and recorded, just untyped.
+	 */
+	input?: v.GenericSchema;
 }
 
 /**

@@ -1,0 +1,46 @@
+import { requireRenderFrame } from './frame.ts';
+
+/**
+ * Read the instance's creation data — the `data` a caller sent with this
+ * instance's first contact, recorded exactly once at creation and constant
+ * for the instance's whole life.
+ *
+ * This is the third leg of the input model: `useInitialData()` is what the
+ * instance is *about*, `useDelivery()` is what *this message* says, and
+ * `useState` is what the agent has *learned*. Parse per-instance facts from
+ * creation data, never from later deliveries — only the first message is
+ * shaped by the code that creates the instance.
+ *
+ * ```ts
+ * // dispatch(triage, { id: 'issue-17307', data: { issue: 17307 }, message: {...} })
+ * const input = v.object({ issue: v.pipe(v.number(), v.integer()) });
+ *
+ * function Triage() {
+ *   const data = useInitialData<v.InferOutput<typeof input>>();
+ *   return `Triage GitHub issue #${data!.issue} end-to-end.`;
+ * }
+ * export default defineAgent(Triage, { model: '…', input });
+ * ```
+ *
+ * Semantics:
+ * - Declare an `input:` schema on `defineAgent` to validate the data at
+ *   instance creation — a mismatch (including absence, unless the schema
+ *   accepts `undefined`) fails the creating submission, so with a required
+ *   schema the value is always present here. The schema-parsed output is
+ *   what this hook returns. Without a schema, whatever the creator sent is
+ *   recorded and returned untyped; the type parameter is compile-time only.
+ * - Constant forever: `data` on messages to an existing instance is ignored,
+ *   and nothing can change the recorded value. Evolving facts belong in
+ *   `useState`.
+ * - Returns `undefined` when creation carried no data, on a bare
+ *   tooling/test render (back it with `initialData` in the render-state
+ *   context), and in subagent renders — a delegate has no creation data of
+ *   its own; close over a value to share it explicitly.
+ * - The recorded value is part of the instance's durable record stream; it
+ *   is not a secrets channel — keys and tokens stay in the environment.
+ */
+export function useInitialData<T = unknown>(): T | undefined {
+	const frame = requireRenderFrame('useInitialData');
+	if (frame.kind === 'subagent') return undefined;
+	return frame.state?.initialData as T | undefined;
+}
