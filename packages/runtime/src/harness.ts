@@ -22,7 +22,6 @@ import {
 import { execShellWithEvents } from './shell.ts';
 import type {
 	AgentConfig,
-	AgentProfile,
 	CallHandle,
 	FlueEventInput,
 	FlueEventInputCallback,
@@ -31,6 +30,7 @@ import type {
 	FlueObservationDetail,
 	FlueSession,
 	FlueSessions,
+	ResolvedSubagent,
 	SessionEnv,
 	SessionToolFactory,
 	ShellOptions,
@@ -244,13 +244,12 @@ export class Harness implements FlueHarness {
 			subagents: taskAgent
 				? Object.fromEntries(
 						(taskAgent.subagents ?? [])
-							.filter((agent): agent is AgentProfile & { name: string } => agent.name !== undefined)
 							.map((agent) => [agent.name, agent]),
 					)
 				: this.config.subagents,
 			model: taskModel,
 			thinkingLevel: taskAgent?.thinkingLevel ?? this.config.thinkingLevel,
-			compaction: taskAgent?.compaction ?? this.config.compaction,
+			compaction: this.config.compaction,
 		};
 		const harnessScope = this.scopeName ? `${this.name}:${this.scopeName}` : this.name;
 		// Reattach (recovery) reuses the existing child conversation: its
@@ -302,7 +301,7 @@ export class Harness implements FlueHarness {
 		options: CreateTaskSessionOptions,
 		harnessScope: string,
 		sessionName: string,
-		taskAgent: AgentProfile | undefined,
+		taskAgent: ResolvedSubagent | undefined,
 	): Promise<string> {
 		const identity = createConversationIdentity();
 		await this.conversationWriter.ensureChildConversation({

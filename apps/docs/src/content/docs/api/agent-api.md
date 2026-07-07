@@ -39,7 +39,6 @@ import {
   type CallHandle,
   type Capability,
   type CompactionConfig,
-  type DeclaredSubagent,
   type DefineSkillOptions,
   type DeliveredAttachment,
   type DeliveredMessage,

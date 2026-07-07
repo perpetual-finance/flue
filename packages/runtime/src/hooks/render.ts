@@ -1,11 +1,11 @@
 import { ToolNameConflictError } from '../errors.ts';
 import type {
-	AgentProfile,
 	AgentProps,
 	AgentRuntimeConfig,
 	Capability,
 	DeliveredMessage,
 	FunctionAgentConfig,
+	ResolvedSubagent,
 	SubagentDefinition,
 } from '../types.ts';
 import {
@@ -140,7 +140,7 @@ export function renderAgentFunctionWithStructure(
 export function resolveSubagentDefinition(
 	subagent: SubagentDefinition,
 	delivery?: DeliveredMessage,
-): AgentProfile {
+): ResolvedSubagent {
 	const { result, frame } = renderWithFrame(
 		subagent.capabilities as () => unknown,
 		delivery ? { snapshot: new Map(), store: undefined, delivery } : undefined,

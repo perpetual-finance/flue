@@ -1,7 +1,7 @@
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { type Static, Type } from '@earendil-works/pi-ai';
 import { composeTimeoutSignal } from './abort.ts';
-import type { AgentProfile, PackagedSkillDirectory, SessionEnv } from './types.ts';
+import type { PackagedSkillDirectory, SessionEnv, SubagentDefinition } from './types.ts';
 
 const MAX_READ_LINES = 2000;
 const MAX_READ_BYTES = 50 * 1024;
@@ -33,7 +33,7 @@ export interface CreateToolsOptions {
 		params: TaskToolParams,
 		signal?: AbortSignal,
 	) => Promise<AgentToolResult<TaskToolResultDetails>>;
-	subagents?: Record<string, AgentProfile>;
+	subagents?: Record<string, SubagentDefinition>;
 	packagedSkills?: Record<string, PackagedSkillDirectory>;
 }
 
@@ -289,7 +289,7 @@ export function createTaskTool(
 		signal?: AbortSignal,
 		toolCallId?: string,
 	) => Promise<AgentToolResult<TaskToolResultDetails>>,
-	subagents: Record<string, AgentProfile>,
+	subagents: Record<string, SubagentDefinition>,
 ): AgentTool<typeof TaskParams> {
 	const agentEntries = Object.entries(subagents);
 	const agentDescription =

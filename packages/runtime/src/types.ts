@@ -332,7 +332,7 @@ export interface AgentConfig {
 	definitionSkills?: Skill[];
 	/** Discovered at runtime from .agents/skills/ in the session's cwd. */
 	skills: Record<string, Skill>;
-	subagents?: Record<string, DeclaredSubagent>;
+	subagents?: Record<string, SubagentDefinition>;
 	/** Agent-wide default model. Per-call values override this. */
 	model: Model<any>;
 	/** Resolve a model specifier to a Model instance. Throws on invalid specifiers. */
@@ -355,40 +355,6 @@ export interface AgentConfig {
 
 // ─── Agent Profile and Runtime Creation ─────────────────────────────────────
 
-/** Reusable agent behavior accepted by {@link defineAgentProfile}. */
-export interface AgentProfile {
-	/** Profile name. Required when selecting this profile with `session.task()`. */
-	name?: string;
-	description?: string;
-	/** Default model specifier. */
-	model?: string;
-	/** Instructions prepended to discovered workspace context. */
-	instructions?: string;
-	/** Registered skills available to sessions initialized from this profile. */
-	skills?: Skill[];
-	/** Custom model-callable tools available to sessions initialized from this profile. */
-	tools?: ToolDefinition[];
-	/** Named delegates available for `task` delegation. */
-	subagents?: DeclaredSubagent[];
-	/** Default reasoning effort. Individual operations may override this value. */
-	thinkingLevel?: ThinkingLevel;
-	/**
-	 * Automatic conversation-compaction configuration. `false` disables
-	 * threshold compaction; overflow recovery and explicit `session.compact()`
-	 * calls still compact when needed.
-	 */
-	compaction?: false | CompactionConfig;
-	/**
-	 * Durability configuration for durable agent submissions. Controls
-	 * recovery attempt limits and submission timeouts. Rejected on subagent
-	 * profiles: a delegated task runs inside the parent operation and shares the
-	 * parent's durability envelope (timeout and retry budget). On recovery the
-	 * parent resumes its in-flight subagent in-process, so a subagent has no
-	 * independent durability configuration of its own.
-	 */
-	durability?: DurabilityConfig;
-}
-
 /**
  * A capability-backed delegate declared with `useSubagent(...)`. The
  * `capabilities` function is rendered at delegation time — in its own frame,
@@ -410,20 +376,24 @@ export interface SubagentDefinition {
 	thinkingLevel?: ThinkingLevel;
 }
 
-/** Either declared-subagent form: a legacy profile or a capability-backed delegate. */
-export type DeclaredSubagent = AgentProfile | SubagentDefinition;
-
-/** Discriminate a capability-backed delegate from a legacy profile. */
-export function isSubagentDefinition(value: DeclaredSubagent): value is SubagentDefinition {
-	return typeof (value as Partial<SubagentDefinition>).capabilities === 'function';
+/**
+ * A capability-backed delegate rendered into the self-contained shape the
+ * task machinery consumes. Internal: produced at delegation time from a
+ * {@link SubagentDefinition}, never authored directly.
+ */
+export interface ResolvedSubagent {
+	name: string;
+	description: string;
+	model?: string;
+	thinkingLevel?: ThinkingLevel;
+	instructions?: string;
+	tools?: ToolDefinition[];
+	skills?: Skill[];
+	subagents?: SubagentDefinition[];
 }
 
-/** Configuration returned by a {@link defineAgent} initializer. */
+/** The internal runtime-config shape one render of an agent composes. */
 export interface AgentRuntimeConfig {
-	/** Reusable baseline profile. Agent definition fields replace or extend profile values. */
-	profile?: AgentProfile;
-	/** Optional human-facing description of what this agent does. */
-	description?: string;
 	/** Default model specifier. */
 	model?: string;
 	/** Instructions prepended to discovered workspace context. */
@@ -433,7 +403,7 @@ export interface AgentRuntimeConfig {
 	/** Additional custom model-callable tools available to initialized sessions. */
 	tools?: ToolDefinition[];
 	/** Additional named delegates available for `task` delegation. */
-	subagents?: DeclaredSubagent[];
+	subagents?: SubagentDefinition[];
 	/** Default reasoning effort. Individual operations may override this value. */
 	thinkingLevel?: ThinkingLevel;
 	/**
@@ -832,7 +802,7 @@ export interface SkillOptions<
 export interface TaskOptions<
 	S extends v.GenericSchema | undefined = undefined,
 > extends OperationOptions<S> {
-	/** Named subagent profile selected for this delegated task. */
+	/** Named subagent (declared with useSubagent) selected for this delegated task. */
 	agent?: string;
 	/** Working directory for the detached task session. Defaults to the parent session cwd. */
 	cwd?: string;
@@ -865,7 +835,7 @@ export interface ShellResult {
 // ─── Sandbox ────────────────────────────────────────────────────────────────
 
 export interface SessionToolFactoryOptions {
-	subagents: Record<string, DeclaredSubagent>;
+	subagents: Record<string, SubagentDefinition>;
 }
 
 /** Sandbox adapter-supplied model-facing tools. Flue appends `task` separately. */

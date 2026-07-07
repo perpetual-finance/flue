@@ -1,7 +1,7 @@
 /// <reference path="../types/skill-md.d.ts" />
 /// <reference path="../types/markdown-md.d.ts" />
 
-export { defineAgent, defineAgentProfile } from './agent-definition.ts';
+export { defineAgent } from './agent-definition.ts';
 export {
 	AttachmentNotAvailableError,
 	DelegationDepthExceededError,
@@ -78,7 +78,6 @@ export { defineTool } from './tool.ts';
 export type {
 	AgentDispatchRequest,
 	AgentModuleValue,
-	AgentProfile,
 	AgentProps,
 	AgentRouteHandler,
 	AgentRuntimeConfig,
@@ -88,7 +87,6 @@ export type {
 	CallHandle,
 	Capability,
 	CompactionConfig,
-	DeclaredSubagent,
 	DeliveredAttachment,
 	DeliveredMessage,
 	DispatchReceipt,

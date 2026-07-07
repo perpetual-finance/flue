@@ -24,7 +24,6 @@ describe('package entrypoints', () => {
 			connectMcpServer: expect.any(Function),
 			defineAgent: expect.any(Function),
 			createSandboxSessionEnv: expect.any(Function),
-			defineAgentProfile: expect.any(Function),
 			defineSkill: expect.any(Function),
 			defineTool: expect.any(Function),
 			dispatch: expect.any(Function),

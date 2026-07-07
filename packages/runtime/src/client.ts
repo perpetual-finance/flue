@@ -1,7 +1,4 @@
 import {
-	assertResolvedAgentProfile,
-	extendAgentProfile,
-	resolveAgentProfile,
 } from './agent-definition.ts';
 import { discoverSessionContext } from './context.ts';
 import { ConversationRecordWriter } from './conversation-writer.ts';
@@ -23,7 +20,6 @@ import type { SessionRerender } from './session.ts';
 import type {
 	AgentConfig,
 	AgentModuleValue,
-	AgentProfile,
 	AgentRuntimeConfig,
 	DeliveredMessage,
 	FlueEvent,
@@ -284,10 +280,9 @@ export async function initializeRootHarness(
 	const first = renderAgentFunctionWithStructure(agent.capability, agent.config, renderState);
 	const resolvedOptions: AgentRuntimeConfig = first.config;
 	let lastStructure: AgentRenderStructure = first.structure;
-	const definition = assertResolvedAgentProfile(
-		extendAgentProfile(resolveAgentProfile(resolvedOptions), {}),
-		label,
-	);
+	// The render composes the config: hooks validated every attachment when it
+	// was declared, and defineAgent validated the static fields at module load.
+	const definition = resolvedOptions;
 	if (typeof definition.model !== 'string') {
 		throw new Error(
 			`[flue] ${label} requires a model. Pass { model: "provider-id/model-id" } to defineAgent(Agent, config).`,
@@ -317,11 +312,7 @@ export async function initializeRootHarness(
 		definitionSkills: definition.skills,
 		skills: localContext.skills,
 		subagents: Object.fromEntries(
-			(definition.subagents ?? [])
-				.filter(
-					(candidate): candidate is AgentProfile & { name: string } => candidate.name !== undefined,
-				)
-				.map((candidate) => [candidate.name, candidate]),
+			(definition.subagents ?? []).map((candidate) => [candidate.name, candidate]),
 		),
 		model: resolvedModel,
 		thinkingLevel: definition.thinkingLevel ?? config.agentConfig.thinkingLevel,

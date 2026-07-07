@@ -141,7 +141,6 @@ import { assertToolDefinition, parseToolInput, validateToolOutput } from './tool
 import { getPreparedToolAdapter } from './tool-adapter.ts';
 import type {
 	AgentConfig,
-	AgentProfile,
 	CallHandle,
 	DeliveredMessage,
 	FlueEvent,
@@ -159,6 +158,7 @@ import type {
 	PromptResponse,
 	PromptResultResponse,
 	PromptUsage,
+	ResolvedSubagent,
 	SessionEnv,
 	SessionToolFactory,
 	ShellOptions,
@@ -169,7 +169,6 @@ import type {
 	ThinkingLevel,
 	ToolDefinition,
 } from './types.ts';
-import { isSubagentDefinition } from './types.ts';
 import { addUsage, emptyUsage, fromProviderUsage } from './usage.ts';
 
 const MAX_DELEGATION_DEPTH = 4;
@@ -290,7 +289,7 @@ export interface CreateTaskSessionOptions {
 	taskId: string;
 	parentEnv: SessionEnv;
 	cwd?: string;
-	agent?: AgentProfile;
+	agent?: ResolvedSubagent;
 	depth: number;
 	/**
 	 * The parent `task` tool call that spawned this child, and the assistant
@@ -1758,7 +1757,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		};
 		// D-B: a renamed/removed subagent across a deploy is deterministically
 		// unrecoverable — fall back to an error outcome for this one call only.
-		let taskAgent: AgentProfile | undefined;
+		let taskAgent: ResolvedSubagent | undefined;
 		try {
 			// Rebuild the delegate's delivered message from the durable tool call
 			// so the resume render's `useDelivery()` sees what attempt one saw.
@@ -1771,7 +1770,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 							]),
 						)
 					: undefined;
-			taskAgent = args.agent ? this.resolveDeclaredSubagent(args.agent, delivery) : undefined;
+			taskAgent = args.agent ? this.resolveSubagent(args.agent, delivery) : undefined;
 		} catch (error) {
 			if (error instanceof SubagentNotDeclaredError) {
 				return this.taskResumeFailureOutcomeRecord(assistantEntryId, toolCallId, error);
@@ -2881,18 +2880,17 @@ export class Session implements FlueSession, AgentSubmissionSession {
 
 	// ─── Tasks ────────────────────────────────────────────────────────────────
 
-	private resolveDeclaredSubagent(name: string, delivery?: DeliveredMessage): AgentProfile {
+	private resolveSubagent(name: string, delivery?: DeliveredMessage): ResolvedSubagent {
 		const subagents = this.config.subagents ?? {};
 		const subagent = subagents[name];
 		if (!subagent) {
 			throw new SubagentNotDeclaredError({ subagent: name, available: Object.keys(subagents) });
 		}
 		// Capability-backed delegates render here — at delegation time, fresh
-		// per task (resume included), outside any parent render — into the same
-		// self-contained profile shape the task machinery has always consumed.
-		// The parent's task prompt rides in as the delegate's delivered message.
-		if (isSubagentDefinition(subagent)) return resolveSubagentDefinition(subagent, delivery);
-		return subagent;
+		// per task (resume included), outside any parent render — into the
+		// self-contained shape the task machinery consumes. The parent's task
+		// prompt rides in as the delegate's delivered message.
+		return resolveSubagentDefinition(subagent, delivery);
 	}
 
 	private async runTaskForTool(
@@ -2959,7 +2957,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 
 		const taskId = crypto.randomUUID();
 		const taskAgent = options?.agent
-			? this.resolveDeclaredSubagent(options.agent, taskDeliveryMessage(text, options?.images))
+			? this.resolveSubagent(options.agent, taskDeliveryMessage(text, options?.images))
 			: undefined;
 		let child: Session | undefined;
 		let abortListener: (() => void) | undefined;
