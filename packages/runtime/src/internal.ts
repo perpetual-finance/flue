@@ -29,6 +29,7 @@ export type { FlueContextConfig, FlueContextInternal } from './client.ts';
 export { createFlueContext, initializeRootHarness } from './client.ts';
 export {
 	CLOUDFLARE_AGENT_INTERNAL_DISPATCH_PATH,
+	CLOUDFLARE_AGENT_INTERNAL_INSTANCE_INFO_PATH,
 	createCloudflareAgentRuntime,
 } from './cloudflare/agent-coordinator.ts';
 export { createSqlConversationStores } from './cloudflare/agent-execution-store.ts';

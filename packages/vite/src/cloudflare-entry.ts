@@ -82,6 +82,7 @@ import {
 	Bash,
 	bashFactoryToSessionEnv,
 	CLOUDFLARE_AGENT_INTERNAL_DISPATCH_PATH,
+	CLOUDFLARE_AGENT_INTERNAL_INSTANCE_INFO_PATH,
 	configureFlueRuntime,
 	createCloudflareAgentRuntime,
 	createFlueContext,
@@ -261,6 +262,15 @@ configureFlueRuntime({
 		const binding = reqEnv?.[agentIdentities[target.agentName]?.bindingName];
 		if (!binding) return null;
 		return fetchAgent(binding, target.instanceId, request);
+	},
+	instanceInfo: async (agentName, instanceId) => {
+		const binding = env?.[agentIdentities[agentName]?.bindingName];
+		if (!binding) throw new Error('[flue] getAgentInstance() target agent "' + agentName + '" Durable Object binding is unavailable.');
+		const response = await fetchAgent(binding, instanceId, new Request('https://flue.invalid' + CLOUDFLARE_AGENT_INTERNAL_INSTANCE_INFO_PATH, { method: 'GET' }));
+		if (!response.ok) throw new Error('[flue] getAgentInstance() lookup for agent "' + agentName + '" failed with status ' + response.status + '.');
+		const info = await response.json();
+		if (!info || info.exists !== true) return null;
+		return { id: instanceId, ...(typeof info.uid === 'string' ? { uid: info.uid } : {}) };
 	},
 });
 

@@ -53,6 +53,7 @@ export function cloudflareRuntime(overrides: Partial<CloudflareRuntime> = {}): C
 			enqueue: async (input) => ({ dispatchId: input.dispatchId, acceptedAt: input.acceptedAt }),
 		},
 		routeAgentRequest: async () => null,
+		instanceInfo: async () => null,
 		...overrides,
 	};
 }

@@ -43,6 +43,7 @@ import {
 } from './agent-execution-store.ts';
 
 export const CLOUDFLARE_AGENT_INTERNAL_DISPATCH_PATH = '/__flue/internal/dispatch';
+export const CLOUDFLARE_AGENT_INTERNAL_INSTANCE_INFO_PATH = '/__flue/internal/instance-info';
 
 const FLUE_AGENT_SUBMISSION_WAKE_CALLBACK = '__flueWakeAgentSubmissions';
 const FLUE_AGENT_SUBMISSION_WAKE_SECONDS = 30;
@@ -230,6 +231,7 @@ class CloudflareAgentCoordinator {
 
 	private async routeRequest(request: Request): Promise<Response | null> {
 		if (isInternalDispatchRequest(request)) return this.admitDispatch(request);
+		if (isInternalInstanceInfoRequest(request)) return this.instanceInfo();
 
 		if (isAbortRequest(request, this.agentName, this.instance.name)) {
 			const aborted = await this.abortInstance();
@@ -743,6 +745,21 @@ class CloudflareAgentCoordinator {
 		};
 	}
 
+	/**
+	 * Internal instance lookup for `getAgentInstance()`: existence and uid
+	 * from this Durable Object's reduced conversation state. Getting a DO
+	 * stub implicitly instantiates the object, so existence is judged by the
+	 * birth record, never by DO liveness.
+	 */
+	private async instanceInfo(): Promise<Response> {
+		const reduced = await (await this.ensureConversationWriter()).loadReducedState();
+		if (reduced.initialData === undefined) return Response.json({ exists: false });
+		return Response.json({
+			exists: true,
+			...(reduced.uid !== undefined ? { uid: reduced.uid } : {}),
+		});
+	}
+
 	private async admitDispatch(request: Request): Promise<Response> {
 		const input: unknown = await request.json();
 		assertAgentDispatchAdmissionInput(input);
@@ -813,6 +830,13 @@ function isInternalDispatchRequest(request: Request): boolean {
 	return (
 		request.method === 'POST' &&
 		new URL(request.url).pathname === CLOUDFLARE_AGENT_INTERNAL_DISPATCH_PATH
+	);
+}
+
+function isInternalInstanceInfoRequest(request: Request): boolean {
+	return (
+		request.method === 'GET' &&
+		new URL(request.url).pathname === CLOUDFLARE_AGENT_INTERNAL_INSTANCE_INFO_PATH
 	);
 }
 

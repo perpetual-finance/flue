@@ -14,6 +14,7 @@ import { useInitialData } from '../src/hooks/use-initial-data.ts';
 import { createFlueContext, type DispatchInput } from '../src/internal.ts';
 import { createNodeAgentCoordinator } from '../src/node/agent-coordinator.ts';
 import { sqlite } from '../src/node/agent-execution-store.ts';
+import { readInstanceInfoFromStream } from '../src/runtime/flue-app.ts';
 import type { CreateAgentContextFn } from '../src/runtime/handle-agent.ts';
 import type { DeliveredMessage } from '../src/types.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
@@ -128,6 +129,12 @@ describe('conditional sends (uid)', () => {
 		const records = read.batches.flatMap((batch) => batch.records as ConversationRecord[]);
 		const birth = records.find((record) => record.type === 'conversation_created');
 		expect(birth).toMatchObject({ kind: 'root', uid: created.uid });
+
+		// The lookup (getAgentInstance's node path) reports existence and uid.
+		expect(await readInstanceInfoFromStream(conversationStreamStore, 'assistant', 'instance-1')).toEqual(
+			{ id: 'instance-1', uid: created.uid },
+		);
+		expect(await readInstanceInfoFromStream(conversationStreamStore, 'assistant', 'other')).toBeNull();
 	});
 
 	it('continues when the uid condition matches the incarnation', async () => {

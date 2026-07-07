@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from 'hono';
+import type { ConversationRecord } from '../conversation-records.ts';
 import { configureErrorRendering, InvalidRequestError } from '../errors.ts';
 import type {
 	AgentDispatchRequest,
@@ -12,6 +13,7 @@ import type { ConversationStreamStore } from './conversation-stream-store.ts';
 import { enqueueDispatch } from './dispatch.ts';
 import type { DispatchQueue } from './dispatch-queue.ts';
 import type { RuntimeActivityGate } from './runtime-activity-gate.ts';
+import { agentStreamPath } from './stream-offsets.ts';
 
 export interface AgentRecord {
 	name: string;
@@ -54,6 +56,8 @@ export interface CloudflareRuntime extends RuntimeBase {
 		env: unknown,
 		target: { agentName: string; instanceId: string },
 	) => Promise<Response | null>;
+	/** Instance lookup for `getAgentInstance()`, served by the agent's Durable Object. */
+	instanceInfo: (agentName: string, instanceId: string) => Promise<AgentInstanceInfo | null>;
 }
 
 export type FlueRuntime = NodeRuntime | CloudflareRuntime;
@@ -97,6 +101,82 @@ export async function dispatch(
 		dispatchQueue: rt.dispatchQueue,
 		rt,
 	});
+}
+
+/** What `getAgentInstance()` reports about one existing agent instance. */
+export interface AgentInstanceInfo {
+	/** The instance id (the address the caller asked about). */
+	id: string;
+	/**
+	 * The incarnation's uid — usable as the `uid` send condition. Absent for
+	 * instances created before uids shipped.
+	 */
+	uid?: string;
+}
+
+/**
+ * Look up an agent instance by id: `null` when no instance exists, else its
+ * {@link AgentInstanceInfo} including the uid usable as a send condition.
+ *
+ * Most callers never need this — unconditional sends work without a uid, a
+ * creating send returns the fresh uid on its receipt, and a failed
+ * `uid: null` condition hands the existing uid back in its error details.
+ * Reach for it when code that did not create the instance wants to condition
+ * a send without attempting one first.
+ */
+export async function getAgentInstance(
+	agent: AgentModuleValue,
+	id: string,
+): Promise<AgentInstanceInfo | null> {
+	const rt = runtimeConfig;
+	if (!rt) {
+		throw new Error(
+			'[flue] getAgentInstance() called before runtime was configured. ' +
+				'This usually means it was used outside a Flue-built server entry.',
+		);
+	}
+	if (!isAgentDefinitionValue(agent)) {
+		throw new InvalidRequestError({
+			reason:
+				'getAgentInstance() requires an agent definition as its first argument. ' +
+				"Pass the default export of a 'use agent' module: getAgentInstance(agent, id).",
+		});
+	}
+	if (typeof id !== 'string' || id.trim() === '') {
+		throw new Error('[flue] getAgentInstance() requires a non-empty instance id.');
+	}
+	const name = rt.agents.find((record) => record.definition === agent)?.name;
+	if (!name) {
+		throw new Error(
+			'[flue] getAgentInstance() target agent definition is not a discovered default-exported agent in this built application.',
+		);
+	}
+	if (rt.target === 'cloudflare') return rt.instanceInfo(name, id);
+	return readInstanceInfoFromStream(rt.conversationStreamStore, name, id);
+}
+
+/**
+ * Node lookup: the root `conversation_created` record is the first record of
+ * the instance's stream, so existence and uid come from stream meta plus the
+ * first batch.
+ */
+export async function readInstanceInfoFromStream(
+	store: ConversationStreamStore,
+	agentName: string,
+	instanceId: string,
+): Promise<AgentInstanceInfo | null> {
+	const path = agentStreamPath(agentName, instanceId);
+	if ((await store.getMeta(path)) === null) return null;
+	const read = await store.read(path, { offset: '-1', limit: 1 });
+	for (const batch of read.batches) {
+		for (const record of batch.records as ConversationRecord[]) {
+			if (record.type === 'conversation_created' && record.kind === 'root') {
+				return { id: instanceId, ...(record.uid !== undefined ? { uid: record.uid } : {}) };
+			}
+		}
+	}
+	// Stream exists but the birth record has not landed (mid-materialization).
+	return { id: instanceId };
 }
 
 function isAgentDefinitionValue(value: unknown): value is AgentModuleValue {
