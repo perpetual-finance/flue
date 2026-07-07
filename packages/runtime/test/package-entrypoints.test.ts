@@ -20,13 +20,10 @@ describe('package entrypoints', () => {
 		const runtime = await import('@flue/runtime');
 
 		expect(runtime).toMatchObject({
-			ActionInputValidationError: expect.any(Function),
-			ActionOutputValidationError: expect.any(Function),
 			DelegationDepthExceededError: expect.any(Function),
 			connectMcpServer: expect.any(Function),
 			defineAgent: expect.any(Function),
 			createSandboxSessionEnv: expect.any(Function),
-			defineAction: expect.any(Function),
 			defineAgentProfile: expect.any(Function),
 			defineSkill: expect.any(Function),
 			defineTool: expect.any(Function),

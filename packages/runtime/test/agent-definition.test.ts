@@ -1,10 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-	defineAction,
-	defineAgent,
-	defineAgentProfile,
-	defineTool,
-} from '../src/index.ts';
+import { defineAgent, defineAgentProfile, defineTool } from '../src/index.ts';
 import type { FlueContextConfig } from '../src/internal.ts';
 import { createFlueContext, resolveModel } from '../src/internal.ts';
 import type { AgentDefinition, AgentProfile, ToolDefinition } from '../src/types.ts';
@@ -84,46 +79,6 @@ describe('defineAgentProfile()', () => {
 		expect(() => defineAgentProfile({ model: 'anthropic/claude-haiku-4-5', unsupported: true } as never)).toThrow(
 			'unknown agent profile field "unsupported"',
 		);
-	});
-
-	it('accepts Actions as first-class profile and runtime capabilities', async () => {
-		const profileAction = defineAction({
-			name: 'profile_action',
-			description: 'Run the profile Action.',
-			async run() {
-				return undefined;
-			},
-		});
-		const runtimeAction = defineAction({
-			name: 'runtime_action',
-			description: 'Run the runtime Action.',
-			async run() {
-				return undefined;
-			},
-		});
-		const harness = await createContext().initializeRootHarness(
-			defineAgent(() => ({
-				profile: defineAgentProfile({ model: 'anthropic/claude-haiku-4-5', actions: [profileAction] }),
-				actions: [runtimeAction],
-			})),
-		);
-
-		expect(harness).toBeDefined();
-	});
-
-	it('rejects forged Actions in a profile', () => {
-		expect(() =>
-			defineAgentProfile({
-				actions: [
-					{
-						__flueAction: true,
-						name: 'forged',
-						description: 'Forged.',
-						run: async () => {},
-					},
-				],
-			} as never),
-		).toThrow('must be created with defineAction()');
 	});
 
 	it('rejects a skill when its description is missing', () => {

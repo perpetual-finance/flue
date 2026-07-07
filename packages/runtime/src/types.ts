@@ -18,7 +18,6 @@ declare module '@earendil-works/pi-agent-core' {
 
 import type { Hono, MiddlewareHandler } from 'hono';
 import type * as v from 'valibot';
-import type { ActionDefinition } from './action.ts';
 import type { ToolDefinition } from './tool-types.ts';
 
 export type {
@@ -342,7 +341,6 @@ export interface AgentConfig {
 	/** Discovered at runtime from .agents/skills/ in the session's cwd. */
 	skills: Record<string, Skill>;
 	subagents?: Record<string, DeclaredSubagent>;
-	actions?: ActionDefinition[];
 	/** Agent-wide default model. Per-call values override this. */
 	model: Model<any>;
 	/** Resolve a model specifier to a Model instance. Throws on invalid specifiers. */
@@ -378,7 +376,6 @@ export interface AgentProfile {
 	skills?: Skill[];
 	/** Custom model-callable tools available to sessions initialized from this profile. */
 	tools?: ToolDefinition[];
-	actions?: ActionDefinition[];
 	/** Named delegates available for `task` delegation. */
 	subagents?: DeclaredSubagent[];
 	/** Default reasoning effort. Individual operations may override this value. */
@@ -443,7 +440,6 @@ export interface AgentRuntimeConfig {
 	skills?: Skill[];
 	/** Additional custom model-callable tools available to initialized sessions. */
 	tools?: ToolDefinition[];
-	actions?: ActionDefinition[];
 	/** Additional named delegates available for `task` delegation. */
 	subagents?: DeclaredSubagent[];
 	/** Default reasoning effort. Individual operations may override this value. */
@@ -517,8 +513,8 @@ export interface AgentDefinition<TEnv = Record<string, any>> {
  *
  * Capabilities stay mounted for the agent's whole life (`use()` is never
  * conditional); guards like the one above, not mounting, scope when a tool
- * may act. They must return synchronously — async work lives in tools,
- * actions, and resource factories.
+ * may act. They must return synchronously — async work lives in tools and
+ * resource factories.
  */
 export type Capability<TProps = void> = TProps extends void
 	? // biome-ignore lint/suspicious/noConfusingVoidType: tools-only capability bodies have no return statement; `void` keeps them assignable.
@@ -1048,7 +1044,7 @@ export interface ModelResponse {
 }
 
 type ToolOrigin = 'model' | 'caller' | 'framework' | 'adapter';
-type ToolSemanticType = 'function' | 'extension' | 'datastore';
+type ToolSemanticType = 'function' | 'datastore';
 
 type FlueEventVariant =
 	| { type: 'agent_start' }

@@ -333,7 +333,6 @@ export async function initializeRootHarness(
 		instructions: definition.instructions,
 		definitionSkills: definition.skills,
 		skills: localContext.skills,
-		actions: definition.actions,
 		subagents: Object.fromEntries(
 			(definition.subagents ?? [])
 				.filter(
@@ -379,7 +378,6 @@ export async function initializeRootHarness(
 		toolFactory,
 		config.conversationWriter,
 		config.attachmentStore,
-		definition.actions,
 		{ instanceId: config.id },
 		undefined,
 		undefined,

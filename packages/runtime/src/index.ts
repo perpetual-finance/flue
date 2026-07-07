@@ -1,22 +1,8 @@
 /// <reference path="../types/skill-md.d.ts" />
 /// <reference path="../types/markdown-md.d.ts" />
 
-export type {
-	ActionContext,
-	ActionDefinition,
-	ActionInput,
-	ActionInputSchema,
-	ActionOutput,
-	ActionOutputSchema,
-	JsonValue,
-} from './action.ts';
-export { defineAction } from './action.ts';
 export { createAgent, defineAgent, defineAgentProfile } from './agent-definition.ts';
 export {
-	ActionInputUnexpectedError,
-	ActionInputValidationError,
-	ActionOutputSerializationError,
-	ActionOutputValidationError,
 	AttachmentNotAvailableError,
 	DelegationDepthExceededError,
 	FlueError,
@@ -62,6 +48,7 @@ export { useSkill } from './hooks/use-skill.ts';
 export { useSubagent } from './hooks/use-subagent.ts';
 export { useTool } from './hooks/use-tool.ts';
 export { type FlueInstrumentation, instrument } from './instrumentation.ts';
+export type { JsonValue } from './json-snapshot.ts';
 export type { McpServerConnection, McpServerOptions, McpTransport } from './mcp.ts';
 export { connectMcpServer } from './mcp.ts';
 export type {

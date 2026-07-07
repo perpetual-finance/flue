@@ -24,7 +24,6 @@ import type {
 import { streamSimple } from '@earendil-works/pi-ai/compat';
 import type * as v from 'valibot';
 import { abortErrorFor, createCallHandle } from './abort.ts';
-import { type ActionDefinition, parseActionInput, runActionWithParsedInput } from './action.ts';
 import {
 	createActivateSkillTool,
 	createPackagedSkillReadTool,
@@ -185,11 +184,11 @@ type TurnInputTool = NonNullable<
 	Extract<FlueEvent, { type: 'turn_request' }>['request']['input']['tools']
 >[number];
 type TurnOutput = NonNullable<Extract<FlueEvent, { type: 'turn' }>['response']['output']>;
-type ModelToolSource = 'builtin' | 'adapter' | 'framework' | 'custom' | 'action' | 'result';
+type ModelToolSource = 'builtin' | 'adapter' | 'framework' | 'custom' | 'result';
 type ModelToolGroup = { source: ModelToolSource; tools: AgentTool<any>[] };
 type ToolTelemetry = {
 	origin: 'model' | 'caller' | 'framework' | 'adapter';
-	toolType: 'function' | 'extension' | 'datastore';
+	toolType: 'function' | 'datastore';
 	description?: string;
 };
 type ActiveToolCall = {
@@ -324,7 +323,6 @@ interface CreateActionHarnessOptions {
 	config: AgentConfig;
 	env: SessionEnv;
 	tools: ToolDefinition[];
-	actions: ActionDefinition[];
 	retainSession(
 		session: string,
 		conversation: { conversationId: string; affinityKey: string; createdAt: string },
@@ -350,7 +348,6 @@ interface SessionInitOptions {
 	toolFactory?: SessionToolFactory;
 	delegationDepth?: number;
 	createTaskSession?: CreateTaskSession;
-	actions?: ActionDefinition[];
 	createActionHarness?: CreateActionHarness;
 	scopeSignal?: AbortSignal;
 	onClose?: () => void;
@@ -542,7 +539,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	private activeActionHarnesses = new Set<ActionHarness>();
 	private delegationDepth: number;
 	private createTaskSession: CreateTaskSession | undefined;
-	private actions: ActionDefinition[];
 	private createActionHarness: CreateActionHarness | undefined;
 	private scopeSignal: AbortSignal | undefined;
 	private activeCallOverrides: CallOverrides | undefined;
@@ -1084,7 +1080,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		this.toolFactory = options.toolFactory;
 		this.delegationDepth = options.delegationDepth ?? 0;
 		this.createTaskSession = options.createTaskSession;
-		this.actions = options.actions ?? [];
 		this.createActionHarness = options.createActionHarness;
 		this.scopeSignal = options.scopeSignal;
 		this.onClose = options.onClose;
@@ -2466,7 +2461,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					: source === 'framework' || source === 'result'
 						? 'framework'
 						: 'model',
-			toolType: source === 'action' ? 'extension' : 'function',
+			toolType: 'function',
 			description: tool.description,
 		};
 	}
@@ -2563,8 +2558,8 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	}
 
 	/**
-	 * The invocation-scoped harness behind `harness: true` tools and legacy
-	 * Actions: the one interface between tool code and the agent's runtime
+	 * The invocation-scoped harness behind `harness: true` tools and
+	 * `useEffect` runs: the one interface between tool code and the agent's runtime
 	 * (sandbox shell/fs, sessions, model calls). Scoped to the invocation
 	 * (`close()` after the run), depth-counted against the general delegation
 	 * cap — the fuse on tool→session→tool recursion — and every child
@@ -2589,7 +2584,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			config: this.config,
 			env: this.env,
 			tools: this.agentTools,
-			actions: this.actions,
 			retainSession: async (session, conversation, harnessScope) => {
 				await this.conversationWriter.ensureChildConversation({
 					parent: {
@@ -2702,78 +2696,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		});
 	}
 
-	private createActionTools(): AgentTool<any>[] {
-		return this.actions.map((action) => {
-			const tool: AgentTool<any> = {
-				name: action.name,
-				label: action.name,
-				description: action.description,
-				parameters: (action.input
-					? valibotToJsonSchema(action.input)
-					: {
-							type: 'object',
-							properties: {},
-							additionalProperties: false,
-						}) as any,
-				execute: async () => {
-					throw new Error('unreachable');
-				},
-			};
-			return this.wrapModelTool(tool, 'action', (toolCallId, input, signal) => {
-				const parsedInput = parseActionInput(action, action.input ? input : undefined);
-				return {
-					args: parsedInput.declared ? parsedInput.value : undefined,
-					run: () => this.executeActionTool(action, toolCallId, parsedInput, signal),
-					result: (value) => (value.details as { output?: unknown }).output,
-				};
-			});
-		});
-	}
-
-	private async executeActionTool(
-		action: ActionDefinition,
-		toolCallId: string,
-		parsedInput: ReturnType<typeof parseActionInput>,
-		signal?: AbortSignal,
-	): Promise<AgentToolResult<any>> {
-		const invocationId = crypto.randomUUID();
-		const harness = this.createInvocationHarness(invocationId, signal);
-		try {
-			const output = await runActionWithParsedInput(
-				action,
-				{
-					harness,
-					log: this.createActionLogger(action.name, toolCallId),
-				},
-				parsedInput,
-			);
-			return {
-				content: [{ type: 'text', text: output === undefined ? 'null' : JSON.stringify(output) }],
-				details: { action: action.name, invocationId, toolCallId, output },
-			};
-		} finally {
-			this.activeActionHarnesses.delete(harness);
-			await harness.close();
-		}
-	}
-
-	private createActionLogger(action: string, toolCallId: string) {
-		const emit = (
-			level: 'info' | 'warn' | 'error',
-			message: string,
-			attributes?: Record<string, unknown>,
-		) =>
-			this.emit({ type: 'log', level, message, attributes: { ...attributes, action, toolCallId } });
-		return {
-			info: (message: string, attributes?: Record<string, unknown>) =>
-				emit('info', message, attributes),
-			warn: (message: string, attributes?: Record<string, unknown>) =>
-				emit('warn', message, attributes),
-			error: (message: string, attributes?: Record<string, unknown>) =>
-				emit('error', message, attributes),
-		};
-	}
-
 	private assembleModelTools(
 		baseGroups: ModelToolGroup[],
 		customDefinitions: ToolDefinition[],
@@ -2782,7 +2704,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		const groups: ModelToolGroup[] = [
 			...baseGroups,
 			{ source: 'custom' as const, tools: this.createCustomTools(customDefinitions) },
-			{ source: 'action' as const, tools: this.createActionTools() },
 			{ source: 'result' as const, tools: extraTools },
 		];
 		const seen = new Map<string, (typeof groups)[number]['source']>();
@@ -2821,7 +2742,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			}
 		}
 		return groups.flatMap((group) =>
-			group.source === 'custom' || group.source === 'action'
+			group.source === 'custom'
 				? group.tools
 				: group.tools.map((tool) =>
 						group.source === 'result'

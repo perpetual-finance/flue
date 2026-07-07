@@ -1,5 +1,4 @@
 import { abortErrorFor, createCallHandle } from './abort.ts';
-import type { ActionDefinition } from './action.ts';
 import { discoverSessionContext } from './context.ts';
 import type { ConversationRecordWriter } from './conversation-writer.ts';
 import { SessionAlreadyExistsError, SessionNotFoundError } from './errors.ts';
@@ -68,7 +67,6 @@ export class Harness implements FlueHarness {
 		private toolFactory: SessionToolFactory | undefined,
 		private conversationWriter: ConversationRecordWriter,
 		private attachmentStore: AttachmentStore,
-		private actions: ActionDefinition[] = config.actions ?? [],
 		private executionContext: FlueExecutionContext = {},
 		private scopeName?: string,
 		private scopeDepth = 0,
@@ -201,7 +199,6 @@ export class Harness implements FlueHarness {
 			toolFactory: this.toolFactory,
 			delegationDepth: this.scopeDepth,
 			createTaskSession: (taskOptions) => this.createTaskSession(taskOptions),
-			actions: this.actions,
 			createActionHarness: (actionOptions) => this.createActionHarness(actionOptions),
 			scopeSignal: this.scopeAbortController.signal,
 			onClose: () => this.openSessions.delete(sessionName),
@@ -244,7 +241,6 @@ export class Harness implements FlueHarness {
 			instructions,
 			definitionSkills,
 			skills: localContext.skills,
-			actions: taskAgent ? taskAgent.actions : this.config.actions,
 			subagents: taskAgent
 				? Object.fromEntries(
 						(taskAgent.subagents ?? [])
@@ -290,7 +286,6 @@ export class Harness implements FlueHarness {
 			toolFactory: this.toolFactory,
 			delegationDepth: options.depth,
 			createTaskSession: (childOptions) => this.createTaskSession(childOptions),
-			actions: taskConfig.actions ?? [],
 			createActionHarness: (actionOptions) => this.createActionHarness(actionOptions),
 			scopeSignal: this.scopeAbortController.signal,
 			conversationWriter: this.conversationWriter,
@@ -355,7 +350,6 @@ export class Harness implements FlueHarness {
 			this.toolFactory,
 			this.conversationWriter,
 			this.attachmentStore,
-			options.actions,
 			options.executionContext,
 			nestedScope,
 			options.depth,

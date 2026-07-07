@@ -641,8 +641,8 @@ export class DelegationDepthExceededError extends FlueError {
 		super({
 			type: 'delegation_depth_exceeded',
 			message: `Maximum delegation depth (${maxDepth}) exceeded.`,
-			details: 'The chain of delegated Tasks and Actions is too deep.',
-			dev: 'Each nested task() or Action delegation adds one level. Restructure the agents to delegate less deeply.',
+			details: 'The chain of delegated tasks is too deep.',
+			dev: 'Each nested task() or harness-tool delegation adds one level. Restructure the agents to delegate less deeply.',
 		});
 	}
 }
@@ -681,7 +681,7 @@ export class ToolNameConflictError extends FlueError {
 	}: {
 		name: string;
 		conflict: 'reserved' | 'duplicate';
-		source: 'builtin' | 'adapter' | 'framework' | 'custom' | 'action' | 'result';
+		source: 'builtin' | 'adapter' | 'framework' | 'custom' | 'result';
 		reserved?: readonly string[];
 	}) {
 		const dev =
@@ -718,73 +718,6 @@ export interface ValidationIssue {
 
 export type ToolValidationIssue = ValidationIssue;
 
-abstract class ActionValidationError extends FlueError {
-	constructor({
-		action,
-		boundary,
-		issues,
-	}: {
-		action: string;
-		boundary: 'input' | 'output';
-		issues: readonly ValidationIssue[];
-	}) {
-		super({
-			type: `action_${boundary}_validation`,
-			message: `Action "${action}" ${boundary} does not match the required schema.`,
-			details: '',
-			dev: '',
-			meta: { action, issues },
-		});
-	}
-}
-
-export class ActionInputValidationError extends ActionValidationError {
-	constructor({ action, issues }: { action: string; issues: readonly ValidationIssue[] }) {
-		super({ action, boundary: 'input', issues });
-		this.name = 'ActionInputValidationError';
-	}
-}
-
-export class ActionOutputValidationError extends ActionValidationError {
-	constructor({ action, issues }: { action: string; issues: readonly ValidationIssue[] }) {
-		super({ action, boundary: 'output', issues });
-		this.name = 'ActionOutputValidationError';
-	}
-}
-
-export class ActionOutputSerializationError extends FlueError {
-	constructor({ action, cause }: { action: string; cause?: unknown }) {
-		super({
-			type: 'action_output_serialization',
-			message: `Action "${action}" output is not JSON-serializable.`,
-			details: '',
-			dev: 'Return a JSON-serializable value, or undefined when the Action has no output schema.',
-			meta: { action },
-			cause,
-		});
-		this.name = 'ActionOutputSerializationError';
-	}
-}
-
-export class ActionInputUnexpectedError extends FlueError {
-	constructor() {
-		super({
-			type: 'action_input_unexpected',
-			message: 'This action does not accept input.',
-			details: '',
-			dev: 'Remove the input value for an Action that has no input schema.',
-		});
-		this.name = 'ActionInputUnexpectedError';
-	}
-}
-
-/**
- * Model-supplied tool arguments failed the tool's valibot `parameters`
- * schema. Thrown from the tool's wrapped `execute`; the agent loop converts
- * the throw into an error tool-result built from `message`, so the model sees
- * the issues and can retry with corrected arguments. `meta.issues` carries
- * the structured issues in Standard Schema's shape.
- */
 export class ToolLegacyDefinitionError extends FlueError {
 	constructor({ fields }: { fields: readonly string[] }) {
 		super({
