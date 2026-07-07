@@ -10,6 +10,7 @@
 	},
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "^1.39.2",
+		"@cloudflare/workers-types": "^4.20260602.1",
 		"@flue/cli": "workspace:*",
 		"@flue/vite": "workspace:*",
 		"vite": "^8.0.14"

@@ -167,17 +167,19 @@ paths, or credentials unless the application has explicitly authorized that.
 
 ## Wire the agent
 
-Bind the trusted conversation destination inside the agent initializer:
+Bind the trusted conversation destination inside the agent component:
 
 ```ts
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import { channel, commentOnIssue } from '../channels/github.ts';
 
-export default defineAgent(({ id }) => ({
-  model: 'anthropic/claude-haiku-4-5',
-  tools: [commentOnIssue(channel.parseConversationKey(id))],
-}));
+function Assistant({ id }: AgentProps) {
+	useTool(commentOnIssue(channel.parseConversationKey(id)));
+	return 'Review the issue and post a concise triage comment when appropriate.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
 The `'use agent'` directive (the module's first statement) is what registers
@@ -187,8 +189,8 @@ needs no `app.ts` mounting. Add
 should also be reachable over HTTP directly.
 
 The channel-agent import cycle is supported only because these imported
-bindings are read inside deferred callbacks and initializers. Do not read the
-agent binding while constructing `channel`.
+bindings are read inside deferred callbacks and capability functions. Do not
+read the agent binding while constructing `channel`.
 
 ## Credentials and verification
 

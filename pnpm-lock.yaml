@@ -199,6 +199,9 @@ importers:
       '@cloudflare/vite-plugin':
         specifier: ^1.39.2
         version: 1.39.2(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))(workerd@1.20260611.1)(wrangler@4.100.0(@cloudflare/workers-types@4.20260602.1))
+      '@cloudflare/workers-types':
+        specifier: ^4.20260602.1
+        version: 4.20260602.1
       '@flue/cli':
         specifier: workspace:*
         version: link:../../packages/cli

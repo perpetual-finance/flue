@@ -141,13 +141,15 @@ body or use the Hono context for explicit status and response control.
 
 ```ts
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import { channel, postMessage } from '../channels/teams.ts';
 
-export default defineAgent(({ id }) => ({
-  model: 'anthropic/claude-haiku-4-5',
-  tools: [postMessage(channel.parseConversationKey(id))],
-}));
+function Assistant({ id }: AgentProps) {
+	useTool(postMessage(channel.parseConversationKey(id)));
+	return 'Reply concisely in the bound Microsoft Teams conversation.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
 The `'use agent'` directive (the module's first statement) is what registers
@@ -157,7 +159,7 @@ needs no `app.ts` mounting. Add
 should also be reachable over HTTP directly.
 
 The channel-agent import cycle is supported only because imported bindings are
-read inside deferred callbacks and initializers.
+read inside deferred callbacks and capability functions.
 
 ## Credentials and verification
 

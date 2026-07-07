@@ -223,16 +223,16 @@ Bind the verified workspace and conversation selected by trusted code:
 
 ```ts
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import { channel, retrieveConversation } from '../channels/intercom.ts';
 
-export default defineAgent(({ id }) => {
-  const conversation = channel.parseConversationKey(id);
-  return {
-    model: 'anthropic/claude-haiku-4-5',
-    tools: [retrieveConversation(conversation)],
-  };
-});
+function Assistant({ id }: AgentProps) {
+	const conversation = channel.parseConversationKey(id);
+	useTool(retrieveConversation(conversation));
+	return 'Help with the inbound Intercom conversation. Retrieve the current conversation when more context is needed.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
 The `'use agent'` directive (the module's first statement) is what registers
@@ -245,7 +245,7 @@ The tool accepts no workspace, token, host, or conversation id from the model.
 The canonical key is an identifier, not an authorization capability; apply the
 project's normal access policy to direct agent routes. The channel-agent import
 cycle is supported because imported bindings are read only inside deferred
-callbacks and initializers.
+callbacks and capability functions.
 
 ## Configure the endpoint
 

@@ -1,13 +1,11 @@
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import { pageIdFromInstanceId, retrievePage } from '../channels/notion.ts';
 
-export default defineAgent(({ id }) => {
+function Assistant({ id }: AgentProps) {
 	const pageId = pageIdFromInstanceId(id);
-	return {
-		model: 'anthropic/claude-haiku-4-5',
-		instructions:
-			'Review the Notion page change. Retrieve the current page when its properties are needed.',
-		tools: [retrievePage(pageId)],
-	};
-});
+	useTool(retrievePage(pageId));
+	return 'Review the Notion page change. Retrieve the current page when its properties are needed.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });

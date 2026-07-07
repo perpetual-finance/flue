@@ -1,13 +1,11 @@
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import { parseShopifyOrderInstanceId, retrieveOrder } from '../channels/shopify.ts';
 
-export default defineAgent(({ id }) => {
+function Assistant({ id }: AgentProps) {
 	const order = parseShopifyOrderInstanceId(id);
-	return {
-		model: 'anthropic/claude-haiku-4-5',
-		instructions:
-			'Review the newly created Shopify order and summarize any fulfillment or payment follow-up.',
-		tools: [retrieveOrder(order)],
-	};
-});
+	useTool(retrieveOrder(order));
+	return 'Review the newly created Shopify order and summarize any fulfillment or payment follow-up.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });

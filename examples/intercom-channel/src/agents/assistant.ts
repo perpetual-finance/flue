@@ -1,13 +1,11 @@
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import { channel, retrieveConversation } from '../channels/intercom.ts';
 
-export default defineAgent(({ id }) => {
+function Assistant({ id }: AgentProps) {
 	const conversation = channel.parseConversationKey(id);
-	return {
-		model: 'anthropic/claude-haiku-4-5',
-		instructions:
-			'Help with the inbound Intercom conversation. Retrieve the current conversation when more context is needed.',
-		tools: [retrieveConversation(conversation)],
-	};
-});
+	useTool(retrieveConversation(conversation));
+	return 'Help with the inbound Intercom conversation. Retrieve the current conversation when more context is needed.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });

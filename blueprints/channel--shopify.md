@@ -260,22 +260,22 @@ Bind the trusted shop and order selected by application code:
 
 ```ts
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import {
   orderRefFromInstanceId,
   retrieveOrder,
 } from '../channels/shopify.ts';
 
-export default defineAgent(({ id }) => {
-  const { shopDomain, orderId } = orderRefFromInstanceId(id);
-  if (shopDomain !== process.env.SHOPIFY_SHOP_DOMAIN) {
-    throw new TypeError('Unexpected Shopify shop.');
-  }
-  return {
-    model: 'anthropic/claude-haiku-4-5',
-    tools: [retrieveOrder(orderId)],
-  };
-});
+function Orders({ id }: AgentProps) {
+	const { shopDomain, orderId } = orderRefFromInstanceId(id);
+	if (shopDomain !== process.env.SHOPIFY_SHOP_DOMAIN) {
+		throw new TypeError('Unexpected Shopify shop.');
+	}
+	useTool(retrieveOrder(orderId));
+	return 'Review the newly created Shopify order and summarize any fulfillment or payment follow-up.';
+}
+
+export default defineAgent(Orders, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
 The `'use agent'` directive (the module's first statement) is what registers
@@ -290,7 +290,7 @@ than an authorization capability; apply the project's normal access policy to
 direct agent routes.
 
 The channel-agent import cycle is supported because imported bindings are read
-inside deferred callbacks and initializers.
+inside deferred callbacks and capability functions.
 
 ## Credentials and endpoint
 

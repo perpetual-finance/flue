@@ -179,13 +179,16 @@ application's agent policy.
 
 ```ts
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import { pageIdFromInstanceId, retrievePage } from '../channels/notion.ts';
 
-export default defineAgent(({ id }) => ({
-  model: 'anthropic/claude-haiku-4-5',
-  tools: [retrievePage(pageIdFromInstanceId(id))],
-}));
+function Assistant({ id }: AgentProps) {
+	const pageId = pageIdFromInstanceId(id);
+	useTool(retrievePage(pageId));
+	return 'Review the Notion page change. Retrieve the current page when its properties are needed.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
 The `'use agent'` directive (the module's first statement) is what registers
@@ -195,7 +198,7 @@ needs no `app.ts` mounting. Add
 should also be reachable over HTTP directly.
 
 The channel-agent import cycle is supported because imported bindings are read
-inside deferred callbacks and initializers.
+inside deferred callbacks and capability functions.
 
 ## Configure endpoint verification
 

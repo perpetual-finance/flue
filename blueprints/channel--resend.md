@@ -146,23 +146,23 @@ the model.
 
 ## Wire the agent
 
-Bind the trusted inbound email id inside the agent initializer:
+Bind the trusted inbound email id inside the agent component:
 
 ```ts
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import {
   emailIdFromInstanceId,
   retrieveReceivedEmail,
 } from '../channels/resend.ts';
 
-export default defineAgent(({ id }) => {
-  const emailId = emailIdFromInstanceId(id);
-  return {
-    model: 'anthropic/claude-haiku-4-5',
-    tools: [retrieveReceivedEmail(emailId)],
-  };
-});
+function Assistant({ id }: AgentProps) {
+	const emailId = emailIdFromInstanceId(id);
+	useTool(retrieveReceivedEmail(emailId));
+	return 'Review the inbound support email. Retrieve the complete email when its body or headers are needed.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
 The `'use agent'` directive (the module's first statement) is what registers
@@ -177,7 +177,7 @@ email message, not a stable thread root. If the application groups replies or
 related mail, define and persist that thread policy itself.
 
 The channel-agent import cycle is supported because imported bindings are read
-inside deferred callbacks and initializers.
+inside deferred callbacks and capability functions.
 
 ## Credentials and endpoint
 

@@ -1,9 +1,10 @@
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import { channel, postMessage } from '../channels/telegram.ts';
 
-export default defineAgent(({ id }) => ({
-	model: 'anthropic/claude-haiku-4-5',
-	instructions: 'Reply concisely in the bound Telegram conversation.',
-	tools: [postMessage(channel.parseConversationKey(id))],
-}));
+function Assistant({ id }: AgentProps) {
+	useTool(postMessage(channel.parseConversationKey(id)));
+	return 'Reply concisely in the bound Telegram conversation.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });

@@ -1,13 +1,11 @@
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import { channel, retrieveTicket } from '../channels/zendesk.ts';
 
-export default defineAgent(({ id }) => {
+function Assistant({ id }: AgentProps) {
 	const ticket = channel.parseTicketKey(id);
-	return {
-		model: 'anthropic/claude-haiku-4-5',
-		instructions:
-			'Review the inbound Zendesk ticket event. Retrieve the current ticket when more context is needed.',
-		tools: [retrieveTicket(ticket)],
-	};
-});
+	useTool(retrieveTicket(ticket));
+	return 'Review the inbound Zendesk ticket event. Retrieve the current ticket when more context is needed.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });

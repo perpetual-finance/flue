@@ -371,17 +371,17 @@ Create an agent module such as `<source-dir>/agents/assistant.ts`:
 
 ```ts
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import { retrieveCallback } from '../channels/salesforce-marketing-cloud.ts';
 import { parseEmailEventInstanceId } from '../salesforce-marketing-cloud-email.ts';
 
-export default defineAgent(({ id }) => {
-  const email = parseEmailEventInstanceId(id);
-  return {
-    model: 'anthropic/claude-haiku-4-5',
-    tools: [retrieveCallback(email)],
-  };
-});
+function Assistant({ id }: AgentProps) {
+	const email = parseEmailEventInstanceId(id);
+	useTool(retrieveCallback(email));
+	return 'Review the inbound Salesforce Marketing Cloud email lifecycle event. Retrieve the configured ENS callback when callback status or delivery configuration is relevant.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
 The `'use agent'` directive (the module's first statement) is what registers

@@ -334,16 +334,16 @@ Bind the account and ticket selected by verified application code:
 
 ```ts
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import { channel, retrieveTicket } from '../channels/zendesk.ts';
 
-export default defineAgent(({ id }) => {
-  const ticket = channel.parseTicketKey(id);
-  return {
-    model: 'anthropic/claude-haiku-4-5',
-    tools: [retrieveTicket(ticket)],
-  };
-});
+function Assistant({ id }: AgentProps) {
+	const ticket = channel.parseTicketKey(id);
+	useTool(retrieveTicket(ticket));
+	return 'Review the inbound Zendesk ticket event. Retrieve the current ticket when more context is needed.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
 The `'use agent'` directive (the module's first statement) is what registers
@@ -357,7 +357,7 @@ model. The canonical key is an identifier, not an authorization capability;
 apply the project's normal policy to direct agent routes.
 
 The channel-agent import cycle is supported because imported bindings are read
-inside deferred callbacks and initializers.
+inside deferred callbacks and capability functions.
 
 ## Configure the endpoint
 

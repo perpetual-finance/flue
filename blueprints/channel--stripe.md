@@ -135,17 +135,19 @@ application has explicitly authorized that access.
 
 ## Wire the agent
 
-Bind the trusted customer id inside the agent initializer:
+Bind the trusted customer id inside the agent component:
 
 ```ts
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import { retrieveCustomer } from '../channels/stripe.ts';
 
-export default defineAgent(({ id: customerId }) => ({
-  model: 'anthropic/claude-haiku-4-5',
-  tools: [retrieveCustomer(customerId)],
-}));
+function Billing({ id: customerId }: AgentProps) {
+	useTool(retrieveCustomer(customerId));
+	return 'Review the completed Checkout event and summarize any billing follow-up that is needed.';
+}
+
+export default defineAgent(Billing, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
 The `'use agent'` directive (the module's first statement) is what registers
@@ -155,8 +157,8 @@ needs no `app.ts` mounting. Add
 should also be reachable over HTTP directly.
 
 The channel-agent import cycle is supported only because imported bindings are
-read inside deferred callbacks and initializers. Do not read the agent binding
-while constructing `channel`.
+read inside deferred callbacks and capability functions. Do not read the agent
+binding while constructing `channel`.
 
 ## Thin event notifications
 
