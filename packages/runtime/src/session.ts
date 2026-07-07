@@ -594,6 +594,14 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		content: string;
 		attributes?: Record<string, string>;
 	}> = [];
+	/**
+	 * While the effects seam runs, signal appends flush durably as they happen
+	 * (an ordered chain) instead of waiting for a turn boundary: pre-turn-1
+	 * the conversation topology is quiescent, so immediate appends are legal —
+	 * and clients see an effect's progress signals live, mid-effect. Undefined
+	 * outside the seam (tool-context appends buffer to turn_end).
+	 */
+	private effectSignalFlush: Promise<void> | undefined;
 
 	private emitTurnRequestAndStream: StreamFn = async (model, context, options) => {
 		if (this.activeTurnId === undefined) this.activeTurnId = generateTurnId();
@@ -743,6 +751,14 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				timestamp,
 			),
 		);
+		if (this.effectSignalFlush) {
+			const pending = this.effectSignalFlush.then(() => this.flushTrailingSignalAppends());
+			this.effectSignalFlush = pending;
+			// The chain is awaited before each effect's completion record; this
+			// handler only keeps an interim rejection from surfacing as an
+			// unhandled-rejection warning.
+			pending.catch(() => {});
+		}
 	}
 
 	/**
@@ -807,21 +823,29 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		// render against durable state, so an effect that moves its own deps
 		// does not retrigger within the submission.
 		const effectRuns = (await this.conversationWriter.loadReducedState()).effectRuns;
-		for (const [index, effect] of effects.entries()) {
-			const lastRun = effectRuns.get(index);
-			if (lastRun?.submissionId === this.activeSubmissionId) continue;
-			if (lastRun?.fingerprint === effect.fingerprint) continue;
-			await this.executeSubmissionEffect(index, effect, signal);
+		this.effectSignalFlush = Promise.resolve();
+		try {
+			for (const [index, effect] of effects.entries()) {
+				const lastRun = effectRuns.get(index);
+				if (lastRun?.submissionId === this.activeSubmissionId) continue;
+				if (lastRun?.fingerprint === effect.fingerprint) continue;
+				await this.executeSubmissionEffect(index, effect, signal);
+			}
+		} finally {
+			this.effectSignalFlush = undefined;
 		}
 	}
 
 	/**
-	 * Run one effect and commit its outcome atomically: buffered state writes,
-	 * the `effect_run` memo record, and any signals it appended land in ONE
-	 * append batch (the tool-batch precedent — an interrupted run leaves no
-	 * record and re-runs on the re-attempt, at-least-once). Signal entries
-	 * chain from the current leaf, ahead of the first assistant turn — the
-	 * same position the steering queue injects them into the live loop.
+	 * Run one effect. Signals it appends flush durably AS THEY HAPPEN (the
+	 * `effectSignalFlush` chain) so clients see progress live, mid-effect;
+	 * they sit ahead of the first assistant turn — the same position the
+	 * steering queue injects them into the live loop. The rest of the outcome
+	 * commits atomically after the run: buffered state writes and the
+	 * `effect_run` memo record in one append batch. An interrupted or failed
+	 * run leaves no completion record and re-runs on the re-attempt
+	 * (at-least-once) — its already-flushed progress signals stay in history,
+	 * an honest record of work that started.
 	 */
 	private async executeSubmissionEffect(
 		index: number,
@@ -855,8 +879,10 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				await harness.close();
 			}
 		}
-		const parentId = await this.conversationWriter.getConversationLeaf(this.conversationId);
-		const signalAppends = this.drainSignalAppendRecords(parentId);
+		// Signals flushed live during the run; surface any append failure before
+		// recording completion, so a lost signal can never hide behind a
+		// completed memo record.
+		await this.effectSignalFlush;
 		await this.appendCanonical([
 			...this.drainHookStateRecords(),
 			{
@@ -865,7 +891,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				index,
 				fingerprint: effect.fingerprint,
 			},
-			...signalAppends.records,
 		]);
 	}
 

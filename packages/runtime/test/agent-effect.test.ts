@@ -247,6 +247,37 @@ describe('useEffect()', () => {
 		expect(effectRuns.map((record) => record.index)).toEqual([0, 1]);
 	});
 
+	it('effect signals flush durably mid-effect — progress is visible before the effect completes', async () => {
+		const dbPath = createTempDbPath();
+		const stores = await connectSqlite(dbPath);
+		const provider = createFauxProvider();
+		provider.setResponses([fauxAssistantMessage('Done.')]);
+
+		let visibleMidEffect = false;
+		function assistant() {
+			const append = useAppend();
+			useEffect(async () => {
+				append({ type: 'progress', body: 'Loading the issue…' });
+				// Poll the durable stream from INSIDE the still-running effect: the
+				// signal must land (and stream to clients) without waiting for the
+				// effect to complete.
+				for (let attempt = 0; attempt < 100 && !visibleMidEffect; attempt++) {
+					visibleMidEffect = readDurableRecords(dbPath).some(
+						(record) => record.type === 'signal' && record.signalType === 'progress',
+					);
+					if (!visibleMidEffect) await new Promise((resolve) => setTimeout(resolve, 20));
+				}
+			}, []);
+			return 'Agent.';
+		}
+
+		const coordinator = makeCoordinator(provider, stores, assistant);
+		await dispatchAndSettle(coordinator, 'Go.');
+		await coordinator.shutdown();
+
+		expect(visibleMidEffect).toBe(true);
+	});
+
 	it('deps are a durable memo: [] runs once per instance, [delivery] once per distinct message', async () => {
 		const dbPath = createTempDbPath();
 		const stores = await connectSqlite(dbPath);
