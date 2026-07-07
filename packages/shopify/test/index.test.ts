@@ -200,8 +200,11 @@ describe('createShopifyChannel()', () => {
 		expect(responses.map((response) => response.status)).toEqual([200, 200, 200, 200, 200, 200]);
 		expect(webhook).toHaveBeenCalledTimes(6);
 		// A delivery with the topic header removed still reaches the handler;
-		// the application sees `undefined` for that header.
-		expect(webhook.mock.calls[0]?.[0].c.req.header('x-shopify-topic')).toBeUndefined();
+		// the application sees `undefined` for that header. The six concurrent
+		// requests complete in no particular order, so find it rather than
+		// assuming call index 0.
+		const topics = webhook.mock.calls.map((call) => call[0].c.req.header('x-shopify-topic'));
+		expect(topics).toContain(undefined);
 	});
 
 	it('rejects unsupported media, malformed JSON, invalid UTF-8, and oversized bodies', async () => {
