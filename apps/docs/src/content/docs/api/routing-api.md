@@ -1,7 +1,7 @@
 ---
 title: Routing API
 description: Mount agent and channel routes in the authored app.ts route map.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-07
 ---
 
 `app.ts` is the application's route map — the only required file. Its default export owns the entire request pipeline, and every route the application serves is mounted there explicitly. There is no framework router and no file-based routing: Flue provides mountable per-agent and per-channel sub-apps, and `app.ts` decides their URLs.
@@ -104,16 +104,24 @@ app.route('/agents/triage', triage.route());
 
 `POST /:id` accepts a [`DeliveredMessage`](/docs/api/agent-api/#deliveredmessage) as its JSON body — the same unified shape `dispatch()` admits. A chat turn is `{ "kind": "user", "body": string, "attachments"?: attachment[] }` with optional `{ type: 'image', data, mimeType, filename? }` attachments, where `data` is base64-encoded image content (capped at 14 MiB of base64 characters per image) for vision-capable models. A structured event is `{ "kind": "signal", "type": string, "body": string, "attributes"?, "tagName"? }`.
 
+`data` and `uid` are reserved top-level siblings beside the message fields — not part of `DeliveredMessage` itself:
+
+```json
+{ "kind": "user", "body": "Triage this.", "data": { "issue": 17307 }, "uid": null }
+```
+
+`data` is instance-creation data, consulted only when this send creates the instance (see [Creation data](/docs/guide/building-agents/#creation-data)). `uid` is the send condition — the instance uid played as an ETag: omitted continues-or-creates unconditionally, a string continues only that incarnation, `null` creates only when no instance exists yet; see [Conditional sends](/docs/api/agent-api/#conditional-sends) for the full model. A condition failure is rejected synchronously, before anything is durably admitted: `404 agent_instance_not_found` for a missing instance or a mismatched uid, `409 agent_instance_exists` for a `uid: null` send against an instance that already exists (`details` names the existing uid).
+
 ```bash
 # Deliver a message. The mount path is whatever app.ts chose;
 # the trailing segment is any conversation id you choose.
 curl -X POST http://localhost:5173/agents/triage/ticket-42 \
   -H 'Content-Type: application/json' \
   -d '{ "kind": "user", "body": "Summarize the open issues." }'
-# → 202 { "streamUrl": "...", "offset": "...", "submissionId": "..." }
+# → 202 { "streamUrl": "...", "offset": "...", "submissionId": "...", "uid": "inst_01KW..." }
 ```
 
-Prompts are fire-and-forget: the `202` body carries `{ streamUrl, offset, submissionId }`, mirrored as `Location` and `Stream-Next-Offset` headers, and the request never blocks on the agent's response. A message is delivered into the living conversation and has no single terminal "result" value, so `?wait=result` is rejected with `400 invalid_request`; await completion with the SDK client's `wait()`, or read the conversation stream (GET the same URL).
+Prompts are fire-and-forget: the `202` body carries `{ streamUrl, offset, submissionId, uid? }`, mirrored as `Location` and `Stream-Next-Offset` headers, and the request never blocks on the agent's response. `uid` is the contacted instance's uid — minted on a creating send, echoed on a continuing one, absent for instances created before uids shipped. A message is delivered into the living conversation and has no single terminal "result" value, so `?wait=result` is rejected with `400 invalid_request`; await completion with the SDK client's `wait()`, or read the conversation stream (GET the same URL).
 
 `POST /:id/abort` stops all in-flight and queued durable work for the conversation and returns `200 { aborted }` — `aborted` is `true` when there was unsettled work, `false` when the conversation was idle. Abort records a durable intent and returns before settlement; the aborted work settles to a distinct **aborted** outcome visible in conversation history and on the stream. Work that already completed is unaffected.
 

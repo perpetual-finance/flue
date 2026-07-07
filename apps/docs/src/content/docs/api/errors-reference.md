@@ -1,7 +1,7 @@
 ---
 title: Errors Reference
 description: Reference Flue transport errors, runtime failures, and development diagnostics.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-07
 ---
 
 Flue exposes stable machine-readable error categories through its public transports. Runtime operations, CLI commands, and builds also report failures, but not every surface uses the transport error vocabulary.
@@ -44,6 +44,8 @@ The following categories are stable for framework-owned transport failures. HTTP
 | `route_not_found`        | `404`       | No mounted route matches the request. Also rendered for an agent's attachment endpoint when the module does not export `attachments` (opt-in downloads). |
 | `stream_not_found`       | `404`       | The conversation stream does not exist yet; conversation streams are created on the first admitted message.                                              |
 | `attachment_not_found`   | `404`       | The attachment id is unknown or belongs to a different conversation.                                                                                     |
+| `agent_instance_not_found` | `404`     | A conditional send (`uid: '<value>'`) named an instance that does not exist, or whose uid does not match. Nothing durable is created.                    |
+| `agent_instance_exists`  | `409`       | A conditional send (`uid: null`) named an instance that already exists. `details`, and the thrown `AgentInstanceExistsError`'s `.uid` property, name the existing uid so the caller can recover without a separate lookup. |
 | `invalid_request`        | `400`       | The request shape, parameters, or protocol message is invalid. Read `details` for the specific reason.                                                   |
 | `runtime_unavailable`    | `503`       | The local dev runtime is reloading or draining. Responses include `Retry-After`.                                                                         |
 | `internal_error`         | `500`       | An unknown or non-public server failure occurred.                                                                                                        |
@@ -130,7 +132,7 @@ Thrown when an agent cannot produce a required structured result, either because
 
 Aborted prompt, skill, task, and shell operations reject with a standard `AbortError` (`DOMException`) carrying the abort reason as `cause` when the runtime permits it. Cancellation is deliberately not part of the `FlueError` vocabulary.
 
-Authoring and definition-time validation failures, such as invalid agent profiles, tool definitions, or model ids, reject with human-readable `Error` messages. Those messages are not stable machine-readable categories. A `dispatch()` call with a missing `id` also rejects this way; a malformed `message` instead throws the stable `invalid_request` `InvalidRequestError`, the same validation a direct HTTP prompt's body goes through.
+Authoring and definition-time validation failures, such as invalid agent profiles, tool definitions, or model ids, reject with human-readable `Error` messages. Those messages are not stable machine-readable categories. A `dispatch()` call with a missing `id` also rejects this way; a malformed `message` instead throws the stable `invalid_request` `InvalidRequestError`, the same validation a direct HTTP prompt's body goes through. A `uid` send condition that fails throws `AgentInstanceNotFoundError` (`agent_instance_not_found`, `404`) or `AgentInstanceExistsError` (`agent_instance_exists`, `409`) — both importable from `@flue/runtime`; see [Conditional sends](/docs/api/agent-api/#conditional-sends).
 
 ## Persistence errors
 

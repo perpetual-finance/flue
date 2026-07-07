@@ -187,6 +187,33 @@ The three input channels each have one job: **`useInitialData()` is what the ins
 
 Authorize access to an `id` in the [`route`](#interacting-with-your-agent) handler. For work that arrives as a dispatched or signal-kind message — a webhook, a chat platform event — carry the identifier your application already validated in the message's `attributes` and read it inside the agent with `useDelivery()`; see [Tools](/docs/guide/tools/#protect-access) for the pattern.
 
+### The id names the address, the uid names the incarnation
+
+Every instance also gets a **uid** (`inst_<ulid>`), minted once at creation and recorded on its birth record. The `id` stays the address — client-chosen, reusable, the thing a URL or a `dispatch()` call names. The uid names *this incarnation* of that address, the way Kubernetes distinguishes `metadata.name` from `metadata.uid`: delete an id and recreate it, and the new incarnation gets a new uid.
+
+Every send is a request against that address, and it can carry the uid as a condition — sends are conditional requests, with the uid playing the ETag:
+
+| You pass | You're saying | Instance exists | Instance missing |
+| --- | --- | --- | --- |
+| neither | "deliver to this address" | continues | creates |
+| `data` (no uid) | "seed if this creates" | continues, seed ignored | creates, seed validated and recorded |
+| `uid: '<value>'` | "continue only that incarnation" | continues if the uid matches, else rejects | rejects |
+| `uid: null` | "create only when fresh" | rejects (naming the existing uid) | creates |
+
+Every successful send's receipt carries the uid — fresh on a creating send, echoed back on a continuing one — so the common case needs no separate lookup:
+
+```ts
+const receipt = await dispatch(triage, { id: 'issue-17307', data: { issue: 17307 }, message });
+receipt.uid; // 'inst_01KW…'
+
+await dispatch(triage, { id: 'issue-17307', uid: receipt.uid, message }); // continue only this incarnation
+await dispatch(triage, { id: 'issue-17307', uid: null, data: { issue: 17307 }, message }); // create only, fresh
+```
+
+Reach for a uid condition in programmatic callers that mint their own ids and want to guard against a typo'd id silently continuing the wrong conversation, or against a stale reference reaching an instance that was deleted and re-created under the same id. Most callers don't need this: quick starts and a first prototype send unconditionally, and so do channels — a channel's derived conversation key can't be typo'd, and "already exists" is its normal case for every message after the first (see [Channels](/docs/guide/channels/)). `uid: '<string>'` combined with `data` is a contradiction Flue rejects: the condition forbids creation, so the seed could never apply. See the [Agent API](/docs/api/agent-api/#conditional-sends) for the full condition semantics and error shapes, including `getAgentInstance()` for code that wants to condition a send it did not originate.
+
+Instances created before this feature shipped have no uid: uid-conditioned sends against them are rejected, bare sends work as before, and their receipts omit `uid`.
+
 ## Interacting with your agent
 
 Users can interact directly with a mounted agent over HTTP. Your application must verify that the caller can access the selected conversation `id`.

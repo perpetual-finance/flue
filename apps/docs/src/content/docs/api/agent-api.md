@@ -8,6 +8,8 @@ The agent API is exported from `@flue/runtime`.
 
 ```ts
 import {
+  AgentInstanceExistsError,
+  AgentInstanceNotFoundError,
   FlueError,
   ResultUnavailableError,
   ToolInputValidationError,
@@ -20,6 +22,7 @@ import {
   defineSkill,
   defineTool,
   dispatch,
+  getAgentInstance,
   use,
   useAppend,
   useDelivery,
@@ -33,6 +36,7 @@ import {
   useSubagent,
   useTool,
   type AgentDispatchRequest,
+  type AgentInstanceInfo,
   type AgentModuleValue,
   type AgentSignalAppend,
   type BashFactory,
@@ -672,24 +676,47 @@ function dispatch(agent: AgentModuleValue, request: AgentDispatchRequest): Promi
 interface AgentDispatchRequest {
   id: string;
   message: DeliveredMessage;
+  data?: unknown;
+  uid?: string | null;
 }
 
 interface DispatchReceipt {
   dispatchId: string;
   acceptedAt: string;
+  uid?: string;
 }
 ```
 
 Delivers a message for asynchronous processing by a continuing agent instance. The `agent` argument is a registered agent module value — the default export of a `'use agent'` module — so no HTTP mount is required.
 
-| Field        | Description                                                             |
-| ------------ | ----------------------------------------------------------------------- |
-| `id`         | Target agent instance id.                                               |
-| `message`    | The message delivered to the session. Flue snapshots it when accepted.  |
-| `dispatchId` | Generated delivery identifier returned in the receipt.                  |
-| `acceptedAt` | ISO timestamp assigned when dispatch admission begins.                  |
+| Field        | Description                                                                                                                                                                                              |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`         | Target agent instance id.                                                                                                                                                                               |
+| `message`    | The message delivered to the session. Flue snapshots it when accepted.                                                                                                                                  |
+| `data`       | Instance-creation data — the seed, consulted only when this send creates the instance: validated against the agent's `input:` schema (when declared) and recorded once. Ignored when the send continues an existing instance. See [Creation data](/docs/guide/building-agents/#creation-data). |
+| `uid`        | Send condition — see [Conditional sends](#conditional-sends).                                                                                                                                           |
+| `dispatchId` | Generated delivery identifier returned in the receipt.                                                                                                                                                  |
+| `acceptedAt` | ISO timestamp assigned when dispatch admission begins.                                                                                                                                                  |
+| `uid` (receipt) | The contacted instance's uid — minted when this send created the instance, echoed when it continued one. Absent for instances created before uids shipped.                                          |
 
 `await dispatch(...)` resolves when the current runtime accepts and queues the message. It does not wait for model processing, tool calls, or an agent reply. Dispatched activity belongs to the continuing agent instance and shares one accepted order with direct HTTP prompts to the same instance.
+
+#### Conditional sends
+
+Every send — `dispatch(...)`, a direct HTTP prompt, or the SDK's `client.send(...)` — is a **conditional request** against the target instance, with the instance uid playing the ETag:
+
+| `uid`                     | Meaning                             | Instance exists                                                              | Instance missing                        |
+| ------------------------- | ------------------------------------ | ------------------------------------------------------------------------------ | ------------------------------------------ |
+| omitted                  | Deliver to this address.             | Continues.                                                                    | Creates.                                   |
+| omitted, `data` present  | Seed if this creates.                | Continues; `data` ignored.                                                    | Creates; `data` validated and recorded.    |
+| `'<value>'`              | Continue only that incarnation.      | Continues if the uid matches, else `AgentInstanceNotFoundError` (`404`).      | `AgentInstanceNotFoundError` (`404`).      |
+| `null`                   | Create only when fresh.              | `AgentInstanceExistsError` (`409`); its `.uid` and `details` name the existing uid. | Creates.                                   |
+
+`uid: '<value>'` combined with `data` throws `InvalidRequestError` — the condition forbids creation, so the seed could never apply. Every condition is checked synchronously at admission: a failed condition creates nothing durable and runs no model turn.
+
+`AgentInstanceExistsError`'s `.uid` (and its error `details`) name the existing instance's uid on purpose: the uid is accident prevention for the caller, not a security mechanism — access control belongs in the [`route`](/docs/api/routing-api/#the-modules-named-exports) handler — so a caller can recover from a `409` and continue the existing instance without a separate lookup.
+
+Both error classes are importable from `@flue/runtime`; see the [Errors Reference](/docs/api/errors-reference/#public-transport-errors) for their `type`/status pairing. The direct-HTTP wire carries the same condition as a reserved `uid` sibling on the message body, and the `202` admission body as a `uid` field alongside `streamUrl`/`offset`/`submissionId`; see [Routing API](/docs/api/routing-api/#wire-behavior).
 
 #### `DeliveredMessage`
 
@@ -733,6 +760,33 @@ type DeliveredAttachment = {
 One image attachment on a `kind: 'user'` `DeliveredMessage`. Today the only supported attachment is an image; the selected model must support image input.
 
 Delivery durability depends on the generated target. Node uses a process-lifetime in-memory queue by default; with a durable `db.ts` adapter, dispatches survive restarts and are reconciled on the replacement process. Cloudflare durably admits delivery to the target agent Durable Object, orders it with direct prompts, and reconciles interruptions conservatively. Both targets retry only when replay safety is provable; external effects still require application-level idempotency. See [Durable Agents](/docs/concepts/durable-execution/) for recovery details, and [Deploy Agents on Node.js](/docs/ecosystem/deploy/node/) and [Deploy Agents on Cloudflare](/docs/ecosystem/deploy/cloudflare/) for target-specific setup.
+
+## `getAgentInstance(...)`
+
+```ts
+function getAgentInstance(agent: AgentModuleValue, id: string): Promise<AgentInstanceInfo | null>;
+```
+
+Looks up an agent instance by id: `null` when no instance exists, else its `AgentInstanceInfo`.
+
+```ts
+interface AgentInstanceInfo {
+  /** The instance id — the address the caller asked about. */
+  id: string;
+  /**
+   * The incarnation's uid, usable as a `uid` send condition. Absent for
+   * instances created before uids shipped.
+   */
+  uid?: string;
+}
+```
+
+Rarely needed: a receipt from a send you originated already carries the uid (`DispatchReceipt.uid`, the direct-HTTP `202` body's `uid`, or the SDK's `AgentSendResult.uid`), and a failed `uid: null` condition hands the existing uid back in `AgentInstanceExistsError`. Reach for `getAgentInstance()` when code that did not originate the instance's creation wants to condition a send against it without attempting one first.
+
+```ts
+const info = await getAgentInstance(triage, 'issue-17307'); // { id: 'issue-17307', uid: 'inst_01KW…' } | null
+if (info) await dispatch(triage, { id: info.id, uid: info.uid, message });
+```
 
 ## Agent
 

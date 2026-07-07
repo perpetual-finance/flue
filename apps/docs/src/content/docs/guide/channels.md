@@ -1,7 +1,7 @@
 ---
 title: Channels
 description: Receive verified provider events and connect them to Flue applications.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-07
 ---
 
 Channels bring provider HTTP events into a Flue application. A channel verifies
@@ -232,6 +232,17 @@ deduplication keys in `attributes` as flat string values.
 Your application chooses the agent and instance id before dispatch. A provider
 thread, issue, ticket, or conversation is often a useful instance boundary
 because later events continue the same agent session.
+
+Channels send unconditionally, on purpose: they never pass a `uid` send
+condition. A channel's derived id (`channel.conversationKey(thread)`) can't be
+typo'd the way a hand-picked id can, and "the instance already exists" is the
+normal case for every event after the first — a condition built for guarding
+against creating the wrong instance would misfire on the common path. Channels
+may still pass `data` freely as the creation seed (thread id, author, or
+whatever the first event carries): it is validated and recorded only on the
+event that actually creates the instance, and silently ignored on every later
+one. See [Creation data](/docs/guide/building-agents/#creation-data) and
+[Conditional sends](/docs/api/agent-api/#conditional-sends).
 
 Conversation keys are canonical identifiers, not authorization capabilities.
 If a caller can select an agent id through another route, authorize that id

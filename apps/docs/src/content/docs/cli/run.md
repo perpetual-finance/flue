@@ -1,13 +1,13 @@
 ---
 title: flue run
 description: Reference for running one agent module locally from the command line, without a server.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-07
 ---
 
 ## Synopsis
 
 ```bash
-flue run <path> --message <text> [--id <conversation-id>] [--env <path>] [--json]
+flue run <path> --message <text> [--id <conversation-id>] [--data <json>] [--uid <uid> | --new] [--env <path>] [--json]
 ```
 
 ## Description
@@ -26,6 +26,9 @@ The run drives the same durable submission path as a deployed server: the messag
 | ------------------ | ------------------------------ | --------------------------------------------------------------------------------- |
 | `--message <text>` | Required                       | The user message submitted to the agent.                                          |
 | `--id <id>`        | A fresh ULID, printed          | Conversation id to create or continue. Reuse an id to continue that conversation. |
+| `--data <json>`    | —                               | Instance-creation data (JSON). The seed, used only when this run creates the conversation; read it with `useInitialData()`. Rejected together with `--uid` (the condition forbids creation, so the seed could never apply). |
+| `--uid <uid>`      | —                               | Continue only the conversation incarnation with this uid (printed by the creating run, in the meta rows and the `--json` envelope). Rejects when that incarnation no longer exists. Rejected together with `--new` or `--data`. |
+| `--new`            | `false`                        | Create only: rejects when the conversation id already exists (the error names its uid). Rejected together with `--uid`.                                                                                              |
 | `--json`           | `false`                        | Print a JSON result envelope to stdout instead of the reply text.                 |
 | `--env <path>`     | `<project>/.env`, when present | Select one alternate `.env`-format file, loaded before the run. Shell values win. |
 
@@ -47,6 +50,7 @@ flue run src/agents/support.ts --message "Any update?" --id ticket-4821   # same
 
 - **stdout** carries only the result: the final assistant reply text, or the `--json` envelope. Everything else — the run banner (agent, conversation id, config, db, env), the echoed user message, streamed agent activity, and any `console.log` output from the agent module — goes to stderr, so stdout is safe to pipe.
 - The conversation id is always printed (stderr), including generated ones, so a follow-up `--id` invocation can continue the conversation.
+- The conversation's uid is also printed (stderr) whenever the runtime reports one — pass it back as `--uid` on a later invocation to continue only that incarnation.
 
 With `--json`, stdout receives one JSON object:
 
@@ -56,11 +60,12 @@ With `--json`, stdout receives one JSON object:
   "agent": "support",
   "submissionId": "f6654bff-d6ce-40d1-97a5-a150a7af6779",
   "outcome": "completed",
-  "message": "The final assistant reply text."
+  "message": "The final assistant reply text.",
+  "uid": "inst_01KW8Z3F9G6QK8P8V7YV5RJXWQ"
 }
 ```
 
-`id` is the conversation id, `agent` the module identity, `submissionId` the durable submission this run admitted, `outcome` always `"completed"` (failed and aborted runs print no envelope), and `message` the final reply text.
+`id` is the conversation id, `agent` the module identity, `submissionId` the durable submission this run admitted, `outcome` always `"completed"` (failed and aborted runs print no envelope), `message` the final reply text, and `uid` the contacted instance's uid — minted on a creating run, echoed on a continuing one, omitted for instances created before uids shipped.
 
 ## Exit codes
 
@@ -96,4 +101,7 @@ Passing a bare name instead of a path (`flue run assistant`) also fails with a p
 flue run src/agents/hello.ts --message "Hi there"
 flue run src/agents/hello.ts --message "And then?" --id support-4821 --env .env.staging
 flue run src/agents/hello.ts --message "Run the demo." --json | jq -r .message
+flue run src/agents/triage.ts --id issue-17307 --data '{"issue": 17307}' --message "Triage."
+flue run src/agents/triage.ts --id issue-17307 --uid inst_01KW8Z3F9G6QK8P8V7YV5RJXWQ --message "Re-check."
+flue run src/agents/triage.ts --id issue-17307 --new --message "Triage."
 ```

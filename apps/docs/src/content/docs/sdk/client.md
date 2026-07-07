@@ -1,7 +1,7 @@
 ---
 title: createFlueClient(...)
 description: Create a client for one agent conversation of a deployed Flue application.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-07
 ---
 
 ```ts
@@ -81,6 +81,8 @@ Sends are fire-and-forget: a message is delivered into the living conversation a
 | Field     | Type               | Description                                     |
 | --------- | ------------------ | ----------------------------------------------- |
 | `message` | `DeliveredMessage` | The message delivered into the agent's session. |
+| `data`    | `unknown`          | Instance-creation data — the seed, consulted only when this send creates the conversation: validated against the agent's `input:` schema (when declared) and recorded once; the agent reads it with `useInitialData()`. Ignored when the send continues an existing conversation (pair with `uid: null` to error instead). |
+| `uid`     | `string \| null`   | Send condition — the instance uid played as an ETag. Omit to continue-or-create unconditionally; pass a previous send's `uid` to continue only that incarnation (rejects with `404` otherwise); pass `null` to create only when no conversation exists yet (rejects with `409`, naming the existing uid, otherwise). |
 | `signal`  | `AbortSignal`      | Cancel the in-flight HTTP request.              |
 
 ### `DeliveredMessage`
@@ -113,10 +115,11 @@ interface AgentSendResult {
   streamUrl: string;
   offset: string;
   submissionId: string;
+  uid?: string;
 }
 ```
 
-`submissionId` identifies the durable submission; `streamUrl` and `offset` are the coordinates for observing its conversation. All fields are server-provided.
+`submissionId` identifies the durable submission; `streamUrl` and `offset` are the coordinates for observing its conversation; `uid` is the contacted conversation's uid — minted when this send created it, echoed when it continued one, absent for conversations created before uids shipped. All fields are server-provided.
 
 ## `conversation.wait(...)`
 

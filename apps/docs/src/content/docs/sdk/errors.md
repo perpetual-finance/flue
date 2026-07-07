@@ -16,6 +16,8 @@ class FlueApiError extends Error {
 
 Failed SDK HTTP JSON request. `status` is the HTTP response status. `body` is the parsed response body when available, or the response text otherwise. Framework-owned routes normally return `{ error: FluePublicError }`; application-owned middleware may return arbitrary bodies.
 
+`conversation.send(...)` rejects this way when a `uid` condition fails: `404` (`agent_instance_not_found`) for a missing instance or mismatched uid, `409` (`agent_instance_exists`, `body.error.details` naming the existing uid) for a `uid: null` send against an instance that already exists. See [Conditional sends](/docs/api/agent-api/#conditional-sends).
+
 ## `FluePublicError`
 
 ```ts
