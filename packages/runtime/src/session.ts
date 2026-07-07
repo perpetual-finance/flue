@@ -1083,10 +1083,14 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			onPayload: (payload, model) => this.applyProviderPayloadOverrides(payload, model),
 			streamFn: this.emitTurnRequestAndStream,
 			toolExecution: 'parallel',
-			// The steering queue carries `useAppend` signals; every signal appended
-			// during a turn must reach the model together at the next boundary
-			// (the default one-at-a-time mode would spread them across turns).
+			// Queued messages always drain together at the next boundary — 'all'
+			// is Flue's only queue behavior. The steering queue carries `useAppend`
+			// signals: every signal appended during a turn reaches the model at
+			// the next turn start (pi's one-at-a-time default would spread them
+			// across turns). Flue never calls followUp(), but the mode is pinned
+			// so no latent one-at-a-time behavior survives anywhere.
 			steeringMode: 'all',
+			followUpMode: 'all',
 			sessionId: this.affinityKey,
 			// Render-per-turn (function agents): runs after the turn_end handler
 			// has committed the tool batch (state writes durable), so the next
