@@ -1,10 +1,15 @@
+'use agent';
 /**
  * pr-redirect — redirect non-maintainer PRs into issues or discussions.
  *
- * Invoked from `.github/workflows/pr-redirect.yml` as a one-shot CLI run.
+ * Invoked from `.github/workflows/pr-redirect.yml` as a one-shot CLI run:
+ *
+ *   flue run .flue/agents/pr-redirect.ts --id pr-redirect-<n> \
+ *     --message "Redirect PR #<n>"
+ *
  * No HTTP trigger.
  *
- * Pipeline
+ * Pipeline (all of it inside the `redirect_pr` harness tool)
  * --------
  *   1. LLM phase (uses `gh` inside the sandbox with read-only GITHUB_TOKEN):
  *        - fetch PR details
@@ -20,13 +25,14 @@
  * The sandbox env is an allowlist; `FREDKBOT_GITHUB_TOKEN` is never
  * exposed to it, so even total prompt injection of the LLM phase cannot
  * make `astrobot-houston` write anything. All mutations happen in the
- * deterministic phase from typed inputs validated by the agent.
+ * deterministic phase from typed inputs validated by the tool's input
+ * schema and the structured-result schemas below.
  *
- * If you change the `local({ env })` call below, re-read this paragraph
- * before adding any secret to the sandbox.
+ * If you change the `useSandbox(local({ env }))` call below, re-read
+ * this paragraph before adding any secret to the sandbox.
  */
 
-import { defineAgent, defineWorkflow, type FlueSession } from '@flue/runtime';
+import { defineAgent, type FlueSession, useSandbox, useTool } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 import * as v from 'valibot';
 import {
@@ -40,7 +46,7 @@ import {
 } from '../lib/github.ts';
 
 // Subset of FlueLogger; declared locally so helpers can take a logger
-// without passing the whole execution context through every signature.
+// without passing the whole tool context through every signature.
 type Logger = {
 	info: (msg: string, attrs?: Record<string, unknown>) => void;
 	warn: (msg: string, attrs?: Record<string, unknown>) => void;
@@ -49,11 +55,156 @@ type Logger = {
 
 const FEATURE_REQUEST_CATEGORY = 'Feature Request';
 
-// Label that, when added to a PR, manually triggers this workflow. The
-// workflow listens for `pull_request_target` with `action: labeled`
-// filtered to this name. The agent removes it on success so re-adding
-// it re-runs the workflow.
+// Label that, when added to a PR, manually triggers this agent. The
+// GitHub workflow listens for `pull_request_target` with `action:
+// labeled` filtered to this name. The agent removes it on success so
+// re-adding it re-runs the workflow.
 const TRIAGE_LABEL = 'triage';
+
+// ─── Agent ──────────────────────────────────────────────────────────────────
+
+const ghToken = process.env.GITHUB_TOKEN;
+
+function PrRedirect() {
+	// Validate both tokens before any model spend: the render runs at
+	// initialization, ahead of the first model call. The privileged token
+	// stays outside the sandbox allowlist and is read only by lib/github.ts.
+	if (!ghToken) throw new Error('GITHUB_TOKEN env var is required.');
+	if (!process.env.FREDKBOT_GITHUB_TOKEN) {
+		throw new Error('FREDKBOT_GITHUB_TOKEN env var is required.');
+	}
+
+	useSandbox(local({ env: { GH_TOKEN: ghToken } }));
+
+	useTool({
+		name: 'redirect_pr',
+		description:
+			'Run the full PR-redirect pipeline for one pull request: fetch and classify it, ' +
+			'search for duplicate issues/discussions, then either comment on the duplicate or ' +
+			'create a new issue (bug) or discussion (feature), comment on the PR, and close it. ' +
+			'Returns the action taken and the destination URL.',
+		input: v.object({ prNumber: v.pipe(v.number(), v.integer()) }),
+		harness: true,
+		async run({ input, harness, log }) {
+			const { prNumber } = input;
+			const session = await harness.session();
+
+			// ─── LLM phase ──────────────────────────────────────────────────
+			const pr = await fetchPullRequest(session, prNumber);
+			log.info('pr-redirect: fetched PR', { prNumber, author: pr.author, title: pr.title });
+
+			const classification = await classify(session, pr);
+			log.info('pr-redirect: classified', {
+				prNumber,
+				kind: classification.kind,
+				suggestedTitle: classification.suggestedTitle,
+			});
+
+			const queries = await generateSearchQueries(session, pr, classification);
+			log.info('pr-redirect: search queries', { prNumber, queries });
+
+			const allCandidates: Candidate[] = [];
+			for (const q of queries) {
+				const results =
+					classification.kind === 'bug'
+						? await searchIssues(session, log, pr.baseRepo, q)
+						: await searchDiscussions(session, log, pr.baseRepo, q);
+				allCandidates.push(...results);
+			}
+			log.info('pr-redirect: candidates', { prNumber, count: allCandidates.length });
+
+			const duplicate = await scoreDuplicates(session, pr, classification, allCandidates);
+			if (duplicate) {
+				log.info('pr-redirect: duplicate found', {
+					prNumber,
+					duplicateNumber: duplicate.number,
+					confidence: duplicate.confidence,
+				});
+			} else {
+				log.info('pr-redirect: no duplicate', { prNumber });
+			}
+
+			// ─── Build the Decision ─────────────────────────────────────────
+			// Pure data and a final LLM call (only for bugs). No mutations
+			// happen until the switch below.
+			let decision: Decision;
+			if (duplicate) {
+				decision = {
+					action: 'comment-on-duplicate',
+					duplicate,
+					commentBody: duplicateCommentBody(pr, classification),
+				};
+			} else if (classification.kind === 'bug') {
+				const llmBody = await writeBugIssueBody(session, pr);
+				decision = {
+					action: 'create-issue',
+					title: classification.suggestedTitle,
+					body: bugIssueBody(pr, llmBody),
+				};
+			} else {
+				decision = {
+					action: 'create-discussion',
+					title: classification.suggestedTitle,
+					body: featureDiscussionBody(pr),
+				};
+			}
+
+			// ─── Deterministic phase ────────────────────────────────────────
+			// No LLM beyond this point. All mutations use FREDKBOT_GITHUB_TOKEN
+			// via lib/github.ts on inputs already validated above.
+			//
+			// Order is significant: create the destination first so the PR's
+			// closing comment can link to it. If `closePullRequest` fails, a
+			// maintainer can close manually — the destination still exists.
+			let destinationUrl: string;
+			let destinationKind: 'issue' | 'discussion' | 'duplicate';
+			switch (decision.action) {
+				case 'comment-on-duplicate': {
+					if (decision.duplicate.kind === 'issue') {
+						await commentOnIssue(decision.duplicate.number, decision.commentBody);
+					} else {
+						await commentOnDiscussion(decision.duplicate.number, decision.commentBody);
+					}
+					destinationUrl = decision.duplicate.url;
+					destinationKind = 'duplicate';
+					break;
+				}
+				case 'create-issue': {
+					const created = await createIssue({ title: decision.title, body: decision.body });
+					destinationUrl = created.htmlUrl;
+					destinationKind = 'issue';
+					break;
+				}
+				case 'create-discussion': {
+					const created = await createDiscussion({
+						title: decision.title,
+						body: decision.body,
+						categoryName: FEATURE_REQUEST_CATEGORY,
+					});
+					destinationUrl = created.url;
+					destinationKind = 'discussion';
+					break;
+				}
+			}
+
+			await commentOnPullRequest(prNumber, closePrComment(destinationUrl, destinationKind));
+			await closePullRequest(prNumber);
+
+			// Done last so that a partial-failure run leaves the label in place
+			// and a maintainer can re-trigger by removing-and-re-adding it.
+			await removeLabelIfPresent(prNumber, TRIAGE_LABEL);
+
+			log.info('pr-redirect: done', { prNumber, action: decision.action, destinationUrl });
+			return { action: decision.action, destinationUrl, prNumber };
+		},
+	});
+
+	return `You redirect non-maintainer pull requests into issues or discussions.
+
+When asked to redirect a pull request, call \`redirect_pr\` with its number, then report the outcome in one sentence: the action taken and the destination URL. If no PR number is given, ask for one instead of guessing.`;
+}
+
+export default defineAgent(PrRedirect, { model: 'anthropic/claude-opus-4-6' });
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -70,18 +221,19 @@ interface PrDetails {
 	diffStat: string;
 }
 
-type Classification = {
-	kind: 'bug' | 'feature';
-	suggestedTitle: string;
-	summary: string;
-};
+const classificationSchema = v.object({
+	kind: v.picklist(['bug', 'feature']),
+	suggestedTitle: v.string(),
+	summary: v.string(),
+});
+type Classification = v.InferOutput<typeof classificationSchema>;
 
 type DuplicateMatch = {
 	kind: 'issue' | 'discussion';
 	number: number;
 	url: string;
 	title: string;
-	confidence: 'high' | 'medium' | 'low';
+	confidence: 'high' | 'medium';
 };
 
 type Decision =
@@ -155,33 +307,10 @@ ${pr.diffStat || '(no files listed)'}
 **Body:**
 ${pr.body || '(empty)'}
 
-## Output
-Return ONLY a JSON object on a single line, no markdown fences:
-{"kind": "bug" | "feature", "suggestedTitle": "<concise title for the resulting issue/discussion>", "summary": "<1-3 sentence summary of what the PR does, in your own words>"}
+Also produce a concise \`suggestedTitle\` for the resulting issue/discussion — problem-focused for bugs ("X crashes when Y"), proposal-focused for features ("Support X in Y"), with any "feat:" / "fix:" prefixes stripped — and a 1-3 sentence \`summary\` of what the PR does, in your own words.`;
 
-The suggestedTitle should be problem-focused for bugs ("X crashes when Y") and proposal-focused for features ("Support X in Y"). Strip any "feat:" / "fix:" prefixes.`;
-
-	const response = await session.prompt(prompt);
-	const parsed = extractJson(response.text);
-	if (
-		typeof parsed !== 'object' ||
-		parsed === null ||
-		!('kind' in parsed) ||
-		!('suggestedTitle' in parsed) ||
-		!('summary' in parsed)
-	) {
-		throw new Error(`Classification response missing required fields: ${response.text}`);
-	}
-	const kind = (parsed as { kind: unknown }).kind;
-	const suggestedTitle = (parsed as { suggestedTitle: unknown }).suggestedTitle;
-	const summary = (parsed as { summary: unknown }).summary;
-	if (kind !== 'bug' && kind !== 'feature') {
-		throw new Error(`Invalid kind in classification: ${String(kind)}`);
-	}
-	if (typeof suggestedTitle !== 'string' || typeof summary !== 'string') {
-		throw new Error(`Classification fields must be strings: ${response.text}`);
-	}
-	return { kind, suggestedTitle, summary };
+	const response = await session.prompt(prompt, { result: classificationSchema });
+	return response.data;
 }
 
 // ─── Step 2 & 3: duplicate search ───────────────────────────────────────────
@@ -204,16 +333,9 @@ async function generateSearchQueries(
 PR title: ${pr.title}
 Summary: ${classification.summary}
 
-Return ONLY a JSON array of 2 strings on a single line, no markdown fences:
-["query 1 with specific keywords", "query 2 with different angle"]
-
 Each query should be 2-5 words, no quotes inside, no special GitHub search qualifiers.`;
-	const response = await session.prompt(prompt);
-	const parsed = extractJson(response.text);
-	if (!Array.isArray(parsed)) {
-		throw new Error(`Expected JSON array of search queries: ${response.text}`);
-	}
-	const queries = parsed.filter((q): q is string => typeof q === 'string' && q.trim().length > 0);
+	const response = await session.prompt(prompt, { result: v.array(v.string()) });
+	const queries = response.data.filter((q) => q.trim().length > 0);
 	if (queries.length === 0) {
 		// Fall back to the PR title so the dup search still runs.
 		return [pr.title];
@@ -303,9 +425,17 @@ async function searchDiscussions(
 		}));
 }
 
+const duplicateVerdictSchema = v.object({
+	duplicate: v.nullable(
+		v.object({
+			index: v.pipe(v.number(), v.integer(), v.minValue(1)),
+			confidence: v.picklist(['high', 'medium', 'low']),
+		}),
+	),
+});
+
 async function scoreDuplicates(
 	session: FlueSession,
-	log: Logger,
 	pr: PrDetails,
 	classification: Classification,
 	candidates: Candidate[],
@@ -336,42 +466,28 @@ async function scoreDuplicates(
 ${candidateList}
 
 ## Output
-Return ONLY a JSON object on a single line, no markdown fences:
-{"duplicate": null} — if none are clearly the same.
-{"duplicate": {"index": <1-based number from the list>, "confidence": "high" | "medium" | "low"}} — if one matches.
-
-Guidance:
+Report \`duplicate: null\` if none are clearly the same; otherwise the matching candidate's 1-based \`index\` from the list and a \`confidence\`:
 - "high" = same bug/feature, near-certain.
 - "medium" = likely the same but the descriptions differ enough to leave room for doubt.
 - "low" = related but probably distinct.
 
 If multiple candidates match, pick the most relevant one only.`;
 
-	const response = await session.prompt(prompt);
-	const parsed = extractJson(response.text);
-	if (typeof parsed !== 'object' || parsed === null) {
-		log.warn('duplicate scorer returned non-object, treating as no dup', { text: response.text });
-		return null;
-	}
-	const dup = (parsed as { duplicate?: unknown }).duplicate;
-	if (dup === null || dup === undefined) return null;
-	if (typeof dup !== 'object') return null;
-	const index = (dup as { index?: unknown }).index;
-	const confidence = (dup as { confidence?: unknown }).confidence;
-	if (typeof index !== 'number' || index < 1 || index > unique.length) return null;
-	if (confidence !== 'high' && confidence !== 'medium' && confidence !== 'low') return null;
+	const response = await session.prompt(prompt, { result: duplicateVerdictSchema });
+	const dup = response.data.duplicate;
+	if (dup === null) return null;
 	// Low confidence is treated as "no duplicate" — we'd rather create a
 	// new thread that a human can merge later than wrongly attach a
 	// contributor's branch to an unrelated issue.
-	if (confidence === 'low') return null;
-	const picked = unique[index - 1];
+	if (dup.confidence === 'low') return null;
+	const picked = unique[dup.index - 1];
 	if (!picked) return null;
 	return {
 		kind: picked.kind,
 		number: picked.number,
 		url: picked.url,
 		title: picked.title,
-		confidence,
+		confidence: dup.confidence,
 	};
 }
 
@@ -512,194 +628,3 @@ We've moved to a model where bugs and feature proposals are discussed in issues/
 
 — astrobot 🤖`;
 }
-
-// ─── Misc ───────────────────────────────────────────────────────────────────
-
-/**
- * Parse a JSON value out of an LLM response. Models occasionally wrap
- * JSON in markdown fences or surrounding prose despite explicit
- * instructions; this finds the first balanced `{...}` or `[...]` and
- * parses that.
- */
-function extractJson(text: string): unknown {
-	const stripped = text
-		.replace(/^\s*```(?:json)?\s*/i, '')
-		.replace(/\s*```\s*$/i, '')
-		.trim();
-	// Fast path: whole thing is JSON.
-	try {
-		return JSON.parse(stripped);
-	} catch {
-		// Fall through.
-	}
-	// Find first { or [ and parse from there using bracket counting.
-	for (let i = 0; i < stripped.length; i++) {
-		const ch = stripped[i];
-		if (ch !== '{' && ch !== '[') continue;
-		const open = ch;
-		const close = ch === '{' ? '}' : ']';
-		let depth = 0;
-		let inString = false;
-		let escaped = false;
-		for (let j = i; j < stripped.length; j++) {
-			const c = stripped[j];
-			if (escaped) {
-				escaped = false;
-				continue;
-			}
-			if (c === '\\') {
-				escaped = true;
-				continue;
-			}
-			if (c === '"') inString = !inString;
-			if (inString) continue;
-			if (c === open) depth++;
-			else if (c === close) {
-				depth--;
-				if (depth === 0) {
-					try {
-						return JSON.parse(stripped.slice(i, j + 1));
-					} catch {
-						break;
-					}
-				}
-			}
-		}
-	}
-	throw new Error(`Could not parse JSON from model response: ${text}`);
-}
-
-// ─── Entry point ────────────────────────────────────────────────────────────
-
-const ghToken = process.env.GITHUB_TOKEN;
-const agent = defineAgent(() => {
-	if (!ghToken) throw new Error('GITHUB_TOKEN env var is required.');
-	return {
-		sandbox: local({ env: { GH_TOKEN: ghToken } }),
-		model: 'anthropic/claude-opus-4-6',
-	};
-});
-
-export default defineWorkflow({
-	agent,
-	input: v.object({ prNumber: v.pipe(v.number(), v.integer()) }),
-	async run({ harness, input, log }) {
-		const { prNumber } = input;
-
-		// Validate the privileged token before spending LLM tokens. It remains
-		// outside the sandbox allowlist and is read only by lib/github.ts.
-		if (!process.env.FREDKBOT_GITHUB_TOKEN) {
-			throw new Error('FREDKBOT_GITHUB_TOKEN env var is required.');
-		}
-
-		const session = await harness.session();
-
-	// ─── LLM phase ──────────────────────────────────────────────────────
-	const pr = await fetchPullRequest(session, prNumber);
-	log.info('pr-redirect: fetched PR', { prNumber, author: pr.author, title: pr.title });
-
-	const classification = await classify(session, pr);
-	log.info('pr-redirect: classified', {
-		prNumber,
-		kind: classification.kind,
-		suggestedTitle: classification.suggestedTitle,
-	});
-
-	const queries = await generateSearchQueries(session, pr, classification);
-	log.info('pr-redirect: search queries', { prNumber, queries });
-
-	const allCandidates: Candidate[] = [];
-	for (const q of queries) {
-		const results =
-			classification.kind === 'bug'
-				? await searchIssues(session, log, pr.baseRepo, q)
-				: await searchDiscussions(session, log, pr.baseRepo, q);
-		allCandidates.push(...results);
-	}
-	log.info('pr-redirect: candidates', { prNumber, count: allCandidates.length });
-
-	const duplicate = await scoreDuplicates(session, log, pr, classification, allCandidates);
-	if (duplicate) {
-		log.info('pr-redirect: duplicate found', {
-			prNumber,
-			duplicateNumber: duplicate.number,
-			confidence: duplicate.confidence,
-		});
-	} else {
-		log.info('pr-redirect: no duplicate', { prNumber });
-	}
-
-	// ─── Build the Decision ─────────────────────────────────────────────
-	// Pure data and a final LLM call (only for bugs). No mutations
-	// happen until the switch below.
-	let decision: Decision;
-	if (duplicate) {
-		decision = {
-			action: 'comment-on-duplicate',
-			duplicate,
-			commentBody: duplicateCommentBody(pr, classification),
-		};
-	} else if (classification.kind === 'bug') {
-		const llmBody = await writeBugIssueBody(session, pr);
-		decision = {
-			action: 'create-issue',
-			title: classification.suggestedTitle,
-			body: bugIssueBody(pr, llmBody),
-		};
-	} else {
-		decision = {
-			action: 'create-discussion',
-			title: classification.suggestedTitle,
-			body: featureDiscussionBody(pr),
-		};
-	}
-
-	// ─── Deterministic phase ────────────────────────────────────────────
-	// No LLM beyond this point. All mutations use FREDKBOT_GITHUB_TOKEN
-	// via lib/github.ts on inputs already validated above.
-	//
-	// Order is significant: create the destination first so the PR's
-	// closing comment can link to it. If `closePullRequest` fails, a
-	// maintainer can close manually — the destination still exists.
-	let destinationUrl: string;
-	let destinationKind: 'issue' | 'discussion' | 'duplicate';
-	switch (decision.action) {
-		case 'comment-on-duplicate': {
-			if (decision.duplicate.kind === 'issue') {
-				await commentOnIssue(decision.duplicate.number, decision.commentBody);
-			} else {
-				await commentOnDiscussion(decision.duplicate.number, decision.commentBody);
-			}
-			destinationUrl = decision.duplicate.url;
-			destinationKind = 'duplicate';
-			break;
-		}
-		case 'create-issue': {
-			const created = await createIssue({ title: decision.title, body: decision.body });
-			destinationUrl = created.htmlUrl;
-			destinationKind = 'issue';
-			break;
-		}
-		case 'create-discussion': {
-			const created = await createDiscussion({
-				title: decision.title,
-				body: decision.body,
-				categoryName: FEATURE_REQUEST_CATEGORY,
-			});
-			destinationUrl = created.url;
-			destinationKind = 'discussion';
-			break;
-		}
-	}
-
-	await commentOnPullRequest(prNumber, closePrComment(destinationUrl, destinationKind));
-	await closePullRequest(prNumber);
-
-	// Done last so that a partial-failure run leaves the label in place
-	// and a maintainer can re-trigger by removing-and-re-adding it.
-	await removeLabelIfPresent(prNumber, TRIAGE_LABEL);
-
-		log.info('pr-redirect: done', { prNumber, action: decision.action, destinationUrl });
-		return { action: decision.action, destinationUrl, prNumber };
-	},
-});
