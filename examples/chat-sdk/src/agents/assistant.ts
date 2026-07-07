@@ -5,7 +5,7 @@ import {
 	fauxToolCall,
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
-import { defineTool, useTool } from '@flue/runtime';
+import { defineAgent, defineTool, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { bot } from '../chat.ts';
 
