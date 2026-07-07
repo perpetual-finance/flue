@@ -187,19 +187,21 @@ namespaces require it.
 
 ```ts title="src/agents/billing.ts"
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import { retrieveCustomer } from '../channels/stripe.ts';
 
-export default defineAgent(({ id: customerId }) => ({
-  model: 'anthropic/claude-haiku-4-5',
-  tools: [retrieveCustomer(customerId)],
-}));
+function Billing({ id: customerId }: AgentProps) {
+  useTool(retrieveCustomer(customerId));
+  return 'Review the completed Checkout event and summarize any billing follow-up that is needed.';
+}
+
+export default defineAgent(Billing, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
 The model can invoke the lookup but cannot select another customer, account, or
 credential. Trusted application code binds those values. The channel-agent
 import cycle is supported because both imported bindings are read only inside
-deferred callbacks or initializers.
+deferred callbacks or the agent's capability function.
 
 ## Thin event notifications
 

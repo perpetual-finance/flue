@@ -54,7 +54,7 @@ An agent module configures its own routes through optional named exports. The bu
 
 ```ts title="src/agents/triage.ts"
 'use agent';
-import { defineAgent, type AgentRouteHandler } from '@flue/runtime';
+import { defineAgent, type AgentProps, type AgentRouteHandler } from '@flue/runtime';
 import { authenticate } from '../auth.ts';
 
 // Middleware applied to every route `.route()` serves for this agent.
@@ -65,10 +65,11 @@ export const route: AgentRouteHandler = async (c, next) => {
   await next();
 };
 
-export default defineAgent(({ id }) => ({
-  model: 'anthropic/claude-haiku-4-5',
-  instructions: `Help with support ticket ${id}.`,
-}));
+function Triage({ id }: AgentProps) {
+  return `Help with support ticket ${id}.`;
+}
+
+export default defineAgent(Triage, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
 | Named export  | Meaning                                                                                                                              |

@@ -189,7 +189,7 @@ Adapt the fallback `agentUrl` to the project: use the local dev server's actual 
 
 Prefer deterministic assertions for exact contracts such as structured output, required tools, prohibited tools, or stable content. Add a `vitest-evals` judge only when the behavior is genuinely semantic. Configure its model separately from the agent under evaluation.
 
-For a bounded, structured job, evaluate the agent that exposes it as a `defineAction` in `actions: [...]` through this same conversation-URL harness: send the message that triggers the action and assert on the action's tool call and the final reply. Do not invent a separate invocation path for it.
+For a bounded, structured job, evaluate the agent that exposes it as a harness tool (`useTool({ harness: true })`) through this same conversation-URL harness: send the message that triggers the tool and assert on its tool call and the final reply. Do not invent a separate invocation path for it.
 
 ## Run and report evals
 

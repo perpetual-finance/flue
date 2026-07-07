@@ -2913,7 +2913,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				inheritedThinkingLevel,
 				cwd: params.cwd,
 				images,
-				// Subagent profiles are self-contained: the parent's call-level
+				// Resolved subagents are self-contained: the parent's call-level
 				// tools flow only into agent-less tasks, never into a selected
 				// profile's session.
 				tools: params.agent ? undefined : tools,

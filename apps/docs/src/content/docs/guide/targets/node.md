@@ -41,13 +41,14 @@ Node is the only target with the built-in `local()` sandbox factory. It gives an
 
 ```ts title="src/agents/repository-reviewer.ts"
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useSandbox } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
-export default defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-  sandbox: local(),
-}));
+function RepositoryReviewer() {
+  useSandbox(local());
+}
+
+export default defineAgent(RepositoryReviewer, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 `local()` uses `process.cwd()` as the working directory by default. Shell commands run through the host shell via `child_process`, and file operations read and write the real filesystem.
@@ -55,12 +56,15 @@ export default defineAgent(() => ({
 Only shell-essential environment variables are exposed to the agent's shell by default. API keys, tokens, and credentials are deliberately excluded. Pass specific values through `env` when a command needs them:
 
 ```ts
-const reviewer = defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-  sandbox: local({
-    env: { GH_TOKEN: process.env.GH_TOKEN },
-  }),
-}));
+function RepositoryReviewer() {
+  useSandbox(
+    local({
+      env: { GH_TOKEN: process.env.GH_TOKEN },
+    }),
+  );
+}
+
+const reviewer = defineAgent(RepositoryReviewer, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 Passing `env: { ...process.env }` exposes the full host environment to the model's shell. Do this only in trusted environments.

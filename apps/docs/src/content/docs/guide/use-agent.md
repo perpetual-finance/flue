@@ -10,10 +10,11 @@ An agent joins a Flue application with one line — the `'use agent'` directive 
 'use agent';
 import { defineAgent } from '@flue/runtime';
 
-export default defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-  instructions: 'Triage the incoming issue and propose next steps.',
-}));
+function Triage() {
+  return 'Triage the incoming issue and propose next steps.';
+}
+
+export default defineAgent(Triage, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 Like `'use strict'`, it is an ECMAScript module directive: a string literal in the directive prologue, before any imports or statements. The [Vite plugin](/docs/guide/vite-plugin/) detects it by parsing, not by pattern-matching, so comments and string contents elsewhere in the file can never trigger it.
@@ -51,10 +52,11 @@ export const route: AgentRouteHandler = requireUser; // middleware on all agent 
 export const attachments: AgentRouteHandler = gateAttachments; // opt-in attachment downloads
 export const description = 'Triages incoming issues.'; // static metadata
 
-export default defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-  instructions: 'Triage the incoming issue and propose next steps.',
-}));
+function Triage() {
+  return 'Triage the incoming issue and propose next steps.';
+}
+
+export default defineAgent(Triage, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 These exports keep exactly the meanings described in [Routing](/docs/guide/routing/#per-agent-middleware-the-route-export). The module is the single source of per-agent configuration — `.route()` takes no options.

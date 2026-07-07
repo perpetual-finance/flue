@@ -63,14 +63,22 @@ Pass an initialized E2B `Sandbox` to `e2b(...)`, then assign the returned factor
 
 ```ts
 import { Sandbox } from 'e2b';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useSandbox } from '@flue/runtime';
 import { e2b } from '../sandboxes/e2b';
 
-const sandbox = await Sandbox.create();
-const agent = defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-  sandbox: e2b(sandbox),
-}));
+function Assistant() {
+  useSandbox({
+    // Lazy, per the SandboxFactory contract: constructing this object is
+    // cheap; the expensive E2B sandbox creation happens once, inside
+    // createSessionEnv(), at initialization — never on a re-render.
+    async createSessionEnv(options) {
+      const sandbox = await Sandbox.create();
+      return e2b(sandbox).createSessionEnv(options);
+    },
+  });
+}
+
+const agent = defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 Select templates, timeouts, network access, secret exposure, and resource reuse through your application and provider policy. Flue adapts the active environment; it does not choose provider retention for you.

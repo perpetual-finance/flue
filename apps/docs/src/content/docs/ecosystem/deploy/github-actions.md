@@ -26,14 +26,15 @@ npm install -D @flue/cli
 ### 2. Create your first agent
 
 ```typescript title="src/agents/hello.ts"
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useSandbox } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
-export default defineAgent(() => ({
-  sandbox: local(),
-  model: 'anthropic/claude-sonnet-4-6',
-  instructions: 'Greet the person the user names and share an interesting fact.',
-}));
+function Hello() {
+  useSandbox(local());
+  return 'Greet the person the user names and share an interesting fact.';
+}
+
+export default defineAgent(Hello, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 A few things to note:
@@ -120,23 +121,25 @@ Your agent often needs to interact with tools like `gh`, `npm`, or `git`. With `
 In GitHub Actions, this means you set the secrets you want the agent's CLIs to see in the workflow `env:` block, then forward them explicitly into the sandbox. The runner is your isolation boundary; flue makes the inner boundary (host → spawned shell) explicit.
 
 ```typescript title="src/agents/triage.ts"
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useSandbox } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
-export default defineAgent(() => ({
-  sandbox: local({
-    env: {
-      GH_TOKEN: process.env.GH_TOKEN,
-      NPM_TOKEN: process.env.NPM_TOKEN,
-    },
-  }),
-  model: 'anthropic/claude-opus-4-7',
-  instructions:
-    'When given an issue number, run the `triage` skill on it and report severity, reproducibility, and a summary.',
-}));
+function Triage() {
+  useSandbox(
+    local({
+      env: {
+        GH_TOKEN: process.env.GH_TOKEN,
+        NPM_TOKEN: process.env.NPM_TOKEN,
+      },
+    }),
+  );
+  return 'When given an issue number, run the `triage` skill on it and report severity, reproducibility, and a summary.';
+}
+
+export default defineAgent(Triage, { model: 'anthropic/claude-opus-4-7' });
 ```
 
-If you want a tighter boundary — the agent can call a specific operation but never see the underlying token — return the custom tool from `defineAgent(...)` with `tools: [...]`. The tool implementation reads the secret from `process.env`; the agent only sees the tool's parameters and result.
+If you want a tighter boundary — the agent can call a specific operation but never see the underlying token — call `useTool(...)` inside the agent function. The tool implementation reads the secret from `process.env`; the agent only sees the tool's parameters and result.
 
 ### Subagents
 

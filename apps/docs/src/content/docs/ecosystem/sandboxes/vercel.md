@@ -117,14 +117,22 @@ Pass an initialized Vercel `Sandbox` to `vercel(...)` and assign the returned fa
 
 ```ts
 import { Sandbox } from '@vercel/sandbox';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useSandbox } from '@flue/runtime';
 import { vercel } from '../sandboxes/vercel';
 
-const sandbox = await Sandbox.create({ runtime: 'node24' });
-const agent = defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-  sandbox: vercel(sandbox),
-}));
+function Assistant() {
+  useSandbox({
+    // Lazy, per the SandboxFactory contract: constructing this object is
+    // cheap; the expensive Vercel sandbox creation happens once, inside
+    // createSessionEnv(), at initialization — never on a re-render.
+    async createSessionEnv(options) {
+      const sandbox = await Sandbox.create({ runtime: 'node24' });
+      return vercel(sandbox).createSessionEnv(options);
+    },
+  });
+}
+
+const agent = defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 Keep Vercel authentication values in trusted application configuration and determine whether sandboxes should be fresh per job or reusable for stable agent identities.

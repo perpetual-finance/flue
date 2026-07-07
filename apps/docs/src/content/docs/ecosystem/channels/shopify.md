@@ -293,19 +293,19 @@ string through `Number`.
 
 ```ts title="src/agents/orders.ts"
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import { orderRefFromInstanceId, retrieveOrder } from '../channels/shopify.ts';
 
-export default defineAgent(({ id }) => {
+function Orders({ id }: AgentProps) {
   const { shopDomain, orderId } = orderRefFromInstanceId(id);
   if (shopDomain !== process.env.SHOPIFY_SHOP_DOMAIN) {
     throw new TypeError('Unexpected Shopify shop.');
   }
-  return {
-    model: 'anthropic/claude-haiku-4-5',
-    tools: [retrieveOrder(orderId)],
-  };
-});
+  useTool(retrieveOrder(orderId));
+  return 'Review the newly created Shopify order and summarize any fulfillment or payment follow-up.';
+}
+
+export default defineAgent(Orders, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
 The local `shopify-order:` id includes shop and order identity because Shopify

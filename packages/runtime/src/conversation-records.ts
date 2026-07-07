@@ -58,7 +58,7 @@ export type ConversationCreatedRecord = ConversationCreatedRecordBase &
 				taskId: string;
 				actionInvocationId?: never;
 				/**
-				 * Subagent profile name this task ran, when a profile was selected.
+				 * Subagent name this task ran, when one was selected.
 				 * Absent for agent-less tasks. Presentation metadata for the task
 				 * tree — never part of conversation identity.
 				 */

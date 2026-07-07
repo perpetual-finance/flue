@@ -247,13 +247,15 @@ Bind the destination in trusted code:
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import { channel, replyInThread } from '../channels/slack.ts';
 
-export default defineAgent(({ id }) => ({
-  model: 'anthropic/claude-haiku-4-5',
-  tools: [replyInThread(channel.parseConversationKey(id))],
-}));
+function Assistant({ id }: AgentProps) {
+  useTool(replyInThread(channel.parseConversationKey(id)));
+  return 'Reply in the bound Slack thread when appropriate.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
 The model selects message text. It does not select arbitrary workspaces,

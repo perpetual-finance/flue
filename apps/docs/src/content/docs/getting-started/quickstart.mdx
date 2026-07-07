@@ -69,10 +69,11 @@ Create `src/agents/assistant.ts`. The `'use agent'` directive on the first line 
 'use agent';
 import { defineAgent } from '@flue/runtime';
 
-export default defineAgent(() => ({
-	model: 'anthropic/claude-haiku-4-5',
-	instructions: 'You are a helpful assistant. Keep replies short.',
-}));
+function Assistant() {
+	return 'You are a helpful assistant. Keep replies short.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
 ### 4. Create the route map

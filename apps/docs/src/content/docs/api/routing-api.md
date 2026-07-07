@@ -74,7 +74,11 @@ Builds the agent's mountable Hono sub-app. Routes, relative to wherever the call
 'use agent';
 import { defineAgent, type AgentRouteHandler } from '@flue/runtime';
 
-export default defineAgent(() => ({ model: '...', instructions: '...' }));
+function Triage() {
+  return '...';
+}
+
+export default defineAgent(Triage, { model: '...' });
 
 export const route: AgentRouteHandler = async (c, next) => next(); // middleware on all routes
 export const attachments: AgentRouteHandler = async (c, next) => next(); // opt-in downloads

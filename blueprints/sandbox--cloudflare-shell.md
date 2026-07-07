@@ -313,20 +313,22 @@ belongs outside this adapter.
 
 ```ts
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { env } from 'cloudflare:workers';
+import { defineAgent, useSandbox } from '@flue/runtime';
 import { getDefaultWorkspace, getShellSandbox } from '../sandboxes/cloudflare-shell';
 
 interface Env {
   LOADER: WorkerLoader;
 }
 
-export default defineAgent<Env>(({ env }) => {
-  const workspace = getDefaultWorkspace();
-  return {
-    sandbox: getShellSandbox({ workspace, loader: env.LOADER }),
-    model: 'cloudflare/@cf/moonshotai/kimi-k2.6',
-  };
-});
+const { LOADER } = env as unknown as Env;
+
+function Assistant() {
+  useSandbox(getShellSandbox({ workspace: getDefaultWorkspace(), loader: LOADER }));
+  return 'You explore and edit the mounted workspace with the `code` tool.';
+}
+
+export default defineAgent(Assistant, { model: 'cloudflare/@cf/moonshotai/kimi-k2.6' });
 ```
 
 The `'use agent'` directive at the top is what registers the module with

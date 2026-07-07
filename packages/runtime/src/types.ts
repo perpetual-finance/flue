@@ -349,11 +349,11 @@ export interface AgentConfig {
 	 * uses defaults.
 	 */
 	compaction?: false | CompactionConfig;
-	/** Durability settings resolved from the agent profile. */
+	/** Durability settings resolved from the agent definition. */
 	durability?: DurabilityConfig;
 }
 
-// ─── Agent Profile and Runtime Creation ─────────────────────────────────────
+// ─── Agent Runtime Configuration ────────────────────────────────────────────
 
 /**
  * A capability-backed delegate declared with `useSubagent(...)`. The
@@ -674,7 +674,7 @@ export interface FlueSession {
 
 	/**
 	 * Delegate work to a detached child session. Pass `options.agent` to select
-	 * a named subagent profile and `options.result` to require validated data.
+	 * a named subagent and `options.result` to require validated data.
 	 * Persisted child history remains part of the parent-owned conversation topology.
 	 */
 	task<S extends v.GenericSchema>(

@@ -225,19 +225,21 @@ callback.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import { channel, commentOnIssue } from '../channels/github.ts';
 
-export default defineAgent(({ id }) => ({
-  model: 'anthropic/claude-haiku-4-5',
-  tools: [commentOnIssue(channel.parseConversationKey(id))],
-}));
+function Assistant({ id }: AgentProps) {
+  useTool(commentOnIssue(channel.parseConversationKey(id)));
+  return 'Review the issue and post a concise triage comment when appropriate.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
 Pull requests use their issue number for issue comments. The model selects the
 comment body; trusted code binds the repository and issue. The channel-agent
 import cycle is supported because both imported bindings are read only inside
-deferred callbacks or initializers.
+deferred callbacks or the agent's capability function.
 
 GitHub expects a `2xx` response within ten seconds and does not auto-retry.
 The package does not enforce a handler deadline; treat the ten-second window as

@@ -220,7 +220,7 @@ export class Harness implements FlueHarness {
 			? createCwdSessionEnv(options.parentEnv, options.parentEnv.resolvePath(options.cwd))
 			: options.parentEnv;
 		const taskAgent = options.agent;
-		// Subagent profiles are self-contained: capability/identity fields
+		// Resolved subagents are self-contained: capability/identity fields
 		// (instructions, tools, skills, subagents) come only from the profile —
 		// omitted means none, never the parent's. Environment fields (model,
 		// thinkingLevel, compaction) inherit from the parent as runtime

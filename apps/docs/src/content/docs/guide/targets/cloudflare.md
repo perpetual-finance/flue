@@ -147,9 +147,9 @@ const response = await env.AGENT_APP.fetch(new Request(url));
 [Workers AI](https://developers.cloudflare.com/workers-ai/) lets you run AI models directly on Cloudflare's infrastructure without managing API keys or external provider accounts. Flue connects to Workers AI automatically on the Cloudflare target, so using a Workers AI model is as simple as specifying the model name:
 
 ```ts
-export default defineAgent(() => ({
-  model: 'cloudflare/@cf/meta/llama-3.1-8b-instruct',
-}));
+function Assistant() {}
+
+export default defineAgent(Assistant, { model: 'cloudflare/@cf/meta/llama-3.1-8b-instruct' });
 ```
 
 No API key is needed. Authorization and billing follow the Worker account, including the [Workers AI free tier](https://developers.cloudflare.com/workers-ai/platform/pricing/).
@@ -165,16 +165,18 @@ To customize the gateway, disable it, or target a named gateway, re-register the
 ```ts
 'use agent';
 import { getSandbox } from '@cloudflare/sandbox';
-import { defineAgent } from '@flue/runtime';
+import { env } from 'cloudflare:workers';
+import { defineAgent, type AgentProps, useSandbox } from '@flue/runtime';
 import { cloudflareSandbox } from '@flue/runtime/cloudflare';
 
-type Env = { Sandbox: DurableObjectNamespace };
+function Assistant({ id }: AgentProps) {
+  useSandbox(cloudflareSandbox(getSandbox(env.Sandbox, id)));
+}
 
-export default defineAgent<Env>(({ id, env }) => ({
+export default defineAgent(Assistant, {
   model: 'anthropic/claude-sonnet-4-6',
-  sandbox: cloudflareSandbox(getSandbox(env.Sandbox, id)),
   cwd: '/workspace',
-}));
+});
 ```
 
 See [Cloudflare Sandbox](/docs/ecosystem/sandboxes/cloudflare/) for container configuration and lifecycle guidance.
@@ -208,9 +210,9 @@ Flue owns each generated Durable Object class. When an agent needs access to nat
 import { defineAgent } from '@flue/runtime';
 import { extend } from '@flue/runtime/cloudflare';
 
-export default defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-}));
+function Assistant() {}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
 
 export const cloudflare = extend({
   base: (Base) =>

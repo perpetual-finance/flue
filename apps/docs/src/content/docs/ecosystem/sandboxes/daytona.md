@@ -64,15 +64,23 @@ The generated adapter expects your application to create and own the Daytona san
 
 ```ts
 import { Daytona } from '@daytona/sdk';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useSandbox } from '@flue/runtime';
 import { daytona } from '../sandboxes/daytona';
 
-const client = new Daytona({ apiKey: env.DAYTONA_API_KEY });
-const sandbox = await client.create();
-const agent = defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-  sandbox: daytona(sandbox),
-}));
+function Assistant() {
+  useSandbox({
+    // Lazy, per the SandboxFactory contract: constructing this object is
+    // cheap; the expensive Daytona sandbox creation happens once, inside
+    // createSessionEnv(), at initialization — never on a re-render.
+    async createSessionEnv(options) {
+      const client = new Daytona({ apiKey: env.DAYTONA_API_KEY });
+      const sandbox = await client.create();
+      return daytona(sandbox).createSessionEnv(options);
+    },
+  });
+}
+
+const agent = defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 Configure images, snapshots, regions, environment variables, and volumes through the Daytona SDK before passing the sandbox to `daytona(...)`. For a narrower working directory, configure `cwd` on the agent definition; Flue resolves it once against the adapter's provider-owned base directory during `init()`.

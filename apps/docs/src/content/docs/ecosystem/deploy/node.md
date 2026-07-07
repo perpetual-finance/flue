@@ -53,11 +53,11 @@ An agent module is an ordinary TypeScript file plus one line: the `'use agent'` 
 'use agent';
 import { defineAgent } from '@flue/runtime';
 
-export default defineAgent(() => ({
-  model: 'openai/gpt-5.5',
-  instructions:
-    'Translate the user message into the requested language. Reply with the translation only.',
-}));
+function Translator() {
+  return 'Translate the user message into the requested language. Reply with the translation only.';
+}
+
+export default defineAgent(Translator, { model: 'openai/gpt-5.5' });
 ```
 
 By default the agent receives a virtual sandbox powered by [just-bash](https://github.com/vercel-labs/just-bash) — no container needed.
@@ -229,14 +229,15 @@ Env exposure is opt-in. By default only shell essentials (`PATH`, `HOME`, locale
 
 ```typescript title="src/agents/reviewer.ts"
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useSandbox } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
-export default defineAgent(() => ({
-  sandbox: local(),
-  model: 'anthropic/claude-sonnet-4-6',
-  instructions: 'Review the codebase and identify potential issues in the area the user names.',
-}));
+function Reviewer() {
+  useSandbox(local());
+  return 'Review the codebase and identify potential issues in the area the user names.';
+}
+
+export default defineAgent(Reviewer, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 The agent reads, searches, and modifies files via its built-in tools — read, write, edit, grep, glob, bash. Anything on `$PATH` (`git`, `npm`, `gh`, `docker`) is reachable from the bash tool. Env vars are opt-in via `local({ env: { ... } })` — pass `process.env.GH_TOKEN`, `process.env.NPM_TOKEN`, etc. into the sandbox for the binaries that need them.
@@ -248,7 +249,7 @@ The agent reads, searches, and modifies files via its built-in tools — read, w
 - **Dev tooling** — analyze project structure, run linters, generate boilerplate.
 - **CI** — issue triage, deploy checks, anything where the runner already provides isolation. `flue run` is a natural fit here: one agent, one message, no port.
 
-No container startup, real project context, fast iteration. If you need a tighter boundary on a specific operation — agent can call it, never sees the underlying secret — wrap it as a custom tool via `defineAgent(() => ({ tools: [...] }))`. The tool reads `process.env`; the agent only sees the tool's params and result.
+No container startup, real project context, fast iteration. If you need a tighter boundary on a specific operation — agent can call it, never sees the underlying secret — wrap it as a custom tool via `useTool(...)` in the agent function. The tool reads `process.env`; the agent only sees the tool's params and result.
 
 ## Connecting a remote sandbox
 
@@ -304,9 +305,9 @@ Flue does not add a health endpoint or inspection routes by default. Define a ho
 
 Here's the progression of sandbox types available on Node.js, from simplest to most powerful:
 
-1. **Empty virtual sandbox** — `defineAgent(() => ({ model: 'openai/gpt-5.5' }))`. Fast, cheap, stateless. Good for prompt-and-response agents.
+1. **Empty virtual sandbox** — `defineAgent(() => {}, { model: 'openai/gpt-5.5' })`. Fast, cheap, stateless. Good for prompt-and-response agents.
 2. **Virtual sandbox with shell setup** — Use `session.shell()` to write files and configure the workspace. Still fast and cheap, good for agents that need small amounts of static context.
-3. **Local sandbox** — `defineAgent(() => ({ sandbox: local(), model: 'anthropic/claude-sonnet-4-6' }))`. Direct host filesystem and shell access. Ideal for self-hosted agents, CI tasks, and dev tooling — anywhere the host environment already provides isolation. Import `local` from `@flue/runtime/node` and pass `env: { ... }` to expose specific host env vars to the agent's shell.
+3. **Local sandbox** — `useSandbox(local())` in the agent function, with `defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' })`. Direct host filesystem and shell access. Ideal for self-hosted agents, CI tasks, and dev tooling — anywhere the host environment already provides isolation. Import `local` from `@flue/runtime/node` and pass `env: { ... }` to expose specific host env vars to the agent's shell.
 4. **Remote sandbox** — Full isolated Linux environment via a sandbox adapter. For multi-tenant agents, coding sandboxes, and anything that needs per-session isolation.
 
 Start simple. Move up when you need to.

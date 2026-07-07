@@ -313,17 +313,17 @@ remain application-owned.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
 import { retrieveCallback } from '../channels/salesforce-marketing-cloud.ts';
 import { parseEmailEventInstanceId } from '../salesforce-marketing-cloud-email.ts';
 
-export default defineAgent(({ id }) => {
+function Assistant({ id }: AgentProps) {
   const email = parseEmailEventInstanceId(id);
-  return {
-    model: 'anthropic/claude-haiku-4-5',
-    tools: [retrieveCallback(email)],
-  };
-});
+  useTool(retrieveCallback(email));
+  return 'Review the inbound Salesforce Marketing Cloud email lifecycle event. Retrieve the configured ENS callback when callback status or delivery configuration is relevant.';
+}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
 The tool accepts no tenant origin, callback id, access token, or resource id

@@ -25,9 +25,9 @@ Use a model specifier to choose an agent's default model:
 ```ts title="src/agents/assistant.ts"
 import { defineAgent } from '@flue/runtime';
 
-export default defineAgent(() => ({
-  model: 'anthropic/claude-sonnet-4-6',
-}));
+function Assistant() {}
+
+export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 Model specifiers can also be supplied by reusable profiles and subagents, or used to override the default model for an individual prompt, skill, or task operation. Responses report the selected model as `{ provider, id }`, preserving the provider ID and model ID from this specifier. See [Agents](/docs/guide/building-agents/), [Subagents](/docs/guide/subagents/), and the [Agent API](/docs/api/agent-api/) for those API-specific behaviors.
@@ -50,10 +50,12 @@ Set the ordinary reasoning effort for an agent alongside its model:
 ```ts title="src/agents/reviewer.ts"
 import { defineAgent } from '@flue/runtime';
 
-export default defineAgent(() => ({
+function Reviewer() {}
+
+export default defineAgent(Reviewer, {
   model: 'anthropic/claude-sonnet-4-6',
   thinkingLevel: 'high',
-}));
+});
 ```
 
 Like a model specifier, `thinkingLevel` can be supplied by a reusable profile or overridden for an individual prompt, skill, or task operation. If no level is configured, Flue uses `'medium'`.
@@ -143,9 +145,9 @@ The registered provider ID is now available anywhere you select a model:
 ```ts title="src/agents/local-assistant.ts"
 import { defineAgent } from '@flue/runtime';
 
-export default defineAgent(() => ({
-  model: 'ollama/llama3.1:8b',
-}));
+function LocalAssistant() {}
+
+export default defineAgent(LocalAssistant, { model: 'ollama/llama3.1:8b' });
 ```
 
 A provider registration can also supply authentication, headers, and model metadata when your endpoint requires them. Most OpenAI-compatible services can use the built-in `openai-completions` protocol shown above. For an endpoint with a different wire protocol, advanced integrations can import `registerApiProvider(...)` from `@flue/runtime` and use it to register that protocol before registering a provider ID for it.
@@ -161,9 +163,9 @@ Everything after `cloudflare/` is passed as the model ID to `env.AI.run(...)`. U
 ```ts title="src/agents/assistant.ts"
 import { defineAgent } from '@flue/runtime';
 
-export default defineAgent(() => ({
-  model: 'cloudflare/@cf/moonshotai/kimi-k2.6',
-}));
+function Assistant() {}
+
+export default defineAgent(Assistant, { model: 'cloudflare/@cf/moonshotai/kimi-k2.6' });
 ```
 
 Declare an `AI` binding in your project's Wrangler configuration:
