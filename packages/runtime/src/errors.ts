@@ -361,6 +361,53 @@ export class InvalidRequestError extends FlueHttpError {
 	}
 }
 
+/**
+ * A conditional send (`uid: '<value>'` — continue only the known
+ * incarnation) named an instance that does not exist or whose uid does not
+ * match. Raised synchronously at admission; nothing durable is created.
+ */
+export class AgentInstanceNotFoundError extends FlueHttpError {
+	constructor({ id }: { id: string }) {
+		super({
+			type: 'agent_instance_not_found',
+			message: `Agent instance "${id}" was not found.`,
+			// One message for absent-instance and uid-mismatch: to a caller
+			// holding a uid condition, "the incarnation you know" not existing
+			// is the same outcome either way.
+			details:
+				'No instance with this id and uid exists. The id may be wrong, or the instance was re-created and this uid names its previous incarnation. Send without a uid to deliver unconditionally.',
+			dev: '',
+			status: 404,
+		});
+	}
+}
+
+/**
+ * A conditional send (`uid: null` — create only when fresh) named an
+ * instance that already exists. Raised synchronously at admission; nothing
+ * durable is created. `details` hands back the existing uid — the condition
+ * is accident prevention for the caller, not access control — so the caller
+ * can continue the existing instance without a separate lookup.
+ */
+export class AgentInstanceExistsError extends FlueHttpError {
+	constructor({ id, uid }: { id: string; uid: string | undefined }) {
+		super({
+			type: 'agent_instance_exists',
+			message: `Agent instance "${id}" already exists.`,
+			details:
+				uid === undefined
+					? 'The instance was created before uids shipped; continue it by sending without a uid condition, or pick a fresh id to create.'
+					: `Continue it with uid "${uid}", or pick a fresh id to create.`,
+			dev: '',
+			status: 409,
+		});
+		this.uid = uid;
+	}
+
+	/** The existing instance's uid, when its birth record carries one. */
+	readonly uid: string | undefined;
+}
+
 // ─── Persistence error vocabulary ───────────────────────────────────────────
 
 /**

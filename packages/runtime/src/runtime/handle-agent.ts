@@ -24,6 +24,7 @@ function isDispatchInput(value: unknown): value is DispatchInput {
 		input.id.trim() !== '' &&
 		!!input.message &&
 		typeof input.message === 'object' &&
+		(input.uid === undefined || input.uid === null || typeof input.uid === 'string') &&
 		typeof input.acceptedAt === 'string' &&
 		input.acceptedAt.trim() !== ''
 	);
@@ -99,16 +100,22 @@ export async function handleAgentRequest(opts: HandleAgentOptions): Promise<Resp
 					"Await completion with the SDK client's `wait()`, or read the conversation stream (GET this URL).",
 			});
 		}
-		// The wire body IS a DeliveredMessage (plus an optional reserved `data`
-		// sibling for instance creation) — the same validated shape a
-		// `dispatch()` call admits, so both transports share one schema and
-		// produce the same structured InvalidRequestError on bad input.
-		const { message, data } = parseDeliveredInput(await parseJsonBody(request));
+		// The wire body IS a DeliveredMessage (plus optional reserved `data` and
+		// `uid` siblings for instance creation / send conditions) — the same
+		// validated shape a `dispatch()` call admits, so both transports share
+		// one schema and produce the same structured InvalidRequestError on bad
+		// input.
+		const { message, data, uid } = parseDeliveredInput(await parseJsonBody(request));
 		const traceCarrier = extractTraceCarrier(request.headers);
 		const streamUrl = invocationStreamUrl(request);
-		const receipt = await opts.admitAttachedSubmission(message, traceCarrier, data);
+		const receipt = await opts.admitAttachedSubmission(message, traceCarrier, data, uid);
 		return admissionResponse(
-			{ streamUrl, offset: receipt.offset, submissionId: receipt.submissionId },
+			{
+				streamUrl,
+				offset: receipt.offset,
+				submissionId: receipt.submissionId,
+				...(receipt.uid !== undefined ? { uid: receipt.uid } : {}),
+			},
 			streamUrl,
 			receipt.offset,
 		);

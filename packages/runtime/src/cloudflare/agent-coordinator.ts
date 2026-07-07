@@ -6,14 +6,20 @@ import type {
 } from '../agent-execution-store.ts';
 import type { FlueContextInternal } from '../client.ts';
 import { ConversationRecordWriter } from '../conversation-writer.ts';
-import { InvalidRequestError, SubmissionAbortedError } from '../errors.ts';
+import {
+	AgentInstanceExistsError,
+	AgentInstanceNotFoundError,
+	InvalidRequestError,
+	SubmissionAbortedError,
+} from '../errors.ts';
 import type { FlueTraceCarrier } from '../execution-interceptor.ts';
 import {
+	admitInstanceContact,
 	agentSubmissionDispatchId,
-	assertAdmissibleCreationData,
 	type createAgentSubmissionSessionHandler,
 	createDirectAgentSubmissionInput,
 	createDispatchAgentSubmissionInput,
+	type InstanceContactAdmission,
 	materializeAgentSubmissionSession,
 	processSubmission,
 	reconcileInterruptedSubmission,
@@ -273,8 +279,8 @@ class CloudflareAgentCoordinator {
 			request,
 			id: this.instance.name,
 			agentName: this.agentName,
-			admitAttachedSubmission: (message, traceCarrier, data) =>
-				this.admitAttachedSubmission(message, traceCarrier),
+			admitAttachedSubmission: (message, traceCarrier, data, uid) =>
+				this.admitAttachedSubmission(message, traceCarrier, data, uid),
 		});
 	}
 
@@ -702,6 +708,7 @@ class CloudflareAgentCoordinator {
 		message: DeliveredMessage,
 		traceCarrier?: FlueTraceCarrier,
 		data?: unknown,
+		uid?: string | null,
 	) {
 		const input = createDirectAgentSubmissionInput({
 			agent: this.agentName,
@@ -712,9 +719,11 @@ class CloudflareAgentCoordinator {
 		});
 		const agent = this.options.agents.find((record) => record.name === this.agentName)?.definition;
 		if (!agent) throw new Error('[flue] Agent target unavailable during durable admission.');
-		await assertAdmissibleCreationData({
+		const contact = await admitInstanceContact({
 			agent,
+			id: this.instance.name,
 			data,
+			uid,
 			loadReducedState: async () => (await this.ensureConversationWriter()).loadReducedState(),
 		});
 		const admitted = await this.submissions.admitDirect(input);
@@ -722,10 +731,16 @@ class CloudflareAgentCoordinator {
 			await this.materializeSubmissionConversation(input, agent);
 			await this.submissions.markSubmissionCanonicalReady(input.submissionId);
 		}
-		const offset = (await this.ensureConversationWriter()).offset;
+		const writer = await this.ensureConversationWriter();
+		const offset = writer.offset;
+		const instanceUid = contact.uid ?? (await writer.loadReducedState()).uid;
 		await this.armSubmissionWake();
 		await this.reconcileSubmissions({ driverAlreadyArmed: true });
-		return { submissionId: input.submissionId, offset };
+		return {
+			submissionId: input.submissionId,
+			offset,
+			...(instanceUid !== undefined ? { uid: instanceUid } : {}),
+		};
 	}
 
 	private async admitDispatch(request: Request): Promise<Response> {
@@ -736,23 +751,39 @@ class CloudflareAgentCoordinator {
 		}
 		const agent = this.options.agents.find((record) => record.name === this.agentName)?.definition;
 		if (!agent) return new Response('Dispatch target unavailable.', { status: 404 });
+		let contact: InstanceContactAdmission;
 		try {
-			await assertAdmissibleCreationData({
+			contact = await admitInstanceContact({
 				agent,
+				id: this.instance.name,
 				data: input.data,
+				uid: input.uid,
 				loadReducedState: async () => (await this.ensureConversationWriter()).loadReducedState(),
 			});
 		} catch (error) {
-			if (error instanceof InvalidRequestError) {
-				return new Response(error.message, { status: 400 });
+			// Structured body so the dispatch() caller's enqueue can rethrow with
+			// the caller-safe details (e.g. the 409's existing uid) intact.
+			if (
+				error instanceof InvalidRequestError ||
+				error instanceof AgentInstanceNotFoundError ||
+				error instanceof AgentInstanceExistsError
+			) {
+				return Response.json(
+					{ error: error.message, details: error.details },
+					{ status: error.status },
+				);
 			}
 			throw error;
 		}
+		const resolveUid = async () =>
+			contact.uid ?? (await (await this.ensureConversationWriter()).loadReducedState()).uid;
 		const admission = await this.submissions.admitDispatch(input);
 		if (admission.kind === 'retained_receipt') {
+			const uid = await resolveUid();
 			return Response.json({
 				dispatchId: admission.receipt.submissionId,
 				acceptedAt: new Date(admission.receipt.acceptedAt).toISOString(),
+				...(uid !== undefined ? { uid } : {}),
 			});
 		}
 		if (admission.kind === 'conflict') {
@@ -763,11 +794,13 @@ class CloudflareAgentCoordinator {
 			const ready = await this.submissions.markSubmissionCanonicalReady(input.dispatchId);
 			if (!ready) throw new Error('[flue] Dispatch admission disappeared before canonical readiness.');
 		}
+		const uid = await resolveUid();
 		await this.armSubmissionWake();
 		await this.reconcileSubmissions({ driverAlreadyArmed: true });
 		return Response.json({
 			dispatchId: admission.submission.submissionId,
 			acceptedAt: input.acceptedAt,
+			...(uid !== undefined ? { uid } : {}),
 		});
 	}
 }

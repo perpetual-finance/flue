@@ -81,12 +81,24 @@ export interface AgentDispatchRequest {
 	/** The message delivered to the session. Flue snapshots the value at admission time. */
 	message: DeliveredMessage;
 	/**
-	 * Instance-creation data. Takes effect only when this dispatch is the
-	 * instance's first contact: validated against the agent's `input:` schema
+	 * Instance-creation data — the seed, consulted only when this send
+	 * creates the instance: validated against the agent's `input:` schema
 	 * (when declared) and recorded once, readable forever via
-	 * `useInitialData()`. Ignored when the instance already exists.
+	 * `useInitialData()`. Ignored when the send continues an existing
+	 * instance (pair with `uid: null` to error instead).
 	 */
 	data?: unknown;
+	/**
+	 * Send condition — sends are conditional requests, with the instance uid
+	 * playing the ETag:
+	 * - omitted: unconditional; continues the instance or creates it.
+	 * - a string: continue only the incarnation with this uid; a missing
+	 *   instance or mismatched uid rejects at admission (404, nothing
+	 *   durable). Cannot be combined with `data`.
+	 * - `null`: create only when no instance exists; an existing instance
+	 *   rejects at admission (409, its uid in the error details).
+	 */
+	uid?: string | null;
 }
 
 /**
@@ -105,6 +117,13 @@ export interface DispatchReceipt {
 	dispatchId: string;
 	/** ISO timestamp assigned when dispatch admission begins. */
 	acceptedAt: string;
+	/**
+	 * The contacted instance's uid — minted at birth when this send created
+	 * the instance, echoed when it continued one. Pass it back as the `uid`
+	 * send condition to guarantee later sends reach this same incarnation.
+	 * Absent for instances created before uids shipped.
+	 */
+	uid?: string;
 }
 
 /**

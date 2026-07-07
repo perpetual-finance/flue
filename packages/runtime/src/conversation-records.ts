@@ -57,6 +57,16 @@ export type ConversationCreatedRecord = ConversationCreatedRecordBase &
 				 * `useInitialData()`; never re-validated after creation.
 				 */
 				data?: unknown;
+				/**
+				 * The instance uid: a server-minted identifier recorded exactly
+				 * once at birth, constant for the incarnation's whole life. The
+				 * instance id is the address (client-chosen, reusable); the uid
+				 * names this incarnation. Callers use it as a send condition
+				 * (`uid` continues only this incarnation; `uid: null` creates
+				 * only when fresh). Absent on records written before uids
+				 * shipped.
+				 */
+				uid?: string;
 		  }
 		| {
 				kind: 'task';

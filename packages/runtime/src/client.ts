@@ -13,6 +13,7 @@ import { type AgentOutputChannel, createAgentOutputChannel } from './message-out
 import { type AttachmentStore, InMemoryAttachmentStore } from './runtime/attachment-store.ts';
 import { InMemoryConversationStreamStore } from './runtime/conversation-stream-store.ts';
 import { dispatchGlobalEvent } from './runtime/events.ts';
+import { generateInstanceUid } from './runtime/ids.ts';
 import { agentStreamPath } from './runtime/stream-offsets.ts';
 import { createCwdSessionEnv } from './sandbox.ts';
 import type { SessionRerender } from './session.ts';
@@ -280,6 +281,7 @@ export async function initializeRootHarness(
 	// stores.
 	let initialData: unknown;
 	let creationData: unknown;
+	let creationUid: string | undefined;
 	if (reduced.initialData) {
 		initialData = reduced.initialData.value;
 	} else {
@@ -296,6 +298,11 @@ export async function initializeRootHarness(
 			initialData = parsedData.output;
 		}
 		creationData = initialData;
+		// The birth record always carries a uid, minted HERE and only here —
+		// never at admission — so the durable submission payload stays
+		// deterministic (dispatch replays remain idempotent). Coordinators
+		// read the recorded value back post-materialization for receipts.
+		creationUid = generateInstanceUid();
 	}
 	const hookState = createHookStateBuffer(reduced.state);
 	const outputChannel = createAgentOutputChannel();
@@ -385,6 +392,7 @@ export async function initializeRootHarness(
 		rerender,
 		outputChannel,
 		creationData,
+		creationUid,
 	);
 }
 

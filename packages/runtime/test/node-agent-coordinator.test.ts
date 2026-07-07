@@ -1564,7 +1564,11 @@ describe('NodeAgentCoordinator', () => {
 
 			const replay = await queue.enqueue(input);
 			expect(replay).toEqual(first);
-			expect(replay).toEqual({ dispatchId: 'dispatch-replay', acceptedAt: input.acceptedAt });
+			expect(replay).toEqual({
+				dispatchId: 'dispatch-replay',
+				acceptedAt: input.acceptedAt,
+				uid: expect.stringMatching(/^inst_/),
+			});
 		});
 
 		it('throws when a dispatch id is replayed with a conflicting payload', async () => {

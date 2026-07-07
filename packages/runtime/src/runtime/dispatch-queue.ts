@@ -5,8 +5,15 @@ export interface DispatchInput {
 	agent: string;
 	id: string;
 	message: DeliveredMessage;
-	/** Instance-creation data; consulted only on the instance's first contact. */
+	/** Instance-creation data; the seed, consulted only when this send creates. */
 	data?: unknown;
+	/**
+	 * Send condition, consumed at admission and never stored durably: a
+	 * string continues only the incarnation with that uid (else 404); `null`
+	 * creates only when no instance exists (else 409). Omit to send
+	 * unconditionally.
+	 */
+	uid?: string | null;
 	acceptedAt: string;
 }
 

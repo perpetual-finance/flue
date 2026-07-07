@@ -92,6 +92,12 @@ export class Harness implements FlueHarness {
 		 * root conversation's birth record.
 		 */
 		private creationData?: unknown,
+		/**
+		 * The instance uid to record at birth; present only when this harness
+		 * is the instance's first contact. Minted at admission (so receipts
+		 * agree with the record) or by initializeRootHarness as fallback.
+		 */
+		private creationUid?: string,
 	) {
 		this.fs = createFlueFs(env);
 		if (scopeSignal) {
@@ -190,6 +196,7 @@ export class Harness implements FlueHarness {
 					affinityKey: identity.affinityKey,
 					createdAt: identity.createdAt,
 					...(this.creationData !== undefined ? { data: this.creationData } : {}),
+					...(this.creationUid !== undefined ? { uid: this.creationUid } : {}),
 				});
 			conversation = await this.conversationWriter.findConversation(harnessScope, sessionName);
 			if (!conversation)

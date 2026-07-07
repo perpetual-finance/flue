@@ -201,6 +201,11 @@ export interface ReducedInstanceState {
 	 * carried no data. Absent before first contact.
 	 */
 	initialData?: { value: unknown };
+	/**
+	 * The instance uid from the root conversation's birth record. Absent
+	 * before first contact and for instances created before uids shipped.
+	 */
+	uid?: string;
 }
 
 export interface ConversationProjectionOptions {
@@ -242,6 +247,7 @@ function cloneReducedInstanceState(state: ReducedInstanceState): ReducedInstance
 		state: new Map(state.state),
 		effectRuns: new Map(state.effectRuns),
 		...(state.initialData ? { initialData: state.initialData } : {}),
+		...(state.uid !== undefined ? { uid: state.uid } : {}),
 		conversations: new Map(
 			[...state.conversations].map(([id, conversation]) => [
 				id,
@@ -338,6 +344,7 @@ export function applyConversationRecord(
 		state.recordsById.set(record.id, record);
 		if (record.kind === 'root') {
 			state.initialData = { value: record.data };
+			if (record.uid !== undefined) state.uid = record.uid;
 		}
 		return;
 	}

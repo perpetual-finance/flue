@@ -185,7 +185,21 @@ const dispatchQueue = {
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify(input),
 		}));
-		if (!response.ok) throw new Error('[flue] dispatch() target agent "' + input.agent + '" rejected durable admission with status ' + response.status + '.');
+		if (!response.ok) {
+			// Admission rejections (failed uid conditions, invalid creation data)
+			// arrive as structured JSON — surface the caller-safe details instead
+			// of a bare status.
+			let rejection;
+			try { rejection = await response.json(); } catch {}
+			if (rejection && typeof rejection.error === 'string') {
+				const details = typeof rejection.details === 'string' ? ' ' + rejection.details : '';
+				throw Object.assign(
+					new Error('[flue] dispatch() target agent "' + input.agent + '" rejected admission: ' + rejection.error + details),
+					{ status: response.status, details: rejection.details },
+				);
+			}
+			throw new Error('[flue] dispatch() target agent "' + input.agent + '" rejected durable admission with status ' + response.status + '.');
+		}
 		return response.json();
 	},
 };

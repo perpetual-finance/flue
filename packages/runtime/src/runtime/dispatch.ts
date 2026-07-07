@@ -13,12 +13,18 @@ export async function enqueueDispatch(options: {
 }): Promise<DispatchReceipt> {
 	const agent = options.request.agent;
 	const message = validateDispatchRequest(options.request, agent, options.rt);
+	if (typeof options.request.uid === 'string' && options.request.data !== undefined) {
+		throw new Error(
+			'[flue] dispatch() cannot combine a continue condition (`uid`) with creation `data` — the condition forbids creation, so the seed could never apply.',
+		);
+	}
 	return options.dispatchQueue.enqueue({
 		dispatchId: crypto.randomUUID(),
 		agent,
 		id: options.request.id,
 		message,
 		...(options.request.data !== undefined ? { data: options.request.data } : {}),
+		...(options.request.uid !== undefined ? { uid: options.request.uid } : {}),
 		acceptedAt: new Date().toISOString(),
 	});
 }

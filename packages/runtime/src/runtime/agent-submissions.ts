@@ -9,6 +9,8 @@ import type {
 import type { FlueContextInternal } from '../client.ts';
 import type { ConversationRecordWriter } from '../conversation-writer.ts';
 import {
+	AgentInstanceExistsError,
+	AgentInstanceNotFoundError,
 	FlueError,
 	InvalidRequestError,
 	SubmissionAbortedError,
@@ -108,42 +110,105 @@ export interface AgentSubmissionSession {
 interface AttachedAgentSubmissionReceipt {
 	readonly submissionId: string;
 	readonly offset: string;
+	/** The instance uid: minted when this submission created, echoed when it continued. */
+	readonly uid?: string;
 }
 
 export type AttachedAgentSubmissionAdmission = (
 	message: DeliveredMessage,
 	traceCarrier?: FlueTraceCarrier,
 	data?: unknown,
+	uid?: string | null,
 ) => Promise<AttachedAgentSubmissionReceipt>;
 
+/** Resolution of one send's admission against the instance's current state. */
+export interface InstanceContactAdmission {
+	/**
+	 * The existing instance's uid when the send continues one. Undefined for
+	 * creating sends (the birth record mints; coordinators read it back
+	 * post-materialization for the receipt), pre-uid instances, and
+	 * storeless admissions.
+	 */
+	readonly uid: string | undefined;
+	/** True when admission observed no existing instance (this send may create). */
+	readonly creating: boolean;
+}
+
 /**
- * Admission-side gate for instance-creation data. When the agent declares an
- * `input:` schema and the instance does not exist yet, the incoming `data`
- * (or its absence) must satisfy the schema — rejected here, synchronously,
- * BEFORE anything durable is admitted, so an invalid creation attempt leaves
- * no queued submission behind. Existing instances skip the check entirely
- * (their data is ignored downstream). `initializeRootHarness` re-validates as
- * the processing-path backstop.
+ * Admission-side gate for one send's contact with an instance — sends are
+ * CONDITIONAL requests (the uid plays the ETag):
+ *
+ * - no condition: unconditional deliver — continues an existing instance or
+ *   creates a fresh one; `data` is the seed, consulted only when creating.
+ * - `uid: '<value>'`: continue only the incarnation the caller knows —
+ *   absent instance or mismatched uid throws {@link AgentInstanceNotFoundError}.
+ *   Combining with `data` is a contradiction (the condition forbids
+ *   creation, so a seed is dead weight) and throws.
+ * - `uid: null`: create only when fresh — an existing instance throws
+ *   {@link AgentInstanceExistsError} with the existing uid in its details.
+ *
+ * Creating sends additionally validate `data` against the agent's `input:`
+ * schema (when declared). Everything here runs synchronously BEFORE anything
+ * durable is admitted, so a failed condition or invalid creation leaves no
+ * queued submission behind. The uid itself is minted at birth (inside
+ * `initializeRootHarness`) — never here — so the durable submission payload
+ * stays deterministic and dispatch replays remain idempotent; coordinators
+ * read the recorded uid back after materialization for the receipt.
  */
-export async function assertAdmissibleCreationData(options: {
+export async function admitInstanceContact(options: {
 	agent: AgentModuleValue;
+	id: string;
 	data: unknown;
-	loadReducedState: () => Promise<{ initialData?: { value: unknown } } | undefined>;
-}): Promise<void> {
-	const schema = options.agent.config?.input;
-	if (schema === undefined) return;
-	const reduced = await options.loadReducedState();
-	if (!reduced || reduced.initialData) return;
-	const parsed = v.safeParse(schema, options.data);
-	if (!parsed.success) {
+	uid: string | null | undefined;
+	loadReducedState: () => Promise<
+		{ initialData?: { value: unknown }; uid?: string } | undefined
+	>;
+}): Promise<InstanceContactAdmission> {
+	const condition = options.uid;
+	if (typeof condition === 'string' && options.data !== undefined) {
 		throw new InvalidRequestError({
 			reason:
-				`The agent requires creation data matching its input schema: ${parsed.issues
-					.map((issue) => issue.message)
-					.join('; ')}. ` +
-				'Creation data rides the instance\'s first message ({ data, ... } beside the message).',
+				'A send conditioned on an existing instance (`uid`) cannot carry creation `data` — the condition forbids creation, so the seed could never apply.',
 		});
 	}
+	const reduced = await options.loadReducedState();
+	if (!reduced) {
+		// No conversation store to consult (degenerate/storeless configs).
+		// Conditions cannot be verified; refuse them rather than guess.
+		if (condition !== undefined) {
+			throw new InvalidRequestError({
+				reason:
+					'Conditional sends (`uid`) require the runtime conversation store, which is unavailable here. Send without a uid condition.',
+			});
+		}
+		return { uid: undefined, creating: false };
+	}
+	const exists = reduced.initialData !== undefined;
+	if (typeof condition === 'string') {
+		if (!exists || reduced.uid !== condition) {
+			throw new AgentInstanceNotFoundError({ id: options.id });
+		}
+		return { uid: reduced.uid, creating: false };
+	}
+	if (condition === null && exists) {
+		throw new AgentInstanceExistsError({ id: options.id, uid: reduced.uid });
+	}
+	if (exists) return { uid: reduced.uid, creating: false };
+
+	const schema = options.agent.config?.input;
+	if (schema !== undefined) {
+		const parsed = v.safeParse(schema, options.data);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				reason:
+					`The agent requires creation data matching its input schema: ${parsed.issues
+						.map((issue) => issue.message)
+						.join('; ')}. ` +
+					'Creation data rides the instance\'s first message ({ data, ... } beside the message).',
+			});
+		}
+	}
+	return { uid: undefined, creating: true };
 }
 
 export function createDispatchAgentSubmissionInput(input: DispatchInput): AgentSubmissionInput {

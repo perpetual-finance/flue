@@ -10,8 +10,8 @@ import { SubmissionAbortedError } from '../errors.ts';
 import {
 	type AgentSubmissionInput,
 	type AttachedAgentSubmissionAdmission,
+	admitInstanceContact,
 	agentSubmissionDispatchId,
-	assertAdmissibleCreationData,
 	createDirectAgentSubmissionInput,
 	createDispatchAgentSubmissionInput,
 	materializeAgentSubmissionSession,
@@ -36,8 +36,12 @@ import type {
 export interface NodeAgentCoordinator {
 	/** Call once at startup to reconcile interrupted work from a previous process. */
 	reconcileSubmissions(): Promise<void>;
-	/** Admit a dispatch. The submission is persisted durably; processing is asynchronous. */
-	admitDispatch(input: DispatchInput): Promise<AgentDispatchAdmission>;
+	/**
+	 * Admit a dispatch. The submission is persisted durably; processing is
+	 * asynchronous. `uid` is the contacted instance's uid (recorded at birth
+	 * for a creating send, read back for the receipt).
+	 */
+	admitDispatch(input: DispatchInput): Promise<AgentDispatchAdmission & { uid?: string }>;
 	/**
 	 * Abort all in-flight and queued durable work for an agent instance. Records
 	 * the durable abort intent on every unsettled submission for the instance
@@ -89,6 +93,7 @@ export function createNodeDispatchQueue(coordinator: NodeAgentCoordinator): Disp
 				return {
 					dispatchId: admission.receipt.submissionId,
 					acceptedAt: new Date(admission.receipt.acceptedAt).toISOString(),
+					...(admission.uid !== undefined ? { uid: admission.uid } : {}),
 				};
 			}
 			if (admission.kind === 'conflict') {
@@ -99,6 +104,7 @@ export function createNodeDispatchQueue(coordinator: NodeAgentCoordinator): Disp
 			return {
 				dispatchId: admission.submission.submissionId,
 				acceptedAt: input.acceptedAt,
+				...(admission.uid !== undefined ? { uid: admission.uid } : {}),
 			};
 		},
 	};
@@ -573,20 +579,23 @@ export function createNodeAgentCoordinator(options: {
 					throw new Error(`[flue] dispatch target agent "${input.agent}" has no agent definition.`);
 				}
 
-				await assertAdmissibleCreationData({
+				const loadReducedState = async () => {
+					const writer = await getConversationWriter(createDispatchAgentSubmissionInput(input));
+					return writer?.loadReducedState();
+				};
+				const contact = await admitInstanceContact({
 					agent,
+					id: input.id,
 					data: input.data,
-					loadReducedState: async () => {
-						const writer = await getConversationWriter(
-							createDispatchAgentSubmissionInput(input),
-						);
-						return writer?.loadReducedState();
-					},
+					uid: input.uid,
+					loadReducedState,
 				});
 				const admission = await submissions.admitDispatch(input);
 				if (admission.kind !== 'submission') {
 					activityLease?.release();
-					return admission;
+					if (admission.kind !== 'retained_receipt') return admission;
+					const uid = contact.uid ?? (await loadReducedState())?.uid;
+					return { ...admission, ...(uid !== undefined ? { uid } : {}) };
 				}
 				let submission = admission.submission;
 				if (submission.canonicalReadyAt === null) {
@@ -594,11 +603,15 @@ export function createNodeAgentCoordinator(options: {
 					submission =
 						(await submissions.markSubmissionCanonicalReady(submission.submissionId)) ?? submission;
 				}
+				// The uid rides every receipt: read back post-materialization for a
+				// creating send (the birth record is the mint site), echoed for a
+				// continuing one.
+				const uid = contact.uid ?? (await loadReducedState())?.uid;
 
 				if (activityLease) activityLeases.set(submission.submissionId, activityLease);
 				ensureClaimLoop();
 				wake();
-				return { kind: 'submission', submission };
+				return { kind: 'submission', submission, ...(uid !== undefined ? { uid } : {}) };
 			} catch (error) {
 				activityLease?.release();
 				throw error;
@@ -641,6 +654,7 @@ export function createNodeAgentCoordinator(options: {
 				message: DeliveredMessage,
 				traceCarrier?: import('../execution-interceptor.ts').FlueTraceCarrier,
 				data?: unknown,
+				uid?: string | null,
 			) => {
 				if (stopping) throw new Error('[flue] Coordinator is shutting down.');
 				const activityLease = activityGate?.enter();
@@ -659,13 +673,16 @@ export function createNodeAgentCoordinator(options: {
 				});
 
 				try {
-					await assertAdmissibleCreationData({
+					const loadReducedState = async () => {
+						const writer = await getConversationWriter(input);
+						return writer?.loadReducedState();
+					};
+					const contact = await admitInstanceContact({
 						agent,
+						id: instanceId,
 						data,
-						loadReducedState: async () => {
-							const writer = await getConversationWriter(input);
-							return writer?.loadReducedState();
-						},
+						uid,
+						loadReducedState,
 					});
 					const admitted = await submissions.admitDirect(input);
 					if (admitted.canonicalReadyAt === null) {
@@ -675,10 +692,15 @@ export function createNodeAgentCoordinator(options: {
 					}
 					const writer = await getConversationWriter(input);
 					const offset = writer?.offset ?? '-1';
+					const instanceUid = contact.uid ?? (await loadReducedState())?.uid;
 					if (activityLease) activityLeases.set(input.submissionId, activityLease);
 					ensureClaimLoop();
 					wake();
-					return { submissionId: input.submissionId, offset };
+					return {
+						submissionId: input.submissionId,
+						offset,
+						...(instanceUid !== undefined ? { uid: instanceUid } : {}),
+					};
 				} catch (error) {
 					activityLease?.release();
 					throw error;

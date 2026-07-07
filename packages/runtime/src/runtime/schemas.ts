@@ -76,20 +76,36 @@ export function parseDeliveredMessage(value: unknown): DeliveredMessage {
 
 /**
  * Validate a raw direct-HTTP body as a delivered input: a
- * {@link DeliveredMessage} with an optional `data` sibling carrying
- * instance-creation data. `data` is a reserved top-level key on the message
- * wire — it is peeled off before message validation and takes effect only on
- * the instance's first contact.
+ * {@link DeliveredMessage} with optional reserved top-level siblings, peeled
+ * off before message validation —
+ * - `data`: instance-creation data (the seed, used only when the send
+ *   creates the instance);
+ * - `uid`: the send condition (a string continues only that incarnation;
+ *   `null` creates only when fresh; omitted sends unconditionally).
  */
 export function parseDeliveredInput(value: unknown): {
 	message: DeliveredMessage;
 	data?: unknown;
+	uid?: string | null;
 } {
-	if (value && typeof value === 'object' && !Array.isArray(value) && 'data' in value) {
-		const { data, ...rest } = value as Record<string, unknown>;
-		return { message: parseDeliveredMessage(rest), ...(data !== undefined ? { data } : {}) };
+	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+		return { message: parseDeliveredMessage(value) };
 	}
-	return { message: parseDeliveredMessage(value) };
+	if (!('data' in value) && !('uid' in value)) {
+		return { message: parseDeliveredMessage(value) };
+	}
+	const { data, uid, ...rest } = value as Record<string, unknown>;
+	if ('uid' in value && uid !== null && typeof uid !== 'string') {
+		throw new InvalidRequestError({
+			reason:
+				'`uid` must be a string (continue only that incarnation) or null (create only when fresh).',
+		});
+	}
+	return {
+		message: parseDeliveredMessage(rest),
+		...(data !== undefined ? { data } : {}),
+		...('uid' in value ? { uid: uid as string | null } : {}),
+	};
 }
 
 /** `?wait` query contract for the agent prompt route. */

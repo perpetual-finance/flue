@@ -3,6 +3,8 @@
 
 export { defineAgent } from './agent-definition.ts';
 export {
+	AgentInstanceExistsError,
+	AgentInstanceNotFoundError,
 	AttachmentNotAvailableError,
 	DelegationDepthExceededError,
 	FlueError,
