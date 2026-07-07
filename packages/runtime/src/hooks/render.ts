@@ -47,6 +47,11 @@ export interface AgentRenderStructure {
 	skillNames: readonly string[];
 	subagentNames: readonly string[];
 	hasSandbox: boolean;
+	/**
+	 * `useEffect` declarations this render. Effects have no names — identity
+	 * is call order — so the count (with the rules of hooks) pins the order.
+	 */
+	effectCount: number;
 }
 
 /** `renderAgentFunction` plus the render's structural fingerprint. */
@@ -58,14 +63,16 @@ export function renderAgentFunctionWithStructure(
 	const { result, frame } = renderWithFrame(capability, state);
 	assertAgentInstruction(result);
 	assertUniqueToolNames(frame);
-	// Hand the render's metadata producers to the session through the shared
-	// output channel — replaced wholesale each render, so per-turn re-renders
-	// refresh the closures the same way tools and instructions refresh.
+	// Hand the render's metadata producers and effect declarations to the
+	// session through the shared output channel — replaced wholesale each
+	// render, so per-turn re-renders refresh the closures the same way tools
+	// and instructions refresh.
 	if (state?.output) {
 		state.output.producers = {
 			start: [...frame.metadataProducers.start],
 			finish: [...frame.metadataProducers.finish],
 		};
+		state.output.effects = [...frame.effects];
 	}
 	const instructions = composeAgentDocument(result, frame);
 	const tools = [...frame.root.tools, ...frame.capabilities.flatMap((record) => record.tools)];
@@ -91,6 +98,7 @@ export function renderAgentFunctionWithStructure(
 			skillNames: frame.skills.map((skill) => skill.name),
 			subagentNames: frame.subagents.map((subagent) => subagent.name),
 			hasSandbox: frame.sandbox !== undefined,
+			effectCount: frame.effects.length,
 		},
 	};
 }
@@ -164,6 +172,9 @@ export function assertRenderStructureInvariance(
 	if (subagentDelta) problems.push(`subagents ${subagentDelta}`);
 	if (previous.hasSandbox !== next.hasSandbox) {
 		problems.push(`sandbox ${next.hasSandbox ? 'added' : 'removed'}`);
+	}
+	if (previous.effectCount !== next.effectCount) {
+		problems.push(`effect count changed (${previous.effectCount} → ${next.effectCount})`);
 	}
 	if (problems.length > 0) {
 		throw new Error(

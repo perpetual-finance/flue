@@ -1,4 +1,4 @@
-import type { PromptUsage } from './types.ts';
+import type { FlueHarness, FlueLogger, PromptUsage } from './types.ts';
 
 /**
  * The write channels behind the output hooks. Client-facing output
@@ -51,16 +51,42 @@ export interface AgentSignalAppend {
 }
 
 /**
+ * The context a `useEffect` run callback receives. `log` emits progress lines
+ * into the conversation stream (the model never sees them); `signal` is the
+ * submission's abort signal; `harness` is the invocation-scoped runtime
+ * surface (sandbox `shell`/`fs`, child sessions, model calls) — available on
+ * every effect, materialized lazily on first access, so an effect that never
+ * touches it pays nothing.
+ */
+export interface EffectContext {
+	readonly harness: FlueHarness;
+	readonly log: FlueLogger;
+	readonly signal: AbortSignal;
+}
+
+/**
+ * One `useEffect` declaration from a render: the run callback plus the JSON
+ * fingerprint of its deps array, computed at render time. Identity is the
+ * declaration index (position in this list).
+ */
+export interface AgentEffectDeclaration {
+	run: (ctx: EffectContext) => void | Promise<void>;
+	fingerprint: string;
+}
+
+/**
  * The output channel shared between renders and the session, mirroring the
  * `useState` buffer pattern: created once per harness lifetime, handed to
- * both sides. Renders replace `producers` wholesale each render (fresh
- * closures); `useMessageData` writers call `writeMessageData` and `useAppend`
- * writers call `appendSignal`; the session connects the sinks that append
- * durable records.
+ * both sides. Renders replace `producers` and `effects` wholesale each render
+ * (fresh closures); `useMessageData` writers call `writeMessageData` and
+ * `useAppend` writers call `appendSignal`; the session connects the sinks
+ * that append durable records.
  */
 export interface AgentOutputChannel {
 	/** Metadata producers from the latest render. */
 	producers: MessageMetadataProducers;
+	/** `useEffect` declarations from the latest render, in call order. */
+	effects: AgentEffectDeclaration[];
 	/** Wire the session-side sink data writes flow into. */
 	connect(sink: (name: string, data: unknown) => void): void;
 	writeMessageData(name: string, data: unknown): void;
@@ -74,6 +100,7 @@ export function createAgentOutputChannel(): AgentOutputChannel {
 	let signalSink: ((signal: AgentSignalAppend) => void) | undefined;
 	return {
 		producers: { start: [], finish: [] },
+		effects: [],
 		connect(next) {
 			sink = next;
 		},

@@ -277,6 +277,22 @@ export interface StateWriteRecord extends ConversationRecordEnvelope {
 }
 
 /**
+ * One completed `useEffect` run. Identity is the effect's declaration index
+ * (call order — effects carry no durable name); `fingerprint` is the JSON of
+ * the deps array the run was declared with. The record log is the effect's
+ * durable memo: an effect runs at a submission's start only when its current
+ * fingerprint differs from its last recorded run (and a re-attempt of the
+ * same submission adopts the record instead of re-running). Appended in the
+ * same batch as the run's buffered state writes and signal appends — one
+ * durability point per effect.
+ */
+interface EffectRunRecord extends ConversationRecordEnvelope {
+	type: 'effect_run';
+	index: number;
+	fingerprint: string;
+}
+
+/**
  * One write to a named, client-facing data part (`useMessageData`). Scoped to
  * the submission in the envelope: the part renders on the submission's
  * response message, anchored after the assistant step that had completed when
@@ -318,6 +334,7 @@ export type ConversationRecord =
 	| ChildSessionRetainedRecord
 	| SubmissionSettledRecord
 	| StateWriteRecord
+	| EffectRunRecord
 	| MessageDataWriteRecord
 	| MessageMetadataRecord;
 

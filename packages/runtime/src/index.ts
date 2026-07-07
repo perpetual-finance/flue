@@ -53,6 +53,7 @@ export { type StateSetter, useState } from './hooks/state.ts';
 export { use } from './hooks/use.ts';
 export { useAppend } from './hooks/use-append.ts';
 export { useDelivery } from './hooks/use-delivery.ts';
+export { useEffect } from './hooks/use-effect.ts';
 export { useInstruction } from './hooks/use-instruction.ts';
 export { useMessageData } from './hooks/use-message-data.ts';
 export { useMessageMetadata } from './hooks/use-message-metadata.ts';
@@ -65,6 +66,7 @@ export type { McpServerConnection, McpServerOptions, McpTransport } from './mcp.
 export { connectMcpServer } from './mcp.ts';
 export type {
 	AgentSignalAppend,
+	EffectContext,
 	MessageMetadataEvent,
 	MessageMetadataPoint,
 	MessageMetadataProducer,

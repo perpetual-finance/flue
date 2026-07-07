@@ -93,8 +93,10 @@ import { type FlueExecutionContext, interceptExecution } from './execution-inter
 import { resolveSubagentDefinition } from './hooks/render.ts';
 import type { HookStateBuffer, HookStateWrite } from './hooks/state.ts';
 import {
+	type AgentEffectDeclaration,
 	type AgentOutputChannel,
 	type AgentSignalAppend,
+	type EffectContext,
 	runMessageMetadataProducers,
 } from './message-output.ts';
 import { createUserContextMessage, renderSignalMessage } from './message-rendering.ts';
@@ -785,6 +787,103 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		const parentId = await this.conversationWriter.getConversationLeaf(this.conversationId);
 		const { records } = this.drainSignalAppendRecords(parentId);
 		await this.appendCanonical(records);
+	}
+
+	/**
+	 * Evaluate the render's `useEffect` declarations at the submission's start
+	 * — after the input record, before the first model call. Sequential, in
+	 * declaration order; each effect runs only when its deps fingerprint has
+	 * no durable completed run (`effect_run`, last-write-wins per declaration
+	 * index) — and never twice within one submission (re-attempt adoption).
+	 * A resume re-entry whose response already has durable assistant steps
+	 * skips evaluation wholesale: effects had their chance before turn one of
+	 * the original attempt. A throw fails the submission (fail-fast, like the
+	 * metadata start producers).
+	 */
+	private async runSubmissionEffects(signal: AbortSignal): Promise<void> {
+		const effects = this.outputChannel?.effects;
+		if (!effects?.length || !this.activeSubmissionId || this.responseHasCompletedStep) return;
+		// One pre-run snapshot for every decision: fingerprints were computed at
+		// render against durable state, so an effect that moves its own deps
+		// does not retrigger within the submission.
+		const effectRuns = (await this.conversationWriter.loadReducedState()).effectRuns;
+		for (const [index, effect] of effects.entries()) {
+			const lastRun = effectRuns.get(index);
+			if (lastRun?.submissionId === this.activeSubmissionId) continue;
+			if (lastRun?.fingerprint === effect.fingerprint) continue;
+			await this.executeSubmissionEffect(index, effect, signal);
+		}
+	}
+
+	/**
+	 * Run one effect and commit its outcome atomically: buffered state writes,
+	 * the `effect_run` memo record, and any signals it appended land in ONE
+	 * append batch (the tool-batch precedent — an interrupted run leaves no
+	 * record and re-runs on the re-attempt, at-least-once). Signal entries
+	 * chain from the current leaf, ahead of the first assistant turn — the
+	 * same position the steering queue injects them into the live loop.
+	 */
+	private async executeSubmissionEffect(
+		index: number,
+		effect: AgentEffectDeclaration,
+		signal: AbortSignal,
+	): Promise<void> {
+		// The harness materializes on first access (an effect that never touches
+		// it pays nothing) and closes when the run settles. The invocation id is
+		// per execution attempt, like harness-connected tools.
+		let harness: ActionHarness | undefined;
+		// `this` is shadowed inside the ctx getter below.
+		const session = this;
+		const ctx: EffectContext = {
+			log: this.createEffectLogger(index),
+			signal,
+			get harness() {
+				harness ??= session.createInvocationHarness(crypto.randomUUID(), signal);
+				return harness as unknown as FlueHarness;
+			},
+		};
+		try {
+			await effect.run(ctx);
+		} catch (error) {
+			throw new Error(
+				`[flue] A useEffect callback (effect #${index} in declaration order) threw: ${error instanceof Error ? error.message : String(error)}`,
+				{ cause: error },
+			);
+		} finally {
+			if (harness) {
+				this.activeActionHarnesses.delete(harness);
+				await harness.close();
+			}
+		}
+		const parentId = await this.conversationWriter.getConversationLeaf(this.conversationId);
+		const signalAppends = this.drainSignalAppendRecords(parentId);
+		await this.appendCanonical([
+			...this.drainHookStateRecords(),
+			{
+				...this.canonicalEnvelope('effect_run'),
+				type: 'effect_run',
+				index,
+				fingerprint: effect.fingerprint,
+			},
+			...signalAppends.records,
+		]);
+	}
+
+	/** `ctx.log` for one effect run, attributed by declaration index. */
+	private createEffectLogger(effectIndex: number) {
+		const emit = (
+			level: 'info' | 'warn' | 'error',
+			message: string,
+			attributes?: Record<string, unknown>,
+		) => this.emit({ type: 'log', level, message, attributes: { ...attributes, effectIndex } });
+		return {
+			info: (message: string, attributes?: Record<string, unknown>) =>
+				emit('info', message, attributes),
+			warn: (message: string, attributes?: Record<string, unknown>) =>
+				emit('warn', message, attributes),
+			error: (message: string, attributes?: Record<string, unknown>) =>
+				emit('error', message, attributes),
+		};
 	}
 
 	/**
@@ -4081,6 +4180,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					await this.rebuildCanonicalContext();
 					await options.onInputApplied?.(durability);
 					await this.beginResponseOutput();
+					await this.runSubmissionEffects(options.signal);
 					await this.resumeConversationToCompletion({
 						inputEntryId: options.inputEntryId,
 						errorLabel: options.errorLabel,
