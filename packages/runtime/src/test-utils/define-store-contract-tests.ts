@@ -914,6 +914,217 @@ export function defineStoreContractTests(label: string, backend: StoreContractTe
 			});
 		});
 
+		// ── Turn-boundary joins (dispatch-while-busy) ───────────────────────
+
+		describe('turn-boundary joins', () => {
+			/** A running host with `count` queued dispatches behind it. */
+			async function hostWithQueued(store: AgentExecutionStore, count: number) {
+				await admitDispatchReady(store, dispatchInput({ dispatchId: 'host-1' }));
+				await store.submissions.claimSubmission(claim('host-1', 'attempt-1'));
+				for (let index = 0; index < count; index++) {
+					await admitDispatchReady(store, dispatchInput({ dispatchId: `queued-${index + 1}` }));
+				}
+				return attempt('host-1', 'attempt-1');
+			}
+
+			it('claims the queued dispatch prefix in admission order onto a running host', async () => {
+				const store = await create();
+				const host = await hostWithQueued(store, 2);
+				const claimed = await store.submissions.claimJoinableSubmissions(host, 'assistant');
+				expect(claimed.map((submission) => submission.submissionId)).toEqual([
+					'queued-1',
+					'queued-2',
+				]);
+				expect(claimed.map((submission) => submission.status)).toEqual(['joining', 'joining']);
+				expect(claimed.map((submission) => submission.joinedInto)).toEqual(['host-1', 'host-1']);
+				expect(await store.submissions.getSubmission('queued-1')).toMatchObject({
+					status: 'joining',
+					joinedInto: 'host-1',
+				});
+				// No double-claim: the prefix is spoken for.
+				expect(await store.submissions.claimJoinableSubmissions(host, 'assistant')).toEqual([]);
+			});
+
+			it('claims nothing for a stale attempt or a host that is not running', async () => {
+				const store = await create();
+				const host = await hostWithQueued(store, 1);
+				expect(
+					await store.submissions.claimJoinableSubmissions(
+						attempt('host-1', 'stale-attempt'),
+						'assistant',
+					),
+				).toEqual([]);
+				await store.submissions.completeSubmission(host);
+				expect(await store.submissions.claimJoinableSubmissions(host, 'assistant')).toEqual([]);
+				expect(await store.submissions.getSubmission('queued-1')).toMatchObject({
+					status: 'queued',
+				});
+			});
+
+			it('stops the prefix at the first non-joinable row, preserving admission order', async () => {
+				const store = await create();
+				const host = await hostWithQueued(store, 1);
+				// A direct submission mid-queue: everything behind it stays queued.
+				await admitDirectReady(store, directInput({ submissionId: 'direct-mid' }));
+				await admitDispatchReady(store, dispatchInput({ dispatchId: 'queued-behind' }));
+				const claimed = await store.submissions.claimJoinableSubmissions(host, 'assistant');
+				expect(claimed.map((submission) => submission.submissionId)).toEqual(['queued-1']);
+				expect(await store.submissions.getSubmission('direct-mid')).toMatchObject({
+					status: 'queued',
+				});
+				expect(await store.submissions.getSubmission('queued-behind')).toMatchObject({
+					status: 'queued',
+				});
+			});
+
+			it('stops the prefix at an abort-requested delivery and at a different agent', async () => {
+				const store = await create();
+				const host = await hostWithQueued(store, 0);
+				await admitDispatchReady(store, dispatchInput({ dispatchId: 'aborted-head' }));
+				await store.submissions.requestSessionAbort('agent-session:["agent-1","default","default"]');
+				await admitDispatchReady(store, dispatchInput({ dispatchId: 'queued-behind' }));
+				expect(await store.submissions.claimJoinableSubmissions(host, 'assistant')).toEqual([]);
+				// Different agent name: same stop-don't-skip rule.
+				expect(await store.submissions.claimJoinableSubmissions(host, 'other-agent')).toEqual([]);
+			});
+
+			it('finalizes a claimed join once and fences on the host attempt', async () => {
+				const store = await create();
+				const host = await hostWithQueued(store, 1);
+				await store.submissions.claimJoinableSubmissions(host, 'assistant');
+				expect(
+					await store.submissions.finalizeJoinedSubmission(
+						attempt('host-1', 'stale-attempt'),
+						'queued-1',
+					),
+				).toBe(false);
+				expect(await store.submissions.finalizeJoinedSubmission(host, 'queued-1')).toBe(true);
+				expect(await store.submissions.getSubmission('queued-1')).toMatchObject({
+					status: 'joined',
+					joinedInto: 'host-1',
+					inputAppliedAt: expect.any(Number),
+				});
+				// Already joined: no second transition.
+				expect(await store.submissions.finalizeJoinedSubmission(host, 'queued-1')).toBe(false);
+			});
+
+			it('reverts an unapplied join back to the queue', async () => {
+				const store = await create();
+				const host = await hostWithQueued(store, 1);
+				await store.submissions.claimJoinableSubmissions(host, 'assistant');
+				expect(
+					await store.submissions.revertJoiningSubmission(
+						attempt('host-1', 'stale-attempt'),
+						'queued-1',
+					),
+				).toBe(false);
+				expect(await store.submissions.revertJoiningSubmission(host, 'queued-1')).toBe(true);
+				const reverted = await store.submissions.getSubmission('queued-1');
+				expect(reverted).toMatchObject({ status: 'queued' });
+				expect(reverted?.joinedInto).toBeUndefined();
+				expect(reverted?.inputAppliedAt).toBeUndefined();
+			});
+
+			it('lists unsettled joins for the host in admission order', async () => {
+				const store = await create();
+				const host = await hostWithQueued(store, 2);
+				await store.submissions.claimJoinableSubmissions(host, 'assistant');
+				await store.submissions.finalizeJoinedSubmission(host, 'queued-1');
+				const joined = await store.submissions.listJoinedSubmissions('host-1');
+				expect(joined.map((submission) => [submission.submissionId, submission.status])).toEqual([
+					['queued-1', 'joined'],
+					['queued-2', 'joining'],
+				]);
+			});
+
+			it('joined deliveries settle with a completing host; joining stragglers revert', async () => {
+				const store = await create();
+				const host = await hostWithQueued(store, 2);
+				await store.submissions.claimJoinableSubmissions(host, 'assistant');
+				await store.submissions.finalizeJoinedSubmission(host, 'queued-1');
+				await store.submissions.completeSubmission(host);
+				const joined = await store.submissions.getSubmission('queued-1');
+				expect(joined).toMatchObject({ status: 'settled' });
+				expect(joined?.error).toBeUndefined();
+				// The unconfirmed join goes back to the queue instead of vanishing.
+				expect(await store.submissions.getSubmission('queued-2')).toMatchObject({
+					status: 'queued',
+				});
+			});
+
+			it('joined deliveries share a failing host outcome', async () => {
+				const store = await create();
+				const host = await hostWithQueued(store, 1);
+				await store.submissions.claimJoinableSubmissions(host, 'assistant');
+				await store.submissions.finalizeJoinedSubmission(host, 'queued-1');
+				await store.submissions.failSubmission(host, new Error('host exploded'));
+				expect(await store.submissions.getSubmission('queued-1')).toMatchObject({
+					status: 'settled',
+					error: 'host exploded',
+				});
+			});
+
+			it('joined deliveries settle when a direct host finalizes its settlement', async () => {
+				const store = await create();
+				await admitDirectReady(store, directInput({ submissionId: 'direct-host' }));
+				await store.submissions.claimSubmission(claim('direct-host', 'attempt-1'));
+				const host = attempt('direct-host', 'attempt-1');
+				await admitDispatchReady(store, dispatchInput({ dispatchId: 'queued-1' }));
+				await store.submissions.claimJoinableSubmissions(host, 'assistant');
+				await store.submissions.finalizeJoinedSubmission(host, 'queued-1');
+				const record = {
+					v: 1 as const,
+					id: 'direct-host:settled',
+					type: 'submission_settled' as const,
+					conversationId: 'conversation-1',
+					harness: 'default',
+					session: 'default',
+					timestamp: '2026-06-22T00:00:00.000Z',
+					submissionId: 'direct-host',
+					attemptId: 'attempt-1',
+					outcome: 'completed' as const,
+				};
+				await store.submissions.reserveSubmissionSettlement(host, {
+					recordId: record.id,
+					record,
+				});
+				await store.submissions.finalizeSubmissionSettlement(host, record.id);
+				const joined = await store.submissions.getSubmission('queued-1');
+				expect(joined).toMatchObject({ status: 'settled' });
+				expect(joined?.error).toBeUndefined();
+			});
+
+			it('unsettled joins block later queued work and clear with the host', async () => {
+				const store = await create();
+				const host = await hostWithQueued(store, 1);
+				await store.submissions.claimJoinableSubmissions(host, 'assistant');
+				await store.submissions.finalizeJoinedSubmission(host, 'queued-1');
+				await admitDispatchReady(store, dispatchInput({ dispatchId: 'later' }));
+				// The joined row is unsettled and earlier: 'later' is not runnable.
+				expect(await store.submissions.listRunnableSubmissions()).toEqual([]);
+				expect(await store.submissions.hasUnsettledSubmissions()).toBe(true);
+				await store.submissions.completeSubmission(host);
+				// Settle fan-out cleared the joined row in the same step: 'later'
+				// is now the runnable head.
+				expect(
+					(await store.submissions.listRunnableSubmissions()).map(
+						(submission) => submission.submissionId,
+					),
+				).toEqual(['later']);
+			});
+
+			it('requestSessionAbort stamps joining and joined deliveries', async () => {
+				const store = await create();
+				const host = await hostWithQueued(store, 2);
+				await store.submissions.claimJoinableSubmissions(host, 'assistant');
+				await store.submissions.finalizeJoinedSubmission(host, 'queued-1');
+				const stamped = await store.submissions.requestSessionAbort(
+					'agent-session:["agent-1","default","default"]',
+				);
+				expect(new Set(stamped)).toEqual(new Set(['host-1', 'queued-1', 'queued-2']));
+			});
+		});
+
 		// ── Edge cases ──────────────────────────────────────────────────────
 
 		describe('edge cases', () => {

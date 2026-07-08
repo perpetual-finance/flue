@@ -77,8 +77,22 @@ export class RedisConversationStreamStore implements ConversationStreamStore {
 		if (input.records.length === 0) throw failure('append', input.path, 'A canonical batch cannot be empty.');
 		const owned = input.records.filter((record) => record.submissionId !== undefined || record.attemptId !== undefined);
 		if (!input.submission && owned.length > 0) throw failure('append', input.path, 'Submission-owned records require attempt authorization.');
-		if (input.submission && owned.some((record) => record.submissionId !== input.submission?.submissionId || record.attemptId !== input.submission?.attemptId)) {
-			throw failure('append', input.path, 'Record ownership does not match the authorized submission attempt.');
+		// Turn-boundary join: the host attempt writes a joined delivery's input
+		// and adoption records under its own authority. Legal exactly when the
+		// delivery's row is durably claimed by THIS host (`joining`/`joined`
+		// with `joinedInto` = the authorized submission) and the record still
+		// carries the host's attempt — the append script checks the delivery
+		// rows atomically; every other mismatch fails here.
+		const joinedDeliveryIds: string[] = [];
+		if (input.submission) {
+			for (const record of owned) {
+				if (record.submissionId === input.submission.submissionId && record.attemptId === input.submission.attemptId) continue;
+				if (record.attemptId === input.submission.attemptId && record.submissionId !== undefined) {
+					if (!joinedDeliveryIds.includes(record.submissionId)) joinedDeliveryIds.push(record.submissionId);
+					continue;
+				}
+				throw failure('append', input.path, 'Record ownership does not match the authorized submission attempt.');
+			}
 		}
 		const meta = await this.getMeta(input.path);
 		if (!meta) throw failure('append', input.path, 'Stream does not exist.');
@@ -94,6 +108,7 @@ export class RedisConversationStreamStore implements ConversationStreamStore {
 				this.keys.conversationOrder(input.path),
 				this.keys.conversationRetries(input.path),
 				submissionKey,
+				...joinedDeliveryIds.map((id) => this.keys.submission(id)),
 			],
 			[
 				input.producerId,
@@ -188,6 +203,7 @@ function appendReason(code: string | undefined): string {
 	if (code === 'conflict') return 'Producer sequence has conflicting content.';
 	if (code === 'sequence') return 'Producer sequence is not the next expected value.';
 	if (code === 'attempt') return 'Submission attempt no longer owns work for this session.';
+	if (code === 'ownership') return 'Record ownership does not match the authorized submission attempt.';
 	return 'Canonical append failed.';
 }
 

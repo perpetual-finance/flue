@@ -259,7 +259,8 @@ describeMongo('mongodb() integration', () => {
 		const first = await createHarness();
 		const secondClient = new MongoClient(url);
 		await secondClient.connect();
-		const second = mongodb(createRunner(secondClient, first.db));
+		const second = mongodb(createRunner(secondClient, secondClient.db(first.db.databaseName)));
+		await second.migrate?.();
 		const a = (await first.adapter.connect()).executionStore.submissions;
 		const b = (await second.connect()).executionStore.submissions;
 		await a.admitDispatch({
@@ -269,6 +270,7 @@ describeMongo('mongodb() integration', () => {
 			message: { kind: 'signal', type: 'test.event', body: 'go' },
 			acceptedAt: new Date().toISOString(),
 		});
+		await a.markSubmissionCanonicalReady('d');
 		const claims = await Promise.all([
 			a.claimSubmission({
 				submissionId: 'd',

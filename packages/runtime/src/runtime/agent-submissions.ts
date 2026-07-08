@@ -78,6 +78,30 @@ export interface ProcessAgentSubmissionOptions {
 	startedAt?: number;
 	/** Absolute timestamp (ms) after which the submission should be aborted. */
 	timeoutAt?: number;
+	/**
+	 * Turn-boundary join seam (dispatch-while-busy): the session polls this
+	 * at response start, every turn boundary, and the would-stop seam to
+	 * absorb queued dispatch deliveries into the live response. Absent in
+	 * degenerate/test setups — the session then serializes exactly as before.
+	 */
+	joinSource?: SubmissionJoinSource;
+}
+
+/**
+ * The session-facing surface of the join protocol, bound to one host
+ * attempt by the coordinator (`processSubmission`). Every method is fenced
+ * on the host still running under that attempt, so a zombie session that
+ * lost its claim can neither steal deliveries nor corrupt their state.
+ */
+export interface SubmissionJoinSource {
+	/** Claim the joinable queued prefix (`queued → joining`), admission order. */
+	claim(): Promise<AgentSubmission[]>;
+	/** Confirm a join once its canonical input record is durable (`joining → joined`). */
+	finalize(submissionId: string): Promise<boolean>;
+	/** Hand an unapplied join back to the queue (`joining → queued`). */
+	revert(submissionId: string): Promise<boolean>;
+	/** Unsettled joins attached to the host (`joining` and `joined`), admission order. */
+	listUnresolved(): Promise<AgentSubmission[]>;
 }
 
 /**
@@ -596,9 +620,19 @@ export async function processSubmission(opts: ProcessSubmissionOptions): Promise
 		ctx.setSubmissionId?.(submission.submissionId);
 	}
 
+	// Bound to this attempt: the store fences every join operation on the
+	// host still running under it, so a replaced attempt's session goes inert.
+	const joinSource: SubmissionJoinSource = {
+		claim: () => submissions.claimJoinableSubmissions(attempt, input.agent),
+		finalize: (submissionId) => submissions.finalizeJoinedSubmission(attempt, submissionId),
+		revert: (submissionId) => submissions.revertJoiningSubmission(attempt, submissionId),
+		listUnresolved: () => submissions.listJoinedSubmissions(attempt.submissionId),
+	};
+
 	const execute = () =>
 		createAgentSubmissionSessionHandler(agent, input, (session) => {
 			const handle = session.processSubmissionInput(input, {
+				joinSource,
 				onInputApplied: async (durability: SubmissionDurability) => {
 					if (!(await submissions.markSubmissionInputApplied(attempt, durability))) {
 						throw new Error(

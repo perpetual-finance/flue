@@ -546,12 +546,32 @@ export class SqliteConversationStreamStore implements ConversationStreamStore {
 			}
 			return;
 		}
-		if (
-			submissionRecords.some(
-				(record) =>
-					record.submissionId !== submission.submissionId || record.attemptId !== submission.attemptId,
-			)
-		) {
+		for (const record of submissionRecords) {
+			if (
+				record.submissionId === submission.submissionId &&
+				record.attemptId === submission.attemptId
+			) {
+				continue;
+			}
+			// Turn-boundary join: the host attempt writes a joined delivery's
+			// input and adoption records under its own authority. Legal exactly
+			// when the delivery's row is durably claimed by THIS host
+			// (`joining`/`joined` with `joined_into` = the authorized submission)
+			// and the record still carries the host's attempt.
+			if (record.attemptId === submission.attemptId && record.submissionId !== undefined) {
+				const delivery = this.sql
+					.exec(
+						'SELECT status, joined_into FROM flue_agent_submissions WHERE submission_id = ?',
+						record.submissionId,
+					)
+					.toArray()[0];
+				if (
+					(delivery?.status === 'joining' || delivery?.status === 'joined') &&
+					delivery.joined_into === submission.submissionId
+				) {
+					continue;
+				}
+			}
 			this.fail('append', path, 'Record ownership does not match the authorized submission attempt.');
 		}
 		const row = this.sql

@@ -23,7 +23,7 @@ import {
 	SUBMISSION_SESSION_NAME,
 } from '@flue/runtime/adapter';
 import { publishChunks, stageChunks } from './chunk-store.ts';
-import type { MongoDocument, MongoRunner } from './mongodb-runner.ts';
+import type { MongoCollection, MongoDocument, MongoRunner } from './mongodb-runner.ts';
 import { collectionName } from './schema.ts';
 import { type StoredValue, ValueStore } from './value-store.ts';
 
@@ -51,7 +51,7 @@ export class MongoSubmissionStore implements AgentSubmissionStore {
 	}
 
 	async hasUnsettledSubmissions(): Promise<boolean> {
-		return Boolean(await this.c('submissions').findOne({ status: { $in: ['queued', 'running', 'terminalizing'] } }));
+		return Boolean(await this.c('submissions').findOne({ status: { $in: ['queued', 'running', 'terminalizing', 'joining', 'joined'] } }));
 	}
 
 	async listUnreadySubmissions(): Promise<AgentSubmission[]> {
@@ -64,7 +64,7 @@ export class MongoSubmissionStore implements AgentSubmissionStore {
 
 	async listRunnableSubmissions(): Promise<AgentSubmission[]> {
 		const rows = await this.c('submissions').find(
-			{ status: { $in: ['queued', 'running', 'terminalizing'] } },
+			{ status: { $in: ['queued', 'running', 'terminalizing', 'joining', 'joined'] } },
 			{ sort: { sequence: 1 } },
 		);
 		const seen = new Set<string>();
@@ -110,7 +110,8 @@ export class MongoSubmissionStore implements AgentSubmissionStore {
 	}
 	async admitDirect(input: AgentSubmissionInput): Promise<AgentSubmission> {
 		const result = await this.admit(input);
-		if (result.kind !== 'submission') throw new TypeError('Direct admission conflicted.');
+		if (result.kind !== 'submission')
+			throw new TypeError('[flue] Internal direct admission returned an unexpected result.');
 		return result.submission;
 	}
 
@@ -125,7 +126,7 @@ export class MongoSubmissionStore implements AgentSubmissionStore {
 			if (!candidate) return null;
 			const earlier = await submissions.findOne({
 				sessionKey: candidate.sessionKey,
-				status: { $in: ['queued', 'running', 'terminalizing'] },
+				status: { $in: ['queued', 'running', 'terminalizing', 'joining', 'joined'] },
 				sequence: { $lt: candidate.sequence },
 			});
 			if (earlier) return null;
@@ -207,7 +208,7 @@ export class MongoSubmissionStore implements AgentSubmissionStore {
 		);
 	}
 	async requestSessionAbort(sessionKey: string): Promise<string[]> {
-		const filter = { sessionKey, status: { $in: ['queued', 'running'] } };
+		const filter = { sessionKey, status: { $in: ['queued', 'running', 'joining', 'joined'] } };
 		const rows = await this.c('submissions').find(filter);
 		if (rows.length === 0) return [];
 		await this.c('submissions').updateMany(filter, [
@@ -229,23 +230,134 @@ export class MongoSubmissionStore implements AgentSubmissionStore {
 		return { submissionId: String(current.submissionId), sessionKey: String(current.sessionKey), attemptId: String(current.attemptId), recordId: String(current.settlementRecordId), record: current.settlementRecord as import('@flue/runtime/adapter').SubmissionSettledRecord };
 	}
 	async finalizeSubmissionSettlement(attempt: SubmissionAttemptRef, recordId: string): Promise<boolean> {
-		const result = await this.c('submissions').updateOne({ submissionId: attempt.submissionId, kind: 'direct', status: 'terminalizing', attemptId: attempt.attemptId, settlementRecordId: recordId }, { $set: { status: 'settled', settledAt: Date.now() } });
-		return result.matchedCount === 1;
+		return this.runner.transaction(async (tx) => {
+			const submissions = tx.collection(collectionName(this.prefix, 'submissions'));
+			const row = await submissions.findOneAndUpdate(
+				{ submissionId: attempt.submissionId, kind: 'direct', status: 'terminalizing', attemptId: attempt.attemptId, settlementRecordId: recordId },
+				{ $set: { status: 'settled', settledAt: Date.now() } },
+				{ returnDocument: 'after' },
+			);
+			if (!row) return false;
+			// A direct host settles through the outbox; fan its outcome out to
+			// joined deliveries the same way completeSubmission/failSubmission do.
+			const record = row.settlementRecord as { outcome?: string; error?: { message?: string } };
+			await this.settleJoinedSubmissions(
+				submissions,
+				attempt.submissionId,
+				record.outcome === 'completed' ? null : (record.error?.message ?? 'The host submission did not complete.'),
+			);
+			return true;
+		});
 	}
 
 	completeSubmission(attempt: SubmissionAttemptRef): Promise<boolean> {
-		return this.lifecycle(attempt, {
-			$set: { status: 'settled', settledAt: Date.now(), error: null },
-		});
+		return this.settleWithJoinedFanOut(attempt, null);
 	}
 	failSubmission(attempt: SubmissionAttemptRef, error: unknown): Promise<boolean> {
-		return this.lifecycle(attempt, {
-			$set: {
-				status: 'settled',
-				settledAt: Date.now(),
-				error: error instanceof Error ? error.message : String(error),
-			},
+		return this.settleWithJoinedFanOut(attempt, error instanceof Error ? error.message : String(error));
+	}
+	private settleWithJoinedFanOut(attempt: SubmissionAttemptRef, error: string | null): Promise<boolean> {
+		return this.runner.transaction(async (tx) => {
+			const submissions = tx.collection(collectionName(this.prefix, 'submissions'));
+			const settled = await submissions.updateOne(
+				{ submissionId: attempt.submissionId, attemptId: attempt.attemptId, status: 'running' },
+				{ $set: { status: 'settled', settledAt: Date.now(), error } },
+			);
+			if (settled.matchedCount !== 1) return false;
+			await this.settleJoinedSubmissions(submissions, attempt.submissionId, error);
+			return true;
 		});
+	}
+
+	async claimJoinableSubmissions(host: SubmissionAttemptRef, agentName: string): Promise<AgentSubmission[]> {
+		return this.runner.transaction(async (tx) => {
+			const submissions = tx.collection(collectionName(this.prefix, 'submissions'));
+			const hostRow = await submissions.findOne({
+				submissionId: host.submissionId,
+				status: 'running',
+				attemptId: host.attemptId,
+			});
+			if (!hostRow) return [];
+			const queued = await submissions.find(
+				{ sessionKey: hostRow.sessionKey, status: 'queued' },
+				{ sort: { sequence: 1 } },
+			);
+			const claimed: AgentSubmission[] = [];
+			for (const row of queued) {
+				// Contiguous prefix: the first non-joinable row ends the claim so
+				// admission order is preserved (everything behind it stays queued).
+				if (row.kind !== 'dispatch' || row.canonicalReadyAt == null || row.abortRequestedAt != null) break;
+				const submission = await this.parseSubmission(row);
+				if (submission.input.agent !== agentName) break;
+				const update = await submissions.updateOne(
+					{ submissionId: submission.submissionId, status: 'queued' },
+					{ $set: { status: 'joining', joinedInto: host.submissionId } },
+				);
+				if (update.matchedCount !== 1) break;
+				claimed.push({ ...submission, status: 'joining', joinedInto: host.submissionId });
+			}
+			return claimed;
+		});
+	}
+	async finalizeJoinedSubmission(host: SubmissionAttemptRef, submissionId: string): Promise<boolean> {
+		return this.runner.transaction(async (tx) => {
+			const submissions = tx.collection(collectionName(this.prefix, 'submissions'));
+			const hostRow = await submissions.findOne({
+				submissionId: host.submissionId,
+				status: 'running',
+				attemptId: host.attemptId,
+			});
+			if (!hostRow) return false;
+			const result = await submissions.updateOne(
+				{ submissionId, status: 'joining', joinedInto: host.submissionId },
+				[{ $set: { status: 'joined', inputAppliedAt: { $ifNull: ['$inputAppliedAt', Date.now()] } } }],
+			);
+			return result.matchedCount === 1;
+		});
+	}
+	async revertJoiningSubmission(host: SubmissionAttemptRef, submissionId: string): Promise<boolean> {
+		return this.runner.transaction(async (tx) => {
+			const submissions = tx.collection(collectionName(this.prefix, 'submissions'));
+			const hostRow = await submissions.findOne({
+				submissionId: host.submissionId,
+				status: 'running',
+				attemptId: host.attemptId,
+			});
+			if (!hostRow) return false;
+			const result = await submissions.updateOne(
+				{ submissionId, status: 'joining', joinedInto: host.submissionId },
+				{ $set: { status: 'queued', joinedInto: null, inputAppliedAt: null } },
+			);
+			return result.matchedCount === 1;
+		});
+	}
+	async listJoinedSubmissions(hostSubmissionId: string): Promise<AgentSubmission[]> {
+		const rows = await this.c('submissions').find(
+			{ joinedInto: hostSubmissionId, status: { $in: ['joining', 'joined'] } },
+			{ sort: { sequence: 1 } },
+		);
+		return this.parseOperationalRows(rows, 'active');
+	}
+	/**
+	 * Joined-delivery settle fan-out, run inside the host's settle
+	 * transaction: `joined` rows settle with the host's outcome (`error`
+	 * copied, null on success); `joining` stragglers — a join whose canonical
+	 * input was never confirmed (abort or crash window) — revert to `queued`
+	 * so the delivery runs as its own submission instead of vanishing.
+	 */
+	private async settleJoinedSubmissions(
+		submissions: MongoCollection,
+		hostSubmissionId: string,
+		error: string | null,
+	): Promise<void> {
+		await submissions.updateMany(
+			{ joinedInto: hostSubmissionId, status: 'joined' },
+			{ $set: { status: 'settled', settledAt: Date.now(), error } },
+		);
+		await submissions.updateMany(
+			{ joinedInto: hostSubmissionId, status: 'joining' },
+			{ $set: { status: 'queued', joinedInto: null, inputAppliedAt: null } },
+		);
 	}
 
 	async insertAttemptMarker(attempt: SubmissionAttemptRef): Promise<void> {
@@ -457,6 +569,7 @@ export class MongoSubmissionStore implements AgentSubmissionStore {
 			...(row.recoveryRequestedAt ? { recoveryRequestedAt: Number(row.recoveryRequestedAt) } : {}),
 			...(row.abortRequestedAt ? { abortRequestedAt: Number(row.abortRequestedAt) } : {}),
 			...(row.startedAt ? { startedAt: Number(row.startedAt) } : {}),
+			...(row.joinedInto ? { joinedInto: String(row.joinedInto) } : {}),
 			...(row.error ? { error: String(row.error) } : {}),
 			attemptCount: Number(row.attemptCount),
 			maxRetry: Number(row.maxRetry),

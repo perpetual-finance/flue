@@ -298,12 +298,31 @@ async function assertSubmissionAuthorization(
 		if (owned.length > 0) throw failure(path, 'Submission-owned records require attempt authorization.');
 		return;
 	}
-	if (
-		owned.some(
-			(record) =>
-				record.submissionId !== submission.submissionId || record.attemptId !== submission.attemptId,
-		)
-	) {
+	for (const record of owned) {
+		if (
+			record.submissionId === submission.submissionId &&
+			record.attemptId === submission.attemptId
+		) {
+			continue;
+		}
+		// Turn-boundary join: the host attempt writes a joined delivery's input
+		// and adoption records under its own authority. Legal exactly when the
+		// delivery's row is durably claimed by THIS host (`joining`/`joined`
+		// with `joined_into` = the authorized submission) and the record still
+		// carries the host's attempt.
+		if (record.attemptId === submission.attemptId && record.submissionId !== undefined) {
+			const deliveries = await tx.query(
+				`SELECT status, joined_into FROM flue_agent_submissions WHERE submission_id = ${p(1)}`,
+				[record.submissionId],
+			);
+			const delivery = deliveries[0];
+			if (
+				(delivery?.status === 'joining' || delivery?.status === 'joined') &&
+				delivery.joined_into === submission.submissionId
+			) {
+				continue;
+			}
+		}
 		throw failure(path, 'Record ownership does not match the authorized submission attempt.');
 	}
 	const rows = await tx.query(

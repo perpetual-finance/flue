@@ -33,9 +33,13 @@ import { requireRenderFrame } from './frame.ts';
  *   the response settles. Appending a signal during the callback continues
  *   the response with another turn; once that continuation is dealt with, the
  *   hook runs again at the next would-stop point. The response settles only
- *   when a cycle completes with no appends. (A `useDispatchMessage()`
- *   dispatch, by contrast, is new input for a NEW submission — it lets the
- *   current response settle and does not re-run this hook.)
+ *   when a cycle completes with no appends AND no delivered input is
+ *   waiting: queued deliveries join the live response before any finish
+ *   evaluation, so several messages collect into several `useAgentStart()`
+ *   runs and ONE final `useAgentFinish()`. A `useDispatchMessage()` dispatch
+ *   made from this callback is a real delivery too — it joins the same
+ *   response and the hook fires again at the new true end (its own
+ *   `useAgentStart` run; never counted against the append-cycle ceiling).
  * - Runs on delivered submissions only, in declaration order, sequentially;
  *   multiple hooks share each cycle, and the response continues if any of
  *   them appended. A throw fails the submission.
@@ -43,8 +47,8 @@ import { requireRenderFrame } from './frame.ts';
  *   signals, so a resumed response neither re-runs a completed cycle nor
  *   appends twice, and the continuation count survives restarts. Runaway
  *   protection is a fixed framework ceiling; the submission's durability
- *   timeout remains the total wall-clock backstop — continuations never
- *   extend it.
+ *   timeout remains the total wall-clock backstop — neither continuations
+ *   nor joins extend it.
  * - Identity is call order.
  */
 export function useAgentFinish(run: (ctx: AgentFinishContext) => void | Promise<void>): void {

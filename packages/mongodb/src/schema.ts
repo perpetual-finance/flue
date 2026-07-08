@@ -36,6 +36,7 @@ export function schema(prefix: string): MongoCollectionSpec[] {
 				key: { sessionKey: 1, status: 1, sequence: 1 },
 				collation: simple,
 			},
+			{ name: 'joined_into', key: { joinedInto: 1 }, collation: simple },
 		]),
 		spec('markers', [
 			{
@@ -60,6 +61,17 @@ export function schema(prefix: string): MongoCollectionSpec[] {
 			{ name: 'path_conversation_attachment', key: { path: 1, conversationId: 1, attachmentId: 1 }, collation: simple },
 		]),
 	];
+}
+
+/**
+ * MongoDB represents simple binary collation by omitting the collation field
+ * from the persisted index, so an expected simple collation matches an index
+ * reported without one.
+ */
+function comparableIndex(index: MongoIndexSpec | undefined): string {
+	if (!index) return canonical(index);
+	const { collation, ...rest } = index;
+	return canonical(collation && collation.locale !== 'simple' ? { ...rest, collation } : rest);
 }
 
 function canonical(value: unknown): string {
@@ -88,7 +100,7 @@ export async function ensureSchema(runner: MongoRunner, prefix: string): Promise
 			);
 		const actualByName = new Map(actual.indexes.map((index) => [index.name, index]));
 		for (const index of expected.indexes)
-			if (canonical(actualByName.get(index.name)) !== canonical(index))
+			if (comparableIndex(actualByName.get(index.name)) !== comparableIndex(index))
 				throw new TypeError(
 					`MongoDB collection ${expected.name} has an incompatible ${index.name} index.`,
 				);

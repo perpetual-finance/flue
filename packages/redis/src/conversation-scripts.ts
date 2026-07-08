@@ -31,6 +31,10 @@ if tonumber(redis.call('HGET', KEYS[1], 'nextProducerSequence') or '0') ~= tonum
 local seq = tonumber(redis.call('HGET', KEYS[1], 'nextOffset') or '0')
 local batch = cjson.decode(ARGV[5])
 if ARGV[6] ~= '' then
+  for i = 6, #KEYS do
+    local delivery = redis.call('HGET', KEYS[i], 'status')
+    if (delivery ~= 'joining' and delivery ~= 'joined') or redis.call('HGET', KEYS[i], 'joinedInto') ~= ARGV[6] then return {'ownership'} end
+  end
   local sessionKey = redis.call('HGET', KEYS[5], 'sessionKey')
   if not sessionKey or string.sub(sessionKey, 1, 14) ~= 'agent-session:' then return {'attempt'} end
   local sessionIdentity = cjson.decode(string.sub(sessionKey, 15))

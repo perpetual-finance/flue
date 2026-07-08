@@ -34,20 +34,22 @@ import { isRendering, requireRenderFrame } from './frame.ts';
  *
  * Semantics — identical to the global `dispatch()` by construction (same
  * queue, same admission, same delivery):
- * - Mid-run, the message joins the current conversation at the next turn
- *   boundary; when the agent is idle, it wakes a new submission — a late
- *   callback dispatching after the run settled behaves exactly like an
- *   external sender.
+ * - A dispatch to a BUSY instance joins the live response at the next turn
+ *   boundary: durably admitted, its own `useAgentStart` run, read by the
+ *   model on its very next turn — without interrupting the turn in flight.
+ *   A dispatch to an IDLE instance wakes a new response; messages piled up
+ *   before turn one collect into it together. A delivery that misses the
+ *   live response (it settled first, or a crash interrupted the join) runs
+ *   as its own submission from the same durable queue — never lost.
+ * - A joined delivery settles when the response that carried it settles,
+ *   with the same outcome, under the host response's durability budget.
  * - Both message kinds work: a `signal` annotates the conversation; a `user`
- *   message queues a real follow-up turn.
- * - Each call is a durable submission with its own receipt. Like any
+ *   message reads as a real user message.
+ * - Each call is a durable delivery with its own receipt. Like any
  *   external side effect in a re-attempted tool, a re-run dispatches again —
  *   design for at-least-once.
  * - The dispatcher throws during render (renders are pure reads) and on bare
  *   tooling/test renders with no runtime behind them.
- * - For a durable signal ordered into the CURRENT submission before the
- *   model's first turn — the intake pattern — use an effect's `append`
- *   instead: it rides the effect's atomic outcome batch.
  */
 export function useDispatchMessage(): (message: DeliveredMessage) => Promise<DispatchReceipt> {
 	const frame = requireRenderFrame('useDispatchMessage');

@@ -152,8 +152,25 @@ async function assertSubmissionAuthorization(
 ): Promise<void> {
 	const owned = records.filter((record) => record.submissionId !== undefined || record.attemptId !== undefined);
 	if (!submission) { if (owned.length > 0) throw failure(path, 'Submission-owned records require attempt authorization.'); return; }
-	if (owned.some((record) => record.submissionId !== submission.submissionId || record.attemptId !== submission.attemptId)) throw failure(path, 'Record ownership does not match the authorized submission attempt.');
 	const submissions = tx.collection(collectionName(prefix, 'submissions'));
+	for (const record of owned) {
+		if (record.submissionId === submission.submissionId && record.attemptId === submission.attemptId) continue;
+		// Turn-boundary join: the host attempt writes a joined delivery's input
+		// and adoption records under its own authority. Legal exactly when the
+		// delivery's row is durably claimed by THIS host (`joining`/`joined`
+		// with `joinedInto` = the authorized submission) and the record still
+		// carries the host's attempt.
+		if (record.attemptId === submission.attemptId && record.submissionId !== undefined) {
+			const delivery = await submissions.findOne({ submissionId: record.submissionId });
+			if (
+				(delivery?.status === 'joining' || delivery?.status === 'joined') &&
+				delivery.joinedInto === submission.submissionId
+			) {
+				continue;
+			}
+		}
+		throw failure(path, 'Record ownership does not match the authorized submission attempt.');
+	}
 	const row = await submissions.findOne({
 		submissionId: submission.submissionId,
 		attemptId: submission.attemptId,

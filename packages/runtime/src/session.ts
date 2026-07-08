@@ -34,6 +34,7 @@ import {
 	type TaskToolResultDetails,
 } from './agent.ts';
 import {
+	type AgentSubmission,
 	DURABILITY_DEFAULT_MAX_ATTEMPTS,
 	DURABILITY_DEFAULT_TIMEOUT_MS,
 	type SubmissionDurability,
@@ -123,6 +124,7 @@ import type {
 	AgentSubmissionSession,
 	InterruptedToolCallRef,
 	ProcessAgentSubmissionOptions,
+	SubmissionJoinSource,
 } from './runtime/agent-submissions.ts';
 import { type AttachmentStore, createAttachmentRef } from './runtime/attachment-store.ts';
 import {
@@ -616,6 +618,16 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	 * `useAgentFinish` appends flush with their cycle's batch).
 	 */
 	private hookSignalFlush: Promise<void> | undefined;
+	/**
+	 * Turn-boundary join seam for the active submission (dispatch-while-busy),
+	 * bound to the host attempt by the coordinator. Set for the duration of
+	 * `runPersistedContextInput`; absent everywhere else (subagent sessions,
+	 * prompt() operations, degenerate/test setups), where the queue serializes
+	 * exactly as before.
+	 */
+	private activeJoinSource: SubmissionJoinSource | undefined;
+	/** The active submission's abort signal, for join work at turn boundaries. */
+	private activeJoinSignal: AbortSignal | undefined;
 
 	private emitTurnRequestAndStream: StreamFn = async (model, context, options) => {
 		if (this.activeTurnId === undefined) this.activeTurnId = generateTurnId();
@@ -841,15 +853,28 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	 * throw fails the submission (fail-fast, like the metadata start
 	 * producers).
 	 */
-	private async runAgentStartHooks(signal: AbortSignal): Promise<void> {
+	private async runAgentStartHooks(
+		signal: AbortSignal,
+		submissionId = this.activeSubmissionId,
+		options?: {
+			/**
+			 * The hooks run for a delivery that JOINED the live response at a turn
+			 * boundary: the completed-step skip below does not apply (the host's
+			 * response having durable steps is the normal mid-run state, not
+			 * evidence these hooks already had their chance).
+			 */
+			joined?: boolean;
+		},
+	): Promise<void> {
 		const hooks = this.outputChannel?.agentStarts;
-		if (!hooks?.length || !this.activeSubmissionId || this.responseHasCompletedStep) return;
+		if (!hooks?.length || !submissionId) return;
+		if (!options?.joined && this.responseHasCompletedStep) return;
 		const ranIndexes = new Set<number>();
 		for (const record of (await this.conversationWriter.loadReducedState()).recordsById.values()) {
 			if (
 				record.type === 'agent_start_run' &&
 				record.conversationId === this.conversationId &&
-				record.submissionId === this.activeSubmissionId
+				record.submissionId === submissionId
 			) {
 				ranIndexes.add(record.index);
 			}
@@ -858,7 +883,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		try {
 			for (const [index, hook] of hooks.entries()) {
 				if (ranIndexes.has(index)) continue;
-				await this.executeAgentStartHook(index, hook, signal);
+				await this.executeAgentStartHook(index, hook, signal, submissionId);
 			}
 		} finally {
 			this.hookSignalFlush = undefined;
@@ -880,6 +905,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		index: number,
 		hook: AgentStartDeclaration,
 		signal: AbortSignal,
+		submissionId: string,
 	): Promise<void> {
 		// The harness materializes on first access (a callback that never
 		// touches it pays nothing) and closes when the run settles. The
@@ -916,6 +942,10 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			...this.drainHookStateRecords(),
 			{
 				...this.canonicalEnvelope('agent_start_run'),
+				// The DELIVERY's id (differs from the active host submission when
+				// the hook runs for a joined delivery) — the adoption scan keys
+				// re-run decisions on it.
+				submissionId,
 				type: 'agent_start_run',
 				index,
 			},
@@ -923,52 +953,78 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	}
 
 	/**
-	 * Evaluate the render's `useAgentFinish` declarations at the would-stop
-	 * seam and drive continuation cycles: the model has no more tool calls and
-	 * the response is about to settle. Each cycle runs every declaration
-	 * sequentially; if any appended a signal, the cycle is recorded
-	 * batch-atomically with its signal records and the loop continues with
-	 * another turn (the appends were steered live; `continue()` runs them).
-	 * The response settles only when a cycle completes with no appends.
+	 * The would-stop seam: the model has no more tool calls and the response
+	 * is about to settle. Two kinds of work interleave here, in a strict
+	 * order per iteration:
 	 *
-	 * Resume-safe by records: a continued cycle whose continuation turn never
-	 * ran (crash between the durable cycle batch and the turn) classifies
-	 * `completed` upstream with trailing unanswered signals — detected here
-	 * and driven before the next evaluation, so a resumed response neither
-	 * re-runs a completed cycle nor appends twice. The cycle count derives
-	 * from durable records, so the runaway ceiling survives restarts. The
-	 * submission's durability timeout remains the total wall-clock backstop —
-	 * continuations never extend it.
+	 * 1. **Late-arrival joins** — queued dispatch deliveries claim-joined and
+	 *    driven as continuation turns. The agent is not "finally done" while
+	 *    delivered input awaits, so joins always drain BEFORE any finish
+	 *    evaluation. (Deliveries arriving mid-run join at turn boundaries
+	 *    inside the loop; this drain covers only the race where one lands
+	 *    after the loop's final steering poll.)
+	 * 2. **`useAgentFinish` cycles** — each cycle runs every declaration
+	 *    sequentially; if any appended a signal, the cycle is recorded
+	 *    batch-atomically with its signal records and the loop continues with
+	 *    another turn (the appends were steered live; `continue()` runs
+	 *    them). A dispatch made during a finish callback is a real delivery:
+	 *    it joins on the next iteration and re-fires the hooks at the new
+	 *    true end. Joined continuations never count against the append-cycle
+	 *    ceiling.
+	 *
+	 * The response settles only when the queue is empty AND a finish cycle
+	 * completes with no appends.
+	 *
+	 * Resume-safe by records: a continued cycle or an applied join whose
+	 * continuation turn never ran (crash between the durable batch and the
+	 * turn) classifies `completed` upstream with trailing unanswered entries
+	 * — detected here and driven before the next evaluation, so a resumed
+	 * response neither re-runs a completed cycle nor appends twice. The cycle
+	 * count derives from durable records, so the runaway ceiling survives
+	 * restarts. The submission's durability timeout remains the total
+	 * wall-clock backstop — neither continuations nor joins extend it.
 	 */
-	private async runAgentFinishCycles(options: {
+	private async runWouldStopPhase(options: {
 		errorLabel: string;
 		signal: AbortSignal;
 	}): Promise<void> {
-		if (!this.outputChannel?.agentFinishes.length || !this.activeSubmissionId) return;
 		const submissionId = this.activeSubmissionId;
-		if (await this.hasPendingFinishContinuation(submissionId)) {
+		if (!submissionId) return;
+		const driveContinuation = async () => {
 			await this.runModelTurnWithRecovery({
 				start: () => this.agentLoop.continue(),
 				signal: options.signal,
 			});
 			this.throwIfError(options.errorLabel);
+		};
+		if (await this.hasPendingSteeredContinuation(submissionId)) {
+			await driveContinuation();
 		}
 		for (;;) {
+			if ((await this.applyQueuedJoins()) > 0) {
+				await driveContinuation();
+				continue;
+			}
+			const hooks = this.outputChannel?.agentFinishes ?? [];
+			if (hooks.length === 0) return;
 			const cycle = await this.countAgentFinishCycles(submissionId);
 			const toolCalls = await this.collectResponseToolCalls(submissionId);
 			const before = this.pendingSignalAppends.length;
 			// Re-read declarations each cycle: render-per-turn agents re-render on
 			// continuation turns, refreshing the closures.
-			const hooks = this.outputChannel?.agentFinishes ?? [];
 			for (const [index, hook] of hooks.entries()) {
 				await this.executeAgentFinishHook(index, hook, toolCalls, options.signal);
 			}
 			const stateRecords = this.drainHookStateRecords();
 			if (this.pendingSignalAppends.length === before) {
-				// No appends: the hooks are satisfied; commit any state writes and
-				// let the response settle.
+				// No appends: the hooks are satisfied; commit any state writes.
 				if (stateRecords.length > 0) await this.appendCanonical(stateRecords);
-				return;
+				// A callback may have dispatched instead of appending — that queued
+				// delivery joins now (re-firing the hooks at the new true end)
+				// rather than waking a serialized follow-up response.
+				if ((await this.applyQueuedJoins()) === 0) return;
+				await driveContinuation();
+				continue;
 			}
 			if (cycle >= MAX_AGENT_FINISH_CYCLES) {
 				throw new Error(
@@ -990,33 +1046,149 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					cycle: cycle + 1,
 				},
 			]);
-			await this.runModelTurnWithRecovery({
-				start: () => this.agentLoop.continue(),
-				signal: options.signal,
-			});
-			this.throwIfError(options.errorLabel);
+			await driveContinuation();
 		}
 	}
 
 	/**
-	 * Whether the submission has a durably continued `useAgentFinish` cycle
-	 * whose continuation turn never ran: at least one cycle record, and the
-	 * active path ends in signal entries no assistant has answered. Only a
-	 * crash between the cycle batch and its continuation turn produces this
-	 * shape — the rebuilt context already ends with the appended signals, so
-	 * the caller drives `continue()` from them.
+	 * Whether the response has durably steered content whose continuation
+	 * turn never ran — the crash window between a durable batch (a continued
+	 * `useAgentFinish` cycle, or an applied turn-boundary join) and the model
+	 * turn that answers it. The rebuilt context already ends with the steered
+	 * entries, so the caller drives `continue()` from them. Trailing
+	 * straggler signals (flushed after the last boundary, never steered) do
+	 * NOT count: absent cycle records they settle un-continued, exactly as
+	 * before.
 	 */
-	private async hasPendingFinishContinuation(submissionId: string): Promise<boolean> {
-		if ((await this.countAgentFinishCycles(submissionId)) === 0) return false;
+	private async hasPendingSteeredContinuation(submissionId: string): Promise<boolean> {
+		const hasCycles = (await this.countAgentFinishCycles(submissionId)) > 0;
+		const joined = this.activeJoinSource ? await this.activeJoinSource.listUnresolved() : [];
+		const joinedEntryIds = new Set(
+			joined.map((submission) =>
+				submissionEntryId(submission.input.kind, submission.submissionId),
+			),
+		);
+		if (!hasCycles && joinedEntryIds.size === 0) return false;
 		const conversation = await this.requireConversation();
 		const path = getActiveConversationPath(conversation);
 		for (let i = path.length - 1; i >= 0; i--) {
 			const entry = path[i];
 			if (entry?.type !== 'message') continue;
 			if (entry.message.role === 'assistant') return false;
-			if (entry.message.role === 'signal') return true;
+			if (joinedEntryIds.has(entry.id)) return true;
+			if (entry.message.role === 'signal' && hasCycles) return true;
 		}
 		return false;
+	}
+
+	/**
+	 * Turn-boundary join (dispatch-while-busy): claim the joinable queued
+	 * prefix and absorb each delivery into the live response — canonical
+	 * input record, the exact projected message steered into the loop, the
+	 * delivery's own `useAgentStart` hooks, then the durable `joined`
+	 * confirmation. Applied strictly in admission order. Claims once per
+	 * boundary: a delivery dispatched DURING this application (e.g. from a
+	 * start hook) waits for the next boundary, so every claim sits between
+	 * model turns and the submission timeout stays the backstop.
+	 *
+	 * Returns the number of deliveries applied. No-op outside a submission
+	 * with a join seam.
+	 */
+	private async applyQueuedJoins(): Promise<number> {
+		const source = this.activeJoinSource;
+		const signal = this.activeJoinSignal;
+		if (!source || !signal || !this.activeSubmissionId) return 0;
+		const claimed = await source.claim();
+		for (const submission of claimed) {
+			if (signal.aborted) throw abortErrorFor(signal);
+			await this.applyJoinedDelivery(submission, source, signal);
+		}
+		return claimed.length;
+	}
+
+	/**
+	 * Absorb one claimed delivery. Two-phase against the store: the row is
+	 * already `joining` (durable intent); the canonical input record makes
+	 * the join real; `finalize` confirms it `joined`. A crash anywhere in
+	 * between resolves on the re-attempt by record existence
+	 * (`resolveInterruptedJoins`) — record present adopts the join, record
+	 * absent hands the row back to the queue. Errors propagate and fail the
+	 * host attempt (recovery owns the row either way).
+	 */
+	private async applyJoinedDelivery(
+		submission: AgentSubmission,
+		source: SubmissionJoinSource,
+		signal: AbortSignal,
+	): Promise<void> {
+		const input = submission.input;
+		const entryId = submissionEntryId(input.kind, input.submissionId);
+		const alreadyApplied = await this.conversationWriter.hasConversationEntry(
+			this.conversationId,
+			entryId,
+		);
+		if (!alreadyApplied) {
+			const parentId = await this.conversationWriter.getConversationLeaf(this.conversationId);
+			await this.appendCanonical([
+				await this.buildSubmissionInputRecord(input, parentId, { asJoinedDelivery: true }),
+			]);
+			await this.steerJoinedEntry(entryId);
+		}
+		// An already-applied input (a reverted join whose record survived) is
+		// in the rebuilt context — steering it again would duplicate it live.
+		await this.runAgentStartHooks(signal, input.submissionId, { joined: true });
+		await source.finalize(input.submissionId);
+	}
+
+	/**
+	 * Steer the joined delivery's message into the live loop as the EXACT
+	 * message the canonical projection rebuilds from its record — same code
+	 * path (`projectConversationModelContextEntries`), so the live context
+	 * and a rehydrated one can never disagree about what the model saw.
+	 */
+	private async steerJoinedEntry(entryId: string): Promise<void> {
+		const conversation = await this.requireConversation();
+		const resolved = await this.resolveCanonicalContextAttachments(conversation);
+		const entries = projectConversationModelContextEntries(conversation, {
+			resolveAttachment: (attachment) => {
+				const image = resolved.get(attachment.id);
+				if (!image) throw new AttachmentNotAvailableError({ attachmentId: attachment.id });
+				return image;
+			},
+		});
+		const entry = entries.findLast((candidate) => candidate.sourceEntry.id === entryId);
+		if (!entry) {
+			throw new Error(
+				'[flue] A joined delivery input entry is missing from the projected context.',
+			);
+		}
+		this.agentLoop.steer(entry.message);
+	}
+
+	/**
+	 * Resolve joins a crash interrupted, on the host's re-attempt: a
+	 * `joining` row whose canonical input record exists becomes `joined`
+	 * (the rebuilt context already carries it); one whose record never
+	 * landed reverts to `queued` and runs as its own submission (or re-joins
+	 * fresh). `joined` rows re-adopt their start hooks — the per-delivery
+	 * `agent_start_run` records gate re-runs, so completed hooks are no-ops.
+	 */
+	private async resolveInterruptedJoins(signal: AbortSignal): Promise<void> {
+		const source = this.activeJoinSource;
+		if (!source || !this.activeSubmissionId) return;
+		for (const submission of await source.listUnresolved()) {
+			const input = submission.input;
+			const entryId = submissionEntryId(input.kind, input.submissionId);
+			if (submission.status === 'joining') {
+				if (await this.conversationWriter.hasConversationEntry(this.conversationId, entryId)) {
+					await this.runAgentStartHooks(signal, input.submissionId, { joined: true });
+					await source.finalize(input.submissionId);
+				} else {
+					await source.revert(input.submissionId);
+				}
+				continue;
+			}
+			await this.runAgentStartHooks(signal, input.submissionId, { joined: true });
+		}
 	}
 
 	/** Count durably continued `useAgentFinish` cycles for one submission. */
@@ -1760,6 +1932,14 @@ export class Session implements FlueSession, AgentSubmissionSession {
 						if (stateWrites.length > 0) await this.appendCanonical(stateWrites);
 						await this.flushTrailingSignalAppends();
 					}
+					// Turn boundary: absorb queued dispatch deliveries into this live
+					// response (dispatch-while-busy). The turn batch above committed,
+					// so the leaf is settled and buffered appends are drained; steered
+					// here, joined messages drain at the loop's post-turn steering
+					// poll and reach the model at the next turn start — and when the
+					// model would otherwise stop, the non-empty steering queue keeps
+					// the loop running to answer them.
+					await this.applyQueuedJoins();
 					this.emit({
 						type: 'turn_messages',
 						turnId,
@@ -4091,48 +4271,68 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					};
 		return this.runPersistedContextInput({
 			inputEntryId: submissionEntryId(input.kind, input.submissionId),
-			createCanonicalInput: async (parentId) => {
-				const messageId = submissionEntryId(input.kind, input.submissionId);
-				const recordId = `record_${input.kind}_input_${input.submissionId}`;
-				if (message.kind === 'user') {
-					const refs = await this.persistCanonicalAttachments(
-						(message.attachments ?? []).map((attachment, index) => ({
-							id: `att_${input.kind}_${input.submissionId}_${index}`,
-							mimeType: attachment.mimeType,
-							data: attachment.data,
-							...(attachment.filename ? { filename: attachment.filename } : {}),
-						})),
-					);
-					return {
-						...this.canonicalEnvelope('user_message', recordId),
-						type: 'user_message',
-						messageId,
-						parentId,
-						content: [
-							{ type: 'text', text: message.body },
-							...refs.map((attachment) => ({ type: 'attachment' as const, attachment })),
-						],
-					};
-				}
-				return {
-					...this.canonicalEnvelope('signal', recordId),
-					type: 'signal',
-					messageId,
-					parentId,
-					...(input.kind === 'dispatch' ? { dispatchId: input.submissionId } : {}),
-					signalType: message.type,
-					...(message.tagName ? { tagName: message.tagName } : {}),
-					content: message.body,
-					...(message.attributes ? { attributes: message.attributes } : {}),
-				};
-			},
+			createCanonicalInput: (parentId) => this.buildSubmissionInputRecord(input, parentId),
 			errorLabel: `${input.kind}(${input.submissionId})`,
 			onInputApplied: options?.onInputApplied,
 			submissionAttempt: options?.submissionAttempt,
 			startedAt: options?.startedAt,
 			timeoutAt: options?.timeoutAt,
+			joinSource: options?.joinSource,
 			signal,
 		});
+	}
+
+	/**
+	 * The canonical `user_message`/`signal` record for a submission's
+	 * delivered message. Shared by the submission's own input path and the
+	 * turn-boundary join path. A joined delivery's record carries the
+	 * DELIVERY's `submissionId` (not the active host's) — that is what keys
+	 * its `agent_start_run` adoption records and distinguishes joined input
+	 * from the host's in the stream; the store authorizes the mismatch
+	 * against the delivery's durable `joining`/`joined` claim.
+	 */
+	private async buildSubmissionInputRecord(
+		input: AgentSubmissionInput,
+		parentId: string | null,
+		options?: { asJoinedDelivery?: boolean },
+	): Promise<ConversationRecord> {
+		const message = input.message;
+		const owner = options?.asJoinedDelivery ? { submissionId: input.submissionId } : {};
+		const messageId = submissionEntryId(input.kind, input.submissionId);
+		const recordId = `record_${input.kind}_input_${input.submissionId}`;
+		if (message.kind === 'user') {
+			const refs = await this.persistCanonicalAttachments(
+				(message.attachments ?? []).map((attachment, index) => ({
+					id: `att_${input.kind}_${input.submissionId}_${index}`,
+					mimeType: attachment.mimeType,
+					data: attachment.data,
+					...(attachment.filename ? { filename: attachment.filename } : {}),
+				})),
+			);
+			return {
+				...this.canonicalEnvelope('user_message', recordId),
+				...owner,
+				type: 'user_message',
+				messageId,
+				parentId,
+				content: [
+					{ type: 'text', text: message.body },
+					...refs.map((attachment) => ({ type: 'attachment' as const, attachment })),
+				],
+			};
+		}
+		return {
+			...this.canonicalEnvelope('signal', recordId),
+			...owner,
+			type: 'signal',
+			messageId,
+			parentId,
+			...(input.kind === 'dispatch' ? { dispatchId: input.submissionId } : {}),
+			signalType: message.type,
+			...(message.tagName ? { tagName: message.tagName } : {}),
+			content: message.body,
+			...(message.attributes ? { attributes: message.attributes } : {}),
+		};
 	}
 
 	/**
@@ -4303,6 +4503,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		errorLabel: string;
 		onInputApplied?: (durability: SubmissionDurability) => Promise<void> | void;
 		submissionAttempt?: import('./agent-execution-store.ts').SubmissionAttemptRef;
+		joinSource?: SubmissionJoinSource;
 		signal: AbortSignal;
 	}): Promise<void> {
 		return this.withCallOverrides(
@@ -4314,6 +4515,8 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			async () => {
 				this.activeSubmissionId = options.submissionAttempt?.submissionId;
 				this.activeSubmissionAttemptId = options.submissionAttempt?.attemptId;
+				this.activeJoinSource = options.joinSource;
+				this.activeJoinSignal = options.signal;
 				const durability = this.resolveSubmissionDurability(options.startedAt, options.timeoutAt);
 				this.activeTimeoutAt = durability.timeoutAt;
 				try {
@@ -4339,12 +4542,19 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					await options.onInputApplied?.(durability);
 					await this.beginResponseOutput();
 					await this.runAgentStartHooks(options.signal);
+					// Joins interrupted by a crash resolve by record existence (the
+					// rebuilt context above already carries every applied one), then
+					// the queued prefix coalesces into this response before turn 1 —
+					// N messages piled up while idle become one response with one
+					// start-hook run per delivery.
+					await this.resolveInterruptedJoins(options.signal);
+					await this.applyQueuedJoins();
 					await this.resumeConversationToCompletion({
 						inputEntryId: options.inputEntryId,
 						errorLabel: options.errorLabel,
 						signal: options.signal,
 					});
-					await this.runAgentFinishCycles({
+					await this.runWouldStopPhase({
 						errorLabel: options.errorLabel,
 						signal: options.signal,
 					});
@@ -4359,6 +4569,8 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					this.agentLoop.clearSteeringQueue();
 					this.activeSubmissionId = undefined;
 					this.activeSubmissionAttemptId = undefined;
+					this.activeJoinSource = undefined;
+					this.activeJoinSignal = undefined;
 					this.activeTimeoutAt = undefined;
 				}
 			},

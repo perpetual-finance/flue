@@ -34,8 +34,10 @@ import type { RedisArgument, RedisOptions, RedisRunner } from './redis-runner.ts
 import {
 	acquireGenerationScript,
 	admitSubmissionScript,
+	claimJoinableSubmissionsScript,
 	claimSubmissionScript,
 	finalizeSettlementScript,
+	joinLifecycleScript,
 	lifecycleScript,
 	markSubmissionCanonicalReadyScript,
 	quarantineSubmissionScript,
@@ -269,16 +271,15 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 	}
 
 	async hasUnsettledSubmissions(): Promise<boolean> {
-		return (
-			integer(await this.backend.command('ZCARD', [this.backend.keys.submissionStatus('queued')])) >
-				0 ||
-			integer(
-				await this.backend.command('ZCARD', [this.backend.keys.submissionStatus('running')]),
-			) > 0 ||
-			integer(
-				await this.backend.command('ZCARD', [this.backend.keys.submissionStatus('terminalizing')]),
-			) > 0
-		);
+		for (const status of ['queued', 'running', 'terminalizing', 'joining', 'joined']) {
+			if (
+				integer(await this.backend.command('ZCARD', [this.backend.keys.submissionStatus(status)])) >
+				0
+			) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	async listUnreadySubmissions(): Promise<AgentSubmission[]> {
@@ -405,7 +406,12 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 		const affected: string[] = [];
 		for (const id of ids) {
 			const row = await this.backend.hgetall(this.backend.keys.submission(id));
-			if (row.status === 'queued' || row.status === 'running') {
+			if (
+				row.status === 'queued' ||
+				row.status === 'running' ||
+				row.status === 'joining' ||
+				row.status === 'joined'
+			) {
 				// COALESCE-equivalent: first abort request wins.
 				await this.backend.command('HSETNX', [
 					this.backend.keys.submission(id),
@@ -438,7 +444,14 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 	async finalizeSubmissionSettlement(attempt: SubmissionAttemptRef, recordId: string): Promise<boolean> {
 		const row = await this.backend.hgetall(this.backend.keys.submission(attempt.submissionId));
 		if (!row.sessionKey) return false;
-		return integer(await this.backend.eval(finalizeSettlementScript, [this.backend.keys.submission(attempt.submissionId), this.backend.keys.submissionStatus('terminalizing'), this.backend.keys.sessionUnsettled(row.sessionKey)], [attempt.submissionId, Date.now(), attempt.attemptId, recordId])) === 1;
+		// A direct host settles through the outbox; fan its outcome out to
+		// joined deliveries the same way completeSubmission/failSubmission do.
+		// The reserved record is immutable once terminalizing, so reading the
+		// outcome ahead of the script is race-free.
+		const record = row.settlementRecord ? (JSON.parse(row.settlementRecord) as { outcome?: string; error?: { message?: string } }) : undefined;
+		const error = record?.outcome === 'completed' ? empty : (record?.error?.message ?? 'The host submission did not complete.');
+		const joins = await this.listJoinIds(attempt.submissionId);
+		return integer(await this.backend.eval(finalizeSettlementScript, [this.backend.keys.submission(attempt.submissionId), this.backend.keys.submissionStatus('terminalizing'), this.backend.keys.sessionUnsettled(row.sessionKey), this.backend.keys.submissionStatus('queued'), this.backend.keys.submissionStatus('joining'), this.backend.keys.submissionStatus('joined'), this.backend.keys.submissionStatus('settled'), ...joins.map((id) => this.backend.keys.submission(id))], [attempt.submissionId, Date.now(), attempt.attemptId, recordId, error, empty, empty, ...joins])) === 1;
 	}
 
 	completeSubmission(attempt: SubmissionAttemptRef): Promise<boolean> {
@@ -452,6 +465,107 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 			Date.now(),
 			error instanceof Error ? error.message : String(error),
 		);
+	}
+
+	// ── Turn-boundary joins ──────────────────────────────────────────────
+
+	async claimJoinableSubmissions(
+		host: SubmissionAttemptRef,
+		agentName: string,
+	): Promise<AgentSubmission[]> {
+		const hostRow = await this.backend.hgetall(this.backend.keys.submission(host.submissionId));
+		if (
+			!hostRow.sessionKey ||
+			hostRow.status !== 'running' ||
+			hostRow.attemptId !== host.attemptId
+		) {
+			return [];
+		}
+		// Pre-vet the queued prefix in admission order. Contiguous prefix: the
+		// first non-joinable row ends the claim so admission order is preserved
+		// (everything behind it stays queued). The agent-name predicate lives
+		// in the immutable payload, so it is checked here; the claim script
+		// atomically rechecks every mutable predicate before claiming a row.
+		const candidates: AgentSubmission[] = [];
+		for (const id of await this.backend.zrange(
+			this.backend.keys.sessionUnsettled(hostRow.sessionKey),
+		)) {
+			const row = await this.backend.hgetall(this.backend.keys.submission(id));
+			if (row.status !== 'queued') continue;
+			if (row.kind !== 'dispatch' || !row.canonicalReadyAt || row.abortRequestedAt) break;
+			const submission = await this.readOperationalSubmission(id, 'queued');
+			if (!submission || submission.input.agent !== agentName) break;
+			candidates.push(submission);
+		}
+		if (candidates.length === 0) return [];
+		const claimed = new Set(
+			strings(
+				await this.backend.eval(
+					claimJoinableSubmissionsScript,
+					[
+						this.backend.keys.submission(host.submissionId),
+						this.backend.keys.submissionStatus('queued'),
+						this.backend.keys.submissionStatus('joining'),
+						...candidates.map((item) => this.backend.keys.submission(item.submissionId)),
+					],
+					[host.attemptId, host.submissionId, ...candidates.map((item) => item.submissionId)],
+				),
+			),
+		);
+		return candidates
+			.filter((item) => claimed.has(item.submissionId))
+			.map((item) => ({ ...item, status: 'joining' as const, joinedInto: host.submissionId }));
+	}
+
+	finalizeJoinedSubmission(host: SubmissionAttemptRef, submissionId: string): Promise<boolean> {
+		return this.joinLifecycle(host, submissionId, 'finalize', 'joined');
+	}
+
+	revertJoiningSubmission(host: SubmissionAttemptRef, submissionId: string): Promise<boolean> {
+		return this.joinLifecycle(host, submissionId, 'revert', 'queued');
+	}
+
+	async listJoinedSubmissions(hostSubmissionId: string): Promise<AgentSubmission[]> {
+		const output: AgentSubmission[] = [];
+		for (const id of await this.listJoinIds(hostSubmissionId)) {
+			const row = await this.backend.hgetall(this.backend.keys.submission(id));
+			if (row.status !== 'joining' && row.status !== 'joined') continue;
+			const submission = await this.readOperationalSubmission(id, row.status);
+			if (submission) output.push(submission);
+		}
+		return output;
+	}
+
+	private async joinLifecycle(
+		host: SubmissionAttemptRef,
+		submissionId: string,
+		operation: 'finalize' | 'revert',
+		targetStatus: 'joined' | 'queued',
+	): Promise<boolean> {
+		const result = await this.backend.eval(
+			joinLifecycleScript,
+			[
+				this.backend.keys.submission(submissionId),
+				this.backend.keys.submission(host.submissionId),
+				this.backend.keys.submissionStatus('joining'),
+				this.backend.keys.submissionStatus(targetStatus),
+			],
+			[operation, host.attemptId, host.submissionId, Date.now(), submissionId],
+		);
+		return integer(result) === 1;
+	}
+
+	/** Unsettled join ids attached to the host, in admission order. */
+	private async listJoinIds(hostSubmissionId: string): Promise<string[]> {
+		const output: Array<{ id: string; sequence: number }> = [];
+		for (const status of ['joining', 'joined']) {
+			for (const id of await this.backend.zrange(this.backend.keys.submissionStatus(status))) {
+				const row = await this.backend.hgetall(this.backend.keys.submission(id));
+				if (row.joinedInto !== hostSubmissionId || row.status !== status || !row.sequence) continue;
+				output.push({ id, sequence: integer(row.sequence) });
+			}
+		}
+		return output.sort((left, right) => left.sequence - right.sequence).map((item) => item.id);
 	}
 
 	async insertAttemptMarker(attempt: SubmissionAttemptRef): Promise<void> {
@@ -644,6 +758,9 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 		const id = attempt.submissionId;
 		const row = await this.backend.hgetall(this.backend.keys.submission(id));
 		if (!row.sessionKey) return false;
+		// Settling a host fans its outcome out to joined deliveries; their row
+		// keys ride along at KEYS[8..] with ids at the same ARGV index.
+		const joins = operation === 'settle' ? await this.listJoinIds(id) : [];
 		try {
 			const result = await this.backend.eval(
 				lifecycleScript,
@@ -653,8 +770,11 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 					this.backend.keys.submissionStatus('running'),
 					this.backend.keys.submissionStatus('settled'),
 					this.backend.keys.sessionUnsettled(row.sessionKey),
+					this.backend.keys.submissionStatus('joining'),
+					this.backend.keys.submissionStatus('joined'),
+					...joins.map((join) => this.backend.keys.submission(join)),
 				],
-				['running', attempt.attemptId, operation, value, extra1, extra2, id],
+				['running', attempt.attemptId, operation, value, extra1, extra2, id, ...joins],
 			);
 			return integer(result) === 1;
 		} finally {
@@ -666,7 +786,7 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 		const row = await this.backend.hgetall(this.backend.keys.submission(id));
 		if (!row.submissionId || !row.sessionKey || !row.status || !row.sequence) return;
 		const sequence = integer(row.sequence);
-		const commands = ['queued', 'running', 'terminalizing', 'settled'].map((status) => ({
+		const commands = ['queued', 'running', 'terminalizing', 'settled', 'joining', 'joined'].map((status) => ({
 			command: status === row.status ? 'ZADD' : 'ZREM',
 			args:
 				status === row.status
@@ -690,7 +810,10 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 		const ids = await this.backend.zrange(this.backend.keys.sessionUnsettled(sessionKey));
 		for (const id of ids) {
 			const row = await this.backend.hgetall(this.backend.keys.submission(id));
-			if (row.status === 'terminalizing') return null;
+			// An unsettled non-claimable head (terminalizing, or a join clearing
+			// with its host) blocks the session without being runnable itself.
+			if (row.status === 'terminalizing' || row.status === 'joining' || row.status === 'joined')
+				return null;
 			const status = row.status === 'running' ? 'running' : 'queued';
 			const value = await this.readOperationalSubmission(id, status);
 			if (value) return value;
@@ -700,7 +823,7 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 
 	private async readOperationalSubmission(
 		id: string,
-		expectedStatus: 'queued' | 'running',
+		expectedStatus: 'queued' | 'running' | 'joining' | 'joined',
 	): Promise<AgentSubmission | null> {
 		try {
 			const submission = await this.getSubmission(id);
@@ -716,6 +839,8 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 					this.backend.keys.submission(id),
 					this.backend.keys.submissionStatus('queued'),
 					this.backend.keys.submissionStatus('running'),
+					this.backend.keys.submissionStatus('joining'),
+					this.backend.keys.submissionStatus('joined'),
 					this.backend.keys.sessionUnsettled(sessionKey),
 					this.backend.keys.sessionSubmissions(sessionKey),
 					this.backend.keys.submissionStatus('settled'),
@@ -783,6 +908,7 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 			...(row.recoveryRequestedAt ? { recoveryRequestedAt: integer(row.recoveryRequestedAt) } : {}),
 			...(row.abortRequestedAt ? { abortRequestedAt: integer(row.abortRequestedAt) } : {}),
 			...(row.startedAt ? { startedAt: integer(row.startedAt) } : {}),
+			...(row.joinedInto ? { joinedInto: row.joinedInto } : {}),
 			...(row.error ? { error: row.error } : {}),
 			attemptCount: integer(row.attemptCount),
 			maxRetry: integer(row.maxRetry),

@@ -24,7 +24,23 @@ export const LEASE_DURATION_MS = 30_000;
 
 // ─── Submission ─────────────────────────────────────────────────────────────
 
-type AgentSubmissionStatus = 'queued' | 'running' | 'terminalizing' | 'settled';
+/**
+ * Submission lifecycle states. The linear path is
+ * `queued → running → (terminalizing →) settled`. The join pair models a
+ * queued dispatch delivery being absorbed into another submission's live
+ * response at a turn boundary (dispatch-while-busy): `joining` is the durable
+ * intent (claimed by the host's session, canonical input record not yet
+ * confirmed), `joined` means the delivery's input is durably part of the
+ * host's response. Joined submissions settle with their host — see
+ * {@link AgentSubmissionStore.completeSubmission}.
+ */
+type AgentSubmissionStatus =
+	| 'queued'
+	| 'running'
+	| 'terminalizing'
+	| 'settled'
+	| 'joining'
+	| 'joined';
 
 export interface AgentSubmission {
 	readonly sequence: number;
@@ -50,6 +66,14 @@ export interface AgentSubmission {
 	 */
 	readonly abortRequestedAt?: number;
 	readonly startedAt?: number;
+	/**
+	 * The host submission this delivery joined (status `joining`/`joined`,
+	 * and preserved on the settled row for inspection). A joined delivery's
+	 * input became part of the host's live response instead of waking its
+	 * own; it consumes no attempts of its own and settles with the host's
+	 * outcome.
+	 */
+	readonly joinedInto?: string;
 	readonly error?: string;
 	readonly attemptCount: number;
 	readonly maxRetry: number;
@@ -129,13 +153,15 @@ export interface AgentSubmissionStore {
 	// Query
 	/** Return the submission, or `null` when the id is unknown. */
 	getSubmission(submissionId: string): Promise<AgentSubmission | null>;
-	/** True while any submission is queued or running. */
+	/** True while any submission is queued, running, or joining/joined. */
 	hasUnsettledSubmissions(): Promise<boolean>;
 	/**
 	 * Queued submissions that are each the oldest unsettled submission of
 	 * their session, in admission order. At most one runnable head exists
 	 * per session; later queued work in the same session is excluded until
-	 * everything admitted before it has settled.
+	 * everything admitted before it has settled. `joining`/`joined` rows
+	 * count as unsettled here (they block later queued work exactly like a
+	 * running head; the settle fan-out clears them with their host).
 	 */
 	listRunnableSubmissions(): Promise<AgentSubmission[]>;
 	/** All queued submissions without canonical readiness, in admission order. */
@@ -206,7 +232,7 @@ export interface AgentSubmissionStore {
 	/**
 	 * Record an abort request for every unsettled submission in a session.
 	 * Atomically stamps `abortRequestedAt` (COALESCE — first request wins) on
-	 * each `queued` or `running` submission with the given `sessionKey` and
+	 * each `queued`, `running`, `joining`, or `joined` submission with the given `sessionKey` and
 	 * returns their submission ids. It does NOT settle anything and does NOT
 	 * change `status`: terminal settlement always happens through an
 	 * attempt-based path (the pre-execution abort check when a queued submission
@@ -238,13 +264,62 @@ export interface AgentSubmissionStore {
 	 * Settle the submission successfully. Gated on a running submission
 	 * owned by `attempt`: a stale attempt or an already-settled submission
 	 * returns `false` and preserves the first terminal state.
+	 *
+	 * Joined-delivery fan-out (applies equally to {@link failSubmission} and
+	 * {@link finalizeSubmissionSettlement}): settling a host atomically
+	 * settles every `joined` submission attached to it (`joinedInto` equals
+	 * the host's id) with the same outcome — success here, the host's error
+	 * on failure. Any `joining` stragglers (a join whose canonical input was
+	 * never confirmed — an abort or crash window) atomically revert to
+	 * `queued` instead, so the delivery runs as its own submission rather
+	 * than silently vanishing with a response that never carried it.
 	 */
 	completeSubmission(attempt: SubmissionAttemptRef): Promise<boolean>;
 	/**
 	 * Settle the submission with an error message. Same gating as
-	 * {@link completeSubmission}: the first terminal state wins.
+	 * {@link completeSubmission}: the first terminal state wins. Applies the
+	 * same joined-delivery fan-out.
 	 */
 	failSubmission(attempt: SubmissionAttemptRef, error: unknown): Promise<boolean>;
+
+	// Turn-boundary joins (dispatch-while-busy)
+	/**
+	 * Atomically claim queued deliveries for absorption into the host's live
+	 * response. Gated on the host running under `host.attemptId` (a replaced
+	 * or settled attempt claims nothing — zombie fencing). Claims the
+	 * CONTIGUOUS prefix of the session's queued submissions, in admission
+	 * order, stopping at the first row that is not joinable: not
+	 * `kind: 'dispatch'`, not canonical-ready, not the same agent, or
+	 * abort-requested. Stopping (rather than skipping) preserves admission
+	 * order — a direct submission mid-queue keeps everything behind it
+	 * serialized, exactly as today. Each claimed row transitions
+	 * `queued → joining` with `joinedInto` set to the host; the claimed
+	 * submissions are returned in admission order. Two concurrent claimers
+	 * must never both claim the same row.
+	 */
+	claimJoinableSubmissions(host: SubmissionAttemptRef, agentName: string): Promise<AgentSubmission[]>;
+	/**
+	 * Confirm a claimed join once the delivery's canonical input record is
+	 * durable: `joining → joined`, stamping `inputAppliedAt` once. Gated on
+	 * the row being `joining` into this host AND the host still running
+	 * under `host.attemptId`; otherwise `false`.
+	 */
+	finalizeJoinedSubmission(host: SubmissionAttemptRef, submissionId: string): Promise<boolean>;
+	/**
+	 * Hand a claimed-but-unconfirmed join back to the queue:
+	 * `joining → queued`, clearing `joinedInto`. Legal only while the
+	 * delivery's canonical input record does NOT exist (the caller owns that
+	 * check — reverting an applied join would duplicate the message). Same
+	 * gating as {@link finalizeJoinedSubmission}; otherwise `false`.
+	 */
+	revertJoiningSubmission(host: SubmissionAttemptRef, submissionId: string): Promise<boolean>;
+	/**
+	 * Every unsettled join attached to the host (`joining` and `joined`), in
+	 * admission order. Recovery uses this to resolve `joining` stragglers by
+	 * canonical-record existence and to re-adopt `joined` deliveries' start
+	 * hooks on a re-attempt.
+	 */
+	listJoinedSubmissions(hostSubmissionId: string): Promise<AgentSubmission[]>;
 
 	// Attempt markers
 	/**

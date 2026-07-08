@@ -18,6 +18,8 @@ import {
 } from '../src/conversation-reducer.ts';
 import { renderWithFrame } from '../src/hooks/frame.ts';
 import { renderAgentFunctionWithStructure } from '../src/hooks/render.ts';
+import { useAgentFinish } from '../src/hooks/use-agent-finish.ts';
+import { useAgentStart } from '../src/hooks/use-agent-start.ts';
 import { useDispatchMessage } from '../src/hooks/use-dispatch-message.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import {
@@ -165,16 +167,15 @@ async function admitAndSettle(
 const CONFIG = { model: 'faux/agent-dispatch-message' };
 
 describe('useDispatchMessage()', () => {
-	it('a tool-triggered mid-run dispatch reaches the model as a real delivery, not an in-run append', async () => {
+	it('a tool-triggered mid-run dispatch joins the live response at the next turn boundary', async () => {
 		const provider = createFauxProvider();
-		let turnThreeTexts: string[] | undefined;
+		let turnTwoTexts: string[] | undefined;
 		provider.setResponses([
 			fauxAssistantMessage(fauxToolCall('trigger_dispatch', {}, { id: 'tool-td-1' }), {
 				stopReason: 'toolUse',
 			}),
-			fauxAssistantMessage('Turn one done.'),
 			(context) => {
-				turnThreeTexts = context.messages.map((message) =>
+				turnTwoTexts = context.messages.map((message) =>
 					typeof message.content === 'string'
 						? message.content
 						: message.content
@@ -212,14 +213,17 @@ describe('useDispatchMessage()', () => {
 		expect(receipts).toHaveLength(1);
 		expect(receipts[0]?.dispatchId).toEqual(expect.any(String));
 
-		expect(turnThreeTexts).toBeDefined();
-		const joined = (turnThreeTexts ?? []).join('\n---\n');
+		// Dispatch-while-busy: the queued delivery joined the LIVE response at
+		// the turn boundary right after the tool batch — the model read it on
+		// its very next turn, in the same response.
+		expect(turnTwoTexts).toBeDefined();
+		const joined = (turnTwoTexts ?? []).join('\n---\n');
 		expect(joined).toContain('<signal type="note" source="tool">');
 		expect(joined).toContain('Follow-up signal.');
 
-		// Real delivery: the signal record carries a dispatchId (unlike an
-		// effect's `append`, which never does) and lands as its own turn
-		// boundary — after the tool-call turn settled, not inline within it.
+		// Still a real delivery, not an append: the signal record carries its
+		// dispatchId — but it lands INSIDE the live response instead of waking
+		// a serialized follow-up submission.
 		const records = readDurableRecords(dbPath);
 		const signalRecord = records.find((record) => record.type === 'signal');
 		expect(signalRecord).toMatchObject({
@@ -233,8 +237,115 @@ describe('useDispatchMessage()', () => {
 			'user',
 			'assistant',
 			'toolResult',
-			'assistant',
 			'signal:note',
+			'assistant',
+		]);
+
+		// The joined delivery settled WITH its host, sharing the outcome.
+		const db = new DatabaseSync(dbPath);
+		const joinedRow = db
+			.prepare(
+				'SELECT status, joined_into, error FROM flue_agent_submissions WHERE submission_id = ?',
+			)
+			.get(receipts[0]?.dispatchId ?? '') as Record<string, unknown>;
+		db.close();
+		expect(joinedRow).toMatchObject({
+			status: 'settled',
+			joined_into: expect.any(String),
+			error: null,
+		});
+	});
+
+	it('multiple mid-run dispatches coalesce: one useAgentStart per delivery, one useAgentFinish', async () => {
+		const provider = createFauxProvider();
+		provider.setResponses([
+			fauxAssistantMessage(fauxToolCall('trigger_dispatches', {}, { id: 'tool-td-2' }), {
+				stopReason: 'toolUse',
+			}),
+			fauxAssistantMessage('All handled.'),
+		]);
+
+		let startRuns = 0;
+		let finishRuns = 0;
+		function assistant() {
+			const dispatchMessage = useDispatchMessage();
+			useAgentStart(() => {
+				startRuns += 1;
+			});
+			useAgentFinish(() => {
+				finishRuns += 1;
+			});
+			useTool({
+				name: 'trigger_dispatches',
+				description: 'Dispatch two follow-up signals to this same instance mid-run.',
+				run: async () => {
+					await dispatchMessage({ kind: 'signal', type: 'first', body: 'One.' });
+					await dispatchMessage({ kind: 'signal', type: 'second', body: 'Two.' });
+					return 'dispatched';
+				},
+			});
+			return 'Agent.';
+		}
+
+		const { dbPath, coordinator } = await setupDispatchHarness(provider, assistant);
+		await admitAndSettle(coordinator, { kind: 'user', body: 'Go.' });
+		await coordinator.shutdown();
+
+		// Three deliveries collected into ONE response: a start-hook run per
+		// message (host + two joined), and a single finish evaluation once the
+		// agent was finally done with all of them.
+		expect(startRuns).toBe(3);
+		expect(finishRuns).toBe(1);
+
+		const records = readDurableRecords(dbPath);
+		expect(activePathKinds(records)).toEqual([
+			'user',
+			'assistant',
+			'toolResult',
+			'signal:first',
+			'signal:second',
+			'assistant',
+		]);
+	});
+
+	it('a dispatch from useAgentFinish joins the live response and re-fires the hook at the new true end', async () => {
+		const provider = createFauxProvider();
+		provider.setResponses([
+			fauxAssistantMessage('First answer.'),
+			fauxAssistantMessage('Handled the reminder.'),
+		]);
+
+		const finishCycles: number[] = [];
+		let nudged = false;
+		function assistant() {
+			const dispatchMessage = useDispatchMessage();
+			useAgentFinish(async ({ response }) => {
+				finishCycles.push(response.toolCalls.length);
+				if (nudged) return;
+				nudged = true;
+				await dispatchMessage({ kind: 'signal', type: 'nudge', body: 'Keep going.' });
+			});
+			return 'Agent.';
+		}
+
+		const { dbPath, coordinator } = await setupDispatchHarness(provider, assistant);
+		await admitAndSettle(coordinator, { kind: 'user', body: 'Go.' });
+		await coordinator.shutdown();
+
+		// The self-dispatch joined the SAME response (no second submission ran
+		// its own start-to-finish), and useAgentFinish fired again once the
+		// joined delivery was dealt with — the agent is only "finally done"
+		// when the queue is empty at the would-stop.
+		expect(finishCycles).toHaveLength(2);
+
+		const records = readDurableRecords(dbPath);
+		const signalRecord = records.find((record) => record.type === 'signal');
+		expect(signalRecord).toMatchObject({ signalType: 'nudge', content: 'Keep going.' });
+		expect(signalRecord?.dispatchId).toEqual(expect.any(String));
+		expect(activePathKinds(records)).toEqual([
+			'user',
+			'assistant',
+			'signal:nudge',
 			'assistant',
 		]);
 	});
