@@ -437,7 +437,14 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 		const id = attempt.submissionId;
 		const row = await this.backend.hgetall(this.backend.keys.submission(id));
 		if (!row.sessionKey) return null;
-		await this.backend.eval(reserveSettlementScript, [this.backend.keys.submission(id), this.backend.keys.submissionStatus('running'), this.backend.keys.submissionStatus('terminalizing'), this.backend.keys.sessionUnsettled(row.sessionKey)], [attempt.attemptId, id, settlement.recordId, json(settlement.record)]);
+		// Two reservable shapes: the direct submission's own running attempt, or
+		// a direct delivery JOINED into a host running under the caller's attempt.
+		// The host hash key is passed only when the pre-read saw a join; the
+		// script re-verifies every mutable predicate (status, joinedInto, host
+		// status/attempt) atomically before adopting the row.
+		const keys = [this.backend.keys.submission(id), this.backend.keys.submissionStatus('running'), this.backend.keys.submissionStatus('terminalizing'), this.backend.keys.sessionUnsettled(row.sessionKey), this.backend.keys.submissionStatus('joined')];
+		if (row.joinedInto) keys.push(this.backend.keys.submission(row.joinedInto));
+		await this.backend.eval(reserveSettlementScript, keys, [attempt.attemptId, id, settlement.recordId, json(settlement.record), row.joinedInto ?? empty, Date.now()]);
 		const current = await this.backend.hgetall(this.backend.keys.submission(id));
 		return current.status === 'terminalizing' && current.sessionKey && current.attemptId === attempt.attemptId && current.settlementRecordId === settlement.recordId && current.settlementRecord === json(settlement.record) ? { submissionId: id, sessionKey: current.sessionKey, attemptId: attempt.attemptId, recordId: settlement.recordId, record: settlement.record } : null;
 	}
@@ -492,7 +499,7 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 		)) {
 			const row = await this.backend.hgetall(this.backend.keys.submission(id));
 			if (row.status !== 'queued') continue;
-			if (row.kind !== 'dispatch' || !row.canonicalReadyAt || row.abortRequestedAt) break;
+			if (!row.canonicalReadyAt || row.abortRequestedAt) break;
 			const submission = await this.readOperationalSubmission(id, 'queued');
 			if (!submission || submission.input.agent !== agentName) break;
 			candidates.push(submission);

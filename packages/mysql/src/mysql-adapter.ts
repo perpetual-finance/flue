@@ -766,13 +766,25 @@ class MysqlSubmissionStore implements AgentSubmissionStore {
 		if (settlement.record.id !== settlement.recordId) return null;
 		return this.runner.transaction(async (tx) => {
 			const data = JSON.stringify(settlement.record);
-			const rows = await tx.query(`SELECT submission_id, session_key, kind, attempt_id, owner_id, status, settlement_record_id, settlement_record FROM flue_agent_submissions WHERE submission_id = ? FOR UPDATE`, [attempt.submissionId]);
+			const rows = await tx.query(`SELECT submission_id, session_key, kind, attempt_id, owner_id, status, joined_into, settlement_record_id, settlement_record FROM flue_agent_submissions WHERE submission_id = ? FOR UPDATE`, [attempt.submissionId]);
 			const row = rows[0];
-			if (!row || row.attempt_id !== attempt.attemptId) return null;
-			if (row.status === 'running') {
-				if (row.kind !== 'direct' || row.owner_id == null) return null;
+			if (!row || row.kind !== 'direct') return null;
+			// Two reservable shapes: the direct submission's own running attempt,
+			// or a direct delivery JOINED into a host that is running under the
+			// caller's attempt — the host settles the joined waiter's record
+			// under its own authority, adopting the row (attempt_id/started_at)
+			// so the terminalizing invariants and finalize fencing hold.
+			if (row.status === 'running' && row.attempt_id === attempt.attemptId) {
+				if (row.owner_id == null) return null;
 				await tx.query(`UPDATE flue_agent_submissions SET status = 'terminalizing', settlement_record_id = ?, settlement_record = ? WHERE submission_id = ? AND status = 'running' AND attempt_id = ?`, [settlement.recordId, data, attempt.submissionId, attempt.attemptId]);
-			} else if (row.status !== 'terminalizing' || row.settlement_record_id !== settlement.recordId || row.settlement_record !== data) return null;
+			} else if (row.status === 'joined' && row.joined_into != null) {
+				// Host gate is a non-locking read (same discipline as the
+				// finalize/revert EXISTS gate): the delivery row lock is already
+				// held, so never wait on the host row here.
+				const host = await tx.query(`SELECT 1 FROM flue_agent_submissions WHERE submission_id = ? AND status = 'running' AND attempt_id = ?`, [String(row.joined_into), attempt.attemptId]);
+				if (!host[0]) return null;
+				await tx.query(`UPDATE flue_agent_submissions SET status = 'terminalizing', settlement_record_id = ?, settlement_record = ?, attempt_id = ?, started_at = COALESCE(started_at, ?) WHERE submission_id = ? AND status = 'joined'`, [settlement.recordId, data, attempt.attemptId, Date.now(), attempt.submissionId]);
+			} else if (row.status !== 'terminalizing' || row.attempt_id !== attempt.attemptId || row.settlement_record_id !== settlement.recordId || row.settlement_record !== data) return null;
 			return { submissionId: attempt.submissionId, sessionKey: String(row.session_key), attemptId: attempt.attemptId, recordId: settlement.recordId, record: settlement.record };
 		});
 	}
@@ -858,11 +870,7 @@ class MysqlSubmissionStore implements AgentSubmissionStore {
 			for (const row of queued) {
 				// Contiguous prefix: the first non-joinable row ends the claim so
 				// admission order is preserved (everything behind it stays queued).
-				if (
-					row.kind !== 'dispatch' ||
-					row.canonical_ready_at == null ||
-					row.abort_requested_at != null
-				) {
+				if (row.canonical_ready_at == null || row.abort_requested_at != null) {
 					break;
 				}
 				const submission = parseSubmission(

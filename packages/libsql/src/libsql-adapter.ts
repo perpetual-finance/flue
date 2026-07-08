@@ -629,7 +629,28 @@ class LibsqlSubmissionStore implements AgentSubmissionStore {
 	async reserveSubmissionSettlement(attempt: SubmissionAttemptRef, settlement: { recordId: string; record: import('@flue/runtime/adapter').SubmissionSettledRecord }): Promise<import('@flue/runtime/adapter').SubmissionSettlementObligation | null> {
 		if (settlement.record.id !== settlement.recordId) return null;
 		const data = JSON.stringify(settlement.record);
-		const rows = await this.runner.query(`UPDATE flue_agent_submissions SET status = 'terminalizing', settlement_record_id = ?, settlement_record = ? WHERE submission_id = ? AND kind = 'direct' AND status = 'running' AND attempt_id = ? AND owner_id IS NOT NULL AND settlement_record_id IS NULL RETURNING submission_id, session_key, attempt_id, settlement_record_id, settlement_record`, [settlement.recordId, data, attempt.submissionId, attempt.attemptId]);
+		// Two reservable shapes: the direct submission's own running attempt,
+		// or a direct delivery JOINED into a host that is running under the
+		// caller's attempt — the host settles the joined waiter's record
+		// under its own authority, adopting the row (attempt_id/started_at)
+		// so the terminalizing invariants and finalize fencing hold.
+		const rows = await this.runner.query(
+			`UPDATE flue_agent_submissions AS current
+			 SET status = 'terminalizing', settlement_record_id = ?, settlement_record = ?,
+			     attempt_id = ?, started_at = COALESCE(started_at, ?)
+			 WHERE current.submission_id = ? AND current.kind = 'direct'
+			   AND (
+			     (current.status = 'running' AND current.attempt_id = ?
+			       AND current.owner_id IS NOT NULL AND current.settlement_record_id IS NULL)
+			     OR (current.status = 'joined' AND EXISTS (
+			       SELECT 1 FROM flue_agent_submissions AS host
+			       WHERE host.submission_id = current.joined_into
+			         AND host.status = 'running' AND host.attempt_id = ?
+			     ))
+			   )
+			 RETURNING submission_id, session_key, attempt_id, settlement_record_id, settlement_record`,
+			[settlement.recordId, data, attempt.attemptId, Date.now(), attempt.submissionId, attempt.attemptId, attempt.attemptId],
+		);
 		const row = rows[0] ?? (await this.runner.query(`SELECT submission_id, session_key, attempt_id, settlement_record_id, settlement_record FROM flue_agent_submissions WHERE submission_id = ? AND status = 'terminalizing' AND attempt_id = ?`, [attempt.submissionId, attempt.attemptId]))[0];
 		return row?.settlement_record_id === settlement.recordId && row?.settlement_record === data ? { submissionId: String(row.submission_id), sessionKey: String(row.session_key), attemptId: String(row.attempt_id), recordId: String(row.settlement_record_id), record: JSON.parse(String(row.settlement_record)) } : null;
 	}
@@ -711,11 +732,7 @@ class LibsqlSubmissionStore implements AgentSubmissionStore {
 			for (const row of queued) {
 				// Contiguous prefix: the first non-joinable row ends the claim so
 				// admission order is preserved (everything behind it stays queued).
-				if (
-					row.kind !== 'dispatch' ||
-					row.canonical_ready_at == null ||
-					row.abort_requested_at != null
-				) {
+				if (row.canonical_ready_at == null || row.abort_requested_at != null) {
 					break;
 				}
 				const submission = parseSubmission(

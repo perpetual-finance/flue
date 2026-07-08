@@ -355,6 +355,14 @@ export async function reconcileInterruptedSubmission(
 		s.inspectSubmissionInput(input),
 	)(ctx) as AgentSubmissionInspection;
 	if (state === 'completed') {
+		await settleJoinedDirectSubmissions(
+			submissions,
+			attempt,
+			ctx,
+			'completed',
+			undefined,
+			conversationWriter,
+		);
 		if (submission.kind === 'direct') {
 			await settleDirectSubmission(
 				submissions,
@@ -728,6 +736,14 @@ export async function processSubmission(opts: ProcessSubmissionOptions): Promise
 				);
 				return;
 			}
+			await settleJoinedDirectSubmissions(
+				submissions,
+				attempt,
+				ctx,
+				'failed',
+				error,
+				opts.conversationWriter,
+			);
 			if (submission.kind === 'direct') {
 				await settleDirectSubmission(
 					submissions,
@@ -742,6 +758,14 @@ export async function processSubmission(opts: ProcessSubmissionOptions): Promise
 			}
 			throw error;
 		}
+		await settleJoinedDirectSubmissions(
+			submissions,
+			attempt,
+			ctx,
+			'completed',
+			undefined,
+			opts.conversationWriter,
+		);
 		if (submission.kind === 'direct') {
 			await settleDirectSubmission(
 				submissions,
@@ -800,6 +824,14 @@ async function failInterruptedSubmission(
 		);
 	}
 	const error = createError(interruptedTools?.length ? interruptedTools : undefined);
+	await settleJoinedDirectSubmissions(
+		submissions,
+		attempt,
+		ctx,
+		'failed',
+		error,
+		conversationWriter,
+	);
 	if (submission.kind === 'direct') {
 		await settleDirectSubmission(
 			submissions,
@@ -852,6 +884,14 @@ async function settleAbortedWithContext(
 			advisoryError,
 		);
 	}
+	await settleJoinedDirectSubmissions(
+		submissions,
+		attempt,
+		ctx,
+		'aborted',
+		error,
+		conversationWriter,
+	);
 	if (submission.kind === 'direct') {
 		await settleDirectSubmission(
 			submissions,
@@ -863,6 +903,40 @@ async function settleAbortedWithContext(
 		);
 	} else {
 		await submissions.failSubmission(attempt, error);
+	}
+}
+
+/**
+ * Settle every direct (HTTP) delivery joined into the host through the
+ * settlement outbox — each gets its durable `submission_settled` record with
+ * the host's outcome, reserved and finalized under the host's attempt — so
+ * HTTP waiters (`wait()` observes that record) always resolve. Runs BEFORE
+ * the host's own settle in every terminal path; this ordering shares the
+ * single-process hazard model of the existing pre-settle terminal advisory
+ * (see the TODO(multi-process) note in `reconcileInterruptedSubmission`).
+ * Idempotent across re-attempts: a row already terminalizing replays its
+ * retained obligation, and one already settled is skipped by the reserve
+ * gate. Joined dispatch deliveries are untouched — the store's settle
+ * fan-out covers them (and remains the kind-agnostic backstop).
+ */
+async function settleJoinedDirectSubmissions(
+	submissions: AgentSubmissionStore,
+	hostAttempt: SubmissionAttemptRef,
+	ctx: FlueContextInternal,
+	outcome: 'completed' | 'failed' | 'aborted',
+	error?: unknown,
+	conversationWriter?: ConversationRecordWriter,
+): Promise<void> {
+	for (const joined of await submissions.listJoinedSubmissions(hostAttempt.submissionId)) {
+		if (joined.kind !== 'direct' || joined.status !== 'joined') continue;
+		await settleDirectSubmission(
+			submissions,
+			{ submissionId: joined.submissionId, attemptId: hostAttempt.attemptId },
+			ctx,
+			outcome,
+			error,
+			conversationWriter,
+		);
 	}
 }
 

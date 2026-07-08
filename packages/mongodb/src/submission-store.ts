@@ -222,12 +222,33 @@ export class MongoSubmissionStore implements AgentSubmissionStore {
 	}
 	async reserveSubmissionSettlement(attempt: SubmissionAttemptRef, settlement: { recordId: string; record: import('@flue/runtime/adapter').SubmissionSettledRecord }): Promise<import('@flue/runtime/adapter').SubmissionSettlementObligation | null> {
 		if (settlement.record.id !== settlement.recordId) return null;
-		const row = await this.c('submissions').findOneAndUpdate(
-			{ submissionId: attempt.submissionId, kind: 'direct', status: 'running', attemptId: attempt.attemptId, ownerId: { $ne: null }, settlementRecordId: null },
-			{ $set: { status: 'terminalizing', settlementRecordId: settlement.recordId, settlementRecord: settlement.record } }, { returnDocument: 'after' });
-		const current = row ?? await this.c('submissions').findOne({ submissionId: attempt.submissionId, status: 'terminalizing', attemptId: attempt.attemptId });
-		if (!current || current.settlementRecordId !== settlement.recordId || JSON.stringify(current.settlementRecord) !== JSON.stringify(settlement.record)) return null;
-		return { submissionId: String(current.submissionId), sessionKey: String(current.sessionKey), attemptId: String(current.attemptId), recordId: String(current.settlementRecordId), record: current.settlementRecord as import('@flue/runtime/adapter').SubmissionSettledRecord };
+		return this.runner.transaction(async (tx) => {
+			const submissions = tx.collection(collectionName(this.prefix, 'submissions'));
+			// Two reservable shapes: the direct submission's own running attempt,
+			// or a direct delivery JOINED into a host that is running under the
+			// caller's attempt — the host settles the joined waiter's record
+			// under its own authority, adopting the row (attemptId/startedAt)
+			// so the terminalizing invariants and finalize fencing hold.
+			let row = await submissions.findOneAndUpdate(
+				{ submissionId: attempt.submissionId, kind: 'direct', status: 'running', attemptId: attempt.attemptId, ownerId: { $ne: null }, settlementRecordId: null },
+				{ $set: { status: 'terminalizing', settlementRecordId: settlement.recordId, settlementRecord: settlement.record } }, { returnDocument: 'after' });
+			if (!row) {
+				const joined = await submissions.findOne({ submissionId: attempt.submissionId, kind: 'direct', status: 'joined' });
+				const host = joined?.joinedInto
+					? await submissions.findOne({ submissionId: joined.joinedInto, status: 'running', attemptId: attempt.attemptId })
+					: null;
+				if (host) {
+					row = await submissions.findOneAndUpdate(
+						{ submissionId: attempt.submissionId, kind: 'direct', status: 'joined', joinedInto: joined?.joinedInto },
+						[{ $set: { status: 'terminalizing', settlementRecordId: settlement.recordId, settlementRecord: settlement.record, attemptId: attempt.attemptId, startedAt: { $ifNull: ['$startedAt', Date.now()] } } }],
+						{ returnDocument: 'after' },
+					);
+				}
+			}
+			const current = row ?? await submissions.findOne({ submissionId: attempt.submissionId, status: 'terminalizing', attemptId: attempt.attemptId });
+			if (!current || current.settlementRecordId !== settlement.recordId || JSON.stringify(current.settlementRecord) !== JSON.stringify(settlement.record)) return null;
+			return { submissionId: String(current.submissionId), sessionKey: String(current.sessionKey), attemptId: String(current.attemptId), recordId: String(current.settlementRecordId), record: current.settlementRecord as import('@flue/runtime/adapter').SubmissionSettledRecord };
+		});
 	}
 	async finalizeSubmissionSettlement(attempt: SubmissionAttemptRef, recordId: string): Promise<boolean> {
 		return this.runner.transaction(async (tx) => {
@@ -286,7 +307,7 @@ export class MongoSubmissionStore implements AgentSubmissionStore {
 			for (const row of queued) {
 				// Contiguous prefix: the first non-joinable row ends the claim so
 				// admission order is preserved (everything behind it stays queued).
-				if (row.kind !== 'dispatch' || row.canonicalReadyAt == null || row.abortRequestedAt != null) break;
+				if (row.canonicalReadyAt == null || row.abortRequestedAt != null) break;
 				const submission = await this.parseSubmission(row);
 				if (submission.input.agent !== agentName) break;
 				const update = await submissions.updateOne(

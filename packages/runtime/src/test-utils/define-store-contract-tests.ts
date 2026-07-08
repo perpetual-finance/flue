@@ -961,20 +961,84 @@ export function defineStoreContractTests(label: string, backend: StoreContractTe
 				});
 			});
 
-			it('stops the prefix at the first non-joinable row, preserving admission order', async () => {
+			it('claims direct (HTTP) deliveries alongside dispatches — both kinds join alike', async () => {
 				const store = await create();
 				const host = await hostWithQueued(store, 1);
-				// A direct submission mid-queue: everything behind it stays queued.
 				await admitDirectReady(store, directInput({ submissionId: 'direct-mid' }));
 				await admitDispatchReady(store, dispatchInput({ dispatchId: 'queued-behind' }));
 				const claimed = await store.submissions.claimJoinableSubmissions(host, 'assistant');
+				expect(claimed.map((submission) => [submission.submissionId, submission.kind])).toEqual([
+					['queued-1', 'dispatch'],
+					['direct-mid', 'direct'],
+					['queued-behind', 'dispatch'],
+				]);
+			});
+
+			it('stops the prefix at the first non-joinable row, preserving admission order', async () => {
+				const store = await create();
+				const host = await hostWithQueued(store, 1);
+				// Admitted but never canonical-ready: not joinable, and everything
+				// behind it stays queued (stop, don't skip).
+				await store.submissions.admitDispatch(dispatchInput({ dispatchId: 'unready-mid' }));
+				await admitDispatchReady(store, dispatchInput({ dispatchId: 'queued-behind' }));
+				const claimed = await store.submissions.claimJoinableSubmissions(host, 'assistant');
 				expect(claimed.map((submission) => submission.submissionId)).toEqual(['queued-1']);
-				expect(await store.submissions.getSubmission('direct-mid')).toMatchObject({
+				expect(await store.submissions.getSubmission('unready-mid')).toMatchObject({
 					status: 'queued',
 				});
 				expect(await store.submissions.getSubmission('queued-behind')).toMatchObject({
 					status: 'queued',
 				});
+			});
+
+			it('reserves a joined direct delivery settlement under the host attempt', async () => {
+				const store = await create();
+				const host = await hostWithQueued(store, 0);
+				await admitDirectReady(store, directInput({ submissionId: 'direct-joined' }));
+				await store.submissions.claimJoinableSubmissions(host, 'assistant');
+				await store.submissions.finalizeJoinedSubmission(host, 'direct-joined');
+				const record = {
+					v: 1 as const,
+					id: 'direct-joined:settled',
+					type: 'submission_settled' as const,
+					conversationId: 'conversation-1',
+					harness: 'default',
+					session: 'default',
+					timestamp: '2026-06-22T00:00:00.000Z',
+					submissionId: 'direct-joined',
+					attemptId: 'attempt-1',
+					outcome: 'completed' as const,
+				};
+				// Fenced on the HOST attempt: a stale attempt reserves nothing.
+				expect(
+					await store.submissions.reserveSubmissionSettlement(
+						attempt('direct-joined', 'stale-attempt'),
+						{ recordId: record.id, record },
+					),
+				).toBeNull();
+				const reserved = await store.submissions.reserveSubmissionSettlement(
+					attempt('direct-joined', 'attempt-1'),
+					{ recordId: record.id, record },
+				);
+				expect(reserved).toMatchObject({
+					submissionId: 'direct-joined',
+					attemptId: 'attempt-1',
+					recordId: record.id,
+				});
+				// The row adopted the host attempt on its way to terminalizing.
+				expect(await store.submissions.getSubmission('direct-joined')).toMatchObject({
+					status: 'terminalizing',
+					attemptId: 'attempt-1',
+				});
+				expect(
+					await store.submissions.finalizeSubmissionSettlement(
+						attempt('direct-joined', 'attempt-1'),
+						record.id,
+					),
+				).toBe(true);
+				const settled = await store.submissions.getSubmission('direct-joined');
+				expect(settled).toMatchObject({ status: 'settled' });
+				expect(settled?.error).toBeUndefined();
 			});
 
 			it('stops the prefix at an abort-requested delivery and at a different agent', async () => {

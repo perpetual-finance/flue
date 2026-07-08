@@ -172,7 +172,7 @@ local claimed = {}
 for i = 4, #KEYS do
   local key = KEYS[i]
   local id = ARGV[i - 1]
-  if redis.call('HGET', key, 'status') ~= 'queued' or redis.call('HGET', key, 'kind') ~= 'dispatch' then break end
+  if redis.call('HGET', key, 'status') ~= 'queued' then break end
   if redis.call('HEXISTS', key, 'canonicalReadyAt') == 0 or redis.call('HEXISTS', key, 'abortRequestedAt') == 1 then break end
   if redis.call('HGET', key, 'sessionKey') ~= sessionKey then break end
   local sequence = redis.call('HGET', key, 'sequence')
@@ -231,15 +231,28 @@ if redis.call('EXISTS', KEYS[1]) == 1 then redis.call('HSET', KEYS[1], 'status',
 return 1
 `;
 
+// Two reservable shapes: the direct submission's own running attempt
+// (attemptId fenced on the row), or a direct delivery JOINED into a host
+// that is running under the caller's attempt — KEYS[6] (present only when
+// the caller saw a join) is the host hash and ARGV[5] the host id it must
+// still match. The joined shape adopts the row on its way to terminalizing
+// (attemptId := caller, startedAt set-once) so the terminalizing invariants
+// and finalize fencing hold.
 export const reserveSettlementScript = `${guard}
 require_type(KEYS[1], 'hash')
-for i = 2, 4 do require_type(KEYS[i], 'zset') end
-if redis.call('HGET', KEYS[1], 'kind') ~= 'direct' or redis.call('HGET', KEYS[1], 'status') ~= 'running' or redis.call('HGET', KEYS[1], 'attemptId') ~= ARGV[1] or not redis.call('HGET', KEYS[1], 'ownerId') or redis.call('HEXISTS', KEYS[1], 'settlementRecordId') == 1 then return 0 end
+for i = 2, 5 do require_type(KEYS[i], 'zset') end
+if #KEYS >= 6 then require_type(KEYS[6], 'hash') end
+if redis.call('HGET', KEYS[1], 'kind') ~= 'direct' or redis.call('HEXISTS', KEYS[1], 'settlementRecordId') == 1 then return 0 end
+local status = redis.call('HGET', KEYS[1], 'status')
+local running = status == 'running' and redis.call('HGET', KEYS[1], 'attemptId') == ARGV[1] and redis.call('HGET', KEYS[1], 'ownerId') ~= false
+local joined = status == 'joined' and #KEYS >= 6 and ARGV[5] ~= '' and redis.call('HGET', KEYS[1], 'joinedInto') == ARGV[5] and redis.call('HGET', KEYS[6], 'status') == 'running' and redis.call('HGET', KEYS[6], 'attemptId') == ARGV[1]
+if not (running or joined) then return 0 end
 local sequence = redis.call('HGET', KEYS[1], 'sequence')
-redis.call('ZREM', KEYS[2], ARGV[2])
+if running then redis.call('ZREM', KEYS[2], ARGV[2]) else redis.call('ZREM', KEYS[5], ARGV[2]) end
 redis.call('ZADD', KEYS[3], sequence, ARGV[2])
 redis.call('ZADD', KEYS[4], sequence, ARGV[2])
-redis.call('HSET', KEYS[1], 'status', 'terminalizing', 'settlementRecordId', ARGV[3], 'settlementRecord', ARGV[4])
+redis.call('HSET', KEYS[1], 'status', 'terminalizing', 'settlementRecordId', ARGV[3], 'settlementRecord', ARGV[4], 'attemptId', ARGV[1])
+redis.call('HSETNX', KEYS[1], 'startedAt', ARGV[6])
 return 1
 `;
 

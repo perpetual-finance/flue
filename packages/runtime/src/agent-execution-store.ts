@@ -250,9 +250,12 @@ export interface AgentSubmissionStore {
 	requeueSubmissionBeforeInputApplied(attempt: SubmissionAttemptRef): Promise<boolean>;
 	/**
 	 * Atomically reserve the exact canonical settlement record as an obligation.
-	 * Only a running direct submission owned by `attempt` may transition to
-	 * terminalizing. Exact retries return the existing obligation; conflicting
-	 * record identities or payloads return `null`.
+	 * Two shapes may transition to terminalizing: a running direct submission
+	 * owned by `attempt`, or a direct delivery `joined` into a host running
+	 * under `attempt.attemptId` — the host settles the joined waiter's record
+	 * under its own authority, adopting the row's `attemptId`/`startedAt`.
+	 * Exact retries return the existing obligation; conflicting record
+	 * identities or payloads return `null`.
 	 */
 	reserveSubmissionSettlement(
 		attempt: SubmissionAttemptRef,
@@ -273,6 +276,15 @@ export interface AgentSubmissionStore {
 	 * never confirmed — an abort or crash window) atomically revert to
 	 * `queued` instead, so the delivery runs as its own submission rather
 	 * than silently vanishing with a response that never carried it.
+	 *
+	 * Joined DIRECT deliveries normally never reach this fan-out: the
+	 * processing layer settles each one through the settlement outbox (its
+	 * durable `submission_settled` record, reserved via
+	 * {@link reserveSubmissionSettlement} under the host attempt) BEFORE
+	 * settling the host, so HTTP waiters always observe an outcome record.
+	 * The fan-out remains the kind-agnostic backstop: a joined row of either
+	 * kind still present when the host settles is cleared here rather than
+	 * wedging the session queue.
 	 */
 	completeSubmission(attempt: SubmissionAttemptRef): Promise<boolean>;
 	/**
@@ -287,12 +299,11 @@ export interface AgentSubmissionStore {
 	 * Atomically claim queued deliveries for absorption into the host's live
 	 * response. Gated on the host running under `host.attemptId` (a replaced
 	 * or settled attempt claims nothing — zombie fencing). Claims the
-	 * CONTIGUOUS prefix of the session's queued submissions, in admission
-	 * order, stopping at the first row that is not joinable: not
-	 * `kind: 'dispatch'`, not canonical-ready, not the same agent, or
-	 * abort-requested. Stopping (rather than skipping) preserves admission
-	 * order — a direct submission mid-queue keeps everything behind it
-	 * serialized, exactly as today. Each claimed row transitions
+	 * CONTIGUOUS prefix of the session's queued submissions — both kinds;
+	 * dispatch and direct (HTTP) deliveries join alike — in admission order,
+	 * stopping at the first row that is not joinable: not canonical-ready,
+	 * not the same agent, or abort-requested. Stopping (rather than
+	 * skipping) preserves admission order. Each claimed row transitions
 	 * `queued → joining` with `joinedInto` set to the host; the claimed
 	 * submissions are returned in admission order. Two concurrent claimers
 	 * must never both claim the same row.

@@ -33,7 +33,8 @@ import { isRendering, requireRenderFrame } from './frame.ts';
  * ```
  *
  * Semantics — identical to the global `dispatch()` by construction (same
- * queue, same admission, same delivery):
+ * queue, same admission, same delivery), and identical for direct HTTP
+ * prompts to the instance (one accepted order, one join behavior):
  * - A dispatch to a BUSY instance joins the live response at the next turn
  *   boundary: durably admitted, its own `useAgentStart` run, read by the
  *   model on its very next turn — without interrupting the turn in flight.

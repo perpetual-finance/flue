@@ -308,6 +308,72 @@ describe('useDispatchMessage()', () => {
 		]);
 	});
 
+	it('a direct (HTTP) prompt arriving mid-response joins it and still settles its waiter record', async () => {
+		const provider = createFauxProvider();
+		provider.setResponses([
+			fauxAssistantMessage(fauxToolCall('trigger_direct', {}, { id: 'tool-hd-1' }), {
+				stopReason: 'toolUse',
+			}),
+			fauxAssistantMessage('Handled both.'),
+		]);
+
+		let directSubmissionId: string | undefined;
+		let admitDirect: ((message: DeliveredMessage) => Promise<{ submissionId: string }>) | undefined;
+		function assistant() {
+			useTool({
+				name: 'trigger_direct',
+				description: 'Simulate an HTTP prompt landing while this response is running.',
+				run: async () => {
+					const receipt = await admitDirect?.({ kind: 'user', body: 'And also this.' });
+					directSubmissionId = receipt?.submissionId;
+					return 'admitted';
+				},
+			});
+			return 'Agent.';
+		}
+
+		const { dbPath, coordinator } = await setupDispatchHarness(provider, assistant);
+		const admission = coordinator.createAdmission('assistant', 'instance-1');
+		admitDirect = (message) => admission(message);
+		await admitAndSettle(coordinator, { kind: 'user', body: 'Go.' });
+		await coordinator.shutdown();
+
+		expect(directSubmissionId).toEqual(expect.any(String));
+
+		// HTTP and dispatch behave alike: the direct prompt joined the live
+		// response as a real user message at the turn boundary.
+		const records = readDurableRecords(dbPath);
+		expect(activePathKinds(records)).toEqual([
+			'user',
+			'assistant',
+			'toolResult',
+			'user',
+			'assistant',
+		]);
+
+		// The waiter contract survives the join: the joined direct delivery
+		// still settled through the outbox with a durable settled record
+		// carrying the shared outcome.
+		const settledRecord = records.find(
+			(record) =>
+				record.type === 'submission_settled' && record.submissionId === directSubmissionId,
+		);
+		expect(settledRecord).toMatchObject({ outcome: 'completed' });
+
+		const db = new DatabaseSync(dbPath);
+		const joinedRow = db
+			.prepare(
+				'SELECT status, joined_into, error FROM flue_agent_submissions WHERE submission_id = ?',
+			)
+			.get(directSubmissionId ?? '') as Record<string, unknown>;
+		db.close();
+		expect(joinedRow).toMatchObject({
+			status: 'settled',
+			joined_into: expect.any(String),
+			error: null,
+		});
+	});
+
 	it('a dispatch from useAgentFinish joins the live response and re-fires the hook at the new true end', async () => {
 		const provider = createFauxProvider();
 		provider.setResponses([

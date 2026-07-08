@@ -405,16 +405,33 @@ class AgentSubmissionStoreImpl implements AgentSubmissionStore {
 		if (settlement.record.id !== settlement.recordId) return null;
 		const recordJson = JSON.stringify(settlement.record);
 		return this.transactionSync(() => {
+			// Two reservable shapes: the direct submission's own running attempt,
+			// or a direct delivery JOINED into a host that is running under the
+			// caller's attempt — the host settles the joined waiter's record
+			// under its own authority, adopting the row (attempt_id/started_at)
+			// so the terminalizing invariants and finalize fencing hold.
 			const inserted = this.sql
 				.exec(
-					`UPDATE flue_agent_submissions
-					 SET status = 'terminalizing', settlement_record_id = ?, settlement_record_json = ?
-					 WHERE submission_id = ? AND kind = 'direct' AND status = 'running' AND attempt_id = ?
+					`UPDATE flue_agent_submissions AS current
+					 SET status = 'terminalizing', settlement_record_id = ?, settlement_record_json = ?,
+					     attempt_id = ?, started_at = COALESCE(started_at, ?)
+					 WHERE current.submission_id = ? AND current.kind = 'direct'
+					   AND (
+					     (current.status = 'running' AND current.attempt_id = ?)
+					     OR (current.status = 'joined' AND EXISTS (
+					       SELECT 1 FROM flue_agent_submissions AS host
+					       WHERE host.submission_id = current.joined_into
+					         AND host.status = 'running' AND host.attempt_id = ?
+					     ))
+					   )
 					 RETURNING submission_id, session_key, attempt_id, settlement_record_id,
 					           settlement_record_json`,
 					settlement.recordId,
 					recordJson,
+					attempt.attemptId,
+					Date.now(),
 					attempt.submissionId,
+					attempt.attemptId,
 					attempt.attemptId,
 				)
 				.toArray()[0];
@@ -534,11 +551,7 @@ class AgentSubmissionStoreImpl implements AgentSubmissionStore {
 			for (const row of queued) {
 				// Contiguous prefix: the first non-joinable row ends the claim so
 				// admission order is preserved (everything behind it stays queued).
-				if (
-					row.kind !== 'dispatch' ||
-					row.canonical_ready_at === null ||
-					row.abort_requested_at !== null
-				) {
+				if (row.canonical_ready_at === null || row.abort_requested_at !== null) {
 					break;
 				}
 				const submission = this.parseSubmission(row);
