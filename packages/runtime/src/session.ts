@@ -100,6 +100,7 @@ import {
 	type AgentSignalAppend,
 	type AgentStartContext,
 	type AgentStartDeclaration,
+	assertAppendMessage,
 	runMessageMetadataProducers,
 } from './message-output.ts';
 import { createUserContextMessage, renderSignalMessage } from './message-rendering.ts';
@@ -595,11 +596,12 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	/** Ordered append chain for `useMessageData` writes; awaited before the response settles. */
 	private outputWriteQueue: Promise<unknown> = Promise.resolve();
 	/**
-	 * `useAppend` signals buffered since the last flush point, in call order.
-	 * Appends are steered into the live loop immediately (the model sees them
-	 * at the next turn boundary) but their canonical records must respect the
-	 * conversation's linear topology, so they flush at turn_end — riding the
-	 * tool batch's commit append, exactly like buffered `useState` writes.
+	 * Finish-continuation appends (`ctx.append` in `useAgentFinish`) buffered
+	 * since the last flush point, in call order. Appends are steered into the
+	 * live loop immediately (the model sees them on the continuation turn) and
+	 * their canonical records flush batch-atomically with the cycle record —
+	 * appends can only happen during finish callbacks, so the cycle batch is
+	 * their single durability point.
 	 */
 	private pendingSignalAppends: Array<{
 		messageId: string;
@@ -609,15 +611,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		content: string;
 		attributes?: Record<string, string>;
 	}> = [];
-	/**
-	 * While the `useAgentStart` seam runs, signal appends flush durably as
-	 * they happen (an ordered chain) instead of waiting for a turn boundary:
-	 * pre-turn-1 the conversation topology is quiescent, so immediate appends
-	 * are legal — and clients see a callback's progress signals live, mid-run.
-	 * Undefined outside the seam (tool-context appends buffer to turn_end;
-	 * `useAgentFinish` appends flush with their cycle's batch).
-	 */
-	private hookSignalFlush: Promise<void> | undefined;
 	/**
 	 * Turn-boundary join seam for the active submission (dispatch-while-busy),
 	 * bound to the host attempt by the coordinator. Set for the duration of
@@ -748,18 +741,17 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	}
 
 	/**
-	 * Sink for `useAppendMessage` writes. The signal is steered into the live
-	 * agent loop immediately — pi drains the steering queue at each turn
-	 * boundary, so the model sees it before its next response — and buffered
-	 * for canonical append at the next flush point
-	 * (`drainSignalAppendRecords`). Steering and the durable flush happen in
-	 * the same order at the same boundary, so the live context and a
-	 * rehydrated one can never disagree.
+	 * Sink for `ctx.append` writes from `useAgentFinish` callbacks. The signal
+	 * is steered into the live agent loop immediately — `continue()` runs it
+	 * as the continuation turn — and buffered for canonical append with the
+	 * cycle's batch (`drainSignalAppendRecords`). Steering and the durable
+	 * flush happen in the same order at the same boundary, so the live
+	 * context and a rehydrated one can never disagree.
 	 */
 	private enqueueSignalAppend(signal: AgentSignalAppend): void {
 		if (!this.activeSubmissionId) {
 			throw new Error(
-				'[flue] The useAppendMessage() writer is only legal while the agent is responding to a submission. An appended signal annotates the running response; to send input at any other time, use the dispatcher from useDispatchMessage().',
+				'[flue] append() is only legal while the agent is responding to a submission. An appended signal steers the running response; to send input at any other time, use the dispatcher from useDispatchMessage().',
 			);
 		}
 		const timestamp = new Date().toISOString();
@@ -788,21 +780,13 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				timestamp,
 			),
 		);
-		if (this.hookSignalFlush) {
-			const pending = this.hookSignalFlush.then(() => this.flushTrailingSignalAppends());
-			this.hookSignalFlush = pending;
-			// The chain is awaited before each callback's completion record; this
-			// handler only keeps an interim rejection from surfacing as an
-			// unhandled-rejection warning.
-			pending.catch(() => {});
-		}
 	}
 
 	/**
-	 * Turn buffered `useAppend` signals into canonical `signal` records chained
-	 * linearly after `parentId`, returning the new leaf. Callers must append
-	 * the records in the same batch (or immediately after) whatever made
-	 * `parentId` the conversation tail.
+	 * Turn buffered finish-continuation appends into canonical `signal`
+	 * records chained linearly after `parentId`, returning the new leaf.
+	 * Callers must append the records in the same batch (or immediately
+	 * after) whatever made `parentId` the conversation tail.
 	 */
 	private drainSignalAppendRecords(parentId: string | null): {
 		records: ConversationRecord[];
@@ -828,18 +812,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			return record;
 		});
 		return { records, leafId };
-	}
-
-	/**
-	 * Flush signals appended after the run's last turn boundary (a straggling
-	 * callback). The model never saw them live; they extend the durable leaf so
-	 * the next run's rebuilt context picks them up.
-	 */
-	private async flushTrailingSignalAppends(): Promise<void> {
-		if (this.pendingSignalAppends.length === 0) return;
-		const parentId = await this.conversationWriter.getConversationLeaf(this.conversationId);
-		const { records } = this.drainSignalAppendRecords(parentId);
-		await this.appendCanonical(records);
 	}
 
 	/**
@@ -879,27 +851,19 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				ranIndexes.add(record.index);
 			}
 		}
-		this.hookSignalFlush = Promise.resolve();
-		try {
-			for (const [index, hook] of hooks.entries()) {
-				if (ranIndexes.has(index)) continue;
-				await this.executeAgentStartHook(index, hook, signal, submissionId);
-			}
-		} finally {
-			this.hookSignalFlush = undefined;
+		for (const [index, hook] of hooks.entries()) {
+			if (ranIndexes.has(index)) continue;
+			await this.executeAgentStartHook(index, hook, signal, submissionId);
 		}
 	}
 
 	/**
-	 * Run one `useAgentStart` callback. Signals it appends flush durably AS
-	 * THEY HAPPEN (the `hookSignalFlush` chain) so clients see progress live,
-	 * mid-run; they sit ahead of the first assistant turn — the same position
-	 * the steering queue injects them into the live loop. The rest of the
-	 * outcome commits atomically after the run: buffered state writes and the
-	 * `agent_start_run` adoption record in one append batch. An interrupted or
-	 * failed run leaves no completion record and re-runs on the re-attempt
-	 * (at-least-once) — its already-flushed progress signals stay in history,
-	 * an honest record of work that started.
+	 * Run one `useAgentStart` callback. Its outcome commits atomically after
+	 * the run: buffered state writes and the `agent_start_run` adoption
+	 * record in one append batch. An interrupted or failed run leaves no
+	 * completion record and re-runs on the re-attempt (at-least-once). To
+	 * put something in front of the model, a callback dispatches — the
+	 * delivery joins this same response before the model's next turn.
 	 */
 	private async executeAgentStartHook(
 		index: number,
@@ -934,10 +898,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				await harness.close();
 			}
 		}
-		// Signals flushed live during the run; surface any append failure before
-		// recording completion, so a lost signal can never hide behind a
-		// completed adoption record.
-		await this.hookSignalFlush;
 		await this.appendCanonical([
 			...this.drainHookStateRecords(),
 			{
@@ -1238,10 +1198,23 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		signal: AbortSignal,
 	): Promise<void> {
 		let harness: ActionHarness | undefined;
+		// The continuation writer is legal only during the callback's execution
+		// window: a captured reference used later cannot steer a response that
+		// has already moved on (or settled), so it throws instead of silently
+		// buffering.
+		let appendWindowOpen = true;
 		// `this` is shadowed inside the ctx getter below.
 		const session = this;
 		const ctx: AgentFinishContext = {
 			response: { toolCalls },
+			append: (message) => {
+				if (!appendWindowOpen) {
+					throw new Error(
+						'[flue] append() was called after its useAgentFinish callback settled. The continuation window is the callback itself — to send input at any other time, use the dispatcher from useDispatchMessage().',
+					);
+				}
+				this.enqueueSignalAppend(assertAppendMessage(message));
+			},
 			log: this.createHookLogger('useAgentFinish', index),
 			signal,
 			get harness() {
@@ -1257,6 +1230,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				{ cause: error },
 			);
 		} finally {
+			appendWindowOpen = false;
 			if (harness) {
 				this.activeActionHarnesses.delete(harness);
 				await harness.close();
@@ -1453,7 +1427,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		this.rerender = options.rerender;
 		this.outputChannel = options.output;
 		this.outputChannel?.connect((name, data) => this.enqueueMessageDataWrite(name, data));
-		this.outputChannel?.connectSignals((signal) => this.enqueueSignalAppend(signal));
 
 		const systemPrompt = this.config.systemPrompt;
 
@@ -1478,12 +1451,12 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			streamFn: this.emitTurnRequestAndStream,
 			toolExecution: 'parallel',
 			// Queued messages always drain together at the next boundary — 'all'
-			// is Flue's only queue behavior. The steering queue carries
-			// `useAppendMessage` signals: every signal appended during a turn
-			// reaches the model at the next turn start (pi's one-at-a-time
-			// default would spread them across turns). Flue never calls
-			// followUp(), but the mode is pinned so no latent one-at-a-time
-			// behavior survives anywhere.
+			// is Flue's only queue behavior. The steering queue carries joined
+			// deliveries and finish-continuation appends: everything steered at a
+			// boundary reaches the model together at the next turn start (pi's
+			// one-at-a-time default would spread them across turns). Flue never
+			// calls followUp(), but the mode is pinned so no latent
+			// one-at-a-time behavior survives anywhere.
 			steeringMode: 'all',
 			followUpMode: 'all',
 			sessionId: this.affinityKey,
@@ -1892,17 +1865,13 @@ export class Session implements FlueSession, AgentSubmissionSession {
 								reason: 'A committed canonical tool-result batch must contain at least one result.',
 							});
 						}
-						// Signals appended during this batch chain after its final tool
-						// result — the same position the steering queue injects them into
-						// the live loop, so durable order equals what the model saw.
-						const signalAppends = this.drainSignalAppendRecords(
-							toolResultEntryId(assistantMessageId, finalToolResult.toolCallId),
-						);
-						// Buffered useState writes and signal appends land in the same
-						// append batch as the commit marker — one store.append, one
-						// durability point. If recovery settles this batch as interrupted,
-						// the writes never happened, exactly like the tool side effects
-						// they rode with.
+						// Buffered useState writes land in the same append batch as the
+						// commit marker — one store.append, one durability point. If
+						// recovery settles this batch as interrupted, the writes never
+						// happened, exactly like the tool side effects they rode with.
+						// (Signal appends never appear at turn boundaries: `ctx.append`
+						// exists only inside useAgentFinish callbacks, and the cycle
+						// batch is their durability point.)
 						await this.appendCanonical([
 							...this.drainHookStateRecords(),
 							{
@@ -1915,22 +1884,21 @@ export class Session implements FlueSession, AgentSubmissionSession {
 								parentId,
 								outcomeIds,
 							},
-							...signalAppends.records,
 						]);
 						for (const toolResult of event.toolResults) {
 							this.pendingToolPublications.get(toolResult.toolCallId)?.();
 							this.pendingToolPublications.delete(toolResult.toolCallId);
 						}
-						this.canonicalToolResultParentId =
-							signalAppends.leafId ??
-							toolResultEntryId(assistantMessageId, finalToolResult.toolCallId);
+						this.canonicalToolResultParentId = toolResultEntryId(
+							assistantMessageId,
+							finalToolResult.toolCallId,
+						);
 						this.canonicalToolRequestMessageId = undefined;
 					} else {
 						// No tool batch this turn: persist any stray buffered writes on
 						// their own so nothing sits in memory past the turn boundary.
 						const stateWrites = this.drainHookStateRecords();
 						if (stateWrites.length > 0) await this.appendCanonical(stateWrites);
-						await this.flushTrailingSignalAppends();
 					}
 					// Turn boundary: absorb queued dispatch deliveries into this live
 					// response (dispatch-while-busy). The turn batch above committed,
@@ -4558,7 +4526,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 						errorLabel: options.errorLabel,
 						signal: options.signal,
 					});
-					await this.flushTrailingSignalAppends();
 					await this.flushResponseOutput();
 				} finally {
 					// A failed attempt drops its unflushed signal appends (they never

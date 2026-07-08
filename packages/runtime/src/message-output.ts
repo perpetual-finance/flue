@@ -5,9 +5,9 @@ import type { FlueHarness, FlueLogger, PromptUsage } from './types.ts';
  * The write channels behind the output hooks. Client-facing output
  * (`useMessageData`, `useMessageMetadata`) decorates the agent's response
  * message for clients and never reaches the model; model-facing appends
- * (`useAppendMessage`) write signal records into the agent's own
- * conversation history. Both are write-only and non-reactive — nothing here
- * re-runs the agent.
+ * (`ctx.append` in `useAgentFinish`) write signal records into the agent's
+ * own conversation history. Both are write-only and non-reactive — nothing
+ * here re-runs the agent.
  */
 
 /** Lifecycle points a `useMessageMetadata` producer can attach to. */
@@ -38,11 +38,12 @@ export interface MessageMetadataProducers {
 }
 
 /**
- * One `useAppendMessage` write: a signal authored by agent code into the
+ * One finish-continuation append: a signal authored by agent code into the
  * current agent's conversation history. Field-for-field the code-side twin
  * of a `kind: 'signal'` delivered message (same validation, same rendering)
- * — minus delivery semantics: an append annotates the running response and
- * never wakes the agent.
+ * — minus delivery semantics: an append steers the response the agent is
+ * producing right now and is never a delivery (no `useAgentStart` run, no
+ * submission of its own).
  */
 export interface AgentSignalAppend {
 	type: string;
@@ -52,10 +53,10 @@ export interface AgentSignalAppend {
 }
 
 /**
- * The message shape `useAppendMessage` writers accept: the same signal form
- * `dispatch()` messages use, so appending and dispatching share one
- * vocabulary. Only `kind: 'signal'` is accepted — a `kind: 'user'` message is
- * real new input and belongs on `useDispatchMessage()`.
+ * The message shape `ctx.append` (on `AgentFinishContext`) accepts: the same
+ * signal form `dispatch()` messages use, so appending and dispatching share
+ * one vocabulary. Only `kind: 'signal'` is accepted — a `kind: 'user'`
+ * message is real new input and belongs on `useDispatchMessage()`.
  */
 export interface AgentAppendMessage extends AgentSignalAppend {
 	kind: 'signal';
@@ -86,7 +87,7 @@ const AppendMessageSchema = v.strictObject(
 		issue.expected === 'never' ? `received unknown signal field ${issue.received}` : issue.message,
 );
 
-/** Validate one `useAppendMessage` argument; throws with field-level detail. */
+/** Validate one `ctx.append` argument; throws with field-level detail. */
 export function assertAppendMessage(message: unknown): AgentSignalAppend {
 	if (
 		typeof message === 'object' &&
@@ -94,13 +95,13 @@ export function assertAppendMessage(message: unknown): AgentSignalAppend {
 		(message as { kind?: unknown }).kind === 'user'
 	) {
 		throw new Error(
-			'[flue] useAppendMessage() only appends kind: "signal" messages into the running response. A kind: "user" message is real new input — send it with the dispatcher from useDispatchMessage() instead.',
+			'[flue] append() only appends kind: "signal" messages into the running response. A kind: "user" message is real new input — send it with the dispatcher from useDispatchMessage() instead.',
 		);
 	}
 	const parsed = v.safeParse(AppendMessageSchema, message);
 	if (!parsed.success) {
 		throw new Error(
-			`[flue] useAppendMessage() message is invalid: ${parsed.issues.map((issue) => issue.message).join('; ')}.`,
+			`[flue] append() message is invalid: ${parsed.issues.map((issue) => issue.message).join('; ')}.`,
 		);
 	}
 	const { type, body, attributes, tagName } = parsed.output;
@@ -118,8 +119,9 @@ export function assertAppendMessage(message: unknown): AgentSignalAppend {
  * submission's abort signal; `harness` is the invocation-scoped runtime
  * surface (sandbox `shell`/`fs`, child sessions, model calls) — materialized
  * lazily on first access, so a callback that never touches it pays nothing.
- * To put a signal in front of the model, use the writer from
- * `useAppendMessage()`.
+ * To put something in front of the model, dispatch a signal with the
+ * dispatcher from `useDispatchMessage()` — it joins this same response
+ * before the model's next turn.
  */
 export interface AgentStartContext {
 	readonly harness: FlueHarness;
@@ -137,13 +139,21 @@ export interface AgentResponseToolCall {
 
 /**
  * The context a `useAgentFinish` callback receives: the `useAgentStart`
- * surface plus visibility into the response so far. `response.toolCalls`
- * aggregates every tool call the response has made — across all turns and
- * across re-attempts (derived from durable records, so a resumed response
- * still sees calls made before an interruption).
+ * surface plus visibility into the response so far and the continuation
+ * writer. `response.toolCalls` aggregates every tool call the response has
+ * made — across all turns and across re-attempts (derived from durable
+ * records, so a resumed response still sees calls made before an
+ * interruption). `append` steers a signal into the same response — the model
+ * reads it on the continuation turn and this hook fires again at the next
+ * would-stop — and is legal only during the callback's execution window
+ * (a captured reference throws after the callback settles). Appends are the
+ * response steering itself: no `useAgentStart` run, no submission of their
+ * own, counted against the framework's continuation ceiling. For real new
+ * input, dispatch instead.
  */
 export interface AgentFinishContext {
 	readonly response: { readonly toolCalls: readonly AgentResponseToolCall[] };
+	readonly append: (message: AgentAppendMessage) => void;
 	readonly harness: FlueHarness;
 	readonly log: FlueLogger;
 	readonly signal: AbortSignal;
@@ -164,8 +174,9 @@ export interface AgentFinishDeclaration {
  * `useState` buffer pattern: created once per harness lifetime, handed to
  * both sides. Renders replace `producers` and the lifecycle declarations
  * wholesale each render (fresh closures); `useMessageData` writers call
- * `writeMessageData`; `useAppendMessage` writers call `appendSignal`; the
- * session connects the sinks that reach the durable log.
+ * `writeMessageData`; the session connects the sink that reaches the
+ * durable log. (Finish-continuation appends never pass through here: the
+ * session constructs `ctx.append` directly when it runs the callbacks.)
  */
 export interface AgentOutputChannel {
 	/** Metadata producers from the latest render. */
@@ -177,14 +188,10 @@ export interface AgentOutputChannel {
 	/** Wire the session-side sink data writes flow into. */
 	connect(sink: (name: string, data: unknown) => void): void;
 	writeMessageData(name: string, data: unknown): void;
-	/** Wire the session-side sink signal appends flow into. */
-	connectSignals(sink: (signal: AgentSignalAppend) => void): void;
-	appendSignal(signal: AgentSignalAppend): void;
 }
 
 export function createAgentOutputChannel(): AgentOutputChannel {
 	let sink: ((name: string, data: unknown) => void) | undefined;
-	let signalSink: ((signal: AgentSignalAppend) => void) | undefined;
 	return {
 		producers: { start: [], finish: [] },
 		agentStarts: [],
@@ -199,17 +206,6 @@ export function createAgentOutputChannel(): AgentOutputChannel {
 				);
 			}
 			sink(name, data);
-		},
-		connectSignals(next) {
-			signalSink = next;
-		},
-		appendSignal(signal) {
-			if (!signalSink) {
-				throw new Error(
-					'[flue] useAppendMessage() has no durable runtime behind this render, so appends are unavailable.',
-				);
-			}
-			signalSink(signal);
 		},
 	};
 }

@@ -25,7 +25,6 @@ import {
   getAgentInstance,
   useAgentFinish,
   useAgentStart,
-  useAppendMessage,
   useDelivery,
   useDispatchMessage,
   useInstruction,
@@ -392,18 +391,19 @@ Constant across every render of one run. In a subagent render, the delivery is t
 function useAgentStart(run: (ctx: AgentStartContext) => void | Promise<void>): void;
 ```
 
-Runs a callback when the agent starts work on a delivered message — after the input is durable, before the model's first turn. The intake seam: load what the model should wake up knowing, seed files, write durable state, and announce it with a signal from [`useAppendMessage()`](#useappendmessage) so the model reads it ahead of its first response.
+Runs a callback when the agent starts work on a delivered message — after the input is durable, before the model's first turn. The intake seam: load what the model should wake up knowing, seed files, write durable state, and announce it by dispatching a signal with [`useDispatchMessage()`](#usedispatchmessage) — the delivery joins this same response, so the model reads it ahead of its first answer.
 
 ```ts
 export default function IssueTriage() {
-  const delivery = useDelivery();
-  const append = useAppendMessage();
+  const dispatch = useDispatchMessage();
+  const [issue, setIssue] = useState<Issue | null>('issue', null);
 
   useAgentStart(async ({ harness, log }) => {
-    const issue = await loadIssue(deliveredIssueNumber(delivery));
-    await harness.fs.writeFile(`triage/gh-${issue.number}/issue.md`, digest(issue));
-    setIssue(issue);
-    append({ kind: 'signal', type: 'intake', body: `Issue #${issue.number} loaded.` });
+    if (issue) return; // durable guard: the intake dispatch fires these hooks itself
+    const loaded = await loadIssue(issueNumber);
+    await harness.fs.writeFile(`triage/gh-${loaded.number}/issue.md`, digest(loaded));
+    setIssue(loaded);
+    await dispatch({ kind: 'signal', type: 'intake', body: `Issue #${loaded.number} loaded.` });
   });
 }
 ```
@@ -426,14 +426,13 @@ interface AgentStartContext {
 function useAgentFinish(run: (ctx: AgentFinishContext) => void | Promise<void>): void;
 ```
 
-Runs a callback when the agent would otherwise finish responding — the model has no more tool calls and the response is about to settle. The enforcement seam: inspect what the response actually did and, if the work is not done, append a signal to send the model back to work within the same response.
+Runs a callback when the agent would otherwise finish responding — the model has no more tool calls and the response is about to settle. The enforcement seam: inspect what the response actually did and, if the work is not done, `append` a signal to send the model back to work within the same response.
 
 ```ts
 function Assistant() {
-  const append = useAppendMessage();
   useTool(postMessage(data));
 
-  useAgentFinish(({ response }) => {
+  useAgentFinish(({ response, append }) => {
     const posted = response.toolCalls.some(
       (call) => call.tool === 'post_message' && !call.isError,
     );
@@ -452,6 +451,7 @@ Appending during the callback continues the response with another turn; once tha
 ```ts
 interface AgentFinishContext {
   response: { toolCalls: readonly AgentResponseToolCall[] };
+  append: (message: AgentAppendMessage) => void;
   harness: FlueHarness;
   log: FlueLogger;
   signal: AbortSignal;
@@ -461,38 +461,7 @@ interface AgentResponseToolCall {
   tool: string;
   isError: boolean;
 }
-```
 
-`response.toolCalls` aggregates every tool call the response has made — across all turns, derived from durable records, so a resumed response still sees calls made before an interruption. The rest is the `useAgentStart` context surface.
-
-### `useAppendMessage()`
-
-```ts
-function useAppendMessage(): (message: AgentAppendMessage) => void;
-```
-
-Gets a writer that appends a signal message into the agent's own running response — the counterpart to [`useDispatchMessage()`](#usedispatchmessage). A dispatch is real new input: a new durable submission that wakes the agent. An append annotates the response the agent is producing right now: the model reads it at the next turn boundary, it is durable and ordered exactly where the live loop saw it, and it never wakes the agent on its own.
-
-```ts
-function Support() {
-  const append = useAppendMessage();
-  useTool({
-    name: 'check_order',
-    description: 'Look up the order and note anomalies for the model.',
-    run: async ({ data }) => {
-      const order = await lookupOrder(data.orderId);
-      if (order.flagged) {
-        append({ kind: 'signal', type: 'note', body: 'Order is fraud-flagged; do not promise a refund.' });
-      }
-      return order.summary;
-    },
-  });
-}
-```
-
-The message is the same signal form `dispatch()` uses:
-
-```ts
 interface AgentAppendMessage {
   kind: 'signal';
   type: string;
@@ -502,7 +471,7 @@ interface AgentAppendMessage {
 }
 ```
 
-`kind: 'user'` is rejected — a user message is real new input and belongs on `useDispatchMessage()`. The writer is legal only while the agent is responding: from tool `run` functions and lifecycle hook callbacks. It throws during render and when the agent is idle. Appending during a `useAgentFinish` callback is the continuation signal — the response runs another turn instead of settling. Not available in a subagent render.
+`response.toolCalls` aggregates every tool call the response has made — across all turns, derived from durable records, so a resumed response still sees calls made before an interruption. `append` takes the same signal form `dispatch()` messages use (`kind: 'user'` is rejected — real new input belongs on the dispatcher) and is legal only during the callback's execution window: a captured reference throws after the callback settles. An append is the response steering itself — no `useAgentStart` run, no submission of its own; a dispatch is a real delivery. The rest is the `useAgentStart` context surface.
 
 ### `useInitialData()`
 
@@ -559,7 +528,7 @@ export default function IssueTriage() {
 
 Same semantics as the global `dispatch()` — same queue, same admission, same delivery — and the same rules apply to direct HTTP prompts to the instance: every transport shares one accepted order and one join behavior. A message to a **busy** instance joins the live response at the next turn boundary: the message is durably admitted, fires its own `useAgentStart` run, and the model reads it on its very next turn — without interrupting the turn in flight. A message to an **idle** instance wakes a new response, and messages that pile up before the first turn collect into it together (several `useAgentStart` runs, one response, one final `useAgentFinish`). Joining never loses a delivery: a message that misses the live response — it settled first, or the process crashed mid-join — simply runs as its own submission from the same durable queue. A joined delivery settles when the response that carried it settles, with the same outcome, under the host response's [durability budget](#durabilityconfig); a joined HTTP prompt still writes its own `submission_settled` record, so an SDK `wait()` resolves exactly as if it had run alone. Both message kinds work: `signal` annotates, `user` reads as a real user message. Each call is a durable delivery with its own receipt — like any external side effect in a re-attempted tool, a re-run dispatches again; design for at-least-once. Throws during render and on bare tooling/test renders with no runtime behind them. Not available in a subagent render (a delegate returns what it produced as its task result instead).
 
-For a durable signal ordered into the *current* response — the intake pattern, a mid-run annotation, or a `useAgentFinish` continuation — use the writer from [`useAppendMessage()`](#useappendmessage) instead; it joins the running response rather than opening a new submission.
+The one thing a dispatch is not: a `useAgentFinish` *continuation*. Inside that callback, `ctx.append` steers a signal into the response without registering new input — no `useAgentStart` run, no submission — and is counted against the framework's continuation ceiling. Everywhere else, dispatching is the way to put something in front of the model.
 
 ### `useMessageData(...)`
 

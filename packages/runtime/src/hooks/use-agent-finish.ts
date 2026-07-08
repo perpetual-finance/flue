@@ -6,15 +6,14 @@ import { requireRenderFrame } from './frame.ts';
  * has no more tool calls and the response is about to settle. The enforcement
  * seam: inspect what the response actually did (`ctx.response.toolCalls`
  * spans every turn, durably, across re-attempts) and, if the work is not
- * done, append a signal with the writer from `useAppendMessage()` to send the
- * model back to work within the same response.
+ * done, `ctx.append` a signal to send the model back to work within the same
+ * response.
  *
  * ```ts
  * function Assistant() {
- *   const append = useAppendMessage();
  *   useTool(postMessage(data));
  *
- *   useAgentFinish(({ response }) => {
+ *   useAgentFinish(({ response, append }) => {
  *     const posted = response.toolCalls.some(
  *       (call) => call.tool === 'post_message' && !call.isError,
  *     );
@@ -30,16 +29,21 @@ import { requireRenderFrame } from './frame.ts';
  *
  * Semantics:
  * - A control seam, not a passive event tap: the callback is awaited before
- *   the response settles. Appending a signal during the callback continues
- *   the response with another turn; once that continuation is dealt with, the
- *   hook runs again at the next would-stop point. The response settles only
- *   when a cycle completes with no appends AND no delivered input is
- *   waiting: queued deliveries join the live response before any finish
- *   evaluation, so several messages collect into several `useAgentStart()`
- *   runs and ONE final `useAgentFinish()`. A `useDispatchMessage()` dispatch
- *   made from this callback is a real delivery too — it joins the same
- *   response and the hook fires again at the new true end (its own
- *   `useAgentStart` run; never counted against the append-cycle ceiling).
+ *   the response settles. `ctx.append` steers a signal into the same
+ *   response — another turn runs, and once that continuation is dealt with
+ *   the hook runs again at the next would-stop point. It is legal only
+ *   during the callback's execution window (a captured reference throws
+ *   after the callback settles) and takes the same signal form dispatch
+ *   messages use. The response settles only when a cycle completes with no
+ *   appends AND no delivered input is waiting: queued deliveries join the
+ *   live response before any finish evaluation, so several messages collect
+ *   into several `useAgentStart()` runs and ONE final `useAgentFinish()`.
+ * - Append vs dispatch: an append is the response steering itself — no
+ *   `useAgentStart` run, no submission of its own, counted against the
+ *   continuation ceiling. A `useDispatchMessage()` dispatch made from this
+ *   callback is a real delivery — it joins the same response and the hook
+ *   fires again at the new true end (its own `useAgentStart` run; never
+ *   counted against the ceiling).
  * - Runs on delivered submissions only, in declaration order, sequentially;
  *   multiple hooks share each cycle, and the response continues if any of
  *   them appended. A throw fails the submission.

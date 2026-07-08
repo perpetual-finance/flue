@@ -40,7 +40,6 @@ export type {
 export { type StateSetter, useState } from './hooks/state.ts';
 export { useAgentFinish } from './hooks/use-agent-finish.ts';
 export { useAgentStart } from './hooks/use-agent-start.ts';
-export { useAppendMessage } from './hooks/use-append-message.ts';
 export { useDelivery } from './hooks/use-delivery.ts';
 export { useDispatchMessage } from './hooks/use-dispatch-message.ts';
 export { useInitialData } from './hooks/use-initial-data.ts';

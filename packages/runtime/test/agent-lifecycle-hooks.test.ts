@@ -24,23 +24,31 @@ import {
 import { useState } from '../src/hooks/state.ts';
 import { useAgentFinish } from '../src/hooks/use-agent-finish.ts';
 import { useAgentStart } from '../src/hooks/use-agent-start.ts';
-import { useAppendMessage } from '../src/hooks/use-append-message.ts';
 import { useDelivery } from '../src/hooks/use-delivery.ts';
+import { useDispatchMessage } from '../src/hooks/use-dispatch-message.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
-import { createFlueContext, type DispatchInput } from '../src/internal.ts';
+import {
+	configureFlueRuntime,
+	createFlueContext,
+	createNodeDispatchQueue,
+	type DispatchInput,
+} from '../src/internal.ts';
 import { createNodeAgentCoordinator } from '../src/node/agent-coordinator.ts';
 import { sqlite } from '../src/node/agent-execution-store.ts';
 import {
 	type AgentSubmissionInput,
 	createAgentSubmissionSessionHandler,
 } from '../src/runtime/agent-submissions.ts';
+import { resetFlueRuntimeForTests } from '../src/runtime/flue-app.ts';
 import type { CreateAgentContextFn } from '../src/runtime/handle-agent.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
+import { agentRecord, nodeRuntime } from './helpers/runtime-config.ts';
 
 const providers: FauxProviderRegistration[] = [];
 const tempDirs: string[] = [];
 
 afterEach(() => {
+	resetFlueRuntimeForTests();
 	for (const provider of providers.splice(0)) provider.unregister();
 	for (const dir of tempDirs.splice(0)) {
 		try {
@@ -64,9 +72,10 @@ function createTempDbPath(): string {
 }
 
 function makeFauxCreateContext(provider: FauxProviderRegistration): CreateAgentContextFn {
-	return ({ id, request, initialEventIndex, dispatchId }) =>
+	return ({ id, agentName, request, initialEventIndex, dispatchId }) =>
 		createFlueContext({
 			id,
+			agentName,
 			dispatchId,
 			env: {},
 			req: request,
@@ -108,7 +117,7 @@ function makeCoordinator(
 	stores: Awaited<ReturnType<typeof connectSqlite>>,
 	assistant: () => string | undefined,
 ) {
-	return createNodeAgentCoordinator({
+	const coordinator = createNodeAgentCoordinator({
 		submissions: stores.executionStore.submissions,
 		agents: [
 			{
@@ -122,6 +131,14 @@ function makeCoordinator(
 		conversationStreamStore: stores.conversationStreamStore,
 		attachmentStore: stores.attachmentStore,
 	});
+	// The ambient runtime `useDispatchMessage()` resolves dispatches through —
+	// wired to this same coordinator, like the real Node target.
+	configureFlueRuntime({
+		...nodeRuntime(),
+		agents: [agentRecord('assistant')],
+		dispatchQueue: createNodeDispatchQueue(coordinator),
+	});
+	return coordinator;
 }
 
 async function dispatchAndSettle(
@@ -241,11 +258,17 @@ describe('useAgentStart()', () => {
 		]);
 
 		const runOrder: string[] = [];
+		// Test-local guard: the intake dispatch is itself a delivery that joins
+		// this response and re-fires these hooks — real agents guard the same
+		// way with durable state.
+		let intakeDispatched = false;
 		function assistant() {
-			const append = useAppendMessage();
-			useAgentStart(() => {
+			const dispatch = useDispatchMessage();
+			useAgentStart(async () => {
 				runOrder.push('first');
-				append({
+				if (intakeDispatched) return;
+				intakeDispatched = true;
+				await dispatch({
 					kind: 'signal',
 					type: 'intake',
 					body: 'Issue loaded; triage warranted.',
@@ -264,9 +287,10 @@ describe('useAgentStart()', () => {
 		await dispatchAndSettle(coordinator, 'Triage issue #42.');
 		await coordinator.shutdown();
 
-		// Declaration order, and the signal arrived before the first response —
-		// after the delivered input in the model's context.
-		expect(runOrder).toEqual(['first', 'second']);
+		// Declaration order, twice: once for the waking delivery, once for the
+		// intake signal that joined the response — and the signal arrived
+		// before the first model turn either way.
+		expect(runOrder).toEqual(['first', 'second', 'first', 'second']);
 		const texts = turnOneTexts ?? [];
 		expect(texts.at(-1)).toContain('<signal type="intake" issue="42">');
 		expect(texts.join('\n')).toContain('Triage issue #42.');
@@ -274,40 +298,11 @@ describe('useAgentStart()', () => {
 		// Durable topology matches what the model saw: input → signal → assistant.
 		const records = readDurableRecords(dbPath);
 		expect(activePathKinds(records)).toEqual(['user', 'signal', 'assistant']);
-		// The adoption records exist, one per declaration index.
+		// Adoption records per delivery: one per declaration index for the
+		// waking delivery AND for the joined intake delivery.
 		const startRuns = records.filter((record) => record.type === 'agent_start_run');
-		expect(startRuns.map((record) => record.index)).toEqual([0, 1]);
-	});
-
-	it('appended signals flush durably mid-callback — progress is visible before the callback completes', async () => {
-		const dbPath = createTempDbPath();
-		const stores = await connectSqlite(dbPath);
-		const provider = createFauxProvider();
-		provider.setResponses([fauxAssistantMessage('Done.')]);
-
-		let visibleMidRun = false;
-		function assistant() {
-			const append = useAppendMessage();
-			useAgentStart(async () => {
-				append({ kind: 'signal', type: 'progress', body: 'Loading the issue…' });
-				// Poll the durable stream from INSIDE the still-running callback:
-				// the signal must land (and stream to clients) without waiting for
-				// the callback to complete.
-				for (let attempt = 0; attempt < 100 && !visibleMidRun; attempt++) {
-					visibleMidRun = readDurableRecords(dbPath).some(
-						(record) => record.type === 'signal' && record.signalType === 'progress',
-					);
-					if (!visibleMidRun) await new Promise((resolve) => setTimeout(resolve, 20));
-				}
-			});
-			return 'Agent.';
-		}
-
-		const coordinator = makeCoordinator(provider, stores, assistant);
-		await dispatchAndSettle(coordinator, 'Go.');
-		await coordinator.shutdown();
-
-		expect(visibleMidRun).toBe(true);
+		expect(startRuns.map((record) => record.index)).toEqual([0, 1, 0, 1]);
+		expect(new Set(startRuns.map((record) => record.submissionId)).size).toBe(2);
 	});
 
 	it('runs on every delivered message — including byte-identical re-deliveries', async () => {
@@ -426,13 +421,12 @@ describe('useAgentFinish()', () => {
 
 		const cyclesSeen: Array<Array<{ tool: string; isError: boolean }>> = [];
 		function assistant() {
-			const append = useAppendMessage();
 			useTool({
 				name: 'post_message',
 				description: 'Deliver the answer to the channel.',
 				run: () => 'posted',
 			});
-			useAgentFinish(({ response }) => {
+			useAgentFinish(({ response, append }) => {
 				cyclesSeen.push(response.toolCalls.map((call) => ({ ...call })));
 				const posted = response.toolCalls.some(
 					(call) => call.tool === 'post_message' && !call.isError,
@@ -528,8 +522,7 @@ describe('useAgentFinish()', () => {
 		);
 
 		function assistant() {
-			const append = useAppendMessage();
-			useAgentFinish(() => {
+			useAgentFinish(({ append }) => {
 				append({ kind: 'signal', type: 'reminder', body: 'Again.' });
 			});
 			return 'Agent.';
@@ -553,13 +546,12 @@ describe('useAgentFinish()', () => {
 
 		let appends = 0;
 		function assistant() {
-			const append = useAppendMessage();
 			useTool({
 				name: 'post_message',
 				description: 'Deliver the answer.',
 				run: () => 'posted',
 			});
-			useAgentFinish(({ response }) => {
+			useAgentFinish(({ response, append }) => {
 				const posted = response.toolCalls.some(
 					(call) => call.tool === 'post_message' && !call.isError,
 				);
@@ -580,130 +572,52 @@ describe('useAgentFinish()', () => {
 	});
 });
 
-describe('useAppendMessage()', () => {
-	it('is unavailable in subagent renders', () => {
-		expect(() =>
-			renderWithFrame(
-				() => {
-					useAppendMessage();
-				},
-				undefined,
-				'subagent',
-			),
-		).toThrow(/not available in a subagent render/);
-	});
-
-	it('the writer throws during render and on bare renders', () => {
-		expect(() =>
-			renderAgentFunctionWithStructure(() => {
-				const append = useAppendMessage();
-				append({ kind: 'signal', type: 'note', body: 'Too early.' });
-				return 'Base.';
-			}, CONFIG),
-		).toThrow(/called during render/);
-
-		let captured: ((message: Parameters<ReturnType<typeof useAppendMessage>>[0]) => void) | undefined;
-		renderAgentFunctionWithStructure(() => {
-			captured = useAppendMessage();
-			return 'Base.';
-		}, CONFIG);
-		expect(() => captured?.({ kind: 'signal', type: 'note', body: 'No runtime.' })).toThrow(
-			/no durable runtime behind this render/,
-		);
-	});
-
+describe('useAgentFinish ctx.append', () => {
 	it('rejects kind:"user" with a pointer to dispatch, and validates the signal shape', async () => {
-		const dbPath = createTempDbPath();
-		const stores = await connectSqlite(dbPath);
 		const provider = createFauxProvider();
-		provider.setResponses([
-			fauxAssistantMessage(fauxToolCall('try_appends', {}, { id: 'tool-try-1' }), {
-				stopReason: 'toolUse',
-			}),
-			fauxAssistantMessage('Done.'),
-		]);
+		provider.setResponses([fauxAssistantMessage('Done.')]);
 
 		const failures: string[] = [];
 		function assistant() {
-			const append = useAppendMessage();
-			useTool({
-				name: 'try_appends',
-				description: 'Exercise append validation.',
-				run: () => {
-					try {
-						append({ kind: 'user', body: 'New input.' } as never);
-					} catch (error) {
-						failures.push(error instanceof Error ? error.message : String(error));
-					}
-					try {
-						append({ kind: 'signal', type: '', body: 'Empty type.' });
-					} catch (error) {
-						failures.push(error instanceof Error ? error.message : String(error));
-					}
-					return 'ok';
-				},
+			useAgentFinish(({ append }) => {
+				try {
+					append({ kind: 'user', body: 'New input.' } as never);
+				} catch (error) {
+					failures.push(error instanceof Error ? error.message : String(error));
+				}
+				try {
+					append({ kind: 'signal', type: '', body: 'Empty type.' });
+				} catch (error) {
+					failures.push(error instanceof Error ? error.message : String(error));
+				}
 			});
 			return 'Agent.';
 		}
 
-		const coordinator = makeCoordinator(provider, stores, assistant);
-		await dispatchAndSettle(coordinator, 'Go.');
-		await coordinator.shutdown();
+		await makeDirectProcess(provider, assistant)();
 
 		expect(failures).toHaveLength(2);
 		expect(failures[0]).toMatch(/real new input.*useDispatchMessage/);
 		expect(failures[1]).toMatch(/"type" must not be empty/);
 	});
 
-	it('a tool-side append lands in the same response at the next turn boundary; idle appends throw', async () => {
-		const dbPath = createTempDbPath();
-		const stores = await connectSqlite(dbPath);
+	it('is scoped to the callback window — a captured reference throws afterwards', async () => {
 		const provider = createFauxProvider();
-		provider.setResponses([
-			fauxAssistantMessage(fauxToolCall('check_order', {}, { id: 'tool-check-1' }), {
-				stopReason: 'toolUse',
-			}),
-			fauxAssistantMessage('Handled.'),
-		]);
+		provider.setResponses([fauxAssistantMessage('Done.')]);
 
-		let captured: ReturnType<typeof useAppendMessage> | undefined;
+		let captured: ((message: { kind: 'signal'; type: string; body: string }) => void) | undefined;
 		function assistant() {
-			const append = useAppendMessage();
-			useTool({
-				name: 'check_order',
-				description: 'Check the order and note anomalies.',
-				run: () => {
-					captured = append;
-					append({ kind: 'signal', type: 'note', body: 'Order is fraud-flagged.' });
-					return 'checked';
-				},
+			useAgentFinish(({ append }) => {
+				captured = append;
 			});
 			return 'Agent.';
 		}
 
-		const coordinator = makeCoordinator(provider, stores, assistant);
-		await dispatchAndSettle(coordinator, 'Check order 7.');
-		await coordinator.shutdown();
+		await makeDirectProcess(provider, assistant)();
 
-		// Same response: the signal chains after the tool batch, before the
-		// final assistant — no dispatchId, no new submission.
-		const records = readDurableRecords(dbPath);
-		expect(activePathKinds(records)).toEqual([
-			'user',
-			'assistant',
-			'toolResult',
-			'signal',
-			'assistant',
-		]);
-		const signalRecord = records.find((record) => record.type === 'signal');
-		expect(signalRecord).toMatchObject({ signalType: 'note' });
-		expect(
-			signalRecord && 'dispatchId' in signalRecord ? signalRecord.dispatchId : undefined,
-		).toBeUndefined();
-
-		// The agent is idle now: the captured writer refuses, pointing at dispatch.
-		expect(() =>
-			captured?.({ kind: 'signal', type: 'note', body: 'Too late.' }),
-		).toThrow(/only legal while the agent is responding/);
+		expect(captured).toBeDefined();
+		expect(() => captured?.({ kind: 'signal', type: 'note', body: 'Too late.' })).toThrow(
+			/after its useAgentFinish callback settled/,
+		);
 	});
 });
