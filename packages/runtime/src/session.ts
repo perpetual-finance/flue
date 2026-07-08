@@ -596,12 +596,14 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	/** Ordered append chain for `useMessageData` writes; awaited before the response settles. */
 	private outputWriteQueue: Promise<unknown> = Promise.resolve();
 	/**
-	 * Finish-continuation appends (`ctx.append` in `useAgentFinish`) buffered
-	 * since the last flush point, in call order. Appends are steered into the
-	 * live loop immediately (the model sees them on the continuation turn) and
-	 * their canonical records flush batch-atomically with the cycle record —
-	 * appends can only happen during finish callbacks, so the cycle batch is
-	 * their single durability point.
+	 * Lifecycle-callback appends (`ctx.append` in `useAgentStart`/
+	 * `useAgentFinish`) buffered since the last flush point, in call order.
+	 * Appends are steered into the live loop immediately (the model sees
+	 * them at the next turn start) and their canonical records flush
+	 * batch-atomically with their callback's outcome — a start hook's
+	 * adoption batch, or a finish cycle's record batch. Appends can only
+	 * happen inside those callback windows, so those two batches are the
+	 * only durability points.
 	 */
 	private pendingSignalAppends: Array<{
 		messageId: string;
@@ -741,12 +743,12 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	}
 
 	/**
-	 * Sink for `ctx.append` writes from `useAgentFinish` callbacks. The signal
-	 * is steered into the live agent loop immediately — `continue()` runs it
-	 * as the continuation turn — and buffered for canonical append with the
-	 * cycle's batch (`drainSignalAppendRecords`). Steering and the durable
-	 * flush happen in the same order at the same boundary, so the live
-	 * context and a rehydrated one can never disagree.
+	 * Sink for `ctx.append` writes from lifecycle callbacks. The signal is
+	 * steered into the live agent loop immediately — the model reads it at
+	 * the next turn start — and buffered for canonical append with the
+	 * owning callback's batch (`drainSignalAppendRecords`). Steering and the
+	 * durable flush happen in the same order at the same boundary, so the
+	 * live context and a rehydrated one can never disagree.
 	 */
 	private enqueueSignalAppend(signal: AgentSignalAppend): void {
 		if (!this.activeSubmissionId) {
@@ -841,6 +843,12 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		const hooks = this.outputChannel?.agentStarts;
 		if (!hooks?.length || !submissionId) return;
 		if (!options?.joined && this.responseHasCompletedStep) return;
+		// A joined delivery's hooks run mid-response, after earlier deliveries'
+		// callbacks wrote durable state — re-render first (the render-per-turn
+		// cadence, extended to join boundaries) so hook closures and guards
+		// observe those writes instead of the stale pre-join render.
+		if (options?.joined) this.prepareRerenderTurn();
+		const declarations = options?.joined ? (this.outputChannel?.agentStarts ?? []) : hooks;
 		const ranIndexes = new Set<number>();
 		for (const record of (await this.conversationWriter.loadReducedState()).recordsById.values()) {
 			if (
@@ -851,7 +859,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				ranIndexes.add(record.index);
 			}
 		}
-		for (const [index, hook] of hooks.entries()) {
+		for (const [index, hook] of declarations.entries()) {
 			if (ranIndexes.has(index)) continue;
 			await this.executeAgentStartHook(index, hook, signal, submissionId);
 		}
@@ -859,11 +867,13 @@ export class Session implements FlueSession, AgentSubmissionSession {
 
 	/**
 	 * Run one `useAgentStart` callback. Its outcome commits atomically after
-	 * the run: buffered state writes and the `agent_start_run` adoption
-	 * record in one append batch. An interrupted or failed run leaves no
-	 * completion record and re-runs on the re-attempt (at-least-once). To
-	 * put something in front of the model, a callback dispatches — the
-	 * delivery joins this same response before the model's next turn.
+	 * the run: appended signals (already steered live), buffered state
+	 * writes, and the `agent_start_run` adoption record in one append batch.
+	 * An interrupted or failed run leaves no completion record and re-runs
+	 * on the re-attempt (at-least-once). To put something in front of the
+	 * model, a callback normally dispatches — the delivery joins this same
+	 * response before the model's next turn; `ctx.append` is the
+	 * non-delivery alternative.
 	 */
 	private async executeAgentStartHook(
 		index: number,
@@ -875,9 +885,20 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		// touches it pays nothing) and closes when the run settles. The
 		// invocation id is per execution attempt, like harness-connected tools.
 		let harness: ActionHarness | undefined;
+		// Same window rule as the finish-context writer: append is legal only
+		// while the callback runs.
+		let appendWindowOpen = true;
 		// `this` is shadowed inside the ctx getter below.
 		const session = this;
 		const ctx: AgentStartContext = {
+			append: (message) => {
+				if (!appendWindowOpen) {
+					throw new Error(
+						'[flue] append() was called after its useAgentStart callback settled. The append window is the callback itself — to send input at any other time, use the dispatcher from useDispatchMessage().',
+					);
+				}
+				this.enqueueSignalAppend(assertAppendMessage(message));
+			},
 			log: this.createHookLogger('useAgentStart', index),
 			signal,
 			get harness() {
@@ -893,12 +914,22 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				{ cause: error },
 			);
 		} finally {
+			appendWindowOpen = false;
 			if (harness) {
 				this.activeActionHarnesses.delete(harness);
 				await harness.close();
 			}
 		}
+		// The callback's appends chain at the leaf inside its own outcome batch
+		// — durable order equals steer order, and a failed run drops them with
+		// the state writes they rode with.
+		const parentId =
+			this.pendingSignalAppends.length > 0
+				? await this.conversationWriter.getConversationLeaf(this.conversationId)
+				: null;
+		const { records: signalRecords } = this.drainSignalAppendRecords(parentId);
 		await this.appendCanonical([
+			...signalRecords,
 			...this.drainHookStateRecords(),
 			{
 				...this.canonicalEnvelope('agent_start_run'),
@@ -1869,9 +1900,9 @@ export class Session implements FlueSession, AgentSubmissionSession {
 						// commit marker — one store.append, one durability point. If
 						// recovery settles this batch as interrupted, the writes never
 						// happened, exactly like the tool side effects they rode with.
-						// (Signal appends never appear at turn boundaries: `ctx.append`
-						// exists only inside useAgentFinish callbacks, and the cycle
-						// batch is their durability point.)
+						// (Signal appends never sit pending at turn boundaries:
+						// `ctx.append` exists only inside lifecycle callbacks, and each
+						// callback's own batch drains them before it returns.)
 						await this.appendCanonical([
 							...this.drainHookStateRecords(),
 							{

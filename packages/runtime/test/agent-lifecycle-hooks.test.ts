@@ -258,16 +258,17 @@ describe('useAgentStart()', () => {
 		]);
 
 		const runOrder: string[] = [];
-		// Test-local guard: the intake dispatch is itself a delivery that joins
-		// this response and re-fires these hooks — real agents guard the same
-		// way with durable state.
-		let intakeDispatched = false;
 		function assistant() {
 			const dispatch = useDispatchMessage();
+			// The DURABLE guard from the docs: the intake dispatch is itself a
+			// delivery that re-fires these hooks, and the joined delivery's
+			// hooks run against a fresh render (the join boundary re-renders),
+			// so the guard reliably observes the write — no duplicate intake.
+			const [intakeDone, setIntakeDone] = useState('intake_done', false);
 			useAgentStart(async () => {
-				runOrder.push('first');
-				if (intakeDispatched) return;
-				intakeDispatched = true;
+				runOrder.push(intakeDone ? 'first:guarded' : 'first');
+				if (intakeDone) return;
+				setIntakeDone(true);
 				await dispatch({
 					kind: 'signal',
 					type: 'intake',
@@ -288,9 +289,9 @@ describe('useAgentStart()', () => {
 		await coordinator.shutdown();
 
 		// Declaration order, twice: once for the waking delivery, once for the
-		// intake signal that joined the response — and the signal arrived
-		// before the first model turn either way.
-		expect(runOrder).toEqual(['first', 'second', 'first', 'second']);
+		// intake signal that joined the response — and the joined run saw the
+		// guard's durable write, so exactly ONE intake signal exists.
+		expect(runOrder).toEqual(['first', 'second', 'first:guarded', 'second']);
 		const texts = turnOneTexts ?? [];
 		expect(texts.at(-1)).toContain('<signal type="intake" issue="42">');
 		expect(texts.join('\n')).toContain('Triage issue #42.');
@@ -303,6 +304,62 @@ describe('useAgentStart()', () => {
 		const startRuns = records.filter((record) => record.type === 'agent_start_run');
 		expect(startRuns.map((record) => record.index)).toEqual([0, 1, 0, 1]);
 		expect(new Set(startRuns.map((record) => record.submissionId)).size).toBe(2);
+	});
+
+	it('ctx.append writes a signal ahead of turn one without registering a delivery', async () => {
+		const dbPath = createTempDbPath();
+		const stores = await connectSqlite(dbPath);
+		const provider = createFauxProvider();
+		let turnOneTexts: string[] | undefined;
+		provider.setResponses([
+			(context) => {
+				turnOneTexts = context.messages.map((message) =>
+					typeof message.content === 'string'
+						? message.content
+						: message.content
+								.map((block) => ('text' in block ? block.text : `[${block.type}]`))
+								.join('\n'),
+				);
+				return fauxAssistantMessage('Proceeding.');
+			},
+		]);
+
+		let captured: ((message: { kind: 'signal'; type: string; body: string }) => void) | undefined;
+		function assistant() {
+			useAgentStart(({ append }) => {
+				captured = append;
+				append({
+					kind: 'signal',
+					type: 'note',
+					body: 'Digest saved at triage/gh-42/issue.md.',
+				});
+			});
+			return 'Agent.';
+		}
+
+		const coordinator = makeCoordinator(provider, stores, assistant);
+		await dispatchAndSettle(coordinator, 'Go.');
+		await coordinator.shutdown();
+
+		// The model read the signal on its first turn.
+		expect((turnOneTexts ?? []).join('\n')).toContain('Digest saved at triage/gh-42/issue.md.');
+
+		// An append is NOT a delivery: no dispatchId on the record, no extra
+		// useAgentStart run — one adoption record for the one real delivery.
+		const records = readDurableRecords(dbPath);
+		expect(activePathKinds(records)).toEqual(['user', 'signal', 'assistant']);
+		const signalRecord = records.find((record) => record.type === 'signal');
+		expect(signalRecord).toMatchObject({ signalType: 'note' });
+		expect(
+			signalRecord && 'dispatchId' in signalRecord ? signalRecord.dispatchId : undefined,
+		).toBeUndefined();
+		const startRuns = records.filter((record) => record.type === 'agent_start_run');
+		expect(startRuns.map((record) => record.index)).toEqual([0]);
+
+		// The writer is scoped to the callback window.
+		expect(() => captured?.({ kind: 'signal', type: 'note', body: 'Too late.' })).toThrow(
+			/after its useAgentStart callback settled/,
+		);
 	});
 
 	it('runs on every delivered message — including byte-identical re-deliveries', async () => {

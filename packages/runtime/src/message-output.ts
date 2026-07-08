@@ -121,9 +121,14 @@ export function assertAppendMessage(message: unknown): AgentSignalAppend {
  * lazily on first access, so a callback that never touches it pays nothing.
  * To put something in front of the model, dispatch a signal with the
  * dispatcher from `useDispatchMessage()` — it joins this same response
- * before the model's next turn.
+ * before the model's next turn. `append` is the low-level alternative
+ * (parity with `useAgentFinish`): it writes a signal into this response
+ * WITHOUT registering a delivery — no `useAgentStart` run of its own, no
+ * submission — and is legal only during the callback's execution window.
+ * Prefer dispatching; reach for `append` only when a delivery is wrong.
  */
 export interface AgentStartContext {
+	readonly append: (message: AgentAppendMessage) => void;
 	readonly harness: FlueHarness;
 	readonly log: FlueLogger;
 	readonly signal: AbortSignal;

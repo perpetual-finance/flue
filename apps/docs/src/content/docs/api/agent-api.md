@@ -412,13 +412,14 @@ export default function IssueTriage() {
 
 ```ts
 interface AgentStartContext {
+  append: (message: AgentAppendMessage) => void;
   harness: FlueHarness;
   log: FlueLogger;
   signal: AbortSignal;
 }
 ```
 
-`harness` is the invocation-scoped runtime surface (sandbox `shell`/`fs`, child sessions, model calls), materialized lazily on first access. `log` emits progress lines into the conversation stream — the model never sees them. `signal` is the submission's abort signal.
+`harness` is the invocation-scoped runtime surface (sandbox `shell`/`fs`, child sessions, model calls), materialized lazily on first access. `log` emits progress lines into the conversation stream — the model never sees them. `signal` is the submission's abort signal. `append` writes a signal into this response without registering a delivery (no `useAgentStart` run of its own, so no guard needed) — an annotation like "the digest is saved at `triage/gh-42/issue.md`"; it is legal only during the callback's execution window. Dispatching is the delivery-grade alternative.
 
 ### `useAgentFinish(...)`
 
