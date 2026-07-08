@@ -47,9 +47,26 @@ export {
 	runWithInstrumentationOwner,
 } from './instrumentation.ts';
 export { createNodeAgentCoordinator, createNodeDispatchQueue } from './node/agent-coordinator.ts';
-export type { AgentSubmissionInput } from './runtime/agent-submissions.ts';
+export type {
+	AgentSubmissionInput,
+	AttachedAgentSubmissionAdmission,
+	AttachedAgentSubmissionOptions,
+} from './runtime/agent-submissions.ts';
 export type { AttachmentStore } from './runtime/attachment-store.ts';
 export { InMemoryAttachmentStore } from './runtime/attachment-store.ts';
+// Submission-scoped conversation observation: in-process settlement waits and
+// reply reads over the canonical stream (the CLI's `flue run` and the
+// programmatic agent client build on these).
+export type {
+	ObserveSubmissionSettlementOptions,
+	ReadSubmissionReplyOptions,
+	SubmissionReply,
+	SubmissionSettlement,
+} from './runtime/conversation-observer.ts';
+export {
+	observeSubmissionSettlement,
+	readSubmissionReply,
+} from './runtime/conversation-observer.ts';
 export type { ConversationStreamStore } from './runtime/conversation-stream-store.ts';
 export {
 	InMemoryConversationStreamStore,
@@ -92,6 +109,9 @@ export type {
 	RuntimeActivityLease,
 } from './runtime/runtime-activity-gate.ts';
 export { createRuntimeActivityGate } from './runtime/runtime-activity-gate.ts';
+// Storage path of an agent instance's canonical conversation stream — the
+// durable-storage contract callers pair with the observation helpers above.
+export { agentStreamPath } from './runtime/stream-offsets.ts';
 
 export { bashFactoryToSessionEnv } from './sandbox.ts';
 export { parseSkillMarkdown } from './skill-frontmatter.ts';

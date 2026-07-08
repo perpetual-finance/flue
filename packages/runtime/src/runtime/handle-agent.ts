@@ -108,7 +108,11 @@ export async function handleAgentRequest(opts: HandleAgentOptions): Promise<Resp
 		const { message, data, uid } = parseDeliveredInput(await parseJsonBody(request));
 		const traceCarrier = extractTraceCarrier(request.headers);
 		const streamUrl = invocationStreamUrl(request);
-		const receipt = await opts.admitAttachedSubmission(message, traceCarrier, data, uid);
+		const receipt = await opts.admitAttachedSubmission(message, {
+			...(traceCarrier !== undefined ? { traceCarrier } : {}),
+			...(data !== undefined ? { data } : {}),
+			...(uid !== undefined ? { uid } : {}),
+		});
 		return admissionResponse(
 			{
 				streamUrl,

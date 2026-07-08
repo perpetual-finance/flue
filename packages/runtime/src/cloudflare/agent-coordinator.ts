@@ -12,8 +12,8 @@ import {
 	InvalidRequestError,
 	SubmissionAbortedError,
 } from '../errors.ts';
-import type { FlueTraceCarrier } from '../execution-interceptor.ts';
 import {
+	type AttachedAgentSubmissionOptions,
 	admitInstanceContact,
 	agentSubmissionDispatchId,
 	type createAgentSubmissionSessionHandler,
@@ -282,8 +282,8 @@ class CloudflareAgentCoordinator {
 			request,
 			id: this.instance.name,
 			agentName: this.agentName,
-			admitAttachedSubmission: (message, traceCarrier, data, uid) =>
-				this.admitAttachedSubmission(message, traceCarrier, data, uid),
+			admitAttachedSubmission: (message, options) =>
+				this.admitAttachedSubmission(message, options),
 		});
 	}
 
@@ -709,10 +709,9 @@ class CloudflareAgentCoordinator {
 
 	private async admitAttachedSubmission(
 		message: DeliveredMessage,
-		traceCarrier?: FlueTraceCarrier,
-		data?: unknown,
-		uid?: string | null,
+		options: AttachedAgentSubmissionOptions = {},
 	) {
+		const { traceCarrier, data, uid } = options;
 		const input = createDirectAgentSubmissionInput({
 			agent: this.agentName,
 			id: this.instance.name,

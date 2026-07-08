@@ -651,12 +651,8 @@ export function createNodeAgentCoordinator(options: {
 		},
 
 		createAdmission(agentName: string, instanceId: string): AttachedAgentSubmissionAdmission {
-			return async (
-				message: DeliveredMessage,
-				traceCarrier?: import('../execution-interceptor.ts').FlueTraceCarrier,
-				data?: unknown,
-				uid?: string | null,
-			) => {
+			return async (message: DeliveredMessage, options = {}) => {
+				const { traceCarrier, data, uid } = options;
 				if (stopping) throw new Error('[flue] Coordinator is shutting down.');
 				const activityLease = activityGate?.enter();
 				const agent = agents.find((record) => record.name === agentName)?.definition;

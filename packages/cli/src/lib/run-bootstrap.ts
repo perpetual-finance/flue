@@ -25,6 +25,7 @@
 
 import type { DeliveredMessage, FunctionAgentDefinition } from '@flue/runtime';
 import {
+	agentStreamPath,
 	Bash,
 	bashFactoryToSessionEnv,
 	type ConversationStreamChunk,
@@ -34,9 +35,10 @@ import {
 	createNodeAgentCoordinator,
 	createNodeDispatchQueue,
 	createRuntimeActivityGate,
-	handleAgentConversationRead,
 	InMemoryFs,
+	observeSubmissionSettlement,
 	type PersistenceAdapter,
+	readSubmissionReply,
 	registerFlueAgents,
 	resolveModel,
 	runWithInstrumentationOwner,
@@ -105,17 +107,6 @@ export interface FlueRunSession {
 	): Promise<FlueRunOutcome>;
 	/** Coordinator shutdown, instrumentation dispose, adapter close. */
 	close(): Promise<void>;
-}
-
-/**
- * Storage path of an agent instance's canonical conversation stream.
- * Mirrors the runtime's `agentStreamPath` (runtime/stream-offsets.ts),
- * which is not exported from `@flue/runtime/internal`. The format is a
- * durable-storage contract (it keys persisted conversations), so this local
- * copy is stable; still, prefer the runtime seam once it is exported.
- */
-function agentStreamPath(identity: string, instanceId: string): string {
-	return `agents/${identity}/${instanceId}`;
 }
 
 const SHUTDOWN_TIMEOUT_MS = 30_000;
@@ -338,16 +329,18 @@ interface SubmitAndSettleOptions extends FlueRunSubmitOptions {
 /**
  * Admit one durable direct submission (the same admission
  * `POST /agents/.../:id` uses) and observe its settlement from the canonical
- * conversation stream via the runtime's own read handler — long-poll reads
- * against the store, no transport. This is `invokeDirectAttached` semantics
- * without HTTP.
+ * conversation stream via the runtime's observation seam — no transport.
+ * This is `invokeDirectAttached` semantics without HTTP.
  */
 async function submitAndSettle(options: SubmitAndSettleOptions): Promise<FlueRunOutcome> {
 	const { coordinator, conversationStreamStore, identity, conversationId, message } = options;
 	throwIfAborted(options.signal);
 
 	const admit = coordinator.createAdmission(identity, conversationId);
-	const receipt = await admit(message, undefined, options.data, options.uid);
+	const receipt = await admit(message, {
+		...(options.data !== undefined ? { data: options.data } : {}),
+		...(options.uid !== undefined ? { uid: options.uid } : {}),
+	});
 	const streamPath = agentStreamPath(identity, conversationId);
 
 	let abortRequested = false;
@@ -355,7 +348,7 @@ async function submitAndSettle(options: SubmitAndSettleOptions): Promise<FlueRun
 		if (abortRequested) return;
 		abortRequested = true;
 		// Durable abort intent; settlement (outcome 'aborted') arrives
-		// asynchronously on the conversation stream, which we keep draining.
+		// asynchronously on the conversation stream, which we keep observing.
 		void coordinator.abortInstance(identity, conversationId).catch((error) => {
 			console.error('[flue] Abort request failed:', error);
 		});
@@ -364,78 +357,29 @@ async function submitAndSettle(options: SubmitAndSettleOptions): Promise<FlueRun
 	options.signal?.addEventListener('abort', requestAbort, { once: true });
 
 	try {
-		let offset = receipt.offset;
-		let settlement:
-			| Extract<ConversationStreamChunk, { type: 'submission-settled' }>
-			| undefined;
-		while (!settlement) {
-			const response = await handleAgentConversationRead({
-				store: conversationStreamStore,
-				path: streamPath,
-				request: new Request(
-					`https://flue.invalid/${streamPath}?view=updates&offset=${encodeURIComponent(offset)}&live=long-poll`,
-				),
-			});
-			if (!response.ok) {
-				throw new Error(`[flue] Conversation stream read failed (HTTP ${response.status}).`);
-			}
-			const chunks = (await response.json()) as ConversationStreamChunk[];
-			for (const chunk of chunks) {
-				options.onEvent?.(chunk);
-				if (chunk.type === 'submission-settled' && chunk.submissionId === receipt.submissionId) {
-					settlement = chunk;
-				}
-			}
-			offset = response.headers.get('Stream-Next-Offset') ?? offset;
-		}
+		const settlement = await observeSubmissionSettlement({
+			store: conversationStreamStore,
+			path: streamPath,
+			submissionId: receipt.submissionId,
+			offset: receipt.offset,
+			...(options.onEvent !== undefined ? { onEvent: options.onEvent } : {}),
+		});
+		const reply = await readSubmissionReply({
+			store: conversationStreamStore,
+			path: streamPath,
+			submissionId: receipt.submissionId,
+		});
 
 		return {
 			submissionId: receipt.submissionId,
 			outcome: settlement.outcome,
 			...(settlement.error === undefined ? {} : { error: settlement.error }),
-			message: await readFinalAssistantMessage(
-				conversationStreamStore,
-				streamPath,
-				receipt.submissionId,
-			),
+			message: reply.text,
 			...(receipt.uid !== undefined ? { uid: receipt.uid } : {}),
 		};
 	} finally {
 		options.signal?.removeEventListener('abort', requestAbort);
 	}
-}
-
-/**
- * Read the settled conversation's history projection and extract the final
- * assistant message text produced by this submission (falling back to the
- * conversation's last assistant message when the submission produced none).
- */
-async function readFinalAssistantMessage(
-	store: SubmitAndSettleOptions['conversationStreamStore'],
-	streamPath: string,
-	submissionId: string,
-): Promise<string> {
-	const response = await handleAgentConversationRead({
-		store,
-		path: streamPath,
-		request: new Request(`https://flue.invalid/${streamPath}?view=history`),
-	});
-	if (!response.ok) return '';
-	const snapshot = (await response.json()) as {
-		messages: Array<{
-			role: string;
-			submissionId?: string;
-			parts: Array<{ type: string; text?: string }>;
-		}>;
-	};
-	const assistantMessages = snapshot.messages.filter((message) => message.role === 'assistant');
-	const own = assistantMessages.filter((message) => message.submissionId === submissionId);
-	const final = (own.length > 0 ? own : assistantMessages).at(-1);
-	if (!final) return '';
-	return final.parts
-		.filter((part) => part.type === 'text' && typeof part.text === 'string')
-		.map((part) => part.text as string)
-		.join('\n\n');
 }
 
 function throwIfAborted(signal?: AbortSignal): void {

@@ -139,11 +139,23 @@ interface AttachedAgentSubmissionReceipt {
 	readonly uid?: string;
 }
 
+/** Options accompanying one attached (direct) submission admission. */
+export interface AttachedAgentSubmissionOptions {
+	/** Distributed-trace continuation extracted from the caller's context. */
+	readonly traceCarrier?: FlueTraceCarrier;
+	/** Instance-creation data; the seed, consulted only when this send creates. */
+	readonly data?: unknown;
+	/**
+	 * Send condition (uid ≈ ETag): a string continues only the incarnation
+	 * with that uid; `null` creates only when no instance exists; omit to
+	 * send unconditionally.
+	 */
+	readonly uid?: string | null;
+}
+
 export type AttachedAgentSubmissionAdmission = (
 	message: DeliveredMessage,
-	traceCarrier?: FlueTraceCarrier,
-	data?: unknown,
-	uid?: string | null,
+	options?: AttachedAgentSubmissionOptions,
 ) => Promise<AttachedAgentSubmissionReceipt>;
 
 /** Resolution of one send's admission against the instance's current state. */
