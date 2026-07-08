@@ -11,8 +11,7 @@ function WithSkill() {
 		input: v.object({ name: v.optional(v.string()) }),
 		harness: true,
 		async run({ harness, data }) {
-			const session = await harness.session();
-			const { data: result } = await session.skill('greet', {
+			const { data: result } = await harness.skill('greet', {
 				args: { name: data.name ?? 'World' },
 				result: v.object({ greeting: v.string() }),
 			});

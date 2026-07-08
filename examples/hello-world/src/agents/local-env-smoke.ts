@@ -14,23 +14,22 @@ function LocalEnvSmoke() {
 			const previous = process.env[sentinelKey];
 			process.env[sentinelKey] = 'leaked';
 			try {
-				const session = await harness.session();
 				const results: Record<string, boolean> = {};
 				const tmpDir = `/tmp/flue-local-env-smoke-${Date.now()}`;
 				results['shell pwd matches process.cwd()'] =
-					(await session.shell('pwd')).stdout.trim() === process.cwd();
-				await session.shell(`mkdir -p ${tmpDir}`);
-				await session.shell(`echo "hello world" > ${tmpDir}/hello.txt`);
+					(await harness.shell('pwd')).stdout.trim() === process.cwd();
+				await harness.shell(`mkdir -p ${tmpDir}`);
+				await harness.shell(`echo "hello world" > ${tmpDir}/hello.txt`);
 				results['shell read file'] =
-					(await session.shell(`cat ${tmpDir}/hello.txt`)).stdout.trim() === 'hello world';
-				results['exec non-zero exit'] = (await session.shell('exit 7')).exitCode === 7;
+					(await harness.shell(`cat ${tmpDir}/hello.txt`)).stdout.trim() === 'hello world';
+				results['exec non-zero exit'] = (await harness.shell('exit 7')).exitCode === 7;
 				results['PATH inherited via default allowlist'] =
-					(await session.shell('echo "$PATH"')).stdout.trim().length > 0;
+					(await harness.shell('echo "$PATH"')).stdout.trim().length > 0;
 				results['explicit env var visible'] =
-					(await session.shell('echo "$CUSTOM_VAR"')).stdout.trim() === 'visible-to-sandbox';
+					(await harness.shell('echo "$CUSTOM_VAR"')).stdout.trim() === 'visible-to-sandbox';
 				results['sentinel host env var NOT leaked'] =
-					(await session.shell(`echo "$${sentinelKey}"`)).stdout.trim() === '';
-				await session.shell(`rm -rf ${tmpDir}`);
+					(await harness.shell(`echo "$${sentinelKey}"`)).stdout.trim() === '';
+				await harness.shell(`rm -rf ${tmpDir}`);
 				return { results, allPassed: Object.values(results).every(Boolean) };
 			} finally {
 				if (previous === undefined) delete process.env[sentinelKey];

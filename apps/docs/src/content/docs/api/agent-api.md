@@ -10,6 +10,7 @@ The agent API is exported from `@flue/runtime`.
 import {
   AgentInstanceExistsError,
   AgentInstanceNotFoundError,
+  AgentRunError,
   FlueError,
   ResultUnavailableError,
   ToolInputValidationError,
@@ -23,6 +24,7 @@ import {
   defineTool,
   dispatch,
   getAgentInstance,
+  init,
   useAgentFinish,
   useAgentStart,
   useDelivery,
@@ -56,8 +58,6 @@ import {
   type FlueFs,
   type FlueHarness,
   type FlueLogger,
-  type FlueSession,
-  type FlueSessions,
   type FunctionAgentConfig,
   type FunctionAgentDefinition,
   type McpServerConnection,
@@ -93,7 +93,10 @@ import {
 ## `defineAgent(...)`
 
 ```ts
-function defineAgent(agent: AgentFunction<AgentProps>, config: FunctionAgentConfig): FunctionAgentDefinition;
+function defineAgent(
+  agent: AgentFunction<AgentProps>,
+  config: FunctionAgentConfig,
+): FunctionAgentDefinition;
 ```
 
 Defines an addressable agent. An agent is an [agent function](#agentfunction) given a model: it composes the agent's behavior with Flue Hooks — attaching tools, instructions, skills, subagents, and durable state — and returns the agent's instruction string; `config` is the static identity (model, tuning) that never renders.
@@ -147,13 +150,13 @@ hatch for the rare caller that must recover them from the id itself.
 
 #### `FunctionAgentConfig`
 
-| Field           | Type                        | Description                                                                                                                   |
-| --------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `model`         | `string`                    | Model specifier (`'<provider-id>/<model-id>'`). Required.                                                                       |
-| `thinkingLevel` | `ThinkingLevel`             | Default reasoning effort. Individual operations may override this value.                                                        |
-| `compaction`    | `false \| CompactionConfig` | Automatic conversation-compaction configuration. `false` disables threshold compaction; overflow recovery and explicit `session.compact()` calls still compact when needed. |
-| `durability`    | `DurabilityConfig`          | Durability configuration for durable agent submissions. Controls recovery attempt limits and submission timeouts.               |
-| `cwd`           | `string`                    | Working directory inside the initialized environment.                                                                           |
+| Field           | Type                        | Description                                                                                                                                                                                                                                           |
+| --------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`         | `string`                    | Model specifier (`'<provider-id>/<model-id>'`). Required.                                                                                                                                                                                             |
+| `thinkingLevel` | `ThinkingLevel`             | Default reasoning effort. Individual operations may override this value.                                                                                                                                                                              |
+| `compaction`    | `false \| CompactionConfig` | Automatic conversation-compaction configuration. `false` disables threshold compaction; overflow recovery and explicit `harness.compact()` calls still compact when needed.                                                                           |
+| `durability`    | `DurabilityConfig`          | Durability configuration for durable agent submissions. Controls recovery attempt limits and submission timeouts.                                                                                                                                     |
+| `cwd`           | `string`                    | Working directory inside the initialized environment.                                                                                                                                                                                                 |
 | `input`         | Valibot schema              | Schema for the instance's creation data, validated once at instance creation (a mismatch — including absence, unless the schema accepts `undefined` — rejects the creating call). Read the recorded value with [`useInitialData()`](#useinitialdata). |
 
 Everything dynamic — instructions, tools, skills, subagents, sandbox — is composed inside the agent function with Flue Hooks; `FunctionAgentConfig` holds only what's fixed for the agent's whole lifetime.
@@ -176,17 +179,17 @@ interface FunctionAgentDefinition {
 #### `DurabilityConfig`
 
 | Field         | Type     | Default   | Description                                                                                                                                                                                                                                                                                              |
-| ------------- | -------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ------------- | -------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `maxAttempts` | `number` | `10`      | Maximum total attempts before the submission is terminalized as failed. The initial run counts as the first attempt; each interruption that requires a new attempt consumes another.                                                                                                                     |
 | `timeoutMs`   | `number` | `3600000` | Maximum wall-clock milliseconds for a single submission. Submissions exceeding this limit are aborted and settled as failed. Set higher for long-running agents (e.g. `21_600_000` for a 6-hour agent). The timeout is checked cooperatively at turn boundaries, not preemptively during provider calls. |
 
 #### `CompactionConfig`
 
 | Field              | Type     | Default                        | Description                                                                                                                     |
-| ------------------ | -------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| ------------------ | -------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
 | `reserveTokens`    | `number` | model-aware; capped at `20000` | Token headroom reserved before automatic compaction. Smaller model output limits and small context windows reduce this default. |
-| `keepRecentTokens` | `number` | `8000`                          | Recent tokens preserved unsummarized after compaction.                                                                          |
-| `model`            | `string` | session model                   | Model specifier override used for compaction summaries.                                                                         |
+| `keepRecentTokens` | `number` | `8000`                         | Recent tokens preserved unsummarized after compaction.                                                                          |
+| `model`            | `string` | agent model                    | Model specifier override used for compaction summaries.                                                                         |
 
 ## Flue Hooks
 
@@ -212,7 +215,9 @@ function useRetention(active: () => boolean) {
     ...offerCredit,
     run: (ctx) => (active() ? offerCredit.run(ctx) : 'Refused: no churn risk on record.'),
   });
-  useInstruction('Only while the customer is weighing cancellation: you may offer retention incentives.');
+  useInstruction(
+    'Only while the customer is weighing cancellation: you may offer retention incentives.',
+  );
 }
 
 function Support() {
@@ -347,15 +352,15 @@ function ReproducePhase() {
 
 #### `SubagentDefinition`
 
-| Field           | Type            | Description                                                                                             |
-| --------------- | --------------- | --------------------------------------------------------------------------------------------------------- |
-| `name`          | `string`        | Catalog name the model uses to select this delegate on the `task` tool.                                   |
-| `description`   | `string`        | Catalog line — how the model decides when to delegate to this agent.                                      |
-| `agent`         | `AgentFunction` | Agent function defining the delegate's whole world.                                                       |
-| `model`         | `string`        | Model specifier override. Inherits the parent's model when omitted.                                       |
-| `thinkingLevel` | `ThinkingLevel` | Reasoning-effort override. Inherits when omitted.                                                          |
+| Field           | Type            | Description                                                             |
+| --------------- | --------------- | ----------------------------------------------------------------------- |
+| `name`          | `string`        | Catalog name the model uses to select this delegate on the `task` tool. |
+| `description`   | `string`        | Catalog line — how the model decides when to delegate to this agent.    |
+| `agent`         | `AgentFunction` | Agent function defining the delegate's whole world.                     |
+| `model`         | `string`        | Model specifier override. Inherits the parent's model when omitted.     |
+| `thinkingLevel` | `ThinkingLevel` | Reasoning-effort override. Inherits when omitted.                       |
 
-Inside the delegate's render, custom hooks, `useTool()`, `useInstruction()`, `useSkill()`, and nested `useSubagent()` all compose as usual; `useState()` and `useSandbox()` throw (durable state is instance-scoped and delegates share the parent environment). Duplicate delegate names in one render fail fast. Select a declared subagent from a `session.task()` call with `options.agent`; see [`session.task(...)`](#sessiontask).
+Inside the delegate's render, custom hooks, `useTool()`, `useInstruction()`, `useSkill()`, and nested `useSubagent()` all compose as usual; `useState()` and `useSandbox()` throw (durable state is instance-scoped and delegates share the parent environment). Duplicate delegate names in one render fail fast. Select a declared subagent from a `harness.task()` call with `options.agent`; see [`harness.task(...)`](#harnesstask).
 
 ### `useSandbox(...)`
 
@@ -397,7 +402,7 @@ export default function IssueTriage() {
 }
 ```
 
-Constant within one render; fresh at the next. Renders happen before every model call — each turn, and the moment a delivery joins the live response, so a `useAgentStart` closure firing for a joined message reads *that* message. Origin-agnostic: a signal is a signal here whether it arrived by dispatch, HTTP, or a callback's `append`. A resumed attempt derives the same cursor from the durable record stream. In a subagent render, the delivery is the parent's task prompt as a `kind: 'user'` message. Always present — every response starts from a delivered message.
+Constant within one render; fresh at the next. Renders happen before every model call — each turn, and the moment a delivery joins the live response, so a `useAgentStart` closure firing for a joined message reads _that_ message. Origin-agnostic: a signal is a signal here whether it arrived by dispatch, HTTP, or a callback's `append`. A resumed attempt derives the same cursor from the durable record stream. In a subagent render, the delivery is the parent's task prompt as a `kind: 'user'` message. Always present — every response starts from a delivered message.
 
 ### `useAgentStart(...)`
 
@@ -448,9 +453,7 @@ function Assistant() {
   useTool(postMessage(data));
 
   useAgentFinish(({ response, append }) => {
-    const posted = response.toolCalls.some(
-      (call) => call.tool === 'post_message' && !call.isError,
-    );
+    const posted = response.toolCalls.some((call) => call.tool === 'post_message' && !call.isError);
     if (posted) return; // nothing appended → the response settles
     append({
       kind: 'signal',
@@ -461,7 +464,7 @@ function Assistant() {
 }
 ```
 
-Appending during the callback continues the response with another turn; once that continuation is dealt with, the hook runs again at the next would-stop point. The response settles only when the hooks complete with no appends AND no delivered input is waiting: queued deliveries [join the live response](#usedispatchmessage) before any finish evaluation — the agent is only "finally done" when it has dealt with everything delivered, so several messages collect into several `useAgentStart()` runs and one final `useAgentFinish()`. A dispatch made *from* this callback is a real delivery too: it joins the same response and the hook fires again at the new true end (unlike an append, it gets its own `useAgentStart` run and never counts against the append-cycle ceiling). Continued cycles are durable: a resumed response neither re-runs a completed cycle nor appends twice, and a hook that appends unconditionally fails loudly at a fixed framework ceiling instead of settling as a success. The submission's [durability timeout](#durabilityconfig) remains the total wall-clock backstop — neither continuations nor joins extend it. Runs on delivered submissions only, in declaration order; a throw fails the submission. Not available in a subagent render.
+Appending during the callback continues the response with another turn; once that continuation is dealt with, the hook runs again at the next would-stop point. The response settles only when the hooks complete with no appends AND no delivered input is waiting: queued deliveries [join the live response](#usedispatchmessage) before any finish evaluation — the agent is only "finally done" when it has dealt with everything delivered, so several messages collect into several `useAgentStart()` runs and one final `useAgentFinish()`. A dispatch made _from_ this callback is a real delivery too: it joins the same response and the hook fires again at the new true end (unlike an append, it gets its own `useAgentStart` run and never counts against the append-cycle ceiling). Continued cycles are durable: a resumed response neither re-runs a completed cycle nor appends twice, and a hook that appends unconditionally fails loudly at a fixed framework ceiling instead of settling as a success. The submission's [durability timeout](#durabilityconfig) remains the total wall-clock backstop — neither continuations nor joins extend it. Runs on delivered submissions only, in declaration order; a throw fails the submission. Not available in a subagent render.
 
 ```ts
 interface AgentFinishContext {
@@ -494,7 +497,7 @@ interface AgentAppendMessage {
 function useInitialData<T = unknown>(): T;
 ```
 
-Read the instance's creation data — the `data` a caller sent with this instance's first contact, recorded exactly once at creation and constant for the instance's whole life. This is the third leg of the input model: `useInitialData()` is what the instance is *about*, `useDelivery()` is what *this message* says, and `useState` is what the agent has *learned*.
+Read the instance's creation data — the `data` a caller sent with this instance's first contact, recorded exactly once at creation and constant for the instance's whole life. This is the third leg of the input model: `useInitialData()` is what the instance is _about_, `useDelivery()` is what _this message_ says, and `useState` is what the agent has _learned_.
 
 ```ts
 const input = v.object({ issue: v.pipe(v.number(), v.integer()) });
@@ -509,7 +512,7 @@ export default defineAgent(Triage, { model: 'anthropic/claude-opus-4-6', input }
 
 Creation data rides the instance's first contact: `dispatch(triage, { id, data, message })`, a `data` field beside the direct-HTTP message body, `client.send({ message, data })`, or `flue run --data '<json>'`. Declare an `input:` schema on `defineAgent` to validate it at creation — a mismatch (including absence, unless the schema accepts `undefined`) rejects the creating call, so with a required schema the value is always present here, as the schema-parsed output. Without a schema, whatever the creator sent is recorded and returned untyped.
 
-The value is immutable — `data` on messages to an existing instance is ignored, and evolving facts belong in `useState`. The return type is exactly the type parameter you assert: with a required schema the value is always present, so the common case needs no `undefined` narrowing (and no `!`). At runtime the value *is* `undefined` when creation carried no data, on bare tooling/test renders (back it with `initialData` in the render-state context), and in subagent renders (a delegate has no creation data of its own; close over a value to share it) — when your agent can hit those cases, say so in the type: `useInitialData<Config | undefined>()`. The recorded value is part of the instance's durable record stream but is never served to clients; still, it is not a secrets channel — keys and tokens stay in the environment.
+The value is immutable — `data` on messages to an existing instance is ignored, and evolving facts belong in `useState`. The return type is exactly the type parameter you assert: with a required schema the value is always present, so the common case needs no `undefined` narrowing (and no `!`). At runtime the value _is_ `undefined` when creation carried no data, on bare tooling/test renders (back it with `initialData` in the render-state context), and in subagent renders (a delegate has no creation data of its own; close over a value to share it) — when your agent can hit those cases, say so in the type: `useInitialData<Config | undefined>()`. The recorded value is part of the instance's durable record stream but is never served to clients; still, it is not a secrets channel — keys and tokens stay in the environment.
 
 ### `useDispatchMessage()`
 
@@ -543,7 +546,7 @@ export default function IssueTriage() {
 
 Same semantics as the global `dispatch()` — same queue, same admission, same delivery — and the same rules apply to direct HTTP prompts to the instance: every transport shares one accepted order and one join behavior. A message to a **busy** instance joins the live response at the next turn boundary: the message is durably admitted, fires its own `useAgentStart` run, and the model reads it on its very next turn — without interrupting the turn in flight. A message to an **idle** instance wakes a new response, and messages that pile up before the first turn collect into it together (several `useAgentStart` runs, one response, one final `useAgentFinish`). Joining never loses a delivery: a message that misses the live response — it settled first, or the process crashed mid-join — simply runs as its own submission from the same durable queue. A joined delivery settles when the response that carried it settles, with the same outcome, under the host response's [durability budget](#durabilityconfig); a joined HTTP prompt still writes its own `submission_settled` record, so an SDK `wait()` resolves exactly as if it had run alone. Both message kinds work: `signal` annotates, `user` reads as a real user message. Each call is a durable delivery with its own receipt — like any external side effect in a re-attempted tool, a re-run dispatches again; design for at-least-once. Throws during render and on bare tooling/test renders with no runtime behind them. Not available in a subagent render (a delegate returns what it produced as its task result instead).
 
-The one thing a dispatch is not: a `useAgentFinish` *continuation*. Inside that callback, `ctx.append` steers a signal into the response without registering new input — no `useAgentStart` run, no submission — and is counted against the framework's continuation ceiling. Everywhere else, dispatching is the way to put something in front of the model.
+The one thing a dispatch is not: a `useAgentFinish` _continuation_. Inside that callback, `ctx.append` steers a signal into the response without registering new input — no `useAgentStart` run, no submission — and is counted against the framework's continuation ceiling. Everywhere else, dispatching is the way to put something in front of the model.
 
 ### `useMessageData(...)`
 
@@ -584,7 +587,9 @@ Values are JSON; `schema` (when given) validates before each write. Writes are l
 ```ts
 function useMessageMetadata<TPoint extends MessageMetadataPoint>(
   point: TPoint,
-  produce: (event: Extract<MessageMetadataEvent, { point: TPoint }>) => Record<string, unknown> | undefined,
+  produce: (
+    event: Extract<MessageMetadataEvent, { point: TPoint }>,
+  ) => Record<string, unknown> | undefined,
 ): void;
 ```
 
@@ -620,20 +625,20 @@ function defineTool<
 }): ToolDefinition<TInput, TOutput, THarness>;
 ```
 
-Validates a custom model-callable tool and returns a frozen definition. Pass the returned value to [`useTool(...)`](#usetool) (or a `tools` array on a session operation). Tool names are checked for collisions with other active tools when a session assembles its tool list.
+Validates a custom model-callable tool and returns a frozen definition. Pass the returned value to [`useTool(...)`](#usetool) (or a `tools` array on a harness operation). Tool names are checked for collisions with other active tools when an operation assembles its tool list.
 
 `input` and `output` are optional Valibot schemas. `input` must be a top-level object schema. Model-supplied input is validated and parsed before `run` receives it; validation failures become tool errors so the model can retry. When present, `output` validates and parses the returned value. Structured output is snapshotted as JSON-compatible data and JSON-stringified for the model. Without an `output` schema, returning `undefined` sends `null` to the model.
 
 #### `ToolDefinition`
 
-| Field         | Type               | Description                                                                                                  |
-| ------------- | ------------------ | -------------------------------------------------------------------------------------------------------------- |
-| `name`        | `string`           | Tool name. Must be unique across active built-in and custom tools.                                              |
-| `description` | `string`           | Tells the model when and how to use this tool.                                                                  |
-| `input`       | `ToolInputSchema`  | Optional top-level Valibot object schema.                                                                       |
-| `output`      | `ToolOutputSchema` | Optional Valibot schema for typed, validated output.                                                            |
-| `harness`     | `boolean`          | Connects the tool to the agent's runtime: `run` receives `harness`, the one interface to the sandbox (`harness.shell()`, `harness.fs`) and to models (`harness.session()`). Tools without it are pure functions of their input. |
-| `run`         | `(context) => value \| Promise` | Receives a [`ToolContext`](#toolcontext). Returns JSON-compatible structured data.                                 |
+| Field         | Type                            | Description                                                                                                                                                                                                                                                         |
+| ------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`        | `string`                        | Tool name. Must be unique across active built-in and custom tools.                                                                                                                                                                                                  |
+| `description` | `string`                        | Tells the model when and how to use this tool.                                                                                                                                                                                                                      |
+| `input`       | `ToolInputSchema`               | Optional top-level Valibot object schema.                                                                                                                                                                                                                           |
+| `output`      | `ToolOutputSchema`              | Optional Valibot schema for typed, validated output.                                                                                                                                                                                                                |
+| `harness`     | `boolean`                       | Connects the tool to the agent's runtime: `run` receives `harness`, the one interface to the sandbox (`harness.shell()`, `harness.fs`) and to models (`harness.prompt()`, `harness.skill()`, `harness.task()`). Tools without it are pure functions of their input. |
+| `run`         | `(context) => value \| Promise` | Receives a [`ToolContext`](#toolcontext). Returns JSON-compatible structured data.                                                                                                                                                                                  |
 
 ```ts
 import { defineTool } from '@flue/runtime';
@@ -658,8 +663,7 @@ const runIntake = defineTool({
   description: 'Load the issue and decide whether triage is warranted.',
   harness: true,
   async run({ harness }) {
-    const session = await harness.session();
-    const { text } = await session.prompt('Summarize the loaded issue.');
+    const { text } = await harness.prompt('Summarize the loaded issue.');
     return text;
   },
 });
@@ -689,7 +693,7 @@ The old `parameters` and `execute` markers now throw when a tool is defined. Ren
 function defineSkill(options: DefineSkillOptions): SkillReference;
 ```
 
-Defines a packaged skill and returns a `SkillReference` ready to pass to [`useSkill(...)`](#useskill) or `session.skill(...)`. Use this when a skill's instructions are authored inline in code rather than in a `SKILL.md` file.
+Defines a packaged skill and returns a `SkillReference` ready to pass to [`useSkill(...)`](#useskill) or `harness.skill(...)`. Use this when a skill's instructions are authored inline in code rather than in a `SKILL.md` file.
 
 ```ts
 import { defineSkill } from '@flue/runtime';
@@ -703,16 +707,16 @@ const triageSkill = defineSkill({
 
 #### `DefineSkillOptions`
 
-| Field           | Type                             | Description                                                                                     |
-| --------------- | --------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `name`          | `string`                          | Skill name. Lowercase letters, numbers, and single hyphens only; at most 64 characters.           |
-| `description`   | `string`                         | Catalog line shown to the model. At most 1024 characters.                                         |
-| `instructions`  | `string`                          | Full instruction body, disclosed to the model when the skill is activated.                        |
-| `license`       | `string`                          | Optional license identifier recorded in the packaged `SKILL.md` frontmatter.                      |
-| `compatibility` | `string`                          | Optional compatibility note recorded in frontmatter. At most 500 characters.                       |
-| `metadata`      | `Record<string, string>`          | Optional string-to-string metadata recorded in frontmatter.                                        |
-| `allowedTools`  | `string`                          | Optional allowed-tools restriction recorded in frontmatter.                                        |
-| `files`         | `Record<string, string \| Uint8Array>` | Optional supporting files packaged alongside `SKILL.md`, keyed by safe relative path.        |
+| Field           | Type                                   | Description                                                                             |
+| --------------- | -------------------------------------- | --------------------------------------------------------------------------------------- |
+| `name`          | `string`                               | Skill name. Lowercase letters, numbers, and single hyphens only; at most 64 characters. |
+| `description`   | `string`                               | Catalog line shown to the model. At most 1024 characters.                               |
+| `instructions`  | `string`                               | Full instruction body, disclosed to the model when the skill is activated.              |
+| `license`       | `string`                               | Optional license identifier recorded in the packaged `SKILL.md` frontmatter.            |
+| `compatibility` | `string`                               | Optional compatibility note recorded in frontmatter. At most 500 characters.            |
+| `metadata`      | `Record<string, string>`               | Optional string-to-string metadata recorded in frontmatter.                             |
+| `allowedTools`  | `string`                               | Optional allowed-tools restriction recorded in frontmatter.                             |
+| `files`         | `Record<string, string \| Uint8Array>` | Optional supporting files packaged alongside `SKILL.md`, keyed by safe relative path.   |
 
 Throws `SkillDefinitionValidationError` when required fields are missing, too long, or a file path is unsafe (absolute, `SKILL.md` itself, or containing `.`/`..` segments).
 
@@ -729,14 +733,14 @@ Adapted tool names use `mcp__<server>__<tool>`. Unsupported characters are repla
 #### `McpServerOptions`
 
 | Field                    | Type                         | Default             | Description                                                                      |
-| ------------------------ | ---------------------------- | ------------------- | --------------------------------------------------------------------------------- |
-| `url`                    | `string \| URL`              | —                    | MCP server endpoint.                                                             |
-| `transport`              | `'streamable-http' \| 'sse'` | `'streamable-http'` | Remote MCP transport. Use `'sse'` for legacy servers.                             |
-| `headers`                | `HeadersInit`                | —                    | Headers merged into MCP transport requests.                                       |
-| `requestInit`            | `RequestInit`                | —                    | Additional MCP transport request configuration.                                   |
-| `fetch`                  | `typeof fetch`               | —                    | Custom fetch implementation used by the MCP transport.                            |
-| `timeoutMs`              | `number`                     | `60000`             | Per-request timeout in milliseconds for MCP requests.                             |
-| `resetTimeoutOnProgress` | `boolean`                    | `false`             | Reset the per-request timeout whenever the server sends a progress notification.  |
+| ------------------------ | ---------------------------- | ------------------- | -------------------------------------------------------------------------------- |
+| `url`                    | `string \| URL`              | —                   | MCP server endpoint.                                                             |
+| `transport`              | `'streamable-http' \| 'sse'` | `'streamable-http'` | Remote MCP transport. Use `'sse'` for legacy servers.                            |
+| `headers`                | `HeadersInit`                | —                   | Headers merged into MCP transport requests.                                      |
+| `requestInit`            | `RequestInit`                | —                   | Additional MCP transport request configuration.                                  |
+| `fetch`                  | `typeof fetch`               | —                   | Custom fetch implementation used by the MCP transport.                           |
+| `timeoutMs`              | `number`                     | `60000`             | Per-request timeout in milliseconds for MCP requests.                            |
+| `resetTimeoutOnProgress` | `boolean`                    | `false`             | Reset the per-request timeout whenever the server sends a progress notification. |
 
 #### `McpServerConnection`
 
@@ -775,15 +779,15 @@ interface DispatchReceipt {
 
 Delivers a message for asynchronous processing by a continuing agent instance. The `agent` argument is a registered agent module value — the default export of a `'use agent'` module — so no HTTP mount is required.
 
-| Field        | Description                                                                                                                                                                                              |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`         | Target agent instance id.                                                                                                                                                                               |
-| `message`    | The message delivered to the session. Flue snapshots it when accepted.                                                                                                                                  |
-| `data`       | Instance-creation data — the seed, consulted only when this send creates the instance: validated against the agent's `input:` schema (when declared) and recorded once. Ignored when the send continues an existing instance. See [Creation data](/docs/guide/building-agents/#creation-data). |
-| `uid`        | Send condition — see [Conditional sends](#conditional-sends).                                                                                                                                           |
-| `dispatchId` | Generated delivery identifier returned in the receipt.                                                                                                                                                  |
-| `acceptedAt` | ISO timestamp assigned when dispatch admission begins.                                                                                                                                                  |
-| `uid` (receipt) | The contacted instance's uid — minted when this send created the instance, echoed when it continued one. Absent for instances created before uids shipped.                                          |
+| Field           | Description                                                                                                                                                                                                                                                                                    |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`            | Target agent instance id.                                                                                                                                                                                                                                                                      |
+| `message`       | The message delivered to the conversation. Flue snapshots it when accepted.                                                                                                                                                                                                                    |
+| `data`          | Instance-creation data — the seed, consulted only when this send creates the instance: validated against the agent's `input:` schema (when declared) and recorded once. Ignored when the send continues an existing instance. See [Creation data](/docs/guide/building-agents/#creation-data). |
+| `uid`           | Send condition — see [Conditional sends](#conditional-sends).                                                                                                                                                                                                                                  |
+| `dispatchId`    | Generated delivery identifier returned in the receipt.                                                                                                                                                                                                                                         |
+| `acceptedAt`    | ISO timestamp assigned when dispatch admission begins.                                                                                                                                                                                                                                         |
+| `uid` (receipt) | The contacted instance's uid — minted when this send created the instance, echoed when it continued one. Absent for instances created before uids shipped.                                                                                                                                     |
 
 `await dispatch(...)` resolves when the current runtime accepts and queues the message. It does not wait for model processing, tool calls, or an agent reply. Dispatched activity belongs to the continuing agent instance and shares one accepted order with direct HTTP prompts to the same instance.
 
@@ -791,12 +795,12 @@ Delivers a message for asynchronous processing by a continuing agent instance. T
 
 Every send — `dispatch(...)`, a direct HTTP prompt, or the SDK's `client.send(...)` — is a **conditional request** against the target instance, with the instance uid playing the ETag:
 
-| `uid`                     | Meaning                             | Instance exists                                                              | Instance missing                        |
-| ------------------------- | ------------------------------------ | ------------------------------------------------------------------------------ | ------------------------------------------ |
-| omitted                  | Deliver to this address.             | Continues.                                                                    | Creates.                                   |
-| omitted, `data` present  | Seed if this creates.                | Continues; `data` ignored.                                                    | Creates; `data` validated and recorded.    |
-| `'<value>'`              | Continue only that incarnation.      | Continues if the uid matches, else `AgentInstanceNotFoundError` (`404`).      | `AgentInstanceNotFoundError` (`404`).      |
-| `null`                   | Create only when fresh.              | `AgentInstanceExistsError` (`409`); its `.uid` and `details` name the existing uid. | Creates.                                   |
+| `uid`                   | Meaning                         | Instance exists                                                                     | Instance missing                        |
+| ----------------------- | ------------------------------- | ----------------------------------------------------------------------------------- | --------------------------------------- |
+| omitted                 | Deliver to this address.        | Continues.                                                                          | Creates.                                |
+| omitted, `data` present | Seed if this creates.           | Continues; `data` ignored.                                                          | Creates; `data` validated and recorded. |
+| `'<value>'`             | Continue only that incarnation. | Continues if the uid matches, else `AgentInstanceNotFoundError` (`404`).            | `AgentInstanceNotFoundError` (`404`).   |
+| `null`                  | Create only when fresh.         | `AgentInstanceExistsError` (`409`); its `.uid` and `details` name the existing uid. | Creates.                                |
 
 `uid: '<value>'` combined with `data` throws `InvalidRequestError` — the condition forbids creation, so the seed could never apply. Every condition is checked synchronously at admission: a failed condition creates nothing durable and runs no model turn.
 
@@ -818,7 +822,7 @@ type DeliveredMessage =
     };
 ```
 
-The single unified message shape delivered into an agent's session, whether it arrives through `dispatch(...)`, a direct HTTP prompt, or [`useDelivery()`](#usedelivery).
+The single unified message shape delivered into an agent's conversation, whether it arrives through `dispatch(...)`, a direct HTTP prompt, or [`useDelivery()`](#usedelivery).
 
 `kind: 'user'` is a real, user-attributed chat turn. It produces a canonical `user_message` record and projects into the model conversation like any other user message. Use it when one person is talking directly to the assistant — a direct 1:1 chat surface such as an SDK-driven chat UI — optionally carrying image attachments.
 
@@ -846,6 +850,38 @@ type DeliveredAttachment = {
 One image attachment on a `kind: 'user'` `DeliveredMessage`. Today the only supported attachment is an image; the selected model must support image input.
 
 Delivery durability depends on the generated target. Node uses a process-lifetime in-memory queue by default; with a durable `db.ts` adapter, dispatches survive restarts and are reconciled on the replacement process. Cloudflare durably admits delivery to the target agent Durable Object, orders it with direct prompts, and reconciles interruptions conservatively. Both targets retry only when replay safety is provable; external effects still require application-level idempotency. See [Durable Agents](/docs/concepts/durable-execution/) for recovery details, and [Deploy Agents on Node.js](/docs/ecosystem/deploy/node/) and [Deploy Agents on Cloudflare](/docs/ecosystem/deploy/cloudflare/) for target-specific setup.
+
+## `init(...)`
+
+```ts
+function init(agent: AgentModuleValue, options?: InitOptions): AgentInstanceHandle;
+
+interface InitOptions {
+  id?: string; // instance address; omitted -> a fresh unique id
+  data?: unknown; // creation data (input: schema), seed iff the first send creates
+  uid?: string | null; // send condition for the handle's first contact
+}
+
+interface AgentInstanceHandle {
+  readonly id: string;
+  prompt(message: string | DeliveredMessage, options?: AgentPromptOptions): Promise<AgentReply>;
+  dispatch(message: DeliveredMessage): Promise<DispatchReceipt>;
+}
+
+interface AgentReply {
+  text: string; // final assistant text ('' when none)
+  data: Record<string, unknown[]>; // useMessageData parts, keyed by name
+  metadata?: Record<string, unknown>; // useMessageMetadata, when produced
+  uid?: string; // the contacted incarnation
+  submissionId: string;
+}
+```
+
+The programmatic client for one agent instance. `prompt(...)` admits a real direct submission — the message becomes the delivery, and every hook fires exactly as it does for a dispatch or an HTTP prompt — waits for it to settle, and resolves with the reply. A string message is shorthand for `{ kind: 'user', body }`. A `failed`/`aborted` settlement rejects with `AgentRunError` (`outcome`, `submissionId`, `cause`). `AgentPromptOptions` carries `onEvent` (every projected `ConversationStreamChunk` as it is durably recorded) and `signal` (durable abort intent; the prompt rejects once the aborted settlement lands).
+
+The handle is an address: nothing is created until first contact, `data`/`uid` gate that first send, and after a prompt the handle pins the incarnation it contacted. Like `dispatch()`, `init()` taps the process's configured runtime — inside a Flue server it works directly; in a standalone script call `start()` from `@flue/runtime/node` first. Prompting is Node-only today (on Cloudflare, `prompt()` throws; `dispatch()` works everywhere).
+
+See the [Scripts guide](/docs/guide/scripts/) for the script, cron, and test recipes.
 
 ## `getAgentInstance(...)`
 
@@ -884,95 +920,41 @@ A harness is an initialized agent environment supplied by the active runner. `ha
 
 #### `FlueHarness`
 
-Initialized agent environment for sessions and workspace operations.
+Initialized agent environment for model operations and workspace access.
 
 ```ts
 interface FlueHarness {
   readonly name: string;
-  session(name?: string): Promise<FlueSession>;
-  readonly sessions: FlueSessions;
-  shell(command: string, options?: ShellOptions): CallHandle<ShellResult>;
-  readonly fs: FlueFs;
-}
-```
-
-### `harness.session(...)`
-
-```ts
-session(name?: string): Promise<FlueSession>;
-```
-
-Gets or creates a session in this harness. Defaults to the `'default'` session. Names beginning with `task:` are reserved for framework-owned detached task sessions.
-
-### `harness.sessions.get(...)`
-
-```ts
-get(name?: string): Promise<FlueSession>;
-```
-
-Loads an existing session. Defaults to `'default'`. Rejects with `SessionNotFoundError` if it does not exist.
-
-### `harness.sessions.create(...)`
-
-```ts
-create(name?: string): Promise<FlueSession>;
-```
-
-Creates a new session. Defaults to `'default'`. Rejects with `SessionAlreadyExistsError` if it already exists.
-
-### `harness.shell(...)`
-
-```ts
-shell(command: string, options?: ShellOptions): CallHandle<ShellResult>;
-```
-
-Runs a shell command in the harness sandbox without recording it in a conversation.
-
-### `harness.fs`
-
-- **Type:** `FlueFs`
-
-Reads and writes files in the harness sandbox without recording them in a conversation.
-
-## Session
-
-A session is named conversation state inside a harness. A session runs one active `prompt`, `skill`, `task`, `shell`, or `compact` operation at a time. Use separate named sessions for parallel conversation branches.
-
-#### `FlueSession`
-
-Named conversation state inside a harness.
-
-```ts
-interface FlueSession {
-  readonly name: string;
   prompt(text: string, options?: PromptOptions): CallHandle<PromptResponse>;
   skill(skill: SkillReference | string, options?: SkillOptions): CallHandle<PromptResponse>;
   task(text: string, options?: TaskOptions): CallHandle<PromptResponse>;
+  compact(): Promise<void>;
   shell(command: string, options?: ShellOptions): CallHandle<ShellResult>;
   readonly fs: FlueFs;
-  compact(): Promise<void>;
 }
 ```
 
+`prompt()`, `skill()`, and `task()` drive the harness's own scratch conversation: repeated calls continue it, one active operation at a time. `shell()` and `fs` touch the sandbox directly and are not recorded in the conversation.
+
 The `prompt()`, `skill()`, and `task()` signatures above omit structured-result overloads. Pass a Valibot schema as `options.result` to resolve with validated `response.data`.
 
-### `session.prompt(...)`
+### `harness.prompt(...)`
 
 ```ts
 prompt(text: string, options?: PromptOptions): CallHandle<PromptResponse>;
 ```
 
-Runs a model operation with a text instruction.
+Runs a model operation with a text instruction in the harness conversation.
 
 #### `PromptOptions`
 
 | Field           | Type               | Description                                                           |
-| --------------- | ------------------ | ----------------------------------------------------------------------- |
+| --------------- | ------------------ | --------------------------------------------------------------------- |
 | `result`        | Valibot schema     | Require validated structured data and resolve with `response.data`.   |
 | `tools`         | `ToolDefinition[]` | Additional custom model-callable tools for this operation.            |
 | `model`         | `string`           | Model specifier override for this operation.                          |
 | `thinkingLevel` | `ThinkingLevel`    | Reasoning-effort override for this operation.                         |
-| `signal`        | `AbortSignal`      | Cancel this operation.                                                 |
+| `signal`        | `AbortSignal`      | Cancel this operation.                                                |
 | `images`        | `PromptImage[]`    | Images attached to the user message. Requires a vision-capable model. |
 
 #### `PromptImage`
@@ -1024,13 +1006,13 @@ interface PromptResultResponse<T> {
 
 A structured-result operation throws `ResultUnavailableError` when the agent cannot produce validated data.
 
-### `session.skill(...)`
+### `harness.skill(...)`
 
 ```ts
 skill(skill: SkillReference | string, options?: SkillOptions): CallHandle<PromptResponse>;
 ```
 
-Runs a registered skill. Pass `options.result` to require validated structured data instead of freeform text.
+Runs a registered skill in the harness conversation. Pass `options.result` to require validated structured data instead of freeform text.
 
 #### `SkillReference`
 
@@ -1043,7 +1025,7 @@ interface SkillReference {
 }
 ```
 
-Opaque skill reference accepted by `useSkill()` and `session.skill()`. Produced by importing a `SKILL.md` value or by [`defineSkill(...)`](#defineskill).
+Opaque skill reference accepted by `useSkill()` and `harness.skill()`. Produced by importing a `SKILL.md` value or by [`defineSkill(...)`](#defineskill).
 
 #### `Skill`
 
@@ -1061,50 +1043,50 @@ Skill metadata mountable with `useSkill()`. Imported `SkillReference` values bun
 #### `SkillOptions`
 
 | Field           | Type                      | Description                                                                   |
-| --------------- | ------------------------- | -------------------------------------------------------------------------------- |
+| --------------- | ------------------------- | ----------------------------------------------------------------------------- |
 | `args`          | `Record<string, unknown>` | Arguments included with the skill instruction.                                |
 | `result`        | Valibot schema            | Require validated structured data and resolve with `response.data`.           |
 | `tools`         | `ToolDefinition[]`        | Additional custom model-callable tools for this operation.                    |
 | `model`         | `string`                  | Model specifier override for this operation.                                  |
-| `thinkingLevel` | `ThinkingLevel`           | Reasoning-effort override for this operation.                                  |
+| `thinkingLevel` | `ThinkingLevel`           | Reasoning-effort override for this operation.                                 |
 | `signal`        | `AbortSignal`             | Cancel this operation.                                                        |
 | `images`        | `PromptImage[]`           | Images attached to the skill's user message. Requires a vision-capable model. |
 
-### `session.task(...)`
+### `harness.task(...)`
 
 ```ts
 task(text: string, options?: TaskOptions): CallHandle<PromptResponse>;
 ```
 
-Delegates work to a detached child session. Pass `options.agent` to select a subagent by the name declared with [`useSubagent(...)`](#usesubagent) and `options.result` to require validated data.
+Delegates work to a detached child conversation. Pass `options.agent` to select a subagent by the name declared with [`useSubagent(...)`](#usesubagent) and `options.result` to require validated data.
 
 #### `TaskOptions`
 
 | Field           | Type               | Description                                                                          |
-| --------------- | ------------------ | --------------------------------------------------------------------------------------- |
-| `agent`         | `string`           | Name of the subagent (declared with `useSubagent()`) to delegate to for this call.      |
+| --------------- | ------------------ | ------------------------------------------------------------------------------------ |
+| `agent`         | `string`           | Name of the subagent (declared with `useSubagent()`) to delegate to for this call.   |
 | `result`        | Valibot schema     | Require validated structured data and resolve with `response.data`.                  |
 | `tools`         | `ToolDefinition[]` | Additional custom model-callable tools for this operation.                           |
 | `model`         | `string`           | Model specifier override for this operation.                                         |
-| `thinkingLevel` | `ThinkingLevel`    | Reasoning-effort override for this operation.                                         |
-| `cwd`           | `string`           | Working directory for the detached task session. Defaults to the parent session cwd. |
-| `signal`        | `AbortSignal`      | Cancel this task.                                                                     |
+| `thinkingLevel` | `ThinkingLevel`    | Reasoning-effort override for this operation.                                        |
+| `cwd`           | `string`           | Working directory for the detached task. Defaults to the parent's cwd.               |
+| `signal`        | `AbortSignal`      | Cancel this task.                                                                    |
 | `images`        | `PromptImage[]`    | Images attached to the task's initial user message. Requires a vision-capable model. |
 
 Rejects with `SubagentNotDeclaredError` when `options.agent` names a subagent that was not declared with `useSubagent()` in the current render.
 
-### `session.shell(...)`
+### `harness.shell(...)`
 
 ```ts
 shell(command: string, options?: ShellOptions): CallHandle<ShellResult>;
 ```
 
-Runs a shell command and records its command exchange in conversation state.
+Runs a shell command in the harness sandbox without recording it in the conversation.
 
 #### `ShellOptions`
 
 | Field       | Type                     | Description                                                                             |
-| ----------- | ------------------------ | ----------------------------------------------------------------------------------------- |
+| ----------- | ------------------------ | --------------------------------------------------------------------------------------- |
 | `env`       | `Record<string, string>` | Environment variables supplied to the command.                                          |
 | `cwd`       | `string`                 | Working directory supplied to the command.                                              |
 | `timeoutMs` | `number`                 | Wall-clock deadline in milliseconds, forwarded to the sandbox adapter's native timeout. |
@@ -1120,19 +1102,19 @@ interface ShellResult {
 }
 ```
 
-### `session.fs`
+### `harness.fs`
 
 - **Type:** `FlueFs`
 
-Reads and writes files in the session sandbox without recording them in the conversation transcript.
+Reads and writes files in the harness sandbox without recording them in the conversation.
 
-### `session.compact()`
+### `harness.compact()`
 
 ```ts
 compact(): Promise<void>;
 ```
 
-Triggers conversation compaction immediately. Resolves without work when there is nothing to compact. Rejects when summarization fails or is aborted. Rejects with `SessionBusyError` if another operation is active on the session.
+Triggers compaction of the harness conversation immediately. Resolves without work when there is nothing to compact. Rejects when summarization fails or is aborted. Rejects with `SessionBusyError` if another operation is in flight.
 
 #### `CallHandle<T>`
 
@@ -1145,7 +1127,7 @@ interface CallHandle<T> extends Promise<T> {
 
 `prompt()`, `skill()`, `task()`, and `shell()` return awaitable call handles. Retain the handle when application code needs to cancel in-flight work. Aborting rejects the awaited operation with an `AbortError` (`DOMException`). Pass `options.signal` to merge an external abort signal with the handle's signal.
 
-Other session failures reject with typed `FlueError` subclasses such as `SessionBusyError`, `SkillNotRegisteredError`, and `SubagentNotDeclaredError`, all importable from `@flue/runtime`. See the [Errors Reference](/docs/api/errors-reference/) for the full vocabulary.
+Other operation failures reject with typed `FlueError` subclasses such as `SessionBusyError`, `SkillNotRegisteredError`, and `SubagentNotDeclaredError`, all importable from `@flue/runtime`. See the [Errors Reference](/docs/api/errors-reference/) for the full vocabulary.
 
 #### `FlueFs`
 

@@ -65,7 +65,7 @@ function OrderAssistant() {
 export default defineAgent(OrderAssistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
-The function runs again before every model turn, so guards and interpolated text always reflect current state. Resources — tools, skills, and subagents — may even be declared conditionally (`if (pro) useSkill(refundsSkill)`): when a render's resource set changes, the runtime announces the change to the model in the conversation instead of rewriting the system prompt (see [Dynamic resources](/docs/api/agent-api/#dynamic-resources)). The agent's *identity* stays static: `useState`, `useMessageData`, `useSandbox`, and the lifecycle hooks must be declared identically on every render. See [Tools](/docs/guide/tools/), [Skills](/docs/guide/skills/), [Sandboxes](/docs/guide/sandboxes/), and [Subagents](/docs/guide/subagents/) for what an agent's body can compose, and [Durable Agents](/docs/concepts/durable-execution/) for how that state persists.
+The function runs again before every model turn, so guards and interpolated text always reflect current state. Resources — tools, skills, and subagents — may even be declared conditionally (`if (pro) useSkill(refundsSkill)`): when a render's resource set changes, the runtime announces the change to the model in the conversation instead of rewriting the system prompt (see [Dynamic resources](/docs/api/agent-api/#dynamic-resources)). The agent's _identity_ stays static: `useState`, `useMessageData`, `useSandbox`, and the lifecycle hooks must be declared identically on every render. See [Tools](/docs/guide/tools/), [Skills](/docs/guide/skills/), [Sandboxes](/docs/guide/sandboxes/), and [Subagents](/docs/guide/subagents/) for what an agent's body can compose, and [Durable Agents](/docs/concepts/durable-execution/) for how that state persists.
 
 `defineAgent(Agent, config)`'s second argument is the agent's static identity — the fields that never render:
 
@@ -163,7 +163,7 @@ from the id itself. Only the top-level function receives `AgentProps`; a custom 
 
 ## Creation data
 
-An instance usually exists *about something* — a support ticket, a GitHub issue, a customer. That fact is known when the instance is created, is constant for its whole life, and shouldn't be re-parsed out of later messages (only the first message is shaped by the code that creates the instance). Send it as `data` on the instance's first contact and read it with `useInitialData()`:
+An instance usually exists _about something_ — a support ticket, a GitHub issue, a customer. That fact is known when the instance is created, is constant for its whole life, and shouldn't be re-parsed out of later messages (only the first message is shaped by the code that creates the instance). Send it as `data` on the instance's first contact and read it with `useInitialData()`:
 
 ```ts
 import * as v from 'valibot';
@@ -194,16 +194,16 @@ Authorize access to an `id` in the [`route`](#interacting-with-your-agent) handl
 
 ### The id names the address, the uid names the incarnation
 
-Every instance also gets a **uid** (`inst_<ulid>`), minted once at creation and recorded on its birth record. The `id` stays the address — client-chosen, reusable, the thing a URL or a `dispatch()` call names. The uid names *this incarnation* of that address, the way Kubernetes distinguishes `metadata.name` from `metadata.uid`: delete an id and recreate it, and the new incarnation gets a new uid.
+Every instance also gets a **uid** (`inst_<ulid>`), minted once at creation and recorded on its birth record. The `id` stays the address — client-chosen, reusable, the thing a URL or a `dispatch()` call names. The uid names _this incarnation_ of that address, the way Kubernetes distinguishes `metadata.name` from `metadata.uid`: delete an id and recreate it, and the new incarnation gets a new uid.
 
 Every send is a request against that address, and it can carry the uid as a condition — sends are conditional requests, with the uid playing the ETag:
 
-| You pass | You're saying | Instance exists | Instance missing |
-| --- | --- | --- | --- |
-| neither | "deliver to this address" | continues | creates |
-| `data` (no uid) | "seed if this creates" | continues, seed ignored | creates, seed validated and recorded |
-| `uid: '<value>'` | "continue only that incarnation" | continues if the uid matches, else rejects | rejects |
-| `uid: null` | "create only when fresh" | rejects (naming the existing uid) | creates |
+| You pass         | You're saying                    | Instance exists                            | Instance missing                     |
+| ---------------- | -------------------------------- | ------------------------------------------ | ------------------------------------ |
+| neither          | "deliver to this address"        | continues                                  | creates                              |
+| `data` (no uid)  | "seed if this creates"           | continues, seed ignored                    | creates, seed validated and recorded |
+| `uid: '<value>'` | "continue only that incarnation" | continues if the uid matches, else rejects | rejects                              |
+| `uid: null`      | "create only when fresh"         | rejects (naming the existing uid)          | creates                              |
 
 Every successful send's receipt carries the uid — fresh on a creating send, echoed back on a continuing one — so the common case needs no separate lookup:
 
@@ -307,5 +307,5 @@ Your application chooses the agent conversation before dispatching the event. `d
 - [Subagents](/docs/guide/subagents/) — delegate focused work to a specialist agent function.
 - [Routing](/docs/guide/routing/) — mount agent HTTP surfaces inside an authenticated application.
 - [Schedules](/docs/guide/schedules/) — dispatch agent input on a schedule.
-- [Channels](/docs/guide/channels/) — deliver verified provider events into agent sessions.
+- [Channels](/docs/guide/channels/) — deliver verified provider events into agent conversations.
 - [Observability](/docs/guide/observability/) — inspect agent activity.

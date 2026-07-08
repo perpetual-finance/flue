@@ -104,10 +104,10 @@ export type ConversationStreamChunk = ConversationStreamChunkBody & {
 
 // The public conversation API addresses exactly one conversation per agent
 // instance: the default harness/session root. An instance can hold other root
-// conversations too (every additional public `harness.session(name)` opens one),
-// so the default must be selected by its stable identity rather than by record
-// order. Fall back to any root only when no default scope exists, preserving the
-// prior behavior for instances that never used the default session.
+// conversations too (internal named sessions each open one), so the default
+// must be selected by its stable identity rather than by record order. Fall
+// back to any root only when no default scope exists, preserving the prior
+// behavior for instances that never used the default session.
 const DEFAULT_HARNESS = 'default';
 const DEFAULT_SESSION = 'default';
 

@@ -11,16 +11,15 @@ function WithAbort() {
 		description: 'Verify timeout, manual, and pre-aborted cancellation for prompts and shells.',
 		harness: true,
 		async run({ harness }) {
-			const session = await harness.session();
 			let timeoutAborted = false;
 			try {
-				await session.prompt('Run `sleep 30` via the bash tool, then describe what happened.', {
+				await harness.prompt('Run `sleep 30` via the bash tool, then describe what happened.', {
 					signal: AbortSignal.timeout(2_000),
 				});
 			} catch (error) {
 				timeoutAborted = isAbortError(error);
 			}
-			const handle = session.prompt('Run `sleep 30` via the bash tool, then describe what happened.');
+			const handle = harness.prompt('Run `sleep 30` via the bash tool, then describe what happened.');
 			setTimeout(() => handle.abort('user-cancel'), 1_000);
 			let manualAborted = false;
 			try {
@@ -30,17 +29,17 @@ function WithAbort() {
 			}
 			let preAborted = false;
 			try {
-				await session.prompt('Say hi.', { signal: AbortSignal.abort('already done') });
+				await harness.prompt('Say hi.', { signal: AbortSignal.abort('already done') });
 			} catch (error) {
 				preAborted = isAbortError(error);
 			}
 			let shellTimeoutAborted = false;
 			try {
-				await session.shell('sleep 30', { signal: AbortSignal.timeout(1_000) });
+				await harness.shell('sleep 30', { signal: AbortSignal.timeout(1_000) });
 			} catch (error) {
 				shellTimeoutAborted = isAbortError(error);
 			}
-			const shellHandle = session.shell('sleep 30');
+			const shellHandle = harness.shell('sleep 30');
 			setTimeout(() => shellHandle.abort('shell-user-cancel'), 1_000);
 			let shellManualAborted = false;
 			try {

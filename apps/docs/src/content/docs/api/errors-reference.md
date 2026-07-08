@@ -82,12 +82,12 @@ The catchable base class for framework-thrown runtime failures, exported from `@
 
 ### Runtime errors
 
-Harness and session operations, and runtime provider registration, reject with typed `FlueError` subclasses, all importable from `@flue/runtime`:
+Harness operations and runtime provider registration reject with typed `FlueError` subclasses, all importable from `@flue/runtime`:
 
 | Class                            | `type`                          | Thrown when                                                                                                                                                                                                             |
 | -------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SessionNotFoundError`           | `session_not_found`             | `sessions.get()` targets a session that does not exist.                                                                                                                                                                 |
-| `SessionAlreadyExistsError`      | `session_already_exists`        | `sessions.create()` targets a session that already exists.                                                                                                                                                              |
+| `SessionNotFoundError`           | `session_not_found`             | An internal session lookup targets a session that does not exist. Public harness operations get-or-create their conversation and cannot hit this.                                                                       |
+| `SessionAlreadyExistsError`      | `session_already_exists`        | An internal session creation targets a session that already exists. Public harness operations get-or-create their conversation and cannot hit this.                                                                     |
 | `SessionBusyError`               | `session_busy`                  | An operation starts while another operation is running.                                                                                                                                                                 |
 | `SkillNotRegisteredError`        | `skill_not_registered`          | A skill call or activation names a skill that is not registered.                                                                                                                                                        |
 | `SkillDefinitionValidationError` | `skill_definition_validation`   | A `defineSkill()` value is malformed.                                                                                                                                                                                   |

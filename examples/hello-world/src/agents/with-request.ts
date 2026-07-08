@@ -22,11 +22,10 @@ export const route: AgentRouteHandler = async (c, next) => {
 function WithRequest() {
 	useTool({
 		name: 'greet',
-		description: 'Ask a child session for a five-word hello.',
+		description: 'Ask the harness conversation for a five-word hello.',
 		harness: true,
 		async run({ harness }) {
-			const session = await harness.session();
-			const { text } = await session.prompt('Say hello in 5 words.');
+			const { text } = await harness.prompt('Say hello in 5 words.');
 			return { text };
 		},
 	});

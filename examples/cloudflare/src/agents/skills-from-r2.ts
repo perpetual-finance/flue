@@ -8,7 +8,7 @@
  * expensive R2 read happens once, inside `createSessionEnv()`, at
  * initialization. The deterministic skill invocation lives in the
  * model-callable `check_spam` tool below (`harness: true` gives its run a
- * child harness — `harness.session().skill(...)` works exactly as it did in
+ * child harness — `harness.skill(...)` works exactly as it did in
  * the workflow body this agent replaced):
  *
  *   curl -X POST /agents/skills-from-r2/<id> \
@@ -45,8 +45,7 @@ const checkSpam = defineTool({
 	}),
 	harness: true,
 	async run({ harness, data }) {
-		const session = await harness.session();
-		const result = await session.skill('spam-filter', {
+		const result = await harness.skill('spam-filter', {
 			args: { message: data.message },
 			result: v.object({
 				spam: v.boolean(),

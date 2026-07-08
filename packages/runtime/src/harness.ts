@@ -1,3 +1,4 @@
+import type * as v from 'valibot';
 import { abortErrorFor, createCallHandle } from './abort.ts';
 import { discoverSessionContext } from './context.ts';
 import type { ConversationRecordWriter } from './conversation-writer.ts';
@@ -31,12 +32,17 @@ import type {
 	FlueHarness,
 	FlueObservationDetail,
 	FlueSession,
-	FlueSessions,
+	PromptOptions,
+	PromptResponse,
+	PromptResultResponse,
 	ResolvedSubagent,
 	SessionEnv,
 	SessionToolFactory,
 	ShellOptions,
 	ShellResult,
+	SkillOptions,
+	SkillReference,
+	TaskOptions,
 	ToolDefinition,
 } from './types.ts';
 
@@ -45,7 +51,14 @@ const DEFAULT_SESSION_NAME = 'default';
 type OpenMode = 'get-or-create' | 'get' | 'create';
 
 export class Harness implements FlueHarness {
-	readonly sessions: FlueSessions = {
+	/**
+	 * Explicit session management. Not part of the public {@link FlueHarness}
+	 * surface (the flattened prompt/skill/task methods drive the default
+	 * session); retained on the class for the runtime's own callers — the
+	 * submission opener addresses its session by name — and as an internal
+	 * escape hatch.
+	 */
+	readonly sessions = {
 		get: (name?: string) => this.openSession(name, 'get'),
 		create: (name?: string) => this.openSession(name, 'create'),
 	};
@@ -122,8 +135,72 @@ export class Harness implements FlueHarness {
 		}
 	}
 
+	/**
+	 * Get or create a session by name (defaults to `'default'`). Not part of
+	 * the public {@link FlueHarness} surface — the flattened
+	 * prompt/skill/task/compact methods below drive the default session.
+	 */
 	async session(name?: string): Promise<FlueSession> {
 		return this.openSession(name, 'get-or-create');
+	}
+
+	prompt<S extends v.GenericSchema>(
+		text: string,
+		options: PromptOptions<S> & { result: S },
+	): CallHandle<PromptResultResponse<v.InferOutput<S>>>;
+	prompt(text: string, options?: PromptOptions): CallHandle<PromptResponse>;
+	prompt(text: string, options?: PromptOptions<v.GenericSchema | undefined>): CallHandle<any> {
+		return this.defaultSessionCall(options?.signal, (session, signal) =>
+			session.prompt(text, { ...options, signal } as PromptOptions),
+		);
+	}
+
+	skill<S extends v.GenericSchema>(
+		skill: SkillReference | string,
+		options: SkillOptions<S> & { result: S },
+	): CallHandle<PromptResultResponse<v.InferOutput<S>>>;
+	skill(skill: SkillReference | string, options?: SkillOptions): CallHandle<PromptResponse>;
+	skill(
+		skill: SkillReference | string,
+		options?: SkillOptions<v.GenericSchema | undefined>,
+	): CallHandle<any> {
+		return this.defaultSessionCall(options?.signal, (session, signal) =>
+			session.skill(skill, { ...options, signal } as SkillOptions),
+		);
+	}
+
+	task<S extends v.GenericSchema>(
+		text: string,
+		options: TaskOptions<S> & { result: S },
+	): CallHandle<PromptResultResponse<v.InferOutput<S>>>;
+	task(text: string, options?: TaskOptions): CallHandle<PromptResponse>;
+	task(text: string, options?: TaskOptions<v.GenericSchema | undefined>): CallHandle<any> {
+		return this.defaultSessionCall(options?.signal, (session, signal) =>
+			session.task(text, { ...options, signal } as TaskOptions),
+		);
+	}
+
+	async compact(): Promise<void> {
+		const session = await this.session();
+		return session.compact();
+	}
+
+	/**
+	 * Defer one default-session operation behind the session's lazy open,
+	 * preserving the synchronous CallHandle contract: aborting the returned
+	 * handle (or the harness scope) aborts the open and the inner call.
+	 */
+	private defaultSessionCall<T>(
+		external: AbortSignal | undefined,
+		run: (session: FlueSession, signal: AbortSignal) => CallHandle<T>,
+	): CallHandle<T> {
+		const merged = external
+			? AbortSignal.any([external, this.scopeAbortController.signal])
+			: this.scopeAbortController.signal;
+		return createCallHandle(merged, async (signal) => {
+			const session = await this.session();
+			return run(session, signal);
+		});
 	}
 
 	shell(command: string, options?: ShellOptions): CallHandle<ShellResult> {

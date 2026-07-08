@@ -32,7 +32,7 @@
  * this paragraph before adding any secret to the sandbox.
  */
 
-import { defineAgent, type FlueSession, useSandbox, useTool } from '@flue/runtime';
+import { defineAgent, type FlueHarness, useSandbox, useTool } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 import * as v from 'valibot';
 import {
@@ -87,33 +87,32 @@ function PrRedirect() {
 		harness: true,
 		async run({ data, harness, log }) {
 			const { prNumber } = data;
-			const session = await harness.session();
 
 			// ─── LLM phase ──────────────────────────────────────────────────
-			const pr = await fetchPullRequest(session, prNumber);
+			const pr = await fetchPullRequest(harness, prNumber);
 			log.info('pr-redirect: fetched PR', { prNumber, author: pr.author, title: pr.title });
 
-			const classification = await classify(session, pr);
+			const classification = await classify(harness, pr);
 			log.info('pr-redirect: classified', {
 				prNumber,
 				kind: classification.kind,
 				suggestedTitle: classification.suggestedTitle,
 			});
 
-			const queries = await generateSearchQueries(session, pr, classification);
+			const queries = await generateSearchQueries(harness, pr, classification);
 			log.info('pr-redirect: search queries', { prNumber, queries });
 
 			const allCandidates: Candidate[] = [];
 			for (const q of queries) {
 				const results =
 					classification.kind === 'bug'
-						? await searchIssues(session, log, pr.baseRepo, q)
-						: await searchDiscussions(session, log, pr.baseRepo, q);
+						? await searchIssues(harness, log, pr.baseRepo, q)
+						: await searchDiscussions(harness, log, pr.baseRepo, q);
 				allCandidates.push(...results);
 			}
 			log.info('pr-redirect: candidates', { prNumber, count: allCandidates.length });
 
-			const duplicate = await scoreDuplicates(session, pr, classification, allCandidates);
+			const duplicate = await scoreDuplicates(harness, pr, classification, allCandidates);
 			if (duplicate) {
 				log.info('pr-redirect: duplicate found', {
 					prNumber,
@@ -135,7 +134,7 @@ function PrRedirect() {
 					commentBody: duplicateCommentBody(pr, classification),
 				};
 			} else if (classification.kind === 'bug') {
-				const llmBody = await writeBugIssueBody(session, pr);
+				const llmBody = await writeBugIssueBody(harness, pr);
 				decision = {
 					action: 'create-issue',
 					title: classification.suggestedTitle,
@@ -247,12 +246,12 @@ type Decision =
 
 // ─── Step 0: fetch PR via `gh` ──────────────────────────────────────────────
 
-async function fetchPullRequest(session: FlueSession, prNumber: number): Promise<PrDetails> {
+async function fetchPullRequest(harness: FlueHarness, prNumber: number): Promise<PrDetails> {
 	// `gh pr view --json` returns structured data, so PR-controlled
 	// strings (title, body, branch name) never reach a shell parser.
 	const fields =
 		'number,title,body,author,headRefName,headRepository,headRepositoryOwner,url,baseRefName,files,changedFiles';
-	const result = await session.shell(`gh pr view ${prNumber} --json ${fields}`);
+	const result = await harness.shell(`gh pr view ${prNumber} --json ${fields}`);
 	if (result.exitCode !== 0) {
 		throw new Error(`gh pr view ${prNumber} failed: ${result.stderr}`);
 	}
@@ -291,7 +290,7 @@ async function fetchPullRequest(session: FlueSession, prNumber: number): Promise
 
 // ─── Step 1: classify ───────────────────────────────────────────────────────
 
-async function classify(session: FlueSession, pr: PrDetails): Promise<Classification> {
+async function classify(harness: FlueHarness, pr: PrDetails): Promise<Classification> {
 	const prompt = `You are triaging a GitHub pull request to a TypeScript framework. Decide whether it's:
 - a **bug** fix (addresses incorrect or broken behavior), or
 - a **feature** (adds new functionality, enhances existing behavior, refactors APIs).
@@ -309,7 +308,7 @@ ${pr.body || '(empty)'}
 
 Also produce a concise \`suggestedTitle\` for the resulting issue/discussion — problem-focused for bugs ("X crashes when Y"), proposal-focused for features ("Support X in Y"), with any "feat:" / "fix:" prefixes stripped — and a 1-3 sentence \`summary\` of what the PR does, in your own words.`;
 
-	const response = await session.prompt(prompt, { result: classificationSchema });
+	const response = await harness.prompt(prompt, { result: classificationSchema });
 	return response.data;
 }
 
@@ -324,7 +323,7 @@ interface Candidate {
 }
 
 async function generateSearchQueries(
-	session: FlueSession,
+	harness: FlueHarness,
 	pr: PrDetails,
 	classification: Classification,
 ): Promise<string[]> {
@@ -334,7 +333,7 @@ PR title: ${pr.title}
 Summary: ${classification.summary}
 
 Each query should be 2-5 words, no quotes inside, no special GitHub search qualifiers.`;
-	const response = await session.prompt(prompt, { result: v.array(v.string()) });
+	const response = await harness.prompt(prompt, { result: v.array(v.string()) });
 	const queries = response.data.filter((q) => q.trim().length > 0);
 	if (queries.length === 0) {
 		// Fall back to the PR title so the dup search still runs.
@@ -353,7 +352,7 @@ function shellEscape(s: string): string {
 }
 
 async function searchIssues(
-	session: FlueSession,
+	harness: FlueHarness,
 	log: Logger,
 	repo: string,
 	query: string,
@@ -363,7 +362,7 @@ async function searchIssues(
 	const cmd = `gh search issues --repo ${shellEscape(repo)} --state open --limit 10 ${shellEscape(
 		query,
 	)} --json number,title,url,body`;
-	const result = await session.shell(cmd);
+	const result = await harness.shell(cmd);
 	if (result.exitCode !== 0) {
 		// Search failures shouldn't crash the pipeline — log and move on.
 		log.warn('gh search issues failed', { query, stderr: result.stderr });
@@ -385,7 +384,7 @@ async function searchIssues(
 }
 
 async function searchDiscussions(
-	session: FlueSession,
+	harness: FlueHarness,
 	log: Logger,
 	repo: string,
 	query: string,
@@ -400,7 +399,7 @@ async function searchDiscussions(
 		}
 	}`;
 	const cmd = `gh api graphql -f query=${shellEscape(graphql)} -f q=${shellEscape(ghQuery)}`;
-	const result = await session.shell(cmd);
+	const result = await harness.shell(cmd);
 	if (result.exitCode !== 0) {
 		log.warn('gh api graphql (discussion search) failed', { query, stderr: result.stderr });
 		return [];
@@ -435,7 +434,7 @@ const duplicateVerdictSchema = v.object({
 });
 
 async function scoreDuplicates(
-	session: FlueSession,
+	harness: FlueHarness,
 	pr: PrDetails,
 	classification: Classification,
 	candidates: Candidate[],
@@ -473,7 +472,7 @@ Report \`duplicate: null\` if none are clearly the same; otherwise the matching 
 
 If multiple candidates match, pick the most relevant one only.`;
 
-	const response = await session.prompt(prompt, { result: duplicateVerdictSchema });
+	const response = await harness.prompt(prompt, { result: duplicateVerdictSchema });
 	const dup = response.data.duplicate;
 	if (dup === null) return null;
 	// Low confidence is treated as "no duplicate" — we'd rather create a
@@ -553,7 +552,7 @@ const BUG_REPORT_TEMPLATE = `### Describe the Bug
  * trust the model to produce well-formed markdown that follows the
  * shape of the template.
  */
-async function writeBugIssueBody(session: FlueSession, pr: PrDetails): Promise<string> {
+async function writeBugIssueBody(harness: FlueHarness, pr: PrDetails): Promise<string> {
 	const prompt = `A contributor opened a pull request fixing what they believe is a bug. Translate their PR into a bug-report issue body that follows the template below.
 
 Fill each section based on what the PR title, body, and changed files imply. If a section is genuinely impossible to infer (for example, no reproduction steps are mentioned anywhere), leave its placeholder text in place so a maintainer can fill it in later. Do not invent reproduction steps you can't justify from the PR's content.
@@ -572,7 +571,7 @@ ${BUG_REPORT_TEMPLATE}
 
 ## Output
 Return only the filled-in markdown body. No JSON, no fences, no explanation. Start directly with the first \`###\` heading. Do not add a top-level title — the issue title is set separately.`;
-	const response = await session.prompt(prompt);
+	const response = await harness.prompt(prompt);
 	return response.text.trim();
 }
 

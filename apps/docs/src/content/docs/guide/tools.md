@@ -64,13 +64,13 @@ function OrderAssistant() {
 export default defineAgent(OrderAssistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
-When this agent receives a request, the model can call `lookup_order_status` if it needs the current status before composing its answer. The call and returned text become part of the session context so the agent can continue working with the result.
+When this agent receives a request, the model can call `lookup_order_status` if it needs the current status before composing its answer. The call and returned text become part of the conversation context so the agent can continue working with the result.
 
-`useTool(...)` accepts a `defineTool(...)` value or an inline definition object — either way the tool joins the render's flat tool set. When a tool is needed for only one bounded call, you can instead provide it in the options for `session.prompt(...)`, `session.skill(...)`, or `session.task(...)`; see the [Agent API](/docs/api/agent-api/).
+`useTool(...)` accepts a `defineTool(...)` value or an inline definition object — either way the tool joins the render's flat tool set. When a tool is needed for only one bounded call, you can instead provide it in the options for `harness.prompt(...)`, `harness.skill(...)`, or `harness.task(...)`; see the [Agent API](/docs/api/agent-api/).
 
 ## Harness tools
 
-A tool needs `harness: true` when it must drive the agent's own runtime — start a scoped model call, run a shell command, or read and write the sandbox filesystem — rather than being a pure function of its input. `run` then receives `harness`: the same surface the agent's own session uses (`harness.session()`, `harness.shell()`, `harness.fs`).
+A tool needs `harness: true` when it must drive the agent's own runtime — start a scoped model call, run a shell command, or read and write the sandbox filesystem — rather than being a pure function of its input. `run` then receives `harness`: the same surface the agent's own conversation uses (`harness.prompt()`, `harness.shell()`, `harness.fs`).
 
 ```ts title="src/shared/review-tools.ts"
 import { defineTool } from '@flue/runtime';
@@ -82,8 +82,7 @@ export const reviewChange = defineTool({
   input: v.object({ change: v.string() }),
   harness: true,
   async run({ harness, data }) {
-    const session = await harness.session();
-    const response = await session.prompt(`Review this change:\n\n${data.change}`);
+    const response = await harness.prompt(`Review this change:\n\n${data.change}`);
     return response.text;
   },
 });

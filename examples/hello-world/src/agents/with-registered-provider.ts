@@ -12,11 +12,11 @@ registerProvider('ollama', {
 function WithRegisteredProvider() {
 	useTool({
 		name: 'provider-smoke',
-		description: 'Verify a session can be created against the registered provider.',
+		description: 'Verify a prompt can be run against the registered provider.',
 		harness: true,
 		async run({ harness }) {
-			const session = await harness.session();
-			return { ok: true, hasSession: typeof session === 'object' };
+			const response = await harness.prompt('Reply with exactly one word: ok');
+			return { ok: true, hasResponse: response.text.length > 0 };
 		},
 	});
 	return 'When asked to run a demo, call the `provider-smoke` tool and report its result.';

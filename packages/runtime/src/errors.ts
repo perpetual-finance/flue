@@ -559,9 +559,9 @@ export class SandboxOperationUnsupportedError extends FlueError {
 
 // ─── Session error vocabulary ───────────────────────────────────────────────
 //
-// Non-HTTP errors thrown by the session surface: `harness.session()` /
-// `harness.sessions.*` and `session.prompt()` / `skill()` / `task()` /
-// `shell()` / `compact()`. Programmatic consumers (the primary
+// Non-HTTP errors thrown by the session surface: the harness's
+// `prompt()` / `skill()` / `task()` / `shell()` / `compact()` operations
+// and the runtime's internal session management. Programmatic consumers (the primary
 // audience of these calls) distinguish failures with `instanceof` against the
 // classes re-exported from the package root. When one of these escapes to the
 // HTTP layer, `toHttpResponse` renders its typed envelope with status 500
@@ -576,7 +576,7 @@ export class SessionNotFoundError extends FlueError {
 			type: 'session_not_found',
 			message: `Session "${session}" does not exist in harness "${harness}".`,
 			details: 'Verify the session name is correct, or create the session first.',
-			dev: '`sessions.get()` never creates sessions. Use `harness.session(name)` to get-or-create, or `sessions.create(name)` to create explicitly.',
+			dev: 'Internal session lookup found no conversation for this name. The public harness operations get-or-create the default session and cannot hit this.',
 		});
 	}
 }
@@ -587,7 +587,7 @@ export class SessionAlreadyExistsError extends FlueError {
 			type: 'session_already_exists',
 			message: `Session "${session}" already exists in harness "${harness}".`,
 			details: 'Choose a different session name, or open the existing session instead.',
-			dev: '`sessions.create()` requires an unused name. Use `harness.session(name)` to get-or-create.',
+			dev: 'Internal session creation requires an unused name; the public harness operations get-or-create the default session and cannot hit this.',
 		});
 	}
 }

@@ -88,11 +88,11 @@ Now let's build something useful — an issue triage agent that analyzes an issu
 
 ### Structured work with skills and actions
 
-An agent's deterministic orchestration lives in [harness tools](/docs/guide/tools/#harness-tools) — finite, schema-validated jobs the model calls — and [skills](/docs/guide/skills/), reusable instruction files. Inside either, a session gives you three core methods:
+An agent's deterministic orchestration lives in [harness tools](/docs/guide/tools/#harness-tools) — finite, schema-validated jobs the model calls — and [skills](/docs/guide/skills/), reusable instruction files. Inside either, the harness gives you three core methods:
 
-- **`session.shell(cmd)`** — Run a shell command in the sandbox. Returns `{ stdout, stderr, exitCode }`.
-- **`session.prompt(text, opts)`** — Send a prompt to the agent and get back a result.
-- **`session.skill(name, opts)`** — Run a named skill — a reusable agent task defined by a markdown instruction file.
+- **`harness.shell(cmd)`** — Run a shell command in the sandbox. Returns `{ stdout, stderr, exitCode }`.
+- **`harness.prompt(text, opts)`** — Send a prompt to the agent and get back a result.
+- **`harness.skill(name, opts)`** — Run a named skill — a reusable agent task defined by a markdown instruction file.
 
 Both `prompt()` and `skill()` accept a `result` option — a [Valibot](https://valibot.dev) schema that defines the expected output shape. Flue parses the agent's response and returns it on `response.data`, fully typed:
 
@@ -100,12 +100,12 @@ Both `prompt()` and `skill()` accept a `result` option — a [Valibot](https://v
 import * as v from 'valibot';
 
 // summary: string
-const { data: summary } = await session.prompt(`Summarize this diff:\n${diff}`, {
+const { data: summary } = await harness.prompt(`Summarize this diff:\n${diff}`, {
   result: v.string(),
 });
 
 // diagnosis: { reproducible: boolean, skipped: boolean }
-const { data: diagnosis } = await session.skill('triage', {
+const { data: diagnosis } = await harness.skill('triage', {
   args: { issueNumber, issue },
   result: v.object({
     reproducible: v.boolean(),
@@ -257,8 +257,7 @@ function AutoTriage() {
     input: v.object({ issueNumber: v.number() }),
     harness: true,
     async run({ harness, data }) {
-      const session = await harness.session();
-      const { data: triage } = await session.skill('triage', {
+      const { data: triage } = await harness.skill('triage', {
         args: { issueNumber: data.issueNumber },
         result: v.object({
           severity: v.picklist(['low', 'medium', 'high', 'critical']),
@@ -268,7 +267,7 @@ function AutoTriage() {
       });
 
       if (triage.severity === 'critical' && triage.reproducible) {
-        await session.skill('auto-fix', {
+        await harness.skill('auto-fix', {
           args: { issueNumber: data.issueNumber },
           result: v.object({ fix_applied: v.boolean(), pr_url: v.optional(v.string()) }),
         });

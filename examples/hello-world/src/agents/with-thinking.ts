@@ -14,17 +14,16 @@ function WithThinking() {
 	});
 	useTool({
 		name: 'thinking-test',
-		description: 'Compare thinking levels across the parent session and a high-thinking subagent.',
+		description: 'Compare thinking levels across the harness conversation and a high-thinking subagent.',
 		harness: true,
 		async run({ harness }) {
-			const session = await harness.session();
 			const Answer = v.object({ answer: v.string() });
-			const fast = await session.prompt('In one word: capital of France?', { result: Answer });
-			const careful = await session.task('Is 1009 prime? Justify briefly.', {
+			const fast = await harness.prompt('In one word: capital of France?', { result: Answer });
+			const careful = await harness.task('Is 1009 prime? Justify briefly.', {
 				agent: 'auditor',
 				result: Answer,
 			});
-			const minimal = await session.task('Echo back: hello', {
+			const minimal = await harness.task('Echo back: hello', {
 				agent: 'auditor',
 				thinkingLevel: 'minimal',
 				result: Answer,

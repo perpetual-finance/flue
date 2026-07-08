@@ -1,6 +1,6 @@
 ---
 title: Skills
-description: Add Agent Skills to Flue agents and invoke them from sessions.
+description: Add Agent Skills to Flue agents and invoke them from application code.
 lastReviewedAt: 2026-07-07
 ---
 
@@ -95,7 +95,7 @@ Unknown frontmatter fields are ignored, so skills that carry extra host-specific
 
 Normally you can trust the agent to use the skills you provide it, as needed, to complete its work.
 
-In application-controlled code such as a [harness tool](/docs/guide/tools/#harness-tools), you can manually trigger a skill through the `session.skill(name: string)` API method. This works with both registered imported skills and workspace-discovered skills.
+In application-controlled code such as a [harness tool](/docs/guide/tools/#harness-tools), you can manually trigger a skill through the `harness.skill(name: string)` API method. This works with both registered imported skills and workspace-discovered skills.
 
 ```ts title="src/shared/review-tools.ts"
 import { defineTool } from '@flue/runtime';
@@ -108,9 +108,7 @@ export const reviewChange = defineTool({
   harness: true,
 
   async run({ harness, data }) {
-    const response = await (
-      await harness.session()
-    ).skill('review', {
+    const response = await harness.skill('review', {
       args: { change: data.change },
       result: v.object({
         approved: v.boolean(),
@@ -122,7 +120,7 @@ export const reviewChange = defineTool({
 });
 ```
 
-`args` provides input for this invocation of the skill. The `result` schema makes `response.data` a validated structured result; omit it when you want text output from `response.text`. The string passed to `session.skill(...)` is the declared skill name, not a path to `SKILL.md` — here the agent that mounts this tool also mounts the `review` skill with `useSkill(...)`.
+`args` provides input for this invocation of the skill. The `result` schema makes `response.data` a validated structured result; omit it when you want text output from `response.text`. The string passed to `harness.skill(...)` is the declared skill name, not a path to `SKILL.md` — here the agent that mounts this tool also mounts the `review` skill with `useSkill(...)`.
 
 See the [Agent API](/docs/api/agent-api/) for operation options and response types.
 
@@ -143,4 +141,4 @@ For executable application capabilities, use a [tool](/docs/guide/tools/).
 - [Agents](/docs/guide/building-agents/) — configure an agent's model and capabilities.
 - [Tools](/docs/guide/tools/) — add executable capabilities that a skill may direct an agent to use.
 - [Sandboxes](/docs/guide/sandboxes/) — control the runtime workspace where discovered skills and their files are available.
-- [Agent API](/docs/api/agent-api/) — look up session operation options and result types.
+- [Agent API](/docs/api/agent-api/) — look up harness operation options and result types.

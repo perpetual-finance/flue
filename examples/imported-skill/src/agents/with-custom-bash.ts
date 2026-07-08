@@ -10,9 +10,8 @@ function WithCustomBash() {
 		description: 'Write and read a file inside the customized virtual sandbox.',
 		harness: true,
 		async run({ harness }) {
-			const session = await harness.session();
-			await session.shell('echo "custom bash succeeded" > proof.txt');
-			return { text: (await session.shell('cat proof.txt')).stdout.trim() };
+			await harness.shell('echo "custom bash succeeded" > proof.txt');
+			return { text: (await harness.shell('cat proof.txt')).stdout.trim() };
 		},
 	});
 	return 'When asked to run the demo, call the `prove-custom-bash` action and report its result.';

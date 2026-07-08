@@ -115,8 +115,6 @@ export type {
 	FlueHarness,
 	FlueLogger,
 	FlueObservation,
-	FlueSession,
-	FlueSessions,
 	FunctionAgentConfig,
 	FunctionAgentDefinition,
 	LlmAssistantMessage,

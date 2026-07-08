@@ -22,7 +22,7 @@ export const summarizeDocument = defineTool({
 
   async run({ harness, log, data }) {
     log.info('Summarization requested', { characters: data.text.length });
-    const response = await (await harness.session()).prompt(data.text);
+    const response = await harness.prompt(data.text);
 
     log.info('Summarization completed', {
       tokens: response.usage.totalTokens,
@@ -65,7 +65,7 @@ app.route('/agents/triage', triage.route());
 export default app;
 ```
 
-An operation is the useful finite boundary for agent activity, such as prompting a session, running a skill, or delegating work with a task. Direct and dispatched agent input can therefore be monitored as bounded units without any separate job abstraction.
+An operation is the useful finite boundary for agent activity, such as running a prompt, running a skill, or delegating work with a task. Direct and dispatched agent input can therefore be monitored as bounded units without any separate job abstraction.
 
 When an operation is slow or unexpectedly expensive, its nested activity can provide the explanation. One prompt operation may include multiple model turns or tool calls. Model turns expose latency, token usage, and cost; tool activity shows where the agent spent time or encountered an error.
 

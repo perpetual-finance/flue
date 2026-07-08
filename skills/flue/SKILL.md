@@ -119,8 +119,10 @@ guide/sandboxes -- Sandboxes
   Give agents a workspace for files and command-driven work.
 guide/schedules -- Schedules
   Dispatch agent input on a schedule with Cloudflare or Node.js.
+guide/scripts -- Scripts
+  Drive agents from plain Node scripts, cron jobs, and tests with start() and init().
 guide/skills -- Skills
-  Add Agent Skills to Flue agents and invoke them from sessions.
+  Add Agent Skills to Flue agents and invoke them from application code.
 guide/subagents -- Subagents
   Let agents delegate focused work to named specialists.
 guide/targets/cloudflare -- Cloudflare

@@ -185,7 +185,7 @@ See [Cloudflare Sandbox](/docs/ecosystem/sandboxes/cloudflare/) for container co
 
 By default, Flue agents use a lightweight in-memory virtual sandbox. This is fast and sufficient for prompt-and-response agents or agents that only need tools and structured results. When an agent needs a durable workspace with structured code execution instead of a full Linux container, use Cloudflare Shell with Codemode.
 
-[Cloudflare Shell](https://developers.cloudflare.com/agents/api-reference/cloudflare-shell/) provides a durable `Workspace` with a model-facing `code` tool backed by [`@cloudflare/codemode`](https://developers.cloudflare.com/agents/api-reference/codemode/). The agent interacts with files through structured code operations rather than shell commands. This means `harness.shell(...)` and `session.shell(...)` do not run arbitrary Linux commands through this sandbox adapter.
+[Cloudflare Shell](https://developers.cloudflare.com/agents/api-reference/cloudflare-shell/) provides a durable `Workspace` with a model-facing `code` tool backed by [`@cloudflare/codemode`](https://developers.cloudflare.com/agents/api-reference/codemode/). The agent interacts with files through structured code operations rather than shell commands. This means `harness.shell(...)` does not run arbitrary Linux commands through this sandbox adapter.
 
 Add the sandbox adapter to your project:
 

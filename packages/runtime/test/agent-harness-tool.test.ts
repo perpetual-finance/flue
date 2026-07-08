@@ -11,6 +11,7 @@ import {
 import * as v from 'valibot';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
+import type { Harness } from '../src/harness.ts';
 import { renderAgentFunctionWithStructure } from '../src/hooks/render.ts';
 import { useState } from '../src/hooks/state.ts';
 import { useSandbox } from '../src/hooks/use-sandbox.ts';
@@ -189,8 +190,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 				harness: true,
 				run: async ({ data, harness, log }) => {
 					log.info('asking', { question: data.question });
-					const session = await harness.session();
-					const response = await session.prompt(data.question);
+					const response = await harness.prompt(data.question);
 					harnessAnswer = response.text;
 					return response.text;
 				},
@@ -240,6 +240,75 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 		db.close();
 		const retained = rows.filter((row) => row.data.includes('child_session_retained'));
 		expect(retained.length).toBeGreaterThanOrEqual(1);
+	});
+
+	it('flattened harness.prompt drives one scratch conversation across calls (with result schemas)', async () => {
+		const dbPath = createTempDbPath();
+		const { executionStore, conversationStreamStore, attachmentStore } =
+			await connectSqlite(dbPath);
+		const provider = createFauxProvider();
+
+		let secondCallContextMessages: number | undefined;
+		provider.setResponses([
+			fauxAssistantMessage(fauxToolCall('two_step', {}, { id: 'tool-flat-1' }), {
+				stopReason: 'toolUse',
+			}),
+			// First harness.prompt: result schemas settle via the finish tool.
+			fauxAssistantMessage(fauxToolCall('finish', { count: 1 }, { id: 'tool-flat-finish' }), {
+				stopReason: 'toolUse',
+			}),
+			// Second harness.prompt: continuity means the scratch conversation
+			// already carries the first exchange.
+			(context) => {
+				secondCallContextMessages = context.messages.length;
+				return fauxAssistantMessage('two');
+			},
+			fauxAssistantMessage('Done.'),
+		]);
+
+		let structured: { count: number } | undefined;
+		let followUp: string | undefined;
+		function assistant() {
+			useTool({
+				name: 'two_step',
+				description: 'Two prompts in one harness conversation.',
+				harness: true,
+				run: async ({ harness }) => {
+					const first = await harness.prompt('Count.', {
+						result: v.object({ count: v.number() }),
+					});
+					structured = first.data;
+					const second = await harness.prompt('And again?');
+					followUp = second.text;
+					return 'done';
+				},
+			});
+			return 'Call two_step.';
+		}
+
+		const coordinator = createNodeAgentCoordinator({
+			submissions: executionStore.submissions,
+			agents: [
+				{
+					name: 'assistant',
+					definition: defineAgent(assistant, {
+						model: `${provider.getModel().provider}/${provider.getModel().id}`,
+					}),
+				},
+			],
+			createContext: makeFauxCreateContext(provider),
+			conversationStreamStore,
+			attachmentStore,
+		});
+		await coordinator.admitDispatch(makeDispatchInput({ dispatchId: 'dispatch:flat-1' }));
+		await coordinator.waitForIdle();
+		await coordinator.shutdown();
+
+		expect(structured).toEqual({ count: 1 });
+		expect(followUp).toBe('two');
+		// The second call's context included the first exchange (system prompt
+		// + first user + first assistant + second user at minimum).
+		expect(secondCallContextMessages ?? 0).toBeGreaterThanOrEqual(3);
 	});
 
 	it('supports harness tools declared inside a delegate capability', async () => {
@@ -408,12 +477,11 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 				harness: true,
 				run: async ({ harness }) => {
 					await harness.shell('pwd');
-					const session = await harness.session();
-					await session.prompt('List inherited capabilities.');
+					await harness.prompt('List inherited capabilities.');
 					// Agent-less task: inherits this (reviewer) session's own
 					// resolved config wholesale, same as the model's `task` tool
 					// would without an explicit `agent` target.
-					await session.task('Inspect inherited task capabilities.');
+					await harness.task('Inspect inherited task capabilities.');
 					return undefined;
 				},
 			});
@@ -553,8 +621,13 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 				description: 'Wait for child operations.',
 				harness: true,
 				run: async ({ harness }) => {
-					const first = await harness.session();
-					const second = await harness.session('second');
+					// Named sessions are internal machinery now (the public surface
+					// is the flattened default-session ops); this test pins the
+					// wait-for-children behavior across parallel sessions, so it
+					// reaches through to the class.
+					const internal = harness as unknown as Harness;
+					const first = await internal.session();
+					const second = await internal.session('second');
 					const calls = [first.shell('first'), second.shell('second')];
 					await Promise.all(calls);
 					return undefined;

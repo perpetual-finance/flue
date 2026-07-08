@@ -18,8 +18,7 @@ function WithSubagent() {
 		input: v.object({ name: v.optional(v.string()) }),
 		harness: true,
 		async run({ harness, data }) {
-			const session = await harness.session();
-			const { data: result } = await session.task(
+			const { data: result } = await harness.task(
 				`Greet the user named "${data.name ?? 'Developer'}".`,
 				{
 					agent: 'greeter',

@@ -4,15 +4,14 @@ import review from '../skills/review/SKILL.md' with { type: 'skill' };
 
 function WithImportedSkill() {
 	// Registering the reference exposes the skill's packaged files to ordinary
-	// prompts too, not just the direct `session.skill(review)` call below.
+	// prompts too, not just the direct `harness.skill(review)` call below.
 	useSkill(review);
 	useTool({
 		name: 'run-review-skill',
 		description: 'Run the imported `review` skill directly and return its answer.',
 		harness: true,
 		async run({ harness }) {
-			const session = await harness.session();
-			const response = await session.skill(review);
+			const response = await harness.skill(review);
 			return { text: response.text, reference: review.name };
 		},
 	});

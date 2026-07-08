@@ -12,7 +12,6 @@ function WithTools() {
 		description: 'Exercise a per-prompt custom tool and the task tool.',
 		harness: true,
 		async run({ harness }) {
-			const session = await harness.session();
 			const results: Record<string, boolean> = {};
 			const calculator = defineTool({
 				name: 'calculator',
@@ -20,16 +19,16 @@ function WithTools() {
 				input: v.object({ expression: v.string() }),
 				run: async ({ data }) => String(Function(`"use strict"; return (${data.expression})`)()),
 			});
-			const { text } = await session.prompt(
+			const { text } = await harness.prompt(
 				'Use the calculator tool to compute 7 * 6. Tell me the result.',
 				{ tools: [calculator] },
 			);
 			results['custom tool works'] = text.includes('42');
-			await session.shell('mkdir -p /home/user/task-workspace');
-			await session.shell(
+			await harness.shell('mkdir -p /home/user/task-workspace');
+			await harness.shell(
 				'echo "You are a math helper. Always respond with just the numeric answer, nothing else." > /home/user/task-workspace/AGENTS.md',
 			);
-			const taskResponse = await session.prompt(
+			const taskResponse = await harness.prompt(
 				'Use the task tool with cwd /home/user/task-workspace to ask: "What is 100 + 23?"',
 			);
 			results['task tool works'] = taskResponse.text.includes('123');

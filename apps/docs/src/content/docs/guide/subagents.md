@@ -57,7 +57,7 @@ A `task()` call without an `agent` name is not a subagent delegation: the child 
 
 ## Use subagents in tools
 
-A [harness tool](/docs/guide/tools/#harness-tools) can choose delegation directly when application logic requires work from a particular subagent. Call `session.task(...)` with the name of a declared subagent, and provide `result` when the tool needs validated data:
+A [harness tool](/docs/guide/tools/#harness-tools) can choose delegation directly when application logic requires work from a particular subagent. Call `harness.task(...)` with the name of a declared subagent, and provide `result` when the tool needs validated data:
 
 ```ts title="src/shared/review-tools.ts"
 import { defineTool } from '@flue/runtime';
@@ -75,9 +75,7 @@ export const reviewChange = defineTool({
   harness: true,
 
   async run({ harness, data }) {
-    const response = await (
-      await harness.session()
-    ).task(data.change, {
+    const response = await harness.task(data.change, {
       agent: 'reviewer',
       result: Review,
     });
@@ -94,5 +92,5 @@ Here, application code chooses `reviewer` rather than leaving delegation to the 
 - [Tools](/docs/guide/tools/) — give a subagent's agent function its own tools, or delegate from inside a harness tool.
 - [Skills](/docs/guide/skills/) — reusable instructions a delegate's agent function can mount.
 - [Sandboxes](/docs/guide/sandboxes/) — how a delegate shares the parent's environment.
-- [Agent API](/docs/api/agent-api/) — look up `session.task(...)` options and results.
+- [Agent API](/docs/api/agent-api/) — look up `harness.task(...)` options and results.
 - [Observability](/docs/guide/observability/) — inspect delegated activity alongside other agent work.

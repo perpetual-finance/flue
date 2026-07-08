@@ -632,18 +632,55 @@ export interface FlueLogger {
 
 // ─── Flue Harness ───────────────────────────────────────────────────────────
 
-/** Initialized agent environment owned by a runtime runner. */
+/**
+ * Initialized agent environment owned by a runtime runner — the surface a
+ * `harness: true` tool and the lifecycle-hook contexts receive.
+ *
+ * `prompt`/`skill`/`task` drive the harness's own scratch conversation:
+ * repeated calls continue it, so a later prompt sees what earlier calls
+ * established. `shell` and `fs` touch the sandbox directly, with no
+ * conversation record.
+ */
 export interface FlueHarness {
 	readonly name: string;
 
 	/**
-	 * Get or create a session in this harness. Defaults to the `'default'`
-	 * session. Names beginning with `'task:'` are reserved for delegated tasks.
+	 * Run a model operation with a text instruction in the harness
+	 * conversation. Pass `options.result` to require validated structured
+	 * data instead of freeform text.
 	 */
-	session(name?: string): Promise<FlueSession>;
+	prompt<S extends v.GenericSchema>(
+		text: string,
+		options: PromptOptions<S> & { result: S },
+	): CallHandle<PromptResultResponse<v.InferOutput<S>>>;
+	prompt(text: string, options?: PromptOptions): CallHandle<PromptResponse>;
 
-	/** Explicit session management helpers. */
-	readonly sessions: FlueSessions;
+	/**
+	 * Run a registered skill in the harness conversation. Pass
+	 * `options.result` to require validated structured data.
+	 */
+	skill<S extends v.GenericSchema>(
+		skill: SkillReference | string,
+		options: SkillOptions<S> & { result: S },
+	): CallHandle<PromptResultResponse<v.InferOutput<S>>>;
+	skill(skill: SkillReference | string, options?: SkillOptions): CallHandle<PromptResponse>;
+
+	/**
+	 * Delegate work to a detached child session. Pass `options.agent` to
+	 * select a named subagent and `options.result` to require validated data.
+	 */
+	task<S extends v.GenericSchema>(
+		text: string,
+		options: TaskOptions<S> & { result: S },
+	): CallHandle<PromptResultResponse<v.InferOutput<S>>>;
+	task(text: string, options?: TaskOptions): CallHandle<PromptResponse>;
+
+	/**
+	 * Trigger compaction of the harness conversation immediately. Resolves
+	 * (no-op) when there is nothing to compact; rejects when summarization
+	 * fails or another operation is in flight.
+	 */
+	compact(): Promise<void>;
 
 	/** Run a shell command in the harness sandbox without recording it in a conversation. */
 	shell(command: string, options?: ShellOptions): CallHandle<ShellResult>;
@@ -653,17 +690,6 @@ export interface FlueHarness {
 	 * conversation. See {@link FlueFs}.
 	 */
 	readonly fs: FlueFs;
-}
-
-/**
- * Explicit session management helpers exposed by {@link FlueHarness.sessions}.
- * Names beginning with `'task:'` are reserved for delegated tasks.
- */
-export interface FlueSessions {
-	/** Load an existing session. Defaults to `'default'`. Throws if it does not exist. */
-	get(name?: string): Promise<FlueSession>;
-	/** Create a new session. Defaults to `'default'`. Throws if it already exists. */
-	create(name?: string): Promise<FlueSession>;
 }
 
 // ─── Flue Session ───────────────────────────────────────────────────────────

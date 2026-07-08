@@ -31,7 +31,7 @@ export function useTool<
 	/**
 	 * Connect this tool to the agent's runtime: `run` receives `harness` —
 	 * the one interface to the sandbox (`harness.shell()`, `harness.fs`) and
-	 * to models (`harness.session()`). Tools without it are pure functions of
+	 * to models (`harness.prompt()`). Tools without it are pure functions of
 	 * their data.
 	 */
 	harness?: THarness;

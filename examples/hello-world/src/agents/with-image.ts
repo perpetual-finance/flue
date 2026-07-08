@@ -8,13 +8,12 @@ const TEST_PNG_BASE64 =
 function WithImage() {
 	useTool({
 		name: 'image-test',
-		description: 'Send an image to a child session in plain and structured prompts.',
+		description: 'Send an image to the harness conversation in plain and structured prompts.',
 		harness: true,
 		async run({ harness }) {
-			const session = await harness.session();
 			const image = { type: 'image' as const, data: TEST_PNG_BASE64, mimeType: 'image/png' };
-			const plain = await session.prompt('What color is this image?', { images: [image] });
-			const structured = await session.prompt('What color is this image?', {
+			const plain = await harness.prompt('What color is this image?', { images: [image] });
+			const structured = await harness.prompt('What color is this image?', {
 				images: [image],
 				result: v.object({ sawImage: v.boolean(), color: v.string() }),
 			});

@@ -74,7 +74,7 @@ If a subagent's profile no longer exists after a redeploy, that one `task` call 
 
 If the parent's budget runs out while a subagent is still unresolved, the parent is terminalized like any other submission: the `task` call settles with an interrupted-error outcome that links the child's retained conversation, rather than resuming the child past the budget. The child's durable transcript remains available for inspection.
 
-Programmatic `session.task(...)` calls made directly from your own code are not recovered this way: like other programmatic session calls, they have no durable submission to resume from.
+Programmatic `harness.task(...)` calls made directly from your own code are not recovered this way: like other programmatic harness calls, they have no durable submission to resume from.
 
 ### Keep workspace state separate
 
