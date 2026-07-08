@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
 import type { AgentExecutionStore } from '../src/agent-execution-store.ts';
 import type { ConversationRecord } from '../src/conversation-records.ts';
+import { useAgentStart } from '../src/hooks/use-agent-start.ts';
 import { useSubagent } from '../src/hooks/use-subagent.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { createFlueContext, type DispatchInput, resolveModel } from '../src/internal.ts';
@@ -1716,6 +1717,98 @@ describe('NodeAgentCoordinator', () => {
 			// Admission is fire-and-forget; wait for both to settle durably.
 			await coordinator.waitForIdle();
 			expect(await executionStore.submissions.hasUnsettledSubmissions()).toBe(false);
+		});
+	});
+
+	describe('direct prompt joining a live dispatch response', () => {
+		it('coalesces a direct prompt admitted right behind a dispatch instead of failing the host', async () => {
+			// Regression: a dispatch admitted while idle followed by an immediate
+			// direct prompt. The direct is queued behind the running host and
+			// absorbed by the pre-turn-1 join claim — its joined `user_message`
+			// record then followed the host's input in canonical history, and the
+			// submission classifier read any later user-role message as
+			// `advanced_past_input`, failing the host (and, through joined
+			// settlement fan-out, the prompt) with "the session advanced past
+			// this input before it completed". Joined-delivery inputs are part of
+			// the same response, not the session moving on.
+			const dbPath = createTempDbPath();
+			const provider = createFauxProvider();
+			let providerCalls = 0;
+			provider.setResponses([
+				() => {
+					providerCalls += 1;
+					return fauxAssistantMessage('Coalesced reply.');
+				},
+				() => {
+					providerCalls += 1;
+					return fauxAssistantMessage('Unexpected second response.');
+				},
+			]);
+
+			// Gate the host inside its own `useAgentStart` run — after the host
+			// claimed the submission, strictly before the pre-turn-1 join claim
+			// and input classification — so the direct prompt is durably queued
+			// by the time the host looks for joinable deliveries.
+			let releaseHost!: () => void;
+			const hostGate = new Promise<void>((resolve) => {
+				releaseHost = resolve;
+			});
+			let signalHostStarted!: () => void;
+			const hostStarted = new Promise<void>((resolve) => {
+				signalHostStarted = resolve;
+			});
+			let hostGateArmed = true;
+			const agent = defineAgent(
+				() => {
+					useAgentStart(async () => {
+						if (!hostGateArmed) return;
+						hostGateArmed = false;
+						signalHostStarted();
+						await hostGate;
+					});
+					return 'Assistant agent.';
+				},
+				{ model: `${provider.getModel().provider}/${provider.getModel().id}` },
+			);
+			const adapter = sqlite(dbPath);
+			await adapter.migrate?.();
+			const { executionStore, conversationStreamStore, attachmentStore } = await adapter.connect();
+			const coordinator = createNodeAgentCoordinator({
+				submissions: executionStore.submissions,
+				agents: [{ name: 'assistant', definition: agent }],
+				createContext: makeFauxCreateContext(provider),
+				conversationStreamStore,
+				attachmentStore,
+			});
+
+			await coordinator.admitDispatch(makeDispatchInput({ dispatchId: 'join-host-dispatch' }));
+			await hostStarted;
+			const receipt = await coordinator.createAdmission('assistant', 'instance-1')({
+				kind: 'user',
+				body: 'Hello right behind the dispatch',
+			});
+			releaseHost();
+			await coordinator.waitForIdle();
+
+			const host = await executionStore.submissions.getSubmission('join-host-dispatch');
+			expect(host?.status).toBe('settled');
+			expect(host?.error).toBeUndefined();
+			const direct = await executionStore.submissions.getSubmission(receipt.submissionId);
+			expect(direct?.status).toBe('settled');
+			expect(direct?.error).toBeUndefined();
+
+			// The joined prompt's durable settlement record carries the host's
+			// completed outcome, and both inputs coalesced into one response.
+			const read = await conversationStreamStore.read(agentStreamPath('assistant', 'instance-1'));
+			const records = read.batches.flatMap((batch) => batch.records);
+			expect(records).toContainEqual(
+				expect.objectContaining({
+					type: 'submission_settled',
+					submissionId: receipt.submissionId,
+					outcome: 'completed',
+				}),
+			);
+			expect(providerCalls).toBe(1);
 		});
 	});
 

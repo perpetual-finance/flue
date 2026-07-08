@@ -37,7 +37,13 @@ import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { isContextOverflow } from './compaction.ts';
 
 export type CanonicalSubmissionEntry =
-	| { id: string; type: 'message'; message: AgentMessage }
+	| {
+			id: string;
+			type: 'message';
+			message: AgentMessage;
+			/** The submission that owns this entry, when one was active at record time. */
+			submissionId?: string;
+	  }
 	| { id: string; type: 'compaction' };
 
 /**
@@ -81,7 +87,12 @@ type SubmissionResumeMode =
 export type SubmissionState =
 	/** The persisted input entry was not found in session history. */
 	| { kind: 'absent' }
-	/** A later user input exists: the session moved on without settling this input. */
+	/**
+	 * A later user input exists: the session moved on without settling this
+	 * input. User messages joined into this submission's own response by the
+	 * turn-boundary join protocol do not count — they are absorbed input, not
+	 * advancement (see `isJoinedDeliveryInput`).
+	 */
 	| { kind: 'advanced_past_input' }
 	/**
 	 * The last assistant response is canonical (stopReason stop/length).
@@ -107,6 +118,28 @@ export type SubmissionState =
 	  };
 
 /**
+ * A user message absorbed into the classified submission's own response by
+ * the turn-boundary join protocol (a queued direct delivery), rather than a
+ * later input the session moved on to. A joined delivery's record carries
+ * the DELIVERY's `submissionId` — never the host's — while every record the
+ * host writes carries the host's own, and programmatic `session.prompt()`
+ * inputs carry none. Recognized only when the classified input's owning
+ * submission is known: joins exist solely under coordinator submissions, so
+ * an unowned input (degenerate/test setups, subagent reattach) keeps the
+ * strict reading.
+ */
+function isJoinedDeliveryInput(
+	entry: Extract<CanonicalSubmissionEntry, { type: 'message' }>,
+	ownSubmissionId: string | undefined,
+): boolean {
+	return (
+		ownSubmissionId !== undefined &&
+		entry.submissionId !== undefined &&
+		entry.submissionId !== ownSubmissionId
+	);
+}
+
+/**
  * Classify how far a persisted submission input progressed.
  *
  * @param following - `history.getActivePathSince(inputEntry.id)` for the
@@ -115,13 +148,24 @@ export type SubmissionState =
  * @param opts.contextWindow - The active model's context window, used for
  *   silent-overflow detection; pass 0 when no model is resolved (only
  *   explicit overflow error messages are detected then).
+ * @param opts.ownSubmissionId - The submission that owns the classified
+ *   input entry. User messages joined into that submission's response (see
+ *   {@link isJoinedDeliveryInput}) are continuation input for the same
+ *   response, not the session advancing past the input.
  */
 export function classifySubmissionState(
 	following: readonly CanonicalSubmissionEntry[] | undefined,
-	opts: { contextWindow: number },
+	opts: { contextWindow: number; ownSubmissionId?: string },
 ): SubmissionState {
 	if (following === undefined) return { kind: 'absent' };
-	if (following.some((entry) => entry.type === 'message' && entry.message.role === 'user')) {
+	if (
+		following.some(
+			(entry) =>
+				entry.type === 'message' &&
+				entry.message.role === 'user' &&
+				!isJoinedDeliveryInput(entry, opts.ownSubmissionId),
+		)
+	) {
 		return { kind: 'advanced_past_input' };
 	}
 	const assistantEntry = following.findLast(

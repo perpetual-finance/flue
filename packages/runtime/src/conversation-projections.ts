@@ -182,7 +182,13 @@ export function classifyConversationSubmission(
 			assistant: materializeInterruptedAssistant(inProgress),
 		};
 	}
-	return classifySubmissionState(path.slice(inputIndex + 1), options);
+	// The input entry's own stamp identifies the submission being classified,
+	// so joined-delivery user messages absorbed into its response are read as
+	// continuation input rather than the session advancing past the input.
+	return classifySubmissionState(path.slice(inputIndex + 1), {
+		...options,
+		ownSubmissionId: path[inputIndex]?.submissionId,
+	});
 }
 
 export function projectConversationUi(

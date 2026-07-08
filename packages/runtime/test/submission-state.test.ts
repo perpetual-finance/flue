@@ -15,6 +15,16 @@ function messageEntry(id: string, message: unknown): CanonicalSubmissionEntry {
 	};
 }
 
+/** A user entry written under another submission — a joined delivery input. */
+function ownedUserEntry(id: string, body: string, submissionId: string): CanonicalSubmissionEntry {
+	return {
+		type: 'message',
+		id,
+		message: { role: 'user', content: body, timestamp: Date.now() } as any,
+		submissionId,
+	};
+}
+
 function assistant(options: {
 	stopReason: AssistantMessage['stopReason'];
 	errorMessage?: string;
@@ -55,6 +65,52 @@ describe('classifySubmissionState()', () => {
 		const following: CanonicalSubmissionEntry[] = [
 			messageEntry('a1', assistant({ stopReason: 'stop' })),
 			messageEntry('u1', { role: 'user', content: 'next input', timestamp: Date.now() }),
+		];
+		expect(classifySubmissionState(following, { contextWindow: 100000 })).toEqual({
+			kind: 'advanced_past_input',
+		});
+	});
+
+	it('treats a joined-delivery user message as continuation input, not advancement', () => {
+		// Turn-boundary join: a queued direct prompt absorbed into the host's
+		// response writes its user record with the DELIVERY's submissionId.
+		// Classifying the host must read it as input for the same response.
+		const joined = ownedUserEntry('u1', 'joined prompt', 'sub-delivery');
+		expect(
+			classifySubmissionState([joined], { contextWindow: 100000, ownSubmissionId: 'sub-host' }),
+		).toEqual({
+			kind: 'resume',
+			mode: 'input_only',
+			consecutiveRetryableErrors: 0,
+		});
+	});
+
+	it('still classifies completed when a joined user message is answered by the response', () => {
+		const following: CanonicalSubmissionEntry[] = [
+			ownedUserEntry('u1', 'joined prompt', 'sub-delivery'),
+			messageEntry('a1', assistant({ stopReason: 'stop' })),
+		];
+		expect(
+			classifySubmissionState(following, { contextWindow: 100000, ownSubmissionId: 'sub-host' }),
+		).toMatchObject({ kind: 'completed', overflow: false });
+	});
+
+	it('returns advanced_past_input for an unowned later user input even when the classified input is owned', () => {
+		// A programmatic `session.prompt()` writes no submissionId — that IS
+		// the session moving on, joined or not.
+		const following: CanonicalSubmissionEntry[] = [
+			messageEntry('u1', { role: 'user', content: 'manual prompt', timestamp: Date.now() }),
+		];
+		expect(
+			classifySubmissionState(following, { contextWindow: 100000, ownSubmissionId: 'sub-host' }),
+		).toEqual({ kind: 'advanced_past_input' });
+	});
+
+	it('returns advanced_past_input for a differently-owned user input when the classified input is unowned', () => {
+		// Without the classified submission's identity (degenerate setups,
+		// subagent reattach) the strict reading is kept.
+		const following: CanonicalSubmissionEntry[] = [
+			ownedUserEntry('u1', 'other input', 'sub-delivery'),
 		];
 		expect(classifySubmissionState(following, { contextWindow: 100000 })).toEqual({
 			kind: 'advanced_past_input',

@@ -152,7 +152,10 @@ describe('start() + init(): the scripted client', () => {
 
 	it('handle.dispatch() enqueues a real fire-and-forget dispatch', async () => {
 		const { provider, model } = createFauxProvider();
-		provider.setResponses([fauxAssistantMessage('signal ack')]);
+		provider.setResponses([
+			fauxAssistantMessage('signal ack'),
+			fauxAssistantMessage('prompt reply'),
+		]);
 
 		const deliveries: string[] = [];
 		function Listener() {
@@ -170,13 +173,16 @@ describe('start() + init(): the scripted client', () => {
 			body: 'from the script',
 		});
 		expect(receipt.dispatchId).toEqual(expect.any(String));
-		// The signal became the delivery and the model consumed the response —
-		// the dispatch really ran. (A follow-up prompt is deliberately NOT sent
-		// here: dispatch-then-immediate-direct hits a pre-existing coordinator
-		// race — the settlement fails with "the session advanced past this
-		// input" — reproducible without init()/start(); tracked as a follow-up.)
-		await expect.poll(() => deliveries, { timeout: 10_000 }).toContain('signal:from the script');
-		await expect.poll(() => provider.getPendingResponseCount(), { timeout: 10_000 }).toBe(0);
+		// An immediate follow-up prompt either joins the dispatch's live
+		// response or runs right behind it — both must settle cleanly (this
+		// interleaving used to fail with "the session advanced past this
+		// input"; the classifier now reads joined deliveries as continuation
+		// input). One faux response covers the coalesced case; the second is
+		// consumed only when the prompt runs as its own response.
+		const reply = await agent.prompt('And a question right behind it.');
+		expect(reply.text).toMatch(/signal ack|prompt reply/);
+		expect(deliveries).toContain('signal:from the script');
+		expect(deliveries).toContain('user:And a question right behind it.');
 	});
 
 	it('streams projected chunks to onEvent while awaiting', async () => {
