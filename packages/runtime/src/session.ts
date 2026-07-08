@@ -106,6 +106,13 @@ import {
 import { createUserContextMessage, renderSignalMessage } from './message-rendering.ts';
 import { assertImagesWithinLimit } from './persisted-images.ts';
 import {
+	diffResourceSnapshots,
+	type ResourceEntry,
+	type ResourceKind,
+	type ResourceSnapshot,
+	renderResourceSignalBody,
+} from './resources.ts';
+import {
 	buildPackagedSkillPrompt,
 	buildPromptText,
 	buildResultFollowUpPrompt,
@@ -175,8 +182,10 @@ import type {
 	SessionToolFactory,
 	ShellOptions,
 	ShellResult,
+	Skill,
 	SkillOptions,
 	SkillReference,
+	SubagentDefinition,
 	TaskOptions,
 	ThinkingLevel,
 	ToolDefinition,
@@ -402,10 +411,52 @@ interface SessionInitOptions {
 	 * the next re-render.
 	 */
 	advanceDelivery?: (message: DeliveredMessage) => void;
+	/**
+	 * Dynamic-resource runtime (function agents only): the init render's
+	 * resources, the durable baseline/narrated snapshots, and the rebaseline
+	 * hook that swaps the frozen presentation surfaces at compaction.
+	 */
+	resources?: SessionResourceRuntime;
 }
 
 /** One re-render's session-facing output: what the next turn runs with. */
-export type SessionRerender = () => { systemPrompt: string; tools: ToolDefinition[] };
+export type SessionRerender = () => {
+	systemPrompt: string;
+	tools: ToolDefinition[];
+	resources: RenderedResources;
+};
+
+/**
+ * One render's model-facing resources. `snapshot` carries the declared sets
+ * with content fingerprints for the narration diff; the live maps back
+ * skill activation and task-agent resolution — always current, independent
+ * of the frozen presentation baseline.
+ */
+export interface RenderedResources {
+	snapshot: ResourceSnapshot;
+	/** Live skill map: declared skills merged over workspace discovery. */
+	skills: Record<string, Skill>;
+	/** Live subagent map for `task` resolution. */
+	subagents: Record<string, SubagentDefinition>;
+}
+
+/**
+ * Dynamic-resource wiring from the harness init (function agents only).
+ * The session diffs each render's snapshot against the durable
+ * last-narrated set and announces deltas as `resources` signals; the
+ * frozen presentation surfaces (system-prompt skill catalog, task-tool
+ * roster) compose from `baseline` until a compaction rebaseline calls
+ * `rebaseline` with the then-current snapshot.
+ */
+export interface SessionResourceRuntime {
+	/** Resources of the harness-init render — the model's turn-1 view. */
+	initial: RenderedResources;
+	/** Durable snapshots from the instance's reduced stream, when present. */
+	baseline?: ResourceSnapshot;
+	narrated?: ResourceSnapshot;
+	/** Swap the frozen skill catalog to a new baseline (compaction). */
+	rebaseline: (snapshot: ResourceSnapshot) => void;
+}
 
 interface CallOverrides {
 	tools: ToolDefinition[];
@@ -594,6 +645,20 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	private rerender: SessionRerender | undefined;
 	private outputChannel: AgentOutputChannel | undefined;
 	private advanceDelivery: ((message: DeliveredMessage) => void) | undefined;
+	/**
+	 * Dynamic resources. The live maps track the CURRENT render (skill
+	 * activation and task resolution always see what the agent declares now);
+	 * the baseline roster freezes the task tool's description so a resource
+	 * flip never rewrites the tool spec; `lastNarratedResources` is the
+	 * in-memory copy of the durable diff base, advanced only after its
+	 * snapshot record commits.
+	 */
+	private resourceRuntime: SessionResourceRuntime | undefined;
+	private liveSkills: Record<string, Skill>;
+	private liveSubagents: Record<string, SubagentDefinition>;
+	private baselineSubagentRoster: readonly ResourceEntry[];
+	private lastNarratedResources: ResourceSnapshot | undefined;
+	private lastRenderedResources: RenderedResources | undefined;
 	/** First assistant messageId of the active submission (the response message). */
 	private responseMessageId: string | undefined;
 	/** Whether the active submission has a durably completed assistant step (the data-write anchor). */
@@ -697,10 +762,16 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	 * wrapper state so later runs snapshot the fresh values. An invariance
 	 * violation (conditional use()/hook) throws here and fails the run.
 	 */
-	private prepareRerenderTurn(): AgentLoopTurnUpdate | undefined {
+	private async prepareRerenderTurn(): Promise<AgentLoopTurnUpdate | undefined> {
 		if (!this.rerender) return undefined;
 		const next = this.rerender();
 		this.agentTools = next.tools;
+		// Live resource sets follow the render: skill activation and task
+		// resolution always see what the agent declares NOW, even while the
+		// frozen presentation surfaces still show the baseline.
+		this.liveSkills = next.resources.skills;
+		this.liveSubagents = next.resources.subagents;
+		this.lastRenderedResources = next.resources;
 		// Rebuild under any active per-call overrides — a structured-result
 		// prompt's finish/give_up bundle and per-call tools must survive the
 		// turn boundary, not just the first turn.
@@ -718,6 +789,11 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		);
 		this.agentLoop.state.tools = tools;
 		this.agentLoop.state.systemPrompt = next.systemPrompt;
+		// Narrate resource deltas from the same render evaluation that just
+		// produced the tool projection — the signal and the model's actual
+		// view cannot disagree. The steered signal injects before the next
+		// provider request (the loop polls steering after this returns).
+		await this.narrateResourceDelta();
 		return {
 			context: {
 				systemPrompt: next.systemPrompt,
@@ -725,6 +801,97 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				tools: this.agentLoop.state.tools,
 			},
 		};
+	}
+
+	/**
+	 * The dynamic-resources reconciler: diff the latest render's declared
+	 * sets against the durable last-narrated snapshot and announce the delta
+	 * — one `resources` signal per changed kind (delta lines + the kind's
+	 * current roster), batch-atomic with the updated `resource_snapshot`
+	 * record. Crash between steer and commit re-diffs on the re-attempt and
+	 * emits again; a committed batch never re-narrates. First contact (no
+	 * durable snapshot) records the current render as the silent baseline —
+	 * it IS what the frozen presentation surfaces were composed from.
+	 */
+	private async narrateResourceDelta(): Promise<void> {
+		const rendered = this.lastRenderedResources;
+		if (!this.resourceRuntime || !rendered || !this.activeSubmissionId) return;
+		const current = rendered.snapshot;
+		const previous = this.lastNarratedResources;
+		if (!previous) {
+			await this.appendCanonical([this.resourceSnapshotRecord(current, true)]);
+			this.lastNarratedResources = current;
+			return;
+		}
+		const deltas = diffResourceSnapshots(previous, current);
+		if (deltas.length === 0) return;
+		const parentId = await this.conversationWriter.getConversationLeaf(this.conversationId);
+		for (const delta of deltas) {
+			this.enqueueSignalAppend({
+				type: 'resources',
+				body: renderResourceSignalBody(delta, this.resourceRoster(delta.kind)),
+				attributes: { resource: delta.kind },
+			});
+		}
+		const { records } = this.drainSignalAppendRecords(parentId);
+		await this.appendCanonical([...records, this.resourceSnapshotRecord(current, false)]);
+		this.lastNarratedResources = current;
+	}
+
+	/** The names-only roster line of one resource kind, as the model sees it. */
+	private resourceRoster(kind: ResourceKind): string[] {
+		switch (kind) {
+			case 'skill':
+				return Object.keys(this.liveSkills);
+			case 'tool':
+				return this.agentLoop.state.tools.map((tool) => tool.name);
+			case 'subagent':
+				return Object.keys(this.liveSubagents);
+		}
+	}
+
+	private resourceSnapshotRecord(
+		snapshot: ResourceSnapshot,
+		baseline: boolean,
+	): ConversationRecord {
+		return {
+			...this.canonicalEnvelope('resource_snapshot'),
+			type: 'resource_snapshot',
+			baseline,
+			snapshot,
+		};
+	}
+
+	/**
+	 * Compaction rebaseline: the post-compaction system prompt snapshots the
+	 * CURRENT resource state — skill catalog and task roster included — just
+	 * as the agent's first message did, so the pre-compaction add/remove
+	 * bookkeeping stops mattering. Narrated advances with the baseline (the
+	 * new prompt already tells the model everything; no signal needed).
+	 */
+	private async rebaselineResources(): Promise<void> {
+		if (!this.resourceRuntime || !this.rerender || !this.lastRenderedResources) return;
+		// Render fresh so the recorded baseline and the recomposed surfaces
+		// come from the same evaluation.
+		const refreshed = this.rerender();
+		const current = refreshed.resources.snapshot;
+		await this.appendCanonical([this.resourceSnapshotRecord(current, true)]);
+		this.lastNarratedResources = current;
+		this.baselineSubagentRoster = current.subagents;
+		this.agentTools = refreshed.tools;
+		this.liveSkills = refreshed.resources.skills;
+		this.liveSubagents = refreshed.resources.subagents;
+		this.lastRenderedResources = refreshed.resources;
+		this.resourceRuntime.rebaseline(current);
+		// Recompose the prompt over the new catalog and rebuild the built-in
+		// tools (the task roster lives in the task tool's description). The
+		// rebaseline call above swapped the catalog, so recompose again.
+		this.agentLoop.state.systemPrompt = this.rerender().systemPrompt;
+		this.agentLoop.state.tools = this.assembleModelTools(
+			this.createBuiltinToolGroups(this.env, []),
+			this.agentTools,
+			[],
+		);
 	}
 
 	/**
@@ -868,7 +1035,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		// callbacks wrote durable state — re-render first (the render-per-turn
 		// cadence, extended to join boundaries) so hook closures and guards
 		// observe those writes instead of the stale pre-join render.
-		if (options?.joined) this.prepareRerenderTurn();
+		if (options?.joined) await this.prepareRerenderTurn();
 		const declarations = options?.joined ? (this.outputChannel?.agentStarts ?? []) : hooks;
 		const ranIndexes = new Set<number>();
 		for (const record of (await this.conversationWriter.loadReducedState()).recordsById.values()) {
@@ -1539,6 +1706,21 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		this.outputChannel = options.output;
 		this.advanceDelivery = options.advanceDelivery;
 		this.outputChannel?.connect((name, data) => this.enqueueMessageDataWrite(name, data));
+		// Dynamic resources (function agents): live sets start at the init
+		// render; legacy agents keep their init-frozen config for life. The
+		// task roster freezes on the durable baseline when one exists — the
+		// init render may already differ from what the model's prompt shows.
+		this.resourceRuntime = options.resources;
+		this.liveSkills = options.resources?.initial.skills ?? this.config.skills;
+		this.liveSubagents = options.resources?.initial.subagents ?? this.config.subagents ?? {};
+		this.baselineSubagentRoster = options.resources
+			? (options.resources.baseline ?? options.resources.initial.snapshot).subagents
+			: Object.values(this.config.subagents ?? {}).map((subagent) => ({
+					name: subagent.name,
+					description: subagent.description,
+				}));
+		this.lastNarratedResources = options.resources?.narrated;
+		this.lastRenderedResources = options.resources?.initial;
 
 		const systemPrompt = this.config.systemPrompt;
 
@@ -2724,7 +2906,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				let skillName: string;
 				let activePackagedSkills: Record<string, PackagedSkillDirectory> | undefined;
 				if (typeof skill === 'string') {
-					const registered = this.config.skills[skill];
+					const registered = this.liveSkills[skill];
 					if (registered && '__flueSkillReference' in registered) {
 						const packaged = this.resolvePackagedSkill(registered);
 						promptText = buildPackagedSkillPrompt(registered, packaged, options?.args, schema);
@@ -2879,8 +3061,15 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	}
 
 	private async activateSkillForTool(name: string): Promise<string> {
-		const registered = this.config.skills[name];
-		if (!registered) this.throwMissingSkill(name);
+		// Resolve against the LIVE skill set — the activate_skill schema is a
+		// plain string (never a name union, which would rewrite the tool spec
+		// on every dynamic-skill flip), so unknown names are a real model-facing
+		// path: answer with a factual miss, not a thrown session error.
+		const registered = this.liveSkills[name];
+		if (!registered) {
+			const available = Object.keys(this.liveSkills);
+			return `Skill "${name}" is not available. Available skills: ${available.join(', ')}.`;
+		}
 		if ('__flueSkillReference' in registered) {
 			return buildPackagedSkillPrompt(registered, this.resolvePackagedSkill(registered));
 		}
@@ -2898,7 +3087,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	private throwMissingSkill(skill: string): never {
 		throw new SkillNotRegisteredError({
 			skill,
-			available: Object.keys(this.config.skills),
+			available: Object.keys(this.liveSkills),
 			skillsDir: skillsDirIn(this.env.cwd),
 		});
 	}
@@ -3224,13 +3413,16 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		const runTask = (params: TaskToolParams, signal?: AbortSignal, toolCallId?: string) =>
 			this.runTaskForTool(params, tools, model, thinkingLevel, signal, toolCallId);
 		const packagedSkills = {
-			...getRegisteredPackagedSkills(this.config.skills),
+			...getRegisteredPackagedSkills(this.liveSkills),
 			...activePackagedSkills,
 		};
-		const skillNames = Object.keys(this.config.skills);
+		// Skill activation resolves against the LIVE skill set (dynamic skills
+		// included); the tool's schema is a stable string so a skill flip never
+		// rewrites the tool spec. Presence still keys on having any skill at
+		// all — the first dynamic skill brings the tool with it.
 		const activateSkillTool =
-			skillNames.length > 0
-				? createActivateSkillTool(skillNames, (name) => this.activateSkillForTool(name))
+			Object.keys(this.liveSkills).length > 0
+				? createActivateSkillTool((name) => this.activateSkillForTool(name))
 				: undefined;
 		const packagedRead = Object.values(packagedSkills).some((skill) =>
 			Object.keys(skill.files).some((path) => path !== 'SKILL.md'),
@@ -3244,7 +3436,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		];
 
 		if (this.toolFactory) {
-			let adapterTools = this.toolFactory(env, { subagents: this.config.subagents ?? {} });
+			let adapterTools = this.toolFactory(env, { subagents: this.liveSubagents });
 			if (packagedRead) {
 				const adapterRead = adapterTools.find((tool) => tool.name === 'read');
 				if (adapterRead) {
@@ -3275,20 +3467,20 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				{ source: 'adapter', tools: adapterTools },
 				{
 					source: 'framework',
-					tools: frameworkTools(createTaskTool(runTask, this.config.subagents ?? {})),
+					tools: frameworkTools(createTaskTool(runTask, this.baselineSubagentRoster)),
 				},
 			];
 		}
 
 		const builtinTools = createTools(env, {
-			subagents: this.config.subagents ?? {},
+			subagents: this.liveSubagents,
 			packagedSkills,
 		});
 		return [
 			{ source: 'builtin', tools: builtinTools },
 			{
 				source: 'framework',
-				tools: frameworkTools(createTaskTool(runTask, this.config.subagents ?? {})),
+				tools: frameworkTools(createTaskTool(runTask, this.baselineSubagentRoster)),
 			},
 		];
 	}
@@ -3334,7 +3526,10 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	// ─── Tasks ────────────────────────────────────────────────────────────────
 
 	private resolveSubagent(name: string, delivery?: DeliveredMessage): ResolvedSubagent {
-		const subagents = this.config.subagents ?? {};
+		// The LIVE set: a dynamically declared subagent is delegable the same
+		// turn its `resources` signal announced it, even while the task tool's
+		// frozen roster description predates it.
+		const subagents = this.liveSubagents;
 		const subagent = subagents[name];
 		if (!subagent) {
 			throw new SubagentNotDeclaredError({ subagent: name, available: Object.keys(subagents) });
@@ -4173,6 +4368,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				]);
 			}
 			await this.rebuildCanonicalContext();
+			await this.rebaselineResources();
 
 			const messagesAfter = this.agentLoop.state.messages.length;
 			this.internalLog(
@@ -4622,6 +4818,10 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					await this.rebuildCanonicalContext();
 					await options.onInputApplied?.(durability);
 					await this.beginResponseOutput();
+					// Wake diff: resource flips from a previous response's final
+					// batch (no turn boundary followed them) narrate before turn 1
+					// against the init render — the model's actual turn-1 view.
+					await this.narrateResourceDelta();
 					await this.runAgentStartHooks(options.signal);
 					// Joins interrupted by a crash resolve by record existence (the
 					// rebuilt context above already carries every applied one), then

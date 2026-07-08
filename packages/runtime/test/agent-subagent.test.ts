@@ -99,7 +99,10 @@ describe('useSubagent() (render)', () => {
 			});
 			return 'Base.';
 		}, CONFIG);
-		expect(rendered.structure.subagentNames).toEqual(['helper', 'checker']);
+		expect(rendered.structure.resources.subagents.map((agent) => agent.name)).toEqual([
+			'helper',
+			'checker',
+		]);
 		expect(rendered.config.subagents).toHaveLength(2);
 		expect(rendered.config.subagents?.[1]).toMatchObject({
 			name: 'checker',
@@ -116,7 +119,7 @@ describe('useSubagent() (render)', () => {
 			usePhase();
 			return 'Base.';
 		}, CONFIG);
-		expect(rendered.structure.subagentNames).toEqual(['helper']);
+		expect(rendered.structure.resources.subagents.map((agent) => agent.name)).toEqual(['helper']);
 	});
 
 	it('throws on duplicate delegate names, missing agent function, and bad shapes', () => {
@@ -147,7 +150,7 @@ describe('useSubagent() (render)', () => {
 		);
 	});
 
-	it('names the invariance delta when a delegate is declared conditionally', () => {
+	it('allows conditional declaration — the delta surfaces in the resources snapshot', () => {
 		let declare = false;
 		const agent = () => {
 			if (declare) {
@@ -158,9 +161,9 @@ describe('useSubagent() (render)', () => {
 		const render = () => renderAgentFunctionWithStructure(agent, CONFIG).structure;
 		const without = render();
 		declare = true;
-		expect(() => assertRenderStructureInvariance(without, render())).toThrow(
-			/subagents added flaky/,
-		);
+		const withIt = render();
+		expect(() => assertRenderStructureInvariance(without, withIt)).not.toThrow();
+		expect(withIt.resources.subagents).toEqual([{ name: 'flaky', description: 'Sometimes.' }]);
 	});
 });
 

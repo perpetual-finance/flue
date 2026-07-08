@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { discoverSessionContext } from './context.ts';
+import { discoverSessionContext, skillCatalogEntries } from './context.ts';
 import { ConversationRecordWriter } from './conversation-writer.ts';
 import { Harness } from './harness.ts';
 import type { RenderStateContext } from './hooks/frame.ts';
@@ -16,7 +16,7 @@ import { dispatchGlobalEvent } from './runtime/events.ts';
 import { generateInstanceUid } from './runtime/ids.ts';
 import { agentStreamPath } from './runtime/stream-offsets.ts';
 import { createCwdSessionEnv } from './sandbox.ts';
-import type { SessionRerender } from './session.ts';
+import type { RenderedResources, SessionRerender, SessionResourceRuntime } from './session.ts';
 import type {
 	AgentConfig,
 	AgentModuleValue,
@@ -347,25 +347,49 @@ export async function initializeRootHarness(
 		definition.instructions,
 		definition.skills,
 	);
+	// One render's model-facing resources: the declared snapshot with skills
+	// merged over workspace discovery (what narration diffs), plus the live
+	// maps that back skill activation and task-agent resolution.
+	const renderedResources = (
+		rendered: ReturnType<typeof renderAgentFunctionWithStructure>,
+	): RenderedResources => {
+		const skills = localContext.mergeSkills(rendered.config.skills ?? []);
+		return {
+			snapshot: {
+				...rendered.structure.resources,
+				skills: skillCatalogEntries(skills),
+			},
+			skills,
+			subagents: Object.fromEntries(
+				(rendered.config.subagents ?? []).map((candidate) => [candidate.name, candidate]),
+			),
+		};
+	};
+	const initialResources = renderedResources(first);
+	// The frozen skill catalog: the durable baseline when this instance has
+	// lived before, else this first render. Dynamic skill flips announce
+	// themselves as `resources` signals instead of rewriting the prompt; a
+	// compaction rebaseline swaps the catalog to the then-current set.
+	const durableResources = reduced.resources;
+	if (durableResources?.baseline) localContext.setCatalog(durableResources.baseline.skills);
 	const agentConfig: AgentConfig = {
 		...config.agentConfig,
-		systemPrompt: localContext.systemPrompt,
+		systemPrompt: localContext.recompose(definition.instructions),
 		instructions: definition.instructions,
 		definitionSkills: definition.skills,
 		skills: localContext.skills,
-		subagents: Object.fromEntries(
-			(definition.subagents ?? []).map((candidate) => [candidate.name, candidate]),
-		),
+		subagents: initialResources.subagents,
 		model: resolvedModel,
 		thinkingLevel: definition.thinkingLevel ?? config.agentConfig.thinkingLevel,
 		compaction: definition.compaction ?? config.agentConfig.compaction,
 		durability: definition.durability,
 	};
 	// Per-turn re-render: fresh closures over the latest state values, the
-	// structural-invariance guard, and a recomposed system prompt. The session
+	// identity-invariance guard, and a recomposed system prompt. The session
 	// applies the result at each turn boundary, so mid-run state writes reach
 	// the very next model call (guards read current truth; interpolated text
-	// stays live).
+	// stays live). Resources (tools, skills, subagents) may change between
+	// renders — the session narrates the delta to the model.
 	const rerender: SessionRerender = () => {
 		const next = renderAgentFunctionWithStructure(agent.agent, agent.config, renderState);
 		assertRenderStructureInvariance(lastStructure, next.structure);
@@ -373,7 +397,14 @@ export async function initializeRootHarness(
 		return {
 			systemPrompt: localContext.recompose(next.config.instructions),
 			tools: next.config.tools ?? [],
+			resources: renderedResources(next),
 		};
+	};
+	const resourceRuntime: SessionResourceRuntime = {
+		initial: initialResources,
+		...(durableResources?.baseline ? { baseline: durableResources.baseline } : {}),
+		...(durableResources?.narrated ? { narrated: durableResources.narrated } : {}),
+		rebaseline: (snapshot) => localContext.setCatalog(snapshot.skills),
 	};
 	return new Harness(
 		config.id,
@@ -398,6 +429,7 @@ export async function initializeRootHarness(
 		(message) => {
 			renderState.delivery = message;
 		},
+		resourceRuntime,
 	);
 }
 

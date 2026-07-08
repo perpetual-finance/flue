@@ -46,7 +46,7 @@ export function createTools(env: SessionEnv, options?: CreateToolsOptions): Agen
 		createGrepTool(env),
 		createGlobTool(env),
 	];
-	if (options?.task) tools.push(createTaskTool(options.task, options.subagents ?? {}));
+	if (options?.task) tools.push(createTaskTool(options.task, Object.values(options.subagents ?? {})));
 	return tools;
 }
 
@@ -282,21 +282,26 @@ const TaskParams = Type.Object({
 	),
 });
 
-/** Build Flue's framework-owned `task` tool. */
+/**
+ * Build Flue's framework-owned `task` tool. The roster in the description is
+ * the BASELINE agent set — frozen so a dynamically added or removed subagent
+ * never rewrites the tool spec (which would invalidate the provider's prompt
+ * cache). Changes are announced to the model as `resources` signals, and
+ * name resolution at run time reads the live set.
+ */
 export function createTaskTool(
 	runTask: (
 		params: TaskToolParams,
 		signal?: AbortSignal,
 		toolCallId?: string,
 	) => Promise<AgentToolResult<TaskToolResultDetails>>,
-	subagents: Record<string, SubagentDefinition>,
+	roster: ReadonlyArray<{ name: string; description?: string }>,
 ): AgentTool<typeof TaskParams> {
-	const agentEntries = Object.entries(subagents);
 	const agentDescription =
-		agentEntries.length > 0
-			? `\nAvailable agents:\n${agentEntries
-					.map(([name, profile]) =>
-						profile.description ? `- ${name}: ${profile.description}` : `- ${name}`,
+		roster.length > 0
+			? `\nAvailable agents:\n${roster
+					.map((agent) =>
+						agent.description ? `- ${agent.name}: ${agent.description}` : `- ${agent.name}`,
 					)
 					.join('\n')}`
 			: ' No subagents are currently defined.';
@@ -318,21 +323,17 @@ export function createTaskTool(
 	};
 }
 
+/**
+ * The `name` schema is a plain string, validated at run time — a literal
+ * union of skill names would rewrite the tool spec (and invalidate the
+ * provider's prompt cache) every time a dynamically declared skill flips.
+ * An unknown name returns a factual miss listing the available skills.
+ */
 export function createActivateSkillTool(
-	skillNames: string[],
 	activate: (name: string, signal?: AbortSignal) => Promise<string>,
 ): AgentTool<any> {
-	const sortedNames = [...skillNames].sort();
-	const [firstName] = sortedNames;
-	if (!firstName) {
-		throw new Error('[flue] Cannot create activate_skill tool without available skills.');
-	}
-	const NameSchema =
-		sortedNames.length === 1
-			? Type.Literal(firstName)
-			: Type.Union(sortedNames.map((name) => Type.Literal(name)));
 	const ActivateSkillParams = Type.Object({
-		name: NameSchema,
+		name: Type.String({ description: 'Name of the skill to activate' }),
 	});
 
 	return {

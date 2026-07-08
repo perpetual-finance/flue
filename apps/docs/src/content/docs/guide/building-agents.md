@@ -65,7 +65,7 @@ function OrderAssistant() {
 export default defineAgent(OrderAssistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
-The function runs again before every model turn, so guards and interpolated text always reflect current state — but the *shape* of what it mounts must stay the same across an instance's whole life: hook calls are never conditional, and every render must attach the same tools, state, and attachments. See [Tools](/docs/guide/tools/), [Skills](/docs/guide/skills/), [Sandboxes](/docs/guide/sandboxes/), and [Subagents](/docs/guide/subagents/) for what an agent's body can compose, and [Durable Agents](/docs/concepts/durable-execution/) for how that state persists.
+The function runs again before every model turn, so guards and interpolated text always reflect current state. Resources — tools, skills, and subagents — may even be declared conditionally (`if (pro) useSkill(refundsSkill)`): when a render's resource set changes, the runtime announces the change to the model in the conversation instead of rewriting the system prompt (see [Dynamic resources](/docs/api/agent-api/#dynamic-resources)). The agent's *identity* stays static: `useState`, `useMessageData`, `useSandbox`, and the lifecycle hooks must be declared identically on every render. See [Tools](/docs/guide/tools/), [Skills](/docs/guide/skills/), [Sandboxes](/docs/guide/sandboxes/), and [Subagents](/docs/guide/subagents/) for what an agent's body can compose, and [Durable Agents](/docs/concepts/durable-execution/) for how that state persists.
 
 `defineAgent(Agent, config)`'s second argument is the agent's static identity — the fields that never render:
 
@@ -111,7 +111,7 @@ function SupportAssistant() {
 export default defineAgent(SupportAssistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
-Like every other hook, a custom hook's calls are never conditional. Drive behavior with state, arguments, and tool guards instead — see [Durable Agents](/docs/concepts/durable-execution/) for the reasoning and the phased-workflow pattern this enables.
+A custom hook that only declares resources (tools, skills, subagents) may be called conditionally; one that also declares identity — state, message data, a sandbox, or lifecycle hooks — inherits the stricter rule and must be called on every render. Most behavior still wants state, arguments, and tool guards rather than conditional mounting — see [Durable Agents](/docs/concepts/durable-execution/) for the reasoning and the phased-workflow pattern this enables.
 
 ### Markdown instructions
 

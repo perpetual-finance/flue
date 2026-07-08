@@ -135,6 +135,10 @@ export function classifySignal(signalType: string): {
 		case 'submission_aborted':
 		case 'submission_interrupted':
 			return { purpose: 'advisory', display: 'diagnostic' };
+		// Dynamic-resource narration: runtime bookkeeping announcing that the
+		// declared tools/skills/subagents changed, not a caller dispatch.
+		case 'resources':
+			return { purpose: 'advisory', display: 'diagnostic' };
 		default:
 			return { purpose: 'dispatch', display: 'diagnostic' };
 	}

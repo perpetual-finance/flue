@@ -13,6 +13,7 @@ import {
 	createPublicSession,
 	Session,
 	type SessionRerender,
+	type SessionResourceRuntime,
 } from './session.ts';
 import {
 	assertPublicSessionName,
@@ -106,6 +107,8 @@ export class Harness implements FlueHarness {
 		 * lifecycle callback appends a signal. Same routing as hookState.
 		 */
 		private advanceDelivery?: (message: DeliveredMessage) => void,
+		/** Dynamic-resource runtime (function agents only); same routing as hookState. */
+		private resources?: SessionResourceRuntime,
 	) {
 		this.fs = createFlueFs(env);
 		if (scopeSignal) {
@@ -231,6 +234,7 @@ export class Harness implements FlueHarness {
 			rerender: this.rerender,
 			output: this.output,
 			advanceDelivery: this.advanceDelivery,
+			resources: this.resources,
 		});
 		await session.initializeCanonicalContext();
 		this.openSessions.set(sessionName, session);

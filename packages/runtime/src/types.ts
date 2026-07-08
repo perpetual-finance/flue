@@ -476,10 +476,12 @@ export interface AgentRuntimeConfig {
  * }
  * ```
  *
- * Hook calls are never conditional — every render composes the same
- * structure; guards like the one above, not conditional hooks, scope when a
- * tool may act. Agent functions must return synchronously — async work lives
- * in tools and resource factories.
+ * Resources are dynamic; identity is static: tools, skills, and subagents
+ * may be declared conditionally (the runtime narrates set changes to the
+ * model), while state, message data, the sandbox, and lifecycle hooks must
+ * be declared identically on every render. Guards like the one above scope
+ * when an always-present tool may act. Agent functions must return
+ * synchronously — async work lives in tools and resource factories.
  */
 export type AgentFunction<TProps = void> = TProps extends void
 	? // biome-ignore lint/suspicious/noConfusingVoidType: tools-only agent bodies have no return statement; `void` keeps them assignable.

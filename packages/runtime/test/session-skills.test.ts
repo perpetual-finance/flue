@@ -274,10 +274,12 @@ describe('session.skill()', () => {
 
 		const result = await session.prompt('Review the workspace.');
 
+		// The schema is a stable plain string — a name union would rewrite the
+		// tool spec (cache-busting) whenever a dynamic skill flips.
 		expect(activateSkillTool).toMatchObject({
 			name: 'activate_skill',
 			parameters: {
-				properties: { name: { const: 'review' } },
+				properties: { name: { type: 'string' } },
 			},
 		});
 		expect(modelToolResult).toMatchObject({

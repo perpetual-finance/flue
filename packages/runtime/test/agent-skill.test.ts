@@ -92,7 +92,10 @@ describe('useSkill() (render)', () => {
 			return 'Base.';
 		}, CONFIG);
 		expect(rendered.config.skills).toEqual([packaged, bare]);
-		expect(rendered.structure.skillNames).toEqual(['triage-reproduce', 'release-notes']);
+		expect(rendered.structure.resources.skills.map((skill) => skill.name)).toEqual([
+			'triage-reproduce',
+			'release-notes',
+		]);
 	});
 
 	it('collects skills mounted by a custom hook into the flat catalog', () => {
@@ -145,8 +148,8 @@ describe('useSkill() (render)', () => {
 	});
 });
 
-describe('useSkill() invariance', () => {
-	it('names the delta when a skill is mounted conditionally', () => {
+describe('useSkill() dynamic declaration', () => {
+	it('allows conditional mounting — the delta surfaces in the resources snapshot', () => {
 		let mount = false;
 		const agent = () => {
 			if (mount) useSkill({ name: 'flaky', description: 'Sometimes mounted.' });
@@ -156,8 +159,12 @@ describe('useSkill() invariance', () => {
 		const without = render();
 		mount = true;
 		const withIt = render();
-		expect(() => assertRenderStructureInvariance(without, withIt)).toThrow(/skills added flaky/);
-		expect(() => assertRenderStructureInvariance(withIt, without)).toThrow(/skills removed flaky/);
+		expect(() => assertRenderStructureInvariance(without, withIt)).not.toThrow();
+		expect(() => assertRenderStructureInvariance(withIt, without)).not.toThrow();
+		expect(without.resources.skills).toEqual([]);
+		expect(withIt.resources.skills).toEqual([
+			{ name: 'flaky', description: 'Sometimes mounted.' },
+		]);
 	});
 });
 

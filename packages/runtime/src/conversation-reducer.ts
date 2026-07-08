@@ -12,6 +12,7 @@ import type {
 import { AttachmentNotAvailableError, ConversationRecordInvariantError } from './errors.ts';
 import { deepMergeMetadata } from './message-output.ts';
 import { createUserContextMessage, renderSignalMessage } from './message-rendering.ts';
+import type { ResourceSnapshot } from './resources.ts';
 import {
 	createActionScopeName,
 	createTaskSessionName,
@@ -199,6 +200,15 @@ export interface ReducedInstanceState {
 	 * before first contact and for instances created before uids shipped.
 	 */
 	uid?: string;
+	/**
+	 * Dynamic-resource bookkeeping from `resource_snapshot` records, scoped
+	 * to the instance like hook state. `narrated` is what the model was last
+	 * told exists (the diff base for the next narration); `baseline` is the
+	 * frozen-presentation snapshot (system-prompt skill catalog, task-tool
+	 * roster), reset at first contact and at each compaction rebaseline.
+	 * Absent for instances that never wrote a snapshot.
+	 */
+	resources?: { baseline?: ResourceSnapshot; narrated: ResourceSnapshot };
 }
 
 export interface ConversationProjectionOptions {
@@ -239,6 +249,8 @@ function cloneReducedInstanceState(state: ReducedInstanceState): ReducedInstance
 		state: new Map(state.state),
 		...(state.initialData ? { initialData: state.initialData } : {}),
 		...(state.uid !== undefined ? { uid: state.uid } : {}),
+		// Snapshots are replaced immutably on update, so carrying the box is safe.
+		...(state.resources ? { resources: { ...state.resources } } : {}),
 		conversations: new Map(
 			[...state.conversations].map(([id, conversation]) => [
 				id,
@@ -649,6 +661,16 @@ export function applyConversationRecord(
 			break;
 		case 'state_write':
 			state.state.set(record.name, record.value);
+			break;
+		case 'resource_snapshot':
+			state.resources = {
+				narrated: record.snapshot,
+				...(record.baseline
+					? { baseline: record.snapshot }
+					: state.resources?.baseline
+						? { baseline: state.resources.baseline }
+						: {}),
+			};
 			break;
 		case 'effect_run':
 			// Legacy record from the removed `useEffect` hook: retained in

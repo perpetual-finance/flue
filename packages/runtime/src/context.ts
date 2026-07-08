@@ -137,9 +137,15 @@ function mergeSkillCatalog(
 const HEADLESS_PREAMBLE =
 	'You are running in headless mode with no human operator. Work autonomously — never ask questions, never wait for user input. Make your best judgment and proceed independently.';
 
+/** One line of the system prompt's skill catalog. */
+export interface SkillCatalogEntry {
+	name: string;
+	description?: string;
+}
+
 function composeSystemPrompt(
 	agentsMd: string,
-	skills: Record<string, Skill>,
+	catalog: readonly SkillCatalogEntry[],
 	env?: { cwd: string; directoryListing?: string[] },
 	instructions?: string,
 ): string {
@@ -148,8 +154,7 @@ function composeSystemPrompt(
 	if (instructions) parts.push('', instructions);
 	if (agentsMd) parts.push('', agentsMd);
 
-	const skillEntries = Object.values(skills);
-	if (skillEntries.length > 0) {
+	if (catalog.length > 0) {
 		parts.push(
 			'',
 			'## Available Skills',
@@ -157,7 +162,7 @@ function composeSystemPrompt(
 			'The following skills provide specialized instructions for specific tasks. When a task matches a skill description, call the `activate_skill` tool with that skill name before proceeding so its full instructions are loaded. Skill instructions and supporting resources stay lazy until activation or explicit file reads.',
 			'',
 		);
-		for (const skill of skillEntries) {
+		for (const skill of catalog) {
 			const desc = skill.description ? ` — ${skill.description}` : '';
 			parts.push(`- **${skill.name}**${desc}`);
 		}
@@ -189,11 +194,14 @@ export async function discoverSessionContext(
 	systemPrompt: string;
 	skills: Record<string, Skill>;
 	recompose: (instructions?: string) => string;
+	setCatalog: (entries: readonly SkillCatalogEntry[]) => void;
+	mergeSkills: (nextDefinitionSkills: readonly Skill[]) => Record<string, Skill>;
 }> {
 	const cwd = env.cwd;
 
 	const agentsMd = await readAgentsMd(env, cwd);
-	const skills = mergeSkillCatalog(definitionSkills, await discoverLocalSkills(env, cwd));
+	const discoveredSkills = await discoverLocalSkills(env, cwd);
+	const skills = mergeSkillCatalog(definitionSkills, discoveredSkills);
 
 	let directoryListing: string[] | undefined;
 	try {
@@ -202,13 +210,23 @@ export async function discoverSessionContext(
 		// readdir failed (e.g., cwd doesn't exist yet) — skip silently
 	}
 
+	// The catalog the prompt lists is a BASELINE snapshot, not the live skill
+	// set: dynamically declared skills announce themselves via `resources`
+	// signals instead of rewriting the prompt (which would invalidate the
+	// provider's prompt cache). `setCatalog` swaps the baseline — at init
+	// (durable baseline from a previous life) and at compaction rebaseline.
+	let catalog: readonly SkillCatalogEntry[] = skillCatalogEntries(skills);
+	const setCatalog = (entries: readonly SkillCatalogEntry[]) => {
+		catalog = entries;
+	};
+
 	// Rebuild the system prompt around new instructions without re-touching
 	// the filesystem — the per-turn re-render path recomposes with whatever
 	// the latest render returned, over the same discovered context.
 	const recompose = (nextInstructions?: string) =>
 		composeSystemPrompt(
 			agentsMd,
-			skills,
+			catalog,
 			{
 				cwd,
 				directoryListing,
@@ -216,5 +234,19 @@ export async function discoverSessionContext(
 			nextInstructions,
 		);
 
-	return { systemPrompt: recompose(instructions), skills, recompose };
+	// The LIVE skill map for a later render's declared skills, merged over
+	// the same discovered workspace skills. Activation resolves against this,
+	// independent of the frozen catalog above.
+	const mergeSkills = (nextDefinitionSkills: readonly Skill[]) =>
+		mergeSkillCatalog(nextDefinitionSkills, discoveredSkills);
+
+	return { systemPrompt: recompose(instructions), skills, recompose, setCatalog, mergeSkills };
+}
+
+/** The model-facing catalog lines of a skill map (name + description only). */
+export function skillCatalogEntries(skills: Record<string, Skill>): SkillCatalogEntry[] {
+	return Object.values(skills).map((skill) => ({
+		name: skill.name,
+		...(skill.description ? { description: skill.description } : {}),
+	}));
 }

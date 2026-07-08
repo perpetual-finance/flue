@@ -48,7 +48,7 @@ function Assistant() {
 export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
-Each import produces a skill reference and includes that skill directory in the application build. Mounting a reference with `useSkill(...)` makes the skill available to this agent by its declared name. Skills mount unconditionally like any other hook — a skill mounted by one custom hook is cataloged on every render, whether or not the current phase calls for it; write that hook's instruction to say when to activate it.
+Each import produces a skill reference and includes that skill directory in the application build. Mounting a reference with `useSkill(...)` makes the skill available to this agent by its declared name. A skill mounted on every render is cataloged in the system prompt; a skill may also be mounted conditionally (`if (pro) useSkill(refundsSkill)`) — when it appears or disappears, the runtime announces the change to the model in the conversation while the prompt's catalog stays frozen (see [Dynamic resources](/docs/api/agent-api/#dynamic-resources)).
 
 Skills can also be imported from installed packages:
 

@@ -11,6 +11,7 @@ import {
 	renderAgentFunction,
 	renderAgentFunctionWithStructure,
 } from '../src/hooks/render.ts';
+import { useState } from '../src/hooks/state.ts';
 import { useInstruction } from '../src/hooks/use-instruction.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { dispatch } from '../src/index.ts';
@@ -349,7 +350,7 @@ describe('custom hooks (composition)', () => {
 		expect(config.tools?.map((t) => t.name)).toEqual(['begin_draft']);
 	});
 
-	it('trips the invariance guard when a custom hook is called conditionally, with the new error text', () => {
+	it('allows a custom hook that only declares resources to be called conditionally', () => {
 		function useRetention() {
 			useTool(tool('offer_credit'));
 		}
@@ -361,9 +362,8 @@ describe('custom hooks (composition)', () => {
 		const first = renderAgentFunctionWithStructure(agent, { model: MODEL }).structure;
 		mount = true;
 		const second = renderAgentFunctionWithStructure(agent, { model: MODEL }).structure;
-		expect(() => assertRenderStructureInvariance(first, second)).toThrow(
-			/Hook calls must not be conditional/,
-		);
+		expect(() => assertRenderStructureInvariance(first, second)).not.toThrow();
+		expect(second.resources.tools.map((t) => t.name)).toEqual(['offer_credit']);
 	});
 });
 
@@ -383,24 +383,31 @@ describe('assertRenderStructureInvariance()', () => {
 		expect(() => assertRenderStructureInvariance(render(agent), render(agent))).not.toThrow();
 	});
 
-	it('names the delta when a custom hook is conditionally called', () => {
-		function useRetention() {
-			useTool({ name: 'retention_tool', description: 'Offer retention.', run: async () => 'ok' });
+	it('lets resources flip while a mixed custom hook still trips on its identity part', () => {
+		// Resources are dynamic; identity is static. A custom hook that
+		// declares BOTH inherits the stricter rule through its useState.
+		function useDelegated(mounted: boolean) {
+			if (!mounted) return;
+			useState('delegated', null);
+			useTool({ name: 'record_step', description: 'Record.', run: async () => 'ok' });
 		}
 		const withIt = () => {
-			useRetention();
+			useDelegated(true);
 			return 'Base.';
 		};
-		const withoutIt = () => 'Base.';
+		const withoutIt = () => {
+			useDelegated(false);
+			return 'Base.';
+		};
 		expect(() => assertRenderStructureInvariance(render(withoutIt), render(withIt))).toThrow(
-			/tools added retention_tool/,
+			/state added delegated/,
 		);
 		expect(() => assertRenderStructureInvariance(render(withoutIt), render(withIt))).toThrow(
-			/Hook calls must not be conditional/,
+			/changed identity between turns/,
 		);
 	});
 
-	it('names added and removed tools and state', () => {
+	it('reports tool changes in the resources snapshot instead of throwing', () => {
 		const a = () => {
 			useTool({ name: 'alpha', description: 'A.', run: async () => 'ok' });
 			return undefined;
@@ -409,12 +416,14 @@ describe('assertRenderStructureInvariance()', () => {
 			useTool({ name: 'beta', description: 'B.', run: async () => 'ok' });
 			return undefined;
 		};
-		expect(() => assertRenderStructureInvariance(render(a), render(b))).toThrow(
-			/tools added beta; removed alpha/,
-		);
+		const first = render(a);
+		const second = render(b);
+		expect(() => assertRenderStructureInvariance(first, second)).not.toThrow();
+		expect(first.resources.tools.map((t) => t.name)).toEqual(['alpha']);
+		expect(second.resources.tools.map((t) => t.name)).toEqual(['beta']);
 	});
 
-	it('tolerates schema changes on a stable tool name (tools compare by name)', () => {
+	it('fingerprints tool descriptions so content changes surface as updates', () => {
 		let flip = false;
 		const agent = () => {
 			useTool({
@@ -426,7 +435,10 @@ describe('assertRenderStructureInvariance()', () => {
 		};
 		const first = render(agent);
 		flip = true;
-		expect(() => assertRenderStructureInvariance(first, render(agent))).not.toThrow();
+		const second = render(agent);
+		expect(() => assertRenderStructureInvariance(first, second)).not.toThrow();
+		expect(first.resources.tools[0]?.description).toBe('First description.');
+		expect(second.resources.tools[0]?.description).toBe('Second description.');
 	});
 });
 

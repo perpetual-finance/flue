@@ -1,4 +1,5 @@
 import type { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai';
+import type { ResourceSnapshot } from './resources.ts';
 import { generateEntryId, generateRecordId } from './runtime/ids.ts';
 import type { PromptUsage } from './types.ts';
 
@@ -354,6 +355,22 @@ interface MessageMetadataRecord extends ConversationRecordEnvelope {
 	metadata: Record<string, unknown>;
 }
 
+/**
+ * The declared resource sets (tools, skills, subagents) as last narrated to
+ * the model. Written batch-atomically with the `resources` signal records
+ * that announced a delta, so a rehydrated render re-diffs against exactly
+ * what the model was told (crash between = neither, and the diff re-emits).
+ * `baseline: true` additionally resets the frozen presentation baseline —
+ * the snapshot the system prompt's skill catalog and the task tool's roster
+ * compose from — written at first contact and at each compaction
+ * rebaseline.
+ */
+interface ResourceSnapshotRecord extends ConversationRecordEnvelope {
+	type: 'resource_snapshot';
+	baseline: boolean;
+	snapshot: ResourceSnapshot;
+}
+
 export type ConversationRecord =
 	| ConversationCreatedRecord
 	| UserMessageRecord
@@ -377,7 +394,8 @@ export type ConversationRecord =
 	| AgentStartRunRecord
 	| AgentFinishCycleRecord
 	| MessageDataWriteRecord
-	| MessageMetadataRecord;
+	| MessageMetadataRecord
+	| ResourceSnapshotRecord;
 
 export function generateConversationRecordId(): string {
 	return generateRecordId();

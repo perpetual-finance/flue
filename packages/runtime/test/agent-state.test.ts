@@ -430,7 +430,7 @@ describe('useState end to end (node coordinator, faux provider)', () => {
 		expect(laterPrompts[0]).toContain('count=1');
 	});
 
-	it('fails the run when a render changes structure mid-run (conditional custom hook)', async () => {
+	it('narrates a mid-run resource flip and continues (conditional tool)', async () => {
 		const dbPath = createTempDbPath();
 		const adapter = sqlite(dbPath);
 		await adapter.migrate?.();
@@ -440,13 +440,13 @@ describe('useState end to end (node coordinator, faux provider)', () => {
 			fauxAssistantMessage(fauxToolCall('bump', {}, { id: 'tool:inv-bump' }), {
 				stopReason: 'toolUse',
 			}),
-			fauxAssistantMessage('Should never be reached.'),
+			fauxAssistantMessage('Continued after the flip.'),
 		]);
 
 		function useExtra() {
 			useTool({
 				name: 'extra_tool',
-				description: 'Conditionally mounted — illegal.',
+				description: 'Conditionally mounted — a dynamic resource.',
 				run: async () => 'ok',
 			});
 		}
@@ -462,7 +462,7 @@ describe('useState end to end (node coordinator, faux provider)', () => {
 					return 'ok';
 				},
 			});
-			return 'invariance test agent';
+			return 'dynamic resources test agent';
 		}
 
 		const coordinator = createNodeAgentCoordinator({
@@ -481,24 +481,48 @@ describe('useState end to end (node coordinator, faux provider)', () => {
 		});
 
 		await coordinator.admitDispatch(
-			makeDispatchInput({ dispatchId: 'dispatch:invariance', id: 'instance-invariance' }),
+			makeDispatchInput({ dispatchId: 'dispatch:dynamic', id: 'instance-dynamic' }),
 		);
 		await coordinator.waitForIdle();
 		await coordinator.shutdown();
 
 		const records = (
-			await conversationStreamStore.read(agentStreamPath('assistant', 'instance-invariance'))
+			await conversationStreamStore.read(agentStreamPath('assistant', 'instance-dynamic'))
 		).batches.flatMap((batch) => batch.records);
-		// The invariance throw lands as pi's synthesized error-completed
-		// assistant message: the run stops, the scripted second reply is never
-		// requested, and the error names the violation.
-		const finalAssistant = records
-			.filter((record) => record.type === 'assistant_message_completed')
-			.at(-1);
-		expect(finalAssistant).toMatchObject({ stopReason: 'error' });
-		expect(JSON.stringify(finalAssistant)).toContain('changed structure between turns');
-		expect(JSON.stringify(finalAssistant)).toContain('extra_tool');
-		expect(JSON.stringify(finalAssistant)).toContain('Hook calls must not be conditional');
-		expect(JSON.stringify(records)).not.toContain('Should never be reached.');
+		// First contact recorded the init render as the silent baseline —
+		// before the flip, so without extra_tool.
+		const snapshots = records.filter((record) => record.type === 'resource_snapshot');
+		expect(snapshots[0]).toMatchObject({ baseline: true });
+		expect(
+			snapshots[0]?.type === 'resource_snapshot'
+				? snapshots[0].snapshot.tools.map((tool) => tool.name)
+				: [],
+		).toEqual(['bump']);
+		// The turn-boundary re-render after bump's state write narrated the
+		// flip: one `resources` signal with the delta line and the roster.
+		const signal = records.find(
+			(record) => record.type === 'signal' && record.signalType === 'resources',
+		);
+		expect(signal).toBeDefined();
+		expect(signal?.type === 'signal' ? signal.content : '').toContain('New tool available:');
+		expect(signal?.type === 'signal' ? signal.content : '').toContain('extra_tool');
+		expect(signal?.type === 'signal' ? signal.content : '').toContain('All available tools:');
+		expect(signal?.type === 'signal' ? signal.attributes : {}).toMatchObject({
+			resource: 'tool',
+		});
+		// The narrated snapshot advanced with the signal (same batch), and the
+		// run CONTINUED — the flip is narrated, not fatal.
+		const narrated = snapshots.at(-1);
+		expect(narrated).toMatchObject({ baseline: false });
+		expect(
+			narrated?.type === 'resource_snapshot'
+				? narrated.snapshot.tools.map((tool) => tool.name)
+				: [],
+		).toEqual(['extra_tool', 'bump']);
+		const responseText = records
+			.filter((record) => record.type === 'assistant_text_delta')
+			.map((record) => record.delta)
+			.join('');
+		expect(responseText).toContain('Continued after the flip.');
 	});
 });

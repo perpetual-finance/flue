@@ -121,7 +121,7 @@ export default defineAgent(Support, { model: 'anthropic/claude-sonnet-4-6' });
 
 The directive gives the agent its durable identity (the file basename) and registers it with the built application — there is no name-based addressing beyond that identity. To expose the agent over HTTP, mount `agent.route()` in `app.ts`; see the [Routing API](/docs/api/routing-api/). A dispatch-only agent needs no mount. `flue run <path>` and raw `defineAgent()` values in unit tests do not require the directive.
 
-The agent function re-renders every turn as durable state changes — it must return synchronously and the tools, state, skills, and subagents it attaches (`useTool()`, `useSkill()`, `useSubagent()`, and other hooks) must stay identical across renders. Async work belongs in tools, lifecycle hooks (`useAgentStart()`, `useAgentFinish()`), or resource factories, never in the agent function body itself.
+The agent function re-renders every turn as durable state changes — it must return synchronously. Its identity hooks (`useState()`, `useMessageData()`, `useSandbox()`, and the lifecycle hooks) must stay identical across renders; its resources (`useTool()`, `useSkill()`, `useSubagent()`) may be declared conditionally, with changes announced to the model (see [Dynamic resources](#dynamic-resources)). Async work belongs in tools, lifecycle hooks (`useAgentStart()`, `useAgentFinish()`), or resource factories, never in the agent function body itself.
 
 The runtime passes the top-level agent function an `AgentProps` object — the agent's route data, the way a web framework passes route params to the page component. Zero-argument agent functions stay assignable unchanged. Only the root receives it: custom hooks get whatever arguments their caller passes, and a subagent's agent function gets nothing (a delegate runs in isolation from the parent).
 
@@ -221,7 +221,21 @@ function Support() {
 }
 ```
 
-Hook calls are never conditional and the set of hooks each function calls must be identical across renders. State informs the agent — through arguments, guards, and interpolated text — it does not reshape the agent. A custom hook may take arguments and return values to its caller like any other function, and may call other custom hooks.
+Resources are dynamic; identity and lifecycle are static. The resource hooks — `useTool`, `useSkill`, `useSubagent` — may be called conditionally (`if (pro) useSkill(refundsSkill)`): when a render's resource set changes, the runtime announces the delta to the model as a `resources` signal instead of rewriting the system prompt (see [Dynamic resources](#dynamic-resources)). Every other hook — `useState`, `useMessageData`, `useSandbox`, `useAgentStart`, `useAgentFinish` — is part of the agent's durable identity and must be declared identically on every render; a custom hook that mixes both kinds inherits the stricter rule. A custom hook may take arguments and return values to its caller like any other function, and may call other custom hooks.
+
+#### Dynamic resources
+
+When a conditionally declared tool, skill, or subagent appears, disappears, or changes its description (or, for tools, its input schema), the runtime appends one `resources` signal per affected kind at the next turn boundary — or, for a change that happened between responses (a redeploy, a flip in the previous response's final batch), before the next response's first turn. The signal states the delta factually and ends with the kind's current roster by name:
+
+```
+<signal type="resources" resource="skill">
+New skill available:
+- **refunds** — Process refund requests against the orders API.
+All available skills: faq, refunds
+</signal>
+```
+
+The presentation surfaces the model already read stay frozen so a flip never invalidates the provider's prompt cache: the system prompt's skill catalog and the `task` tool's agent roster keep their birth-time snapshot, and `activate_skill` takes a plain string name (unknown names get a factual miss listing what is available). Activation and task delegation always resolve against the live set. When the conversation [compacts](/docs/api/agent-api/#compactionconfig), the runtime rebaselines: the post-compaction prompt snapshots the then-current resource state — exactly what a first message would see — and the earlier delta bookkeeping stops mattering.
 
 ### `useTool(...)`
 
