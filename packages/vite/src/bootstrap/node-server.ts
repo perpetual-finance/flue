@@ -20,25 +20,16 @@ import userApp from 'virtual:flue/app';
 import userPersistenceAdapter from 'virtual:flue/db';
 import type { FunctionAgentDefinition } from '@flue/runtime';
 import type {
-	AgentRecord,
-	CreateAgentContextOptions,
+	AssembledNodeAgentRuntime,
 	FlueAgentRegistration,
 	PersistenceAdapter,
 	RuntimeActivityLease,
 } from '@flue/runtime/internal';
 import {
-	Bash,
-	bashFactoryToSessionEnv,
-	configureFlueRuntime,
-	createFlueContext,
+	assembleNodeAgentRuntime,
+	connectPersistenceAdapter,
 	createInstrumentationOwner,
-	createNodeAgentCoordinator,
-	createNodeDispatchQueue,
-	createRuntimeActivityGate,
-	InMemoryFs,
 	installDevLifecycleLogger,
-	registerFlueAgents,
-	resolveModel,
 	runWithInstrumentationOwner,
 } from '@flue/runtime/internal';
 import { sqlite } from '@flue/runtime/node';
@@ -84,22 +75,6 @@ export interface FlueNodeServer {
 }
 
 type ConsoleMethod = 'log' | 'info' | 'debug' | 'warn' | 'error';
-
-/**
- * Create an empty in-memory sandbox (default).
- * Uses InMemoryFs (no real filesystem access) with sensible defaults:
- * cwd = /home/user, /tmp exists, /bin and /usr/bin exist.
- */
-async function createDefaultEnv() {
-	const fs = new InMemoryFs();
-	return bashFactoryToSessionEnv(
-		() =>
-			new Bash({
-				fs,
-				network: { dangerouslyAllowFullInternetAccess: true },
-			}),
-	);
-}
 
 /** Build the identity-keyed registration records from the scanned modules. */
 function createAgentRegistrations(): FlueAgentRegistration[] {
@@ -154,156 +129,54 @@ export async function loadFlueNodeApplication(
 	const instrumentationOwner = createInstrumentationOwner();
 	let devLifecycle: ReturnType<typeof installDevLifecycleLogger> | undefined;
 	let persistenceAdapter: PersistenceAdapter | undefined;
-	let agentCoordinator: ReturnType<typeof createNodeAgentCoordinator> | undefined;
+	let assembled: AssembledNodeAgentRuntime | undefined;
 	try {
 		return await runInRuntime(() =>
 			runWithInstrumentationOwner(instrumentationOwner, async () => {
 				devLifecycle =
 					isLocalMode && options.internalDevLogs === true ? installDevLifecycleLogger() : undefined;
 
-				// ─── Registration ─────────────────────────────────────────────
+				// ─── Persistence ──────────────────────────────────────────────
+				// Custom persistence from db.ts, or the Node default — in-memory
+				// SQLite, process lifetime. Under local dev, FLUE_DEV_SQLITE_PATH
+				// points the default at a disk file so conversation history
+				// survives reloads (the dev server resets that file on each cold
+				// start); ignored outside local mode, so deployed Node stays
+				// in-memory. Either way connect() is awaited once at startup so an
+				// unreachable or misconfigured database fails at boot, not inside
+				// the first request.
+				const adapter: PersistenceAdapter =
+					userPersistenceAdapter !== undefined
+						? (userPersistenceAdapter as PersistenceAdapter)
+						: sqlite(
+								isLocalMode && runtimeEnv.FLUE_DEV_SQLITE_PATH
+									? runtimeEnv.FLUE_DEV_SQLITE_PATH
+									: undefined,
+							);
+				const stores = await connectPersistenceAdapter(
+					adapter,
+					userPersistenceAdapter !== undefined ? 'db.ts' : 'the default sqlite adapter',
+				);
+				persistenceAdapter = adapter;
+
+				// ─── Runtime assembly ─────────────────────────────────────────
 				// The scan IS the registration: every 'use agent' module joins the
 				// app, replacing any previous registration wholesale (reload-safe).
-				const registrations = createAgentRegistrations();
-				registerFlueAgents(registrations);
-				const agents: AgentRecord[] = registrations.map((registration) => ({
-					name: registration.identity,
-					definition: registration.definition,
-					...(registration.description !== undefined
-						? { description: registration.description }
-						: {}),
-					...(registration.route !== undefined ? { route: registration.route } : {}),
-					...(registration.attachments !== undefined
-						? { attachments: registration.attachments }
-						: {}),
-				}));
-
-				// ─── Persistence ──────────────────────────────────────────────
-				let stores: Awaited<ReturnType<PersistenceAdapter['connect']>>;
-				if (userPersistenceAdapter !== undefined) {
-					// Custom persistence from db.ts. connect() is awaited once at
-					// startup so an unreachable or misconfigured database fails at
-					// boot, not inside the first request.
-					const adapter = userPersistenceAdapter as PersistenceAdapter;
-					if (!adapter || typeof adapter.connect !== 'function') {
-						throw new Error(
-							'[flue] db.ts must default-export a PersistenceAdapter with a connect() method.',
-						);
-					}
-					try {
-						if (adapter.migrate) await adapter.migrate();
-						const connected = (await adapter.connect()) as Awaited<
-							ReturnType<PersistenceAdapter['connect']>
-						>;
-						if (!connected || typeof connected !== 'object') {
-							throw new Error(
-								'connect() must return { executionStore, conversationStreamStore, attachmentStore }.',
-							);
-						}
-						if (
-							!connected.executionStore ||
-							typeof connected.executionStore.submissions?.getSubmission !== 'function'
-						) {
-							throw new Error('connect() must return an executionStore with submissions.');
-						}
-						if (
-							!connected.conversationStreamStore ||
-							typeof connected.conversationStreamStore.append !== 'function' ||
-							typeof connected.conversationStreamStore.acquireProducer !== 'function'
-						) {
-							throw new Error('connect() must return a conversationStreamStore.');
-						}
-						if (
-							!connected.attachmentStore ||
-							typeof connected.attachmentStore.put !== 'function' ||
-							typeof connected.attachmentStore.get !== 'function'
-						) {
-							throw new Error('connect() must return an attachmentStore.');
-						}
-						stores = connected;
-					} catch (error) {
-						throw new Error(
-							`[flue] Failed to initialize persistence from db.ts: ${error instanceof Error ? error.message : error}`,
-							{ cause: error },
-						);
-					}
-					persistenceAdapter = adapter;
-				} else {
-					// Default persistence for Node — in-memory SQLite, process
-					// lifetime. Under local dev, FLUE_DEV_SQLITE_PATH points this at
-					// a disk file so conversation history survives reloads (the dev
-					// server resets that file on each cold start). Ignored outside
-					// local mode, so deployed Node stays in-memory.
-					const defaultAdapter = sqlite(
-						isLocalMode && runtimeEnv.FLUE_DEV_SQLITE_PATH
-							? runtimeEnv.FLUE_DEV_SQLITE_PATH
-							: undefined,
-					);
-					if (defaultAdapter.migrate) await defaultAdapter.migrate();
-					stores = await defaultAdapter.connect();
-					persistenceAdapter = defaultAdapter;
-				}
-				const { executionStore, conversationStreamStore, attachmentStore } = stores;
-
-				// ─── Coordinator ──────────────────────────────────────────────
-				const activityGate = createRuntimeActivityGate();
-				const coordinator = createNodeAgentCoordinator({
-					submissions: executionStore.submissions,
-					agents,
-					createContext: createAgentContextForRequest,
-					conversationStreamStore,
-					attachmentStore,
-					onInteractionStart: devLifecycle?.onAgentInteractionStart,
-					activityGate,
-				});
-				agentCoordinator = coordinator;
-				const dispatchQueue = createNodeDispatchQueue(coordinator);
-
-				function createAgentContextForRequest({
-					id,
-					agentName,
-					request,
-					initialEventIndex,
-					dispatchId,
-				}: CreateAgentContextOptions) {
-					return createFlueContext({
-						id,
-						agentName,
-						dispatchId,
-						initialEventIndex,
-						env: runtimeEnv,
-						req: request,
-						agentConfig: { resolveModel },
-						createDefaultEnv,
-					});
-				}
-
-				// ─── Runtime seed ─────────────────────────────────────────────
-				// Seed the runtime before the application is installed into its
-				// listener. `.route()` handlers in the user's app read this
-				// configuration when requests arrive, so mounting during app.ts
-				// evaluation (before this call) is safe.
-				configureFlueRuntime({
-					target: 'node',
+				// The shared assembly wires registration → coordinator → dispatch
+				// queue → runtime seed → startup reconciliation; it seeds the
+				// runtime before the application is installed into its listener,
+				// so `.route()` handlers mounted during app.ts evaluation read the
+				// configuration when requests arrive.
+				const runtime = await assembleNodeAgentRuntime({
+					agents: createAgentRegistrations(),
+					adapter,
+					stores,
+					env: runtimeEnv,
 					devMode: isLocalMode,
-					agents,
-					createAgentAdmission: (agentName, instanceId) =>
-						coordinator.createAdmission(agentName, instanceId),
-					abortAgentInstance: (agentName, instanceId) =>
-						coordinator.abortInstance(agentName, instanceId),
-					dispatchQueue,
-					activityGate,
-					conversationStreamStore,
-					attachmentStore,
+					...(devLifecycle ? { onInteractionStart: devLifecycle.onAgentInteractionStart } : {}),
 				});
-
-				try {
-					await runInRuntime(() => coordinator.reconcileSubmissions());
-				} catch (error) {
-					runInRuntime(() =>
-						console.error('[flue] Startup submission reconciliation failed:', error),
-					);
-				}
+				assembled = runtime;
+				const { activityGate } = runtime;
 
 				// ─── App composition ──────────────────────────────────────────
 				// The user's app.ts default export owns the entire request
@@ -333,17 +206,13 @@ export async function loadFlueNodeApplication(
 						disposing = runInRuntime(async () => {
 							const errors: unknown[] = [];
 							try {
-								await coordinator.shutdown(timeoutMs);
+								// Coordinator shutdown, runtime reset, adapter close.
+								await runtime.close(timeoutMs);
 							} catch (error) {
 								errors.push(error);
 							}
 							try {
 								await instrumentationOwner.dispose();
-							} catch (error) {
-								errors.push(error);
-							}
-							try {
-								if (persistenceAdapter?.close) await persistenceAdapter.close();
 							} catch (error) {
 								errors.push(error);
 							}
@@ -365,12 +234,10 @@ export async function loadFlueNodeApplication(
 	} catch (error) {
 		const cleanupErrors: unknown[] = [];
 		try {
-			if (agentCoordinator) await agentCoordinator.shutdown(30_000);
-		} catch (cleanupError) {
-			cleanupErrors.push(cleanupError);
-		}
-		try {
-			if (persistenceAdapter?.close) await persistenceAdapter.close();
+			// close() covers the coordinator AND the adapter; before assembly the
+			// connected adapter is closed directly.
+			if (assembled) await assembled.close();
+			else if (persistenceAdapter?.close) await persistenceAdapter.close();
 		} catch (cleanupError) {
 			cleanupErrors.push(cleanupError);
 		}

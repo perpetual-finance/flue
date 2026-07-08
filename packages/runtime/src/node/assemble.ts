@@ -10,11 +10,17 @@
 import { Bash, InMemoryFs } from 'just-bash';
 import type { PersistenceAdapter } from '../agent-execution-store.ts';
 import { createFlueContext } from '../client.ts';
-import type { AgentRecord } from '../runtime/flue-app.ts';
-import { configureFlueRuntime, resetFlueRuntimeForTests } from '../runtime/flue-app.ts';
+import type { AgentInteractionStart } from '../runtime/dev-lifecycle-logger.ts';
+import type { AgentRecord, FlueRuntime } from '../runtime/flue-app.ts';
+import {
+	configureFlueRuntime,
+	getFlueRuntime,
+	resetFlueRuntimeForTests,
+} from '../runtime/flue-app.ts';
 import { resolveModel } from '../runtime/providers.ts';
 import type { FlueAgentRegistration } from '../runtime/registration.ts';
 import { registerFlueAgents } from '../runtime/registration.ts';
+import type { RuntimeActivityGate } from '../runtime/runtime-activity-gate.ts';
 import { createRuntimeActivityGate } from '../runtime/runtime-activity-gate.ts';
 import { bashFactoryToSessionEnv } from '../sandbox.ts';
 import type { SessionEnv } from '../types.ts';
@@ -88,13 +94,17 @@ export interface AssembleNodeAgentRuntimeOptions {
 	devMode?: boolean;
 	/** Sandbox factory; defaults to an empty in-memory fs with Bash. */
 	createDefaultEnv?: () => Promise<SessionEnv>;
+	/** Interaction-start callback (the dev lifecycle logger's seam). */
+	onInteractionStart?: (interaction: AgentInteractionStart) => void;
 }
 
 export interface AssembledNodeAgentRuntime {
 	coordinator: ReturnType<typeof createNodeAgentCoordinator>;
 	conversationStreamStore: NonNullable<ConnectedStores['conversationStreamStore']>;
+	/** The admission gate the assembly wired into the runtime (drain/idle seam). */
+	activityGate: RuntimeActivityGate;
 	/** Coordinator shutdown, runtime reset, adapter close. */
-	close(): Promise<void>;
+	close(timeoutMs?: number): Promise<void>;
 }
 
 /**
@@ -149,10 +159,11 @@ export async function assembleNodeAgentRuntime(
 		conversationStreamStore,
 		attachmentStore,
 		activityGate,
+		...(options.onInteractionStart ? { onInteractionStart: options.onInteractionStart } : {}),
 	});
 	const dispatchQueue = createNodeDispatchQueue(coordinator);
 
-	configureFlueRuntime({
+	const runtimeConfiguration: FlueRuntime = {
 		target: 'node',
 		devMode: options.devMode ?? false,
 		agents,
@@ -163,7 +174,8 @@ export async function assembleNodeAgentRuntime(
 		abortAgentInstance: (agentName, instanceId) => coordinator.abortInstance(agentName, instanceId),
 		conversationStreamStore,
 		attachmentStore,
-	});
+	};
+	configureFlueRuntime(runtimeConfiguration);
 
 	// Reconcile work a previous process left interrupted (durable adapters
 	// persist across invocations by design; a fresh store is a no-op).
@@ -177,15 +189,19 @@ export async function assembleNodeAgentRuntime(
 	return {
 		coordinator,
 		conversationStreamStore,
-		close() {
+		activityGate,
+		close(timeoutMs = SHUTDOWN_TIMEOUT_MS) {
 			closing ??= (async () => {
 				const errors: unknown[] = [];
 				try {
-					await coordinator.shutdown(SHUTDOWN_TIMEOUT_MS);
+					await coordinator.shutdown(timeoutMs);
 				} catch (error) {
 					errors.push(error);
 				}
-				resetFlueRuntimeForTests();
+				// Reload-safe: a replacement assembly may already have configured
+				// the runtime (hot reload swaps in the new app before disposing
+				// the old one) — only clear a configuration this assembly owns.
+				if (getFlueRuntime() === runtimeConfiguration) resetFlueRuntimeForTests();
 				try {
 					if (options.adapter.close) await options.adapter.close();
 				} catch (error) {
