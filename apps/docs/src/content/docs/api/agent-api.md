@@ -477,7 +477,7 @@ interface AgentAppendMessage {
 ### `useInitialData()`
 
 ```ts
-function useInitialData<T = unknown>(): T | undefined;
+function useInitialData<T = unknown>(): T;
 ```
 
 Read the instance's creation data — the `data` a caller sent with this instance's first contact, recorded exactly once at creation and constant for the instance's whole life. This is the third leg of the input model: `useInitialData()` is what the instance is *about*, `useDelivery()` is what *this message* says, and `useState` is what the agent has *learned*.
@@ -487,7 +487,7 @@ const input = v.object({ issue: v.pipe(v.number(), v.integer()) });
 
 function Triage() {
   const data = useInitialData<v.InferOutput<typeof input>>();
-  return `Triage GitHub issue #${data!.issue} end-to-end.`;
+  return `Triage GitHub issue #${data.issue} end-to-end.`;
 }
 
 export default defineAgent(Triage, { model: 'anthropic/claude-opus-4-6', input });
@@ -495,7 +495,7 @@ export default defineAgent(Triage, { model: 'anthropic/claude-opus-4-6', input }
 
 Creation data rides the instance's first contact: `dispatch(triage, { id, data, message })`, a `data` field beside the direct-HTTP message body, `client.send({ message, data })`, or `flue run --data '<json>'`. Declare an `input:` schema on `defineAgent` to validate it at creation — a mismatch (including absence, unless the schema accepts `undefined`) rejects the creating call, so with a required schema the value is always present here, as the schema-parsed output. Without a schema, whatever the creator sent is recorded and returned untyped.
 
-The value is immutable — `data` on messages to an existing instance is ignored, and evolving facts belong in `useState`. Returns `undefined` when creation carried no data, on bare tooling/test renders (back it with `initialData` in the render-state context), and in subagent renders (a delegate has no creation data of its own; close over a value to share it). The recorded value is part of the instance's durable record stream but is never served to clients; still, it is not a secrets channel — keys and tokens stay in the environment.
+The value is immutable — `data` on messages to an existing instance is ignored, and evolving facts belong in `useState`. The return type is exactly the type parameter you assert: with a required schema the value is always present, so the common case needs no `undefined` narrowing (and no `!`). At runtime the value *is* `undefined` when creation carried no data, on bare tooling/test renders (back it with `initialData` in the render-state context), and in subagent renders (a delegate has no creation data of its own; close over a value to share it) — when your agent can hit those cases, say so in the type: `useInitialData<Config | undefined>()`. The recorded value is part of the instance's durable record stream but is never served to clients; still, it is not a secrets channel — keys and tokens stay in the environment.
 
 ### `useDispatchMessage()`
 

@@ -17,7 +17,7 @@ import { requireRenderFrame } from './frame.ts';
  *
  * function Triage() {
  *   const data = useInitialData<v.InferOutput<typeof input>>();
- *   return `Triage GitHub issue #${data!.issue} end-to-end.`;
+ *   return `Triage GitHub issue #${data.issue} end-to-end.`;
  * }
  * export default defineAgent(Triage, { model: '…', input });
  * ```
@@ -32,15 +32,19 @@ import { requireRenderFrame } from './frame.ts';
  * - Constant forever: `data` on messages to an existing instance is ignored,
  *   and nothing can change the recorded value. Evolving facts belong in
  *   `useState`.
- * - Returns `undefined` when creation carried no data, on a bare
- *   tooling/test render (back it with `initialData` in the render-state
- *   context), and in subagent renders — a delegate has no creation data of
- *   its own; close over a value to share it explicitly.
+ * - The return type is exactly the type parameter you assert — with a
+ *   required `input:` schema the value is always present, so the common
+ *   case needs no `undefined` narrowing (and no `!`). At runtime the value
+ *   IS `undefined` when creation carried no data, on a bare tooling/test
+ *   render (back it with `initialData` in the render-state context), and
+ *   in subagent renders (a delegate has no creation data of its own; close
+ *   over a value to share it explicitly) — when your agent can hit those
+ *   cases, say so in the type: `useInitialData<Config | undefined>()`.
  * - The recorded value is part of the instance's durable record stream; it
  *   is not a secrets channel — keys and tokens stay in the environment.
  */
-export function useInitialData<T = unknown>(): T | undefined {
+export function useInitialData<T = unknown>(): T {
 	const frame = requireRenderFrame('useInitialData');
-	if (frame.kind === 'subagent') return undefined;
-	return frame.state?.initialData as T | undefined;
+	if (frame.kind === 'subagent') return undefined as T;
+	return frame.state?.initialData as T;
 }
