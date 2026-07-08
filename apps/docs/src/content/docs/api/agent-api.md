@@ -23,9 +23,11 @@ import {
   defineTool,
   dispatch,
   getAgentInstance,
+  useAgentFinish,
+  useAgentStart,
+  useAppendMessage,
   useDelivery,
   useDispatchMessage,
-  useEffect,
   useInstruction,
   useMessageData,
   useMessageMetadata,
@@ -34,11 +36,15 @@ import {
   useState,
   useSubagent,
   useTool,
+  type AgentAppendMessage,
   type AgentDispatchRequest,
+  type AgentFinishContext,
   type AgentFunction,
   type AgentInstanceInfo,
   type AgentModuleValue,
+  type AgentResponseToolCall,
   type AgentSignalAppend,
+  type AgentStartContext,
   type BashFactory,
   type CallHandle,
   type CompactionConfig,
@@ -47,7 +53,6 @@ import {
   type DeliveredMessage,
   type DispatchReceipt,
   type DurabilityConfig,
-  type EffectContext,
   type FileStat,
   type FlueFs,
   type FlueHarness,
@@ -117,7 +122,7 @@ export default defineAgent(Support, { model: 'anthropic/claude-sonnet-4-6' });
 
 The directive gives the agent its durable identity (the file basename) and registers it with the built application — there is no name-based addressing beyond that identity. To expose the agent over HTTP, mount `agent.route()` in `app.ts`; see the [Routing API](/docs/api/routing-api/). A dispatch-only agent needs no mount. `flue run <path>` and raw `defineAgent()` values in unit tests do not require the directive.
 
-The agent function re-renders every turn as durable state changes — it must return synchronously and the tools, state, skills, and subagents it attaches (`useTool()`, `useSkill()`, `useSubagent()`, and other hooks) must stay identical across renders. Async work belongs in tools, `useEffect()`, or resource factories, never in the agent function body itself.
+The agent function re-renders every turn as durable state changes — it must return synchronously and the tools, state, skills, and subagents it attaches (`useTool()`, `useSkill()`, `useSubagent()`, and other hooks) must stay identical across renders. Async work belongs in tools, lifecycle hooks (`useAgentStart()`, `useAgentFinish()`), or resource factories, never in the agent function body itself.
 
 The runtime passes the top-level agent function an `AgentProps` object — the agent's route data, the way a web framework passes route params to the page component. Zero-argument agent functions stay assignable unchanged. Only the root receives it: custom hooks get whatever arguments their caller passes, and a subagent's agent function gets nothing (a delegate runs in isolation from the parent).
 
@@ -196,7 +201,7 @@ type AgentFunction<TProps = void> = TProps extends void
   : (props: TProps) => string | undefined | void;
 ```
 
-A plain synchronous function that composes agent behavior: Flue Hooks in the body attach what it provides, and the returned string is its instruction — the prose that teaches the model who it is and how to use it. Return nothing for a tools-only agent function. Agent functions must return synchronously; async work lives in tools, `useEffect()`, or resource factories.
+A plain synchronous function that composes agent behavior: Flue Hooks in the body attach what it provides, and the returned string is its instruction — the prose that teaches the model who it is and how to use it. Return nothing for a tools-only agent function. Agent functions must return synchronously; async work lives in tools, lifecycle hooks, or resource factories.
 
 ### Custom hooks
 
@@ -381,41 +386,123 @@ export default function IssueTriage() {
 
 Constant across every render of one run. In a subagent render, the delivery is the parent's task prompt as a `kind: 'user'` message. Always present — every agent run is triggered by a delivered message.
 
-### `useEffect(...)`
+### `useAgentStart(...)`
 
 ```ts
-function useEffect(run: (ctx: EffectContext) => void | Promise<void>, deps: readonly unknown[]): void;
+function useAgentStart(run: (ctx: AgentStartContext) => void | Promise<void>): void;
 ```
 
-Runs a side effect at the start of a submission — after the delivered input is durable, before the model's first turn — with a deps array as the whole cadence contract: `[delivery]` runs every message, `[]` once per agent instance lifetime, `[someState]` when that durable value moved since the effect's last run.
+Runs a callback when the agent starts work on a delivered message — after the input is durable, before the model's first turn. The intake seam: load what the model should wake up knowing, seed files, write durable state, and announce it with a signal from [`useAppendMessage()`](#useappendmessage) so the model reads it ahead of its first response.
 
 ```ts
 export default function IssueTriage() {
   const delivery = useDelivery();
+  const append = useAppendMessage();
 
-  useEffect(async ({ harness, log, append }) => {
+  useAgentStart(async ({ harness, log }) => {
     const issue = await loadIssue(deliveredIssueNumber(delivery));
     await harness.fs.writeFile(`triage/gh-${issue.number}/issue.md`, digest(issue));
     setIssue(issue);
-    append({ type: 'intake', body: `Issue #${issue.number} loaded.` });
-  }, [delivery]);
+    append({ kind: 'signal', type: 'intake', body: `Issue #${issue.number} loaded.` });
+  });
 }
 ```
 
-`run` may be async and is awaited; it returns void — no cleanup function. `run` receives `{ harness, log, append, signal }`: `append` writes a durable signal into the running submission, ordered before the model's next turn, atomic with the effect's outcome batch — the intake pattern's home. Effects are NOT reactive: they evaluate once per delivered submission, in declaration order, sequentially. Identity is call order — across deploys, append new effects after existing ones. At-least-once: an interrupted run re-runs on the re-attempt; a completed run is adopted, never repeated. Not available in a subagent render.
-
-#### `EffectContext`
+`run` may be async and is awaited; a throw fails the submission before the model runs. It fires on every delivered message — there is no cadence configuration; for work that should happen once in the instance's lifetime, guard with durable state (`if (loaded) return`). Callbacks are NOT reactive: they evaluate once per delivered submission, in declaration order, sequentially. Identity is call order — across deploys, add new hooks after existing ones. At-least-once: an interrupted run re-runs on the re-attempt; a completed run is adopted, never repeated. Not available in a subagent render.
 
 ```ts
-interface EffectContext {
+interface AgentStartContext {
   harness: FlueHarness;
   log: FlueLogger;
-  append: (signal: AgentSignalAppend) => void;
   signal: AbortSignal;
 }
 ```
 
-`harness` is the invocation-scoped runtime surface (sandbox `shell`/`fs`, child sessions, model calls), materialized lazily on first access. `log` emits progress lines into the conversation stream — the model never sees them. `append` is write-only and non-reactive: it never re-runs the agent. `signal` is the submission's abort signal.
+`harness` is the invocation-scoped runtime surface (sandbox `shell`/`fs`, child sessions, model calls), materialized lazily on first access. `log` emits progress lines into the conversation stream — the model never sees them. `signal` is the submission's abort signal.
+
+### `useAgentFinish(...)`
+
+```ts
+function useAgentFinish(run: (ctx: AgentFinishContext) => void | Promise<void>): void;
+```
+
+Runs a callback when the agent would otherwise finish responding — the model has no more tool calls and the response is about to settle. The enforcement seam: inspect what the response actually did and, if the work is not done, append a signal to send the model back to work within the same response.
+
+```ts
+function Assistant() {
+  const append = useAppendMessage();
+  useTool(postMessage(data));
+
+  useAgentFinish(({ response }) => {
+    const posted = response.toolCalls.some(
+      (call) => call.tool === 'post_message' && !call.isError,
+    );
+    if (posted) return; // nothing appended → the response settles
+    append({
+      kind: 'signal',
+      type: 'reminder',
+      body: 'You ended without calling post_message — nothing reached the user. Call it now with your answer.',
+    });
+  });
+}
+```
+
+Appending during the callback continues the response with another turn; once that continuation is dealt with, the hook runs again at the next would-stop point. The response settles only when a cycle completes with no appends. (A [`useDispatchMessage()`](#usedispatchmessage) dispatch, by contrast, is new input for a *new* submission — it lets the current response settle and does not re-run this hook.) Continued cycles are durable: a resumed response neither re-runs a completed cycle nor appends twice, and a hook that appends unconditionally fails loudly at a fixed framework ceiling instead of settling as a success. The submission's [durability timeout](#durabilityconfig) remains the total wall-clock backstop — continuations never extend it. Runs on delivered submissions only, in declaration order; a throw fails the submission. Not available in a subagent render.
+
+```ts
+interface AgentFinishContext {
+  response: { toolCalls: readonly AgentResponseToolCall[] };
+  harness: FlueHarness;
+  log: FlueLogger;
+  signal: AbortSignal;
+}
+
+interface AgentResponseToolCall {
+  tool: string;
+  isError: boolean;
+}
+```
+
+`response.toolCalls` aggregates every tool call the response has made — across all turns, derived from durable records, so a resumed response still sees calls made before an interruption. The rest is the `useAgentStart` context surface.
+
+### `useAppendMessage()`
+
+```ts
+function useAppendMessage(): (message: AgentAppendMessage) => void;
+```
+
+Gets a writer that appends a signal message into the agent's own running response — the counterpart to [`useDispatchMessage()`](#usedispatchmessage). A dispatch is real new input: a new durable submission that wakes the agent. An append annotates the response the agent is producing right now: the model reads it at the next turn boundary, it is durable and ordered exactly where the live loop saw it, and it never wakes the agent on its own.
+
+```ts
+function Support() {
+  const append = useAppendMessage();
+  useTool({
+    name: 'check_order',
+    description: 'Look up the order and note anomalies for the model.',
+    run: async ({ data }) => {
+      const order = await lookupOrder(data.orderId);
+      if (order.flagged) {
+        append({ kind: 'signal', type: 'note', body: 'Order is fraud-flagged; do not promise a refund.' });
+      }
+      return order.summary;
+    },
+  });
+}
+```
+
+The message is the same signal form `dispatch()` uses:
+
+```ts
+interface AgentAppendMessage {
+  kind: 'signal';
+  type: string;
+  body: string;
+  attributes?: Record<string, string>;
+  tagName?: string;
+}
+```
+
+`kind: 'user'` is rejected — a user message is real new input and belongs on `useDispatchMessage()`. The writer is legal only while the agent is responding: from tool `run` functions and lifecycle hook callbacks. It throws during render and when the agent is idle. Appending during a `useAgentFinish` callback is the continuation signal — the response runs another turn instead of settling. Not available in a subagent render.
 
 ### `useInitialData()`
 
@@ -472,7 +559,7 @@ export default function IssueTriage() {
 
 Same semantics as the global `dispatch()` — same queue, same admission, same delivery: mid-run, the message joins the conversation at the next turn boundary; when the agent is idle, it wakes a new submission, so a late callback behaves exactly like an external sender. Both message kinds work: `signal` annotates, `user` queues a real follow-up turn. Each call is a durable submission with its own receipt — like any external side effect in a re-attempted tool, a re-run dispatches again; design for at-least-once. Throws during render and on bare tooling/test renders with no runtime behind them. Not available in a subagent render (a delegate returns what it produced as its task result instead).
 
-For a durable signal ordered into the *current* submission before the model's first turn — the intake pattern — use an effect's `append` instead (see [`useEffect`](#useeffect)); it rides the effect's atomic outcome batch rather than opening a new one.
+For a durable signal ordered into the *current* response — the intake pattern, a mid-run annotation, or a `useAgentFinish` continuation — use the writer from [`useAppendMessage()`](#useappendmessage) instead; it joins the running response rather than opening a new submission.
 
 ### `useMessageData(...)`
 

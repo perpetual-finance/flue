@@ -188,14 +188,6 @@ export interface ReducedInstanceState {
 	 */
 	state: Map<string, unknown>;
 	/**
-	 * Last completed `useEffect` run per declaration index (`effect_run`),
-	 * last-write-wins in stream order. Instance-scoped like `state` — effects
-	 * belong to the root agent render. The session's effect evaluation reads
-	 * this as its durable memo: fingerprint match → skip; same submission →
-	 * re-attempt adoption.
-	 */
-	effectRuns: Map<number, { fingerprint: string; submissionId?: string }>;
-	/**
 	 * Instance-creation data from the root conversation's
 	 * `conversation_created` record. Present (as a box) once the root
 	 * conversation exists — `value` may itself be undefined when creation
@@ -225,7 +217,6 @@ export function createReducedInstanceState(): ReducedInstanceState {
 		conversationScopes: new Map(),
 		recordsById: new Map(),
 		state: new Map(),
-		effectRuns: new Map(),
 	};
 }
 
@@ -246,7 +237,6 @@ function cloneReducedInstanceState(state: ReducedInstanceState): ReducedInstance
 		conversationScopes: new Map(state.conversationScopes),
 		recordsById: new Map(state.recordsById),
 		state: new Map(state.state),
-		effectRuns: new Map(state.effectRuns),
 		...(state.initialData ? { initialData: state.initialData } : {}),
 		...(state.uid !== undefined ? { uid: state.uid } : {}),
 		conversations: new Map(
@@ -661,10 +651,13 @@ export function applyConversationRecord(
 			state.state.set(record.name, record.value);
 			break;
 		case 'effect_run':
-			state.effectRuns.set(record.index, {
-				fingerprint: record.fingerprint,
-				...(record.submissionId ? { submissionId: record.submissionId } : {}),
-			});
+			// Legacy record from the removed `useEffect` hook: retained in
+			// `recordsById` like every record, folded into nothing.
+			break;
+		case 'agent_start_run':
+		case 'agent_finish_cycle':
+			// Lifecycle-hook bookkeeping: the session reads these straight from
+			// `recordsById` (submission-scoped scans), no folded state needed.
 			break;
 		case 'message_metadata': {
 			if (!record.submissionId) fail(record, `Response metadata requires a tracked submission.`);

@@ -5,7 +5,7 @@ import type { FlueHarness, FlueLogger, PromptUsage } from './types.ts';
  * The write channels behind the output hooks. Client-facing output
  * (`useMessageData`, `useMessageMetadata`) decorates the agent's response
  * message for clients and never reaches the model; model-facing appends
- * (an effect's `append`) write signal records into the agent's own
+ * (`useAppendMessage`) write signal records into the agent's own
  * conversation history. Both are write-only and non-reactive — nothing here
  * re-runs the agent.
  */
@@ -38,11 +38,11 @@ export interface MessageMetadataProducers {
 }
 
 /**
- * One `append()` call from an effect: a signal authored by agent code into
- * the current agent's conversation history. Field-for-field the code-side
- * twin of a `kind: 'signal'` delivered message (same validation, same
- * rendering) — minus delivery semantics: an append annotates the running
- * submission and never wakes the agent.
+ * One `useAppendMessage` write: a signal authored by agent code into the
+ * current agent's conversation history. Field-for-field the code-side twin
+ * of a `kind: 'signal'` delivered message (same validation, same rendering)
+ * — minus delivery semantics: an append annotates the running response and
+ * never wakes the agent.
  */
 export interface AgentSignalAppend {
 	type: string;
@@ -51,8 +51,19 @@ export interface AgentSignalAppend {
 	tagName?: string;
 }
 
-const SignalAppendSchema = v.strictObject(
+/**
+ * The message shape `useAppendMessage` writers accept: the same signal form
+ * `dispatch()` messages use, so appending and dispatching share one
+ * vocabulary. Only `kind: 'signal'` is accepted — a `kind: 'user'` message is
+ * real new input and belongs on `useDispatchMessage()`.
+ */
+export interface AgentAppendMessage extends AgentSignalAppend {
+	kind: 'signal';
+}
+
+const AppendMessageSchema = v.strictObject(
 	{
+		kind: v.literal('signal', 'message "kind" must be "signal"'),
 		type: v.pipe(v.string(), v.nonEmpty('signal "type" must not be empty')),
 		body: v.string('signal "body" must be a string'),
 		attributes: v.optional(v.record(v.string(), v.string())),
@@ -75,12 +86,21 @@ const SignalAppendSchema = v.strictObject(
 		issue.expected === 'never' ? `received unknown signal field ${issue.received}` : issue.message,
 );
 
-/** Validate one effect `append()` argument; throws with field-level detail. */
-export function assertSignalAppend(signal: unknown): AgentSignalAppend {
-	const parsed = v.safeParse(SignalAppendSchema, signal);
+/** Validate one `useAppendMessage` argument; throws with field-level detail. */
+export function assertAppendMessage(message: unknown): AgentSignalAppend {
+	if (
+		typeof message === 'object' &&
+		message !== null &&
+		(message as { kind?: unknown }).kind === 'user'
+	) {
+		throw new Error(
+			'[flue] useAppendMessage() only appends kind: "signal" messages into the running response. A kind: "user" message is real new input — send it with the dispatcher from useDispatchMessage() instead.',
+		);
+	}
+	const parsed = v.safeParse(AppendMessageSchema, message);
 	if (!parsed.success) {
 		throw new Error(
-			`[flue] append() signal is invalid: ${parsed.issues.map((issue) => issue.message).join('; ')}.`,
+			`[flue] useAppendMessage() message is invalid: ${parsed.issues.map((issue) => issue.message).join('; ')}.`,
 		);
 	}
 	const { type, body, attributes, tagName } = parsed.output;
@@ -93,59 +113,82 @@ export function assertSignalAppend(signal: unknown): AgentSignalAppend {
 }
 
 /**
- * The context a `useEffect` run callback receives. `log` emits progress lines
- * into the conversation stream (the model never sees them); `append` writes a
- * signal into the running submission — durable and flushed live, ordered
- * before the model's next turn, atomic with the effect's outcome batch;
- * `signal` is the submission's abort signal; `harness` is the
- * invocation-scoped runtime surface (sandbox `shell`/`fs`, child sessions,
- * model calls) — available on every effect, materialized lazily on first
- * access, so an effect that never touches it pays nothing.
- *
- * Transitional: `useEffect` (and with it this context) is slated to be
- * replaced by event hooks mapped to pi events (onSessionStart, onToolCall,
- * ...); `append` rides along until then rather than surviving as standalone
- * API.
+ * The context a `useAgentStart` callback receives. `log` emits progress lines
+ * into the conversation stream (the model never sees them); `signal` is the
+ * submission's abort signal; `harness` is the invocation-scoped runtime
+ * surface (sandbox `shell`/`fs`, child sessions, model calls) — materialized
+ * lazily on first access, so a callback that never touches it pays nothing.
+ * To put a signal in front of the model, use the writer from
+ * `useAppendMessage()`.
  */
-export interface EffectContext {
+export interface AgentStartContext {
 	readonly harness: FlueHarness;
 	readonly log: FlueLogger;
-	readonly append: (signal: AgentSignalAppend) => void;
 	readonly signal: AbortSignal;
 }
 
+/** One tool call the current response has made, from the durable record log. */
+export interface AgentResponseToolCall {
+	/** The tool's name as the model called it. */
+	tool: string;
+	/** Whether the call's recorded outcome was an error. */
+	isError: boolean;
+}
+
 /**
- * One `useEffect` declaration from a render: the run callback plus the JSON
- * fingerprint of its deps array, computed at render time. Identity is the
- * declaration index (position in this list).
+ * The context a `useAgentFinish` callback receives: the `useAgentStart`
+ * surface plus visibility into the response so far. `response.toolCalls`
+ * aggregates every tool call the response has made — across all turns and
+ * across re-attempts (derived from durable records, so a resumed response
+ * still sees calls made before an interruption).
  */
-export interface AgentEffectDeclaration {
-	run: (ctx: EffectContext) => void | Promise<void>;
-	fingerprint: string;
+export interface AgentFinishContext {
+	readonly response: { readonly toolCalls: readonly AgentResponseToolCall[] };
+	readonly harness: FlueHarness;
+	readonly log: FlueLogger;
+	readonly signal: AbortSignal;
+}
+
+/** One `useAgentStart` declaration; identity is the declaration index. */
+export interface AgentStartDeclaration {
+	run: (ctx: AgentStartContext) => void | Promise<void>;
+}
+
+/** One `useAgentFinish` declaration; identity is the declaration index. */
+export interface AgentFinishDeclaration {
+	run: (ctx: AgentFinishContext) => void | Promise<void>;
 }
 
 /**
  * The output channel shared between renders and the session, mirroring the
  * `useState` buffer pattern: created once per harness lifetime, handed to
- * both sides. Renders replace `producers` and `effects` wholesale each render
- * (fresh closures); `useMessageData` writers call `writeMessageData`; the
- * session connects the sink that appends durable records.
+ * both sides. Renders replace `producers` and the lifecycle declarations
+ * wholesale each render (fresh closures); `useMessageData` writers call
+ * `writeMessageData`; `useAppendMessage` writers call `appendSignal`; the
+ * session connects the sinks that reach the durable log.
  */
 export interface AgentOutputChannel {
 	/** Metadata producers from the latest render. */
 	producers: MessageMetadataProducers;
-	/** `useEffect` declarations from the latest render, in call order. */
-	effects: AgentEffectDeclaration[];
+	/** `useAgentStart` declarations from the latest render, in call order. */
+	agentStarts: AgentStartDeclaration[];
+	/** `useAgentFinish` declarations from the latest render, in call order. */
+	agentFinishes: AgentFinishDeclaration[];
 	/** Wire the session-side sink data writes flow into. */
 	connect(sink: (name: string, data: unknown) => void): void;
 	writeMessageData(name: string, data: unknown): void;
+	/** Wire the session-side sink signal appends flow into. */
+	connectSignals(sink: (signal: AgentSignalAppend) => void): void;
+	appendSignal(signal: AgentSignalAppend): void;
 }
 
 export function createAgentOutputChannel(): AgentOutputChannel {
 	let sink: ((name: string, data: unknown) => void) | undefined;
+	let signalSink: ((signal: AgentSignalAppend) => void) | undefined;
 	return {
 		producers: { start: [], finish: [] },
-		effects: [],
+		agentStarts: [],
+		agentFinishes: [],
 		connect(next) {
 			sink = next;
 		},
@@ -156,6 +199,17 @@ export function createAgentOutputChannel(): AgentOutputChannel {
 				);
 			}
 			sink(name, data);
+		},
+		connectSignals(next) {
+			signalSink = next;
+		},
+		appendSignal(signal) {
+			if (!signalSink) {
+				throw new Error(
+					'[flue] useAppendMessage() has no durable runtime behind this render, so appends are unavailable.',
+				);
+			}
+			signalSink(signal);
 		},
 	};
 }

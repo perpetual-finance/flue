@@ -38,9 +38,11 @@ export type {
 	FlueExecutionOperation,
 } from './execution-interceptor.ts';
 export { type StateSetter, useState } from './hooks/state.ts';
+export { useAgentFinish } from './hooks/use-agent-finish.ts';
+export { useAgentStart } from './hooks/use-agent-start.ts';
+export { useAppendMessage } from './hooks/use-append-message.ts';
 export { useDelivery } from './hooks/use-delivery.ts';
 export { useDispatchMessage } from './hooks/use-dispatch-message.ts';
-export { useEffect } from './hooks/use-effect.ts';
 export { useInitialData } from './hooks/use-initial-data.ts';
 export { useInstruction } from './hooks/use-instruction.ts';
 export { useMessageData } from './hooks/use-message-data.ts';
@@ -54,8 +56,11 @@ export type { JsonValue } from './json-snapshot.ts';
 export type { McpServerConnection, McpServerOptions, McpTransport } from './mcp.ts';
 export { connectMcpServer } from './mcp.ts';
 export type {
+	AgentAppendMessage,
+	AgentFinishContext,
+	AgentResponseToolCall,
 	AgentSignalAppend,
-	EffectContext,
+	AgentStartContext,
 	MessageMetadataEvent,
 	MessageMetadataPoint,
 	MessageMetadataProducer,

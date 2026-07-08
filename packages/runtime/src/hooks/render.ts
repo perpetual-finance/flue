@@ -61,10 +61,11 @@ export interface AgentRenderStructure {
 	subagentNames: readonly string[];
 	hasSandbox: boolean;
 	/**
-	 * `useEffect` declarations this render. Effects have no names — identity
-	 * is call order — so the count (with the rules of hooks) pins the order.
+	 * Lifecycle declarations this render. Hooks have no names — identity is
+	 * call order — so the counts (with the rules of hooks) pin the order.
 	 */
-	effectCount: number;
+	agentStartCount: number;
+	agentFinishCount: number;
 }
 
 /** `renderAgentFunction` plus the render's structural fingerprint. */
@@ -77,7 +78,7 @@ export function renderAgentFunctionWithStructure(
 	const { result, frame } = renderWithFrame(() => agent(props), state);
 	assertAgentInstruction(result);
 	assertUniqueToolNames(frame);
-	// Hand the render's metadata producers and effect declarations to the
+	// Hand the render's metadata producers and lifecycle declarations to the
 	// session through the shared output channel — replaced wholesale each
 	// render, so per-turn re-renders refresh the closures the same way tools
 	// and instructions refresh.
@@ -86,7 +87,8 @@ export function renderAgentFunctionWithStructure(
 			start: [...frame.metadataProducers.start],
 			finish: [...frame.metadataProducers.finish],
 		};
-		state.output.effects = [...frame.effects];
+		state.output.agentStarts = [...frame.agentStarts];
+		state.output.agentFinishes = [...frame.agentFinishes];
 	}
 	const instructions = composeAgentDocument(result, frame);
 	const tools = frame.root.tools;
@@ -110,7 +112,8 @@ export function renderAgentFunctionWithStructure(
 			skillNames: frame.skills.map((skill) => skill.name),
 			subagentNames: frame.subagents.map((subagent) => subagent.name),
 			hasSandbox: frame.sandbox !== undefined,
-			effectCount: frame.effects.length,
+			agentStartCount: frame.agentStarts.length,
+			agentFinishCount: frame.agentFinishes.length,
 		},
 	};
 }
@@ -177,8 +180,15 @@ export function assertRenderStructureInvariance(
 	if (previous.hasSandbox !== next.hasSandbox) {
 		problems.push(`sandbox ${next.hasSandbox ? 'added' : 'removed'}`);
 	}
-	if (previous.effectCount !== next.effectCount) {
-		problems.push(`effect count changed (${previous.effectCount} → ${next.effectCount})`);
+	if (previous.agentStartCount !== next.agentStartCount) {
+		problems.push(
+			`useAgentStart count changed (${previous.agentStartCount} → ${next.agentStartCount})`,
+		);
+	}
+	if (previous.agentFinishCount !== next.agentFinishCount) {
+		problems.push(
+			`useAgentFinish count changed (${previous.agentFinishCount} → ${next.agentFinishCount})`,
+		);
 	}
 	if (problems.length > 0) {
 		throw new Error(

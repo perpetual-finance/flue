@@ -1,6 +1,7 @@
 import type {
-	AgentEffectDeclaration,
+	AgentFinishDeclaration,
 	AgentOutputChannel,
+	AgentStartDeclaration,
 	MessageMetadataProducers,
 } from '../message-output.ts';
 import type { ToolDefinition } from '../tool-types.ts';
@@ -91,8 +92,10 @@ export interface RenderFrame {
 	messageDataNames: Set<string>;
 	/** `useMessageMetadata` producers declared this render, in call order per point. */
 	metadataProducers: MessageMetadataProducers;
-	/** `useEffect` declarations this render, in call order (identity = index). */
-	effects: AgentEffectDeclaration[];
+	/** `useAgentStart` declarations this render, in call order (identity = index). */
+	agentStarts: AgentStartDeclaration[];
+	/** `useAgentFinish` declarations this render, in call order (identity = index). */
+	agentFinishes: AgentFinishDeclaration[];
 	/** The render's `useSandbox` attachment; at most one per render. */
 	sandbox: SandboxFactory | undefined;
 	/** `useSkill` mounts across the whole render, in call order; names unique. */
@@ -138,7 +141,8 @@ export function renderWithFrame<T>(
 		stateNames: new Set(),
 		messageDataNames: new Set(),
 		metadataProducers: { start: [], finish: [] },
-		effects: [],
+		agentStarts: [],
+		agentFinishes: [],
 		sandbox: undefined,
 		skills: [],
 		subagents: [],

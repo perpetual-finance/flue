@@ -294,19 +294,41 @@ export interface StateWriteRecord extends ConversationRecordEnvelope {
 }
 
 /**
- * One completed `useEffect` run. Identity is the effect's declaration index
- * (call order — effects carry no durable name); `fingerprint` is the JSON of
- * the deps array the run was declared with. The record log is the effect's
- * durable memo: an effect runs at a submission's start only when its current
- * fingerprint differs from its last recorded run (and a re-attempt of the
- * same submission adopts the record instead of re-running). Appended in the
- * same batch as the run's buffered state writes and signal appends — one
- * durability point per effect.
+ * LEGACY: one completed run of the removed `useEffect` hook. Durable streams
+ * written before the lifecycle hooks (`useAgentStart`/`useAgentFinish`)
+ * replaced effects carry these records forever; the type stays parseable but
+ * nothing consumes it.
  */
 interface EffectRunRecord extends ConversationRecordEnvelope {
 	type: 'effect_run';
 	index: number;
 	fingerprint: string;
+}
+
+/**
+ * One completed `useAgentStart` run. Identity is the declaration index (call
+ * order — hooks carry no durable name); the submission in the envelope is the
+ * adoption key: a callback runs once per submission, and a re-attempt of the
+ * same submission adopts the record instead of re-running. Appended in the
+ * same batch as the run's buffered state writes — one durability point per
+ * callback.
+ */
+interface AgentStartRunRecord extends ConversationRecordEnvelope {
+	type: 'agent_start_run';
+	index: number;
+}
+
+/**
+ * One continued `useAgentFinish` cycle: the would-stop evaluation appended at
+ * least one signal, so the response continues with another turn. Written only
+ * for continued cycles (a cycle with no appends settles the response and
+ * needs no record), batch-atomic with the cycle's signal records. The count
+ * of these records per submission is the durable continuation counter behind
+ * the runaway ceiling, and survives re-attempts.
+ */
+interface AgentFinishCycleRecord extends ConversationRecordEnvelope {
+	type: 'agent_finish_cycle';
+	cycle: number;
 }
 
 /**
@@ -352,6 +374,8 @@ export type ConversationRecord =
 	| SubmissionSettledRecord
 	| StateWriteRecord
 	| EffectRunRecord
+	| AgentStartRunRecord
+	| AgentFinishCycleRecord
 	| MessageDataWriteRecord
 	| MessageMetadataRecord;
 
