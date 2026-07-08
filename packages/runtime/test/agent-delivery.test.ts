@@ -155,8 +155,9 @@ describe('useDelivery()', () => {
 		await coordinator.waitForIdle();
 		await coordinator.shutdown();
 
-		// The value survived the durable payload round trip and was identical in
-		// every render of the run — including the re-render before turn two.
+		// The value survived the durable payload round trip, and with no joins
+		// or appends the cursor never advanced — every render of the response
+		// read the waking delivery, including the re-render before turn two.
 		expect(toolSaw).toEqual(message);
 		expect(rendersSaw.length).toBeGreaterThanOrEqual(2);
 		for (const seen of rendersSaw) expect(seen).toEqual(message);

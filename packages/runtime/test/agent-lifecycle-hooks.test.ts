@@ -306,6 +306,78 @@ describe('useAgentStart()', () => {
 		expect(new Set(startRuns.map((record) => record.submissionId)).size).toBe(2);
 	});
 
+	it('useDelivery is a cursor: a joined delivery start hook reads THAT message', async () => {
+		const dbPath = createTempDbPath();
+		const stores = await connectSqlite(dbPath);
+		const provider = createFauxProvider();
+		provider.setResponses([
+			fauxAssistantMessage(fauxToolCall('trigger_dispatches', {}, { id: 'tool-cur-1' }), {
+				stopReason: 'toolUse',
+			}),
+			fauxAssistantMessage('All handled.'),
+		]);
+
+		const hookSaw: string[] = [];
+		function assistant() {
+			const delivery = useDelivery();
+			const dispatch = useDispatchMessage();
+			useAgentStart(() => {
+				hookSaw.push(delivery.kind === 'signal' ? `signal:${delivery.type}` : `user:${delivery.body}`);
+			});
+			useTool({
+				name: 'trigger_dispatches',
+				description: 'Dispatch two follow-up signals to this same instance mid-run.',
+				run: async () => {
+					await dispatch({ kind: 'signal', type: 'first', body: 'One.' });
+					await dispatch({ kind: 'signal', type: 'second', body: 'Two.' });
+					return 'dispatched';
+				},
+			});
+			return 'Agent.';
+		}
+
+		const coordinator = makeCoordinator(provider, stores, assistant);
+		await dispatchAndSettle(coordinator, 'Go.');
+		await coordinator.shutdown();
+
+		// The join boundary re-renders with the cursor advanced, so each
+		// delivery's hook run closes over ITS message — the waking user
+		// message, then each joined signal, in the order the model read them.
+		expect(hookSaw).toEqual(['user:Go.', 'signal:first', 'signal:second']);
+	});
+
+	it('a finish append advances the cursor for the continuation render', async () => {
+		const dbPath = createTempDbPath();
+		const stores = await connectSqlite(dbPath);
+		const provider = createFauxProvider();
+		provider.setResponses([
+			fauxAssistantMessage('Text only.'),
+			fauxAssistantMessage('Handled the reminder.'),
+		]);
+
+		const rendersSaw: string[] = [];
+		let nudged = false;
+		function assistant() {
+			const delivery = useDelivery();
+			rendersSaw.push(delivery.kind === 'signal' ? `signal:${delivery.type}` : `user:${delivery.body}`);
+			useAgentFinish(({ append }) => {
+				if (nudged) return;
+				nudged = true;
+				append({ kind: 'signal', type: 'reminder', body: 'Keep going.' });
+			});
+			return 'Agent.';
+		}
+
+		const coordinator = makeCoordinator(provider, stores, assistant);
+		await dispatchAndSettle(coordinator, 'Go.');
+		await coordinator.shutdown();
+
+		// The appended reminder is the message in front of the model on the
+		// continuation turn — its render's cursor says so.
+		expect(rendersSaw.at(0)).toBe('user:Go.');
+		expect(rendersSaw.at(-1)).toBe('signal:reminder');
+	});
+
 	it('ctx.append writes a signal ahead of turn one without registering a delivery', async () => {
 		const dbPath = createTempDbPath();
 		const stores = await connectSqlite(dbPath);

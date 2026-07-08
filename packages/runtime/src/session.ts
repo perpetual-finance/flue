@@ -394,6 +394,14 @@ interface SessionInitOptions {
 	 * the response's start/finish points.
 	 */
 	output?: AgentOutputChannel;
+	/**
+	 * Advance the render state's delivery cursor (function agents only):
+	 * `useDelivery()` returns the latest message put in front of the model,
+	 * so the session moves it when a delivery joins the live response or a
+	 * lifecycle callback appends a signal. Renders observe the new value from
+	 * the next re-render.
+	 */
+	advanceDelivery?: (message: DeliveredMessage) => void;
 }
 
 /** One re-render's session-facing output: what the next turn runs with. */
@@ -585,6 +593,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	private hookState: HookStateBuffer | undefined;
 	private rerender: SessionRerender | undefined;
 	private outputChannel: AgentOutputChannel | undefined;
+	private advanceDelivery: ((message: DeliveredMessage) => void) | undefined;
 	/** First assistant messageId of the active submission (the response message). */
 	private responseMessageId: string | undefined;
 	/** Whether the active submission has a durably completed assistant step (the data-write anchor). */
@@ -623,6 +632,8 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	private activeJoinSource: SubmissionJoinSource | undefined;
 	/** The active submission's abort signal, for join work at turn boundaries. */
 	private activeJoinSignal: AbortSignal | undefined;
+	/** The active submission's canonical input entry id (delivery-cursor floor). */
+	private activeInputEntryId: string | undefined;
 
 	private emitTurnRequestAndStream: StreamFn = async (model, context, options) => {
 		if (this.activeTurnId === undefined) this.activeTurnId = generateTurnId();
@@ -782,6 +793,16 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				timestamp,
 			),
 		);
+		// The delivery cursor is uniform: appended signals advance it exactly
+		// like delivered ones — `useDelivery()` reads the latest message in
+		// front of the model, whatever put it there.
+		this.advanceDelivery?.({
+			kind: 'signal',
+			type: signal.type,
+			body: signal.body,
+			...(signal.attributes ? { attributes: signal.attributes } : {}),
+			...(signal.tagName ? { tagName: signal.tagName } : {}),
+		});
 	}
 
 	/**
@@ -1126,6 +1147,10 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		}
 		// An already-applied input (a reverted join whose record survived) is
 		// in the rebuilt context — steering it again would duplicate it live.
+		// Advance the delivery cursor before the delivery's hooks run: the
+		// join boundary re-renders, so `useDelivery()` closures in those hooks
+		// see THIS message.
+		this.advanceDelivery?.(input.message);
 		await this.runAgentStartHooks(signal, input.submissionId, { joined: true });
 		await source.finalize(input.submissionId);
 	}
@@ -1171,6 +1196,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			const entryId = submissionEntryId(input.kind, input.submissionId);
 			if (submission.status === 'joining') {
 				if (await this.conversationWriter.hasConversationEntry(this.conversationId, entryId)) {
+					this.advanceDelivery?.(input.message);
 					await this.runAgentStartHooks(signal, input.submissionId, { joined: true });
 					await source.finalize(input.submissionId);
 				} else {
@@ -1178,7 +1204,61 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				}
 				continue;
 			}
+			this.advanceDelivery?.(input.message);
 			await this.runAgentStartHooks(signal, input.submissionId, { joined: true });
+		}
+		// The per-delivery advances above track hook re-runs in admission
+		// order; the durable record stream then restores the true latest input
+		// (which may be an appended signal after the last join).
+		await this.restoreDeliveryCursor();
+	}
+
+	/**
+	 * Point the delivery cursor at the latest input message of the ACTIVE
+	 * submission on the rebuilt path — a resumed attempt's renders must see
+	 * the same cursor the crashed attempt's renders saw. Entries at or before
+	 * the submission's own input entry leave the threaded waking delivery in
+	 * place; a later signal entry (joined or appended) reconstructs from its
+	 * record, and a later user entry (a joined `kind: 'user'` delivery)
+	 * reconstructs its attachments from the attachment store.
+	 */
+	private async restoreDeliveryCursor(): Promise<void> {
+		const inputEntryId = this.activeInputEntryId;
+		if (!this.advanceDelivery || !inputEntryId) return;
+		const conversation = await this.requireConversation();
+		const path = getActiveConversationPath(conversation);
+		const inputIndex = path.findIndex((entry) => entry.id === inputEntryId);
+		if (inputIndex === -1) return;
+		for (let i = path.length - 1; i > inputIndex; i--) {
+			const entry = path[i];
+			if (entry?.type !== 'message') continue;
+			const message = entry.message;
+			if (message.role === 'signal') {
+				this.advanceDelivery({
+					kind: 'signal',
+					type: message.type,
+					body: message.content,
+					...(message.attributes ? { attributes: message.attributes } : {}),
+					...(message.tagName ? { tagName: message.tagName } : {}),
+				});
+				return;
+			}
+			if (message.role !== 'user') continue;
+			const body = Array.isArray(message.content)
+				? message.content
+						.filter((block) => block.type === 'text')
+						.map((block) => ('text' in block ? block.text : ''))
+						.join('\n')
+				: String(message.content);
+			const refs = [...(entry.attachmentRefs?.values() ?? [])];
+			const attachments =
+				refs.length > 0 ? await this.resolveCanonicalImages(refs.map((ref) => ref.id)) : undefined;
+			this.advanceDelivery({
+				kind: 'user',
+				body,
+				...(attachments?.length ? { attachments } : {}),
+			});
+			return;
 		}
 	}
 
@@ -1457,6 +1537,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		this.hookState = options.hookState;
 		this.rerender = options.rerender;
 		this.outputChannel = options.output;
+		this.advanceDelivery = options.advanceDelivery;
 		this.outputChannel?.connect((name, data) => this.enqueueMessageDataWrite(name, data));
 
 		const systemPrompt = this.config.systemPrompt;
@@ -4516,6 +4597,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				this.activeSubmissionAttemptId = options.submissionAttempt?.attemptId;
 				this.activeJoinSource = options.joinSource;
 				this.activeJoinSignal = options.signal;
+				this.activeInputEntryId = options.inputEntryId;
 				const durability = this.resolveSubmissionDurability(options.startedAt, options.timeoutAt);
 				this.activeTimeoutAt = durability.timeoutAt;
 				try {
@@ -4569,6 +4651,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					this.activeSubmissionAttemptId = undefined;
 					this.activeJoinSource = undefined;
 					this.activeJoinSignal = undefined;
+					this.activeInputEntryId = undefined;
 					this.activeTimeoutAt = undefined;
 				}
 			},

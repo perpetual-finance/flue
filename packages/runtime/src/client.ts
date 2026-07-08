@@ -306,9 +306,10 @@ export async function initializeRootHarness(
 	}
 	const hookState = createHookStateBuffer(reduced.state);
 	const outputChannel = createAgentOutputChannel();
-	// The delivery is constant for the harness lifetime (one submission
-	// attempt), so the first render and every per-turn re-render read the
-	// same triggering input through `useDelivery()`.
+	// The delivery is a CURSOR over the messages put in front of the model:
+	// it starts as the waking delivery and the session advances it when a
+	// delivery joins the live response or a lifecycle callback appends a
+	// signal, so every re-render's `useDelivery()` reads the latest input.
 	const renderState: RenderStateContext = {
 		snapshot: reduced.state,
 		store: hookState,
@@ -394,6 +395,9 @@ export async function initializeRootHarness(
 		outputChannel,
 		creationData,
 		creationUid,
+		(message) => {
+			renderState.delivery = message;
+		},
 	);
 }
 

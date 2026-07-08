@@ -366,7 +366,7 @@ Callable from the agent body or a custom hook — but at most once per render (a
 function useDelivery(): DeliveredMessage;
 ```
 
-Reads the delivered message that triggered the current run — the same validated [`DeliveredMessage`](#deliveredmessage) a `dispatch()` call or a direct HTTP prompt admitted, verbatim.
+Reads the message currently in front of the model — the latest input the response has received, as the same validated [`DeliveredMessage`](#deliveredmessage) shape a `dispatch()` call or a direct HTTP prompt admits. The value is a cursor: it starts as the delivery that woke the response and advances whenever a new message reaches the model — a delivery [joining the live response](#usedispatchmessage) at a turn boundary, or a signal appended by a lifecycle callback.
 
 ```ts
 // dispatch(triage, { id: `issue-${n}`, message: { kind: 'signal',
@@ -383,7 +383,7 @@ export default function IssueTriage() {
 }
 ```
 
-Constant across every render of one run. In a subagent render, the delivery is the parent's task prompt as a `kind: 'user'` message. Always present — every agent run is triggered by a delivered message.
+Constant within one render; fresh at the next. Renders happen before every model call — each turn, and the moment a delivery joins the live response, so a `useAgentStart` closure firing for a joined message reads *that* message. Origin-agnostic: a signal is a signal here whether it arrived by dispatch, HTTP, or a callback's `append`. A resumed attempt derives the same cursor from the durable record stream. In a subagent render, the delivery is the parent's task prompt as a `kind: 'user'` message. Always present — every response starts from a delivered message.
 
 ### `useAgentStart(...)`
 

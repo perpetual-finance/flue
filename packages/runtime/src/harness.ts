@@ -23,6 +23,7 @@ import { execShellWithEvents } from './shell.ts';
 import type {
 	AgentConfig,
 	CallHandle,
+	DeliveredMessage,
 	FlueEventInput,
 	FlueEventInputCallback,
 	FlueFs,
@@ -98,6 +99,13 @@ export class Harness implements FlueHarness {
 		 * agree with the record) or by initializeRootHarness as fallback.
 		 */
 		private creationUid?: string,
+		/**
+		 * Advance the render state's delivery cursor (function agents only):
+		 * `useDelivery()` returns the latest message put in front of the model,
+		 * so the session moves it when a delivery joins the live response or a
+		 * lifecycle callback appends a signal. Same routing as hookState.
+		 */
+		private advanceDelivery?: (message: DeliveredMessage) => void,
 	) {
 		this.fs = createFlueFs(env);
 		if (scopeSignal) {
@@ -222,6 +230,7 @@ export class Harness implements FlueHarness {
 			hookState: this.hookState,
 			rerender: this.rerender,
 			output: this.output,
+			advanceDelivery: this.advanceDelivery,
 		});
 		await session.initializeCanonicalContext();
 		this.openSessions.set(sessionName, session);
