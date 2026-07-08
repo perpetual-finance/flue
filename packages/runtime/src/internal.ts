@@ -8,11 +8,7 @@
  *
  * User agent code should never import from here.
  */
-import { type Api, getModel, type KnownProvider, type Model } from '@earendil-works/pi-ai/compat';
-
 export { Bash, InMemoryFs } from 'just-bash';
-
-import { resolveRegisteredModel } from './runtime/providers.ts';
 
 export type {
 	AgentDispatchAdmission,
@@ -47,6 +43,13 @@ export {
 	runWithInstrumentationOwner,
 } from './instrumentation.ts';
 export { createNodeAgentCoordinator, createNodeDispatchQueue } from './node/agent-coordinator.ts';
+// The shared Node runtime assembly `start()` and the CLI's `flue run` build
+// on: registration → persistence validation → coordinator → runtime seed.
+export type {
+	AssembledNodeAgentRuntime,
+	AssembleNodeAgentRuntimeOptions,
+} from './node/assemble.ts';
+export { assembleNodeAgentRuntime, connectPersistenceAdapter } from './node/assemble.ts';
 export type {
 	AgentSubmissionInput,
 	AttachedAgentSubmissionAdmission,
@@ -94,7 +97,7 @@ export {
 	handleAgentConversationHead,
 	handleAgentConversationRead,
 } from './runtime/handle-conversation-routes.ts';
-export { hasRegisteredProvider, resetProviderRuntime } from './runtime/providers.ts';
+export { hasRegisteredProvider, resetProviderRuntime, resolveModel } from './runtime/providers.ts';
 // Identity registry consumed by the new generated bootstraps (the scanned
 // `'use agent'` set) and by unit tests mounting `AgentDefinition.route()`.
 export type { FlueAgentRegistration } from './runtime/registration.ts';
@@ -116,47 +119,3 @@ export { agentStreamPath } from './runtime/stream-offsets.ts';
 export { bashFactoryToSessionEnv } from './sandbox.ts';
 export { parseSkillMarkdown } from './skill-frontmatter.ts';
 export { buildPackagedSkill, createSkillReference } from './skill-package.ts';
-
-/**
- * Resolve a `provider-id/model-id` model specifier to a pi-ai Model.
- * Registered provider IDs win over pi-ai's catalog; registrations for
- * catalog provider IDs hydrate metadata from the catalog with the
- * registration's options layered on top.
- */
-export function resolveModel(model: string): Model<Api> {
-	const modelSpecifier = model;
-
-	const slash = modelSpecifier.indexOf('/');
-	if (slash === -1) {
-		throw new Error(
-			`[flue] Invalid model specifier "${modelSpecifier}". ` +
-				`Use the "provider-id/model-id" format (e.g. "anthropic/claude-haiku-4-5").`,
-		);
-	}
-	const providerId = modelSpecifier.slice(0, slash);
-	const modelId = modelSpecifier.slice(slash + 1);
-
-	const registered = resolveRegisteredModel(providerId, modelId);
-	if (registered) {
-		if (modelId === '') {
-			throw new Error(
-				`[flue] Invalid model specifier "${modelSpecifier}". ` +
-					`Provider ID "${providerId}" is registered via registerProvider(), but no model ID ` +
-					`was given. Use "${providerId}/<model-id>".`,
-			);
-		}
-		return registered;
-	}
-
-	// `getModel` is typed for literal model IDs; runtime strings are checked by
-	// the null return below.
-	const resolved = getModel(providerId as KnownProvider, modelId as never);
-	if (!resolved) {
-		throw new Error(
-			`[flue] Unknown model specifier "${modelSpecifier}". ` +
-				`Provider ID "${providerId}" / model ID "${modelId}" ` +
-				`is not registered with @earendil-works/pi-ai or via registerProvider().`,
-		);
-	}
-	return resolved;
-}

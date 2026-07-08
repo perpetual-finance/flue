@@ -26,6 +26,15 @@ export function generateInstanceUid(): string {
 	return `inst_${ulid()}`;
 }
 
+/**
+ * A fresh instance *address*, minted when `init()` is called without an id.
+ * Distinct from {@link generateInstanceUid}: this names the reusable address
+ * (normally caller-chosen, e.g. `daily-2026-07-08`), not the incarnation.
+ */
+export function generateInstanceId(): string {
+	return `instance_${ulid()}`;
+}
+
 export function generateRecordId(): string {
 	return `record_${ulid()}`;
 }

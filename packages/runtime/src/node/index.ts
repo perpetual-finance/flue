@@ -8,3 +8,4 @@
  */
 export { sqlite } from './agent-execution-store.ts';
 export { type LocalSandboxOptions, local } from './local.ts';
+export { type Flue, type StartAgent, type StartOptions, start } from './start.ts';

@@ -12,35 +12,25 @@
  * (`dist/run-bootstrap.mjs`) with `@flue/runtime/*` kept external for the
  * same reason.
  *
- * The bootstrap drives the REAL durable submission path — the exact
- * machinery the generated Node server entry uses (@flue/vite's node
- * bootstrap):
- * persistence adapter connect/migrate/validate, `createNodeAgentCoordinator`,
- * a durable direct admission, and settlement observed from the canonical
- * conversation stream. Nothing HTTP is created: no Hono app, no listener,
- * no channels. Conversation reads go through the runtime's own
- * `handleAgentConversationRead` handler invoked in-process with synthetic
- * `Request` values.
+ * The bootstrap drives the REAL durable submission path — the shared
+ * `assembleNodeAgentRuntime` assembly (registration, persistence
+ * connect/migrate/validate, `createNodeAgentCoordinator`, runtime seed), a
+ * durable direct admission, and settlement observed from the canonical
+ * conversation stream via the runtime's observation seam. Nothing HTTP is
+ * created: no Hono app, no listener, no channels.
  */
 
 import type { DeliveredMessage, FunctionAgentDefinition } from '@flue/runtime';
 import {
+	type AssembledNodeAgentRuntime,
 	agentStreamPath,
-	Bash,
-	bashFactoryToSessionEnv,
+	assembleNodeAgentRuntime,
 	type ConversationStreamChunk,
-	configureFlueRuntime,
-	createFlueContext,
+	connectPersistenceAdapter,
 	createInstrumentationOwner,
-	createNodeAgentCoordinator,
-	createNodeDispatchQueue,
-	createRuntimeActivityGate,
-	InMemoryFs,
 	observeSubmissionSettlement,
 	type PersistenceAdapter,
 	readSubmissionReply,
-	registerFlueAgents,
-	resolveModel,
 	runWithInstrumentationOwner,
 } from '@flue/runtime/internal';
 import { sqlite } from '@flue/runtime/node';
@@ -109,15 +99,13 @@ export interface FlueRunSession {
 	close(): Promise<void>;
 }
 
-const SHUTDOWN_TIMEOUT_MS = 30_000;
-
 export async function createFlueRunSession(
 	options: FlueRunSessionOptions,
 ): Promise<FlueRunSession> {
 	const runtimeEnv = options.env ?? process.env;
 	const instrumentationOwner = createInstrumentationOwner();
 	let persistenceAdapter: PersistenceAdapter | undefined;
-	let agentCoordinator: ReturnType<typeof createNodeAgentCoordinator> | undefined;
+	let assembled: AssembledNodeAgentRuntime | undefined;
 
 	try {
 		// User modules evaluate inside the instrumentation owner so that any
@@ -126,137 +114,42 @@ export async function createFlueRunSession(
 		return await runWithInstrumentationOwner(instrumentationOwner, async () => {
 			const agentModule = await options.loadModule(options.agentModulePath);
 			const definition = agentModule.default as FunctionAgentDefinition;
-			// Validates the default export (defineAgent value) and the identity,
-			// and makes `.route()` / definition-addressed `dispatch()` resolvable.
-			registerFlueAgents([{ identity: options.identity, definition }]);
 
 			const dbSource = options.dbSource ?? 'db.ts';
-			let userPersistenceAdapter: PersistenceAdapter | undefined;
+			let adapter: PersistenceAdapter;
+			let adapterSource: string;
 			if (options.dbModulePath !== undefined) {
 				const dbModule = await options.loadModule(options.dbModulePath);
-				userPersistenceAdapter = dbModule.default as PersistenceAdapter;
-				if (!userPersistenceAdapter || typeof userPersistenceAdapter.connect !== 'function') {
-					throw new Error(
-						`[flue] ${dbSource} must default-export a PersistenceAdapter with a connect() method.`,
-					);
-				}
-			}
-
-			// ── Persistence ─────────────────────────────────────────────────
-			// Ported from the generated Node entry (now @flue/vite's node
-			// bootstrap): connect() is awaited once at startup so an unreachable or
-			// misconfigured database fails at boot, not mid-conversation.
-			let stores: Awaited<ReturnType<PersistenceAdapter['connect']>>;
-			if (userPersistenceAdapter) {
-				try {
-					if (userPersistenceAdapter.migrate) await userPersistenceAdapter.migrate();
-					stores = await userPersistenceAdapter.connect();
-					if (!stores || typeof stores !== 'object') {
-						throw new Error(
-							'connect() must return { executionStore, conversationStreamStore, attachmentStore }.',
-						);
-					}
-					if (
-						!stores.executionStore ||
-						typeof stores.executionStore.submissions?.getSubmission !== 'function'
-					) {
-						throw new Error('connect() must return an executionStore with submissions.');
-					}
-					if (
-						!stores.conversationStreamStore ||
-						typeof stores.conversationStreamStore.append !== 'function' ||
-						typeof stores.conversationStreamStore.acquireProducer !== 'function'
-					) {
-						throw new Error('connect() must return a conversationStreamStore.');
-					}
-					if (
-						!stores.attachmentStore ||
-						typeof stores.attachmentStore.put !== 'function' ||
-						typeof stores.attachmentStore.get !== 'function'
-					) {
-						throw new Error('connect() must return an attachmentStore.');
-					}
-				} catch (error) {
-					throw new Error(
-						`[flue] Failed to initialize persistence from ${dbSource}: ` +
-							(error instanceof Error ? error.message : String(error)),
-						{ cause: error },
-					);
-				}
-				persistenceAdapter = userPersistenceAdapter;
+				adapter = dbModule.default as PersistenceAdapter;
+				adapterSource = dbSource;
 			} else {
-				const defaultAdapter = sqlite(options.defaultSqlitePath);
-				if (defaultAdapter.migrate) await defaultAdapter.migrate();
-				stores = await defaultAdapter.connect();
-				persistenceAdapter = defaultAdapter;
+				// The default run.db is NEVER wiped — `--id` continuation across
+				// `flue run` invocations depends on it accumulating history.
+				adapter = sqlite(options.defaultSqlitePath);
+				adapterSource = 'the default sqlite adapter';
 			}
-			const { executionStore, conversationStreamStore, attachmentStore } = stores;
-			if (!conversationStreamStore || !attachmentStore) {
-				throw new Error('[flue] Persistence adapter did not provide conversation stores.');
-			}
+			// connect() is awaited once at startup so an unreachable or
+			// misconfigured database fails at boot, not mid-conversation.
+			const stores = await connectPersistenceAdapter(adapter, adapterSource);
+			persistenceAdapter = adapter;
 
-			// ── Coordinator ─────────────────────────────────────────────────
-			// Default sandbox: empty in-memory fs, mirroring the generated entry.
-			async function createDefaultEnv() {
-				const fs = new InMemoryFs();
-				return bashFactoryToSessionEnv(
-					() => new Bash({ fs, network: { dangerouslyAllowFullInternetAccess: true } }),
-				);
-			}
-
-			const agents = [{ name: options.identity, definition }];
-			const activityGate = createRuntimeActivityGate();
-			const coordinator = createNodeAgentCoordinator({
-				submissions: executionStore.submissions,
-				agents,
-				createContext: ({ id, agentName, request, initialEventIndex, dispatchId }) =>
-					createFlueContext({
-						id,
-						agentName,
-						dispatchId,
-						initialEventIndex,
-						env: runtimeEnv,
-						req: request,
-						agentConfig: { resolveModel },
-						createDefaultEnv,
-					}),
-				conversationStreamStore,
-				attachmentStore,
-				activityGate,
+			// The shared runtime assembly the generated Node entry and `start()`
+			// use: registration, coordinator, dispatch queue, runtime seed, and
+			// startup reconciliation (the run.db persists across invocations).
+			const runtime = await assembleNodeAgentRuntime({
+				agents: [{ identity: options.identity, definition }],
+				adapter,
+				stores,
+				env: runtimeEnv,
 			});
-			agentCoordinator = coordinator;
-			const dispatchQueue = createNodeDispatchQueue(coordinator);
-
-			// Seed the runtime config so `dispatch()` and other registration-aware
-			// APIs behave exactly as in a generated Node entry.
-			configureFlueRuntime({
-				target: 'node',
-				devMode: false,
-				agents,
-				dispatchQueue,
-				activityGate,
-				createAgentAdmission: (agentName, instanceId) =>
-					coordinator.createAdmission(agentName, instanceId),
-				abortAgentInstance: (agentName, instanceId) =>
-					coordinator.abortInstance(agentName, instanceId),
-				conversationStreamStore,
-				attachmentStore,
-			});
-
-			// Reconcile work interrupted by a previous `flue run` process — the
-			// default run.db persists across invocations by design.
-			try {
-				await coordinator.reconcileSubmissions();
-			} catch (error) {
-				console.error('[flue] Startup submission reconciliation failed:', error);
-			}
+			assembled = runtime;
 
 			let closing: Promise<void> | undefined;
 			return {
 				submit: (conversationId, message, submitOptions = {}) =>
 					submitAndSettle({
-						coordinator,
-						conversationStreamStore,
+						coordinator: runtime.coordinator,
+						conversationStreamStore: runtime.conversationStreamStore,
 						identity: options.identity,
 						conversationId,
 						message,
@@ -266,17 +159,12 @@ export async function createFlueRunSession(
 					closing ??= (async () => {
 						const errors: unknown[] = [];
 						try {
-							await coordinator.shutdown(SHUTDOWN_TIMEOUT_MS);
+							await runtime.close();
 						} catch (error) {
 							errors.push(error);
 						}
 						try {
 							await instrumentationOwner.dispose();
-						} catch (error) {
-							errors.push(error);
-						}
-						try {
-							if (persistenceAdapter?.close) await persistenceAdapter.close();
 						} catch (error) {
 							errors.push(error);
 						}
@@ -293,12 +181,8 @@ export async function createFlueRunSession(
 		// Startup failed part-way: unwind whatever was created, then rethrow.
 		const cleanupErrors: unknown[] = [];
 		try {
-			if (agentCoordinator) await agentCoordinator.shutdown(SHUTDOWN_TIMEOUT_MS);
-		} catch (cleanupError) {
-			cleanupErrors.push(cleanupError);
-		}
-		try {
-			if (persistenceAdapter?.close) await persistenceAdapter.close();
+			if (assembled) await assembled.close();
+			else if (persistenceAdapter?.close) await persistenceAdapter.close();
 		} catch (cleanupError) {
 			cleanupErrors.push(cleanupError);
 		}
@@ -317,7 +201,7 @@ export async function createFlueRunSession(
 // ─── Submission + settlement observation ────────────────────────────────────
 
 interface SubmitAndSettleOptions extends FlueRunSubmitOptions {
-	coordinator: ReturnType<typeof createNodeAgentCoordinator>;
+	coordinator: AssembledNodeAgentRuntime['coordinator'];
 	conversationStreamStore: NonNullable<
 		Awaited<ReturnType<PersistenceAdapter['connect']>>['conversationStreamStore']
 	>;

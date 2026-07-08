@@ -1,7 +1,18 @@
 /// <reference path="../types/skill-md.d.ts" />
 /// <reference path="../types/markdown-md.d.ts" />
 
+export {
+	type AgentInstanceHandle,
+	type AgentPromptOptions,
+	type AgentReply,
+	AgentRunError,
+	type InitOptions,
+	init,
+} from './agent-client.ts';
 export { defineAgent } from './agent-definition.ts';
+// The live conversation projection protocol (`init().prompt`'s onEvent, the
+// SDK's updates view). The canonical record schema stays internal.
+export type { ConversationStreamChunk } from './conversation-public.ts';
 export {
 	AgentInstanceExistsError,
 	AgentInstanceNotFoundError,

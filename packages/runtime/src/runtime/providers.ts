@@ -283,7 +283,7 @@ export function getModelGateway<TApi extends Api>(
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
 /** Resolve `'provider-id/model-id'` against the provider registry. */
-export function resolveRegisteredModel(
+function resolveRegisteredModel(
 	providerId: string,
 	modelId: string,
 ): Model<Api> | undefined {
@@ -371,4 +371,48 @@ function zeroMetadataModel(
 		contextWindow: 0,
 		maxTokens: 0,
 	};
+}
+
+/**
+ * Resolve a `provider-id/model-id` model specifier to a pi-ai Model.
+ * Registered provider IDs win over pi-ai's catalog; registrations for
+ * catalog provider IDs hydrate metadata from the catalog with the
+ * registration's options layered on top.
+ */
+export function resolveModel(model: string): Model<Api> {
+	const modelSpecifier = model;
+
+	const slash = modelSpecifier.indexOf('/');
+	if (slash === -1) {
+		throw new Error(
+			`[flue] Invalid model specifier "${modelSpecifier}". ` +
+				`Use the "provider-id/model-id" format (e.g. "anthropic/claude-haiku-4-5").`,
+		);
+	}
+	const providerId = modelSpecifier.slice(0, slash);
+	const modelId = modelSpecifier.slice(slash + 1);
+
+	const registered = resolveRegisteredModel(providerId, modelId);
+	if (registered) {
+		if (modelId === '') {
+			throw new Error(
+				`[flue] Invalid model specifier "${modelSpecifier}". ` +
+					`Provider ID "${providerId}" is registered via registerProvider(), but no model ID ` +
+					`was given. Use "${providerId}/<model-id>".`,
+			);
+		}
+		return registered;
+	}
+
+	// `getModel` is typed for literal model IDs; runtime strings are checked by
+	// the null return below.
+	const resolved = getModel(providerId as KnownProvider, modelId as never);
+	if (!resolved) {
+		throw new Error(
+			`[flue] Unknown model specifier "${modelSpecifier}". ` +
+				`Provider ID "${providerId}" / model ID "${modelId}" ` +
+				`is not registered with @earendil-works/pi-ai or via registerProvider().`,
+		);
+	}
+	return resolved;
 }
