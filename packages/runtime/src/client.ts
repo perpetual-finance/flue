@@ -315,6 +315,7 @@ export async function initializeRootHarness(
 		output: outputChannel,
 		delivery,
 		instanceId: config.id,
+		...(config.agentName === undefined ? {} : { agentName: config.agentName }),
 		initialData,
 	};
 	const first = renderAgentFunctionWithStructure(agent.agent, agent.config, renderState);

@@ -95,6 +95,7 @@ import {
 	type AgentEffectDeclaration,
 	type AgentOutputChannel,
 	type AgentSignalAppend,
+	assertSignalAppend,
 	type EffectContext,
 	runMessageMetadataProducers,
 } from './message-output.ts';
@@ -724,17 +725,18 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	}
 
 	/**
-	 * Sink for `useAppend` writers. The signal is steered into the live agent
-	 * loop immediately — pi drains the steering queue at each turn boundary, so
-	 * the model sees it before its next response — and buffered for canonical
-	 * append at the next flush point (`drainSignalAppendRecords`). Steering and
-	 * the durable flush happen in the same order at the same boundary, so the
-	 * live context and a rehydrated one can never disagree.
+	 * Sink for effect `append()` calls. The signal is steered into the live
+	 * agent loop immediately — pi drains the steering queue at each turn
+	 * boundary, so the model sees it before its next response — and buffered
+	 * for canonical append at the next flush point
+	 * (`drainSignalAppendRecords`). Steering and the durable flush happen in
+	 * the same order at the same boundary, so the live context and a
+	 * rehydrated one can never disagree.
 	 */
 	private enqueueSignalAppend(signal: AgentSignalAppend): void {
 		if (!this.activeSubmissionId) {
 			throw new Error(
-				'[flue] append() is only legal while the agent is responding to a submission — call it from tool run functions (and other callbacks that run during one). An appended signal annotates the running conversation; to send input to an idle agent, use dispatch().',
+				'[flue] append() is only legal while the agent is responding to a submission. An appended signal annotates the running submission; to send input at any other time, use the dispatcher from useDispatchMessage().',
 			);
 		}
 		const timestamp = new Date().toISOString();
@@ -872,6 +874,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		const session = this;
 		const ctx: EffectContext = {
 			log: this.createEffectLogger(index),
+			append: (signalAppend) => this.enqueueSignalAppend(assertSignalAppend(signalAppend)),
 			signal,
 			get harness() {
 				harness ??= session.createInvocationHarness(generateInvocationId(), signal);
@@ -1095,7 +1098,6 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		this.rerender = options.rerender;
 		this.outputChannel = options.output;
 		this.outputChannel?.connect((name, data) => this.enqueueMessageDataWrite(name, data));
-		this.outputChannel?.connectSignals((signal) => this.enqueueSignalAppend(signal));
 
 		const systemPrompt = this.config.systemPrompt;
 

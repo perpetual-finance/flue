@@ -22,7 +22,6 @@ import {
 	renderAgentFunctionWithStructure,
 } from '../src/hooks/render.ts';
 import { useState } from '../src/hooks/state.ts';
-import { useAppend } from '../src/hooks/use-append.ts';
 import { useDelivery } from '../src/hooks/use-delivery.ts';
 import { useEffect } from '../src/hooks/use-effect.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
@@ -205,8 +204,7 @@ describe('useEffect()', () => {
 		const runOrder: string[] = [];
 		function assistant() {
 			const delivery = useDelivery();
-			const append = useAppend();
-			useEffect(() => {
+			useEffect(({ append }) => {
 				runOrder.push('first');
 				append({
 					type: 'intake',
@@ -255,8 +253,7 @@ describe('useEffect()', () => {
 
 		let visibleMidEffect = false;
 		function assistant() {
-			const append = useAppend();
-			useEffect(async () => {
+			useEffect(async ({ append }) => {
 				append({ type: 'progress', body: 'Loading the issue…' });
 				// Poll the durable stream from INSIDE the still-running effect: the
 				// signal must land (and stream to clients) without waiting for the

@@ -23,8 +23,8 @@ import {
   defineTool,
   dispatch,
   getAgentInstance,
-  useAppend,
   useDelivery,
+  useDispatchMessage,
   useEffect,
   useInstruction,
   useMessageData,
@@ -392,9 +392,8 @@ Runs a side effect at the start of a submission — after the delivered input is
 ```ts
 export default function IssueTriage() {
   const delivery = useDelivery();
-  const append = useAppend();
 
-  useEffect(async ({ harness, log }) => {
+  useEffect(async ({ harness, log, append }) => {
     const issue = await loadIssue(deliveredIssueNumber(delivery));
     await harness.fs.writeFile(`triage/gh-${issue.number}/issue.md`, digest(issue));
     setIssue(issue);
@@ -403,7 +402,20 @@ export default function IssueTriage() {
 }
 ```
 
-`run` may be async and is awaited; it returns void — no cleanup function. `run` receives `{ harness, log, signal }`. Effects are NOT reactive: they evaluate once per delivered submission, in declaration order, sequentially. Identity is call order — across deploys, append new effects after existing ones. At-least-once: an interrupted run re-runs on the re-attempt; a completed run is adopted, never repeated. Not available in a subagent render.
+`run` may be async and is awaited; it returns void — no cleanup function. `run` receives `{ harness, log, append, signal }`: `append` writes a durable signal into the running submission, ordered before the model's next turn, atomic with the effect's outcome batch — the intake pattern's home. Effects are NOT reactive: they evaluate once per delivered submission, in declaration order, sequentially. Identity is call order — across deploys, append new effects after existing ones. At-least-once: an interrupted run re-runs on the re-attempt; a completed run is adopted, never repeated. Not available in a subagent render.
+
+#### `EffectContext`
+
+```ts
+interface EffectContext {
+  harness: FlueHarness;
+  log: FlueLogger;
+  append: (signal: AgentSignalAppend) => void;
+  signal: AbortSignal;
+}
+```
+
+`harness` is the invocation-scoped runtime surface (sandbox `shell`/`fs`, child sessions, model calls), materialized lazily on first access. `log` emits progress lines into the conversation stream — the model never sees them. `append` is write-only and non-reactive: it never re-runs the agent. `signal` is the submission's abort signal.
 
 ### `useInitialData()`
 
@@ -428,17 +440,17 @@ Creation data rides the instance's first contact: `dispatch(triage, { id, data, 
 
 The value is immutable — `data` on messages to an existing instance is ignored, and evolving facts belong in `useState`. Returns `undefined` when creation carried no data, on bare tooling/test renders (back it with `initialData` in the render-state context), and in subagent renders (a delegate has no creation data of its own; close over a value to share it). The recorded value is part of the instance's durable record stream but is never served to clients; still, it is not a secrets channel — keys and tokens stay in the environment.
 
-### `useAppend()`
+### `useDispatchMessage()`
 
 ```ts
-function useAppend(): (signal: AgentSignalAppend) => void;
+function useDispatchMessage(): (message: DeliveredMessage) => Promise<DispatchReceipt>;
 ```
 
-Gets a write-only function that appends a signal to the current agent's conversation history — the same first-class record a `kind: 'signal'` dispatch delivers, but authored by *code* mid-run: it annotates the running conversation and never wakes the agent.
+Gets a dispatcher bound to this agent instance — the agent-scoped form of [`dispatch()`](#dispatch), the way a router hook overloads a browser primitive with the router-scoped version. The returned function takes just the message: the instance already exists, so there is no creation `data` and no `uid` condition to pass.
 
 ```ts
 export default function IssueTriage() {
-  const append = useAppend();
+  const dispatch = useDispatchMessage();
 
   useTool({
     name: 'run_intake',
@@ -446,7 +458,8 @@ export default function IssueTriage() {
     harness: true,
     run: async ({ harness }) => {
       const issue = await loadIssue(harness);
-      append({
+      await dispatch({
+        kind: 'signal',
         type: 'intake',
         body: `Issue #${issue.number} loaded; triage warranted.`,
         attributes: { issue: String(issue.number) },
@@ -457,7 +470,9 @@ export default function IssueTriage() {
 }
 ```
 
-Appends are legal only during an active submission — from tool `run` functions and other callbacks that run while the agent is responding; the writer throws during render and when the agent is idle. Appends are durable and ordered; the model sees them at the next turn boundary. `tagName` becomes the signal's XML envelope in model context. Not available in a subagent render (a delegate returns what it produced as its task result instead).
+Same semantics as the global `dispatch()` — same queue, same admission, same delivery: mid-run, the message joins the conversation at the next turn boundary; when the agent is idle, it wakes a new submission, so a late callback behaves exactly like an external sender. Both message kinds work: `signal` annotates, `user` queues a real follow-up turn. Each call is a durable submission with its own receipt — like any external side effect in a re-attempted tool, a re-run dispatches again; design for at-least-once. Throws during render and on bare tooling/test renders with no runtime behind them. Not available in a subagent render (a delegate returns what it produced as its task result instead).
+
+For a durable signal ordered into the *current* submission before the model's first turn — the intake pattern — use an effect's `append` instead (see [`useEffect`](#useeffect)); it rides the effect's atomic outcome batch rather than opening a new one.
 
 ### `useMessageData(...)`
 

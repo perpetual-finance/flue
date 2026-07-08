@@ -38,8 +38,8 @@ export type {
 	FlueExecutionOperation,
 } from './execution-interceptor.ts';
 export { type StateSetter, useState } from './hooks/state.ts';
-export { useAppend } from './hooks/use-append.ts';
 export { useDelivery } from './hooks/use-delivery.ts';
+export { useDispatchMessage } from './hooks/use-dispatch-message.ts';
 export { useEffect } from './hooks/use-effect.ts';
 export { useInitialData } from './hooks/use-initial-data.ts';
 export { useInstruction } from './hooks/use-instruction.ts';

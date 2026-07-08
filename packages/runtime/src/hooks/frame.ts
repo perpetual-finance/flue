@@ -42,6 +42,12 @@ export interface RenderStateContext {
 	 */
 	instanceId?: string;
 	/**
+	 * The agent's registered name backing this render — with `instanceId`,
+	 * the self address `useDispatchMessage()` binds to. Absent on bare
+	 * tooling/test renders, where the dispatcher throws on call.
+	 */
+	agentName?: string;
+	/**
 	 * The client-facing output channel (`useMessageData` writes, metadata
 	 * producers). Absent when there is no durable runtime behind the render —
 	 * data writers then throw on call.

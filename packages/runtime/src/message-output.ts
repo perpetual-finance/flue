@@ -1,12 +1,13 @@
+import * as v from 'valibot';
 import type { FlueHarness, FlueLogger, PromptUsage } from './types.ts';
 
 /**
  * The write channels behind the output hooks. Client-facing output
  * (`useMessageData`, `useMessageMetadata`) decorates the agent's response
  * message for clients and never reaches the model; model-facing appends
- * (`useAppend`) write signal records into the agent's own conversation
- * history. Both are write-only and non-reactive — nothing here re-runs the
- * agent.
+ * (an effect's `append`) write signal records into the agent's own
+ * conversation history. Both are write-only and non-reactive — nothing here
+ * re-runs the agent.
  */
 
 /** Lifecycle points a `useMessageMetadata` producer can attach to. */
@@ -37,11 +38,11 @@ export interface MessageMetadataProducers {
 }
 
 /**
- * One `append()` call from a `useAppend()` writer: a signal authored by agent
- * code into the current agent's conversation history. Field-for-field the
- * code-side twin of a `kind: 'signal'` delivered message (same validation,
- * same rendering) — minus delivery semantics: an append annotates the running
- * conversation and never wakes the agent.
+ * One `append()` call from an effect: a signal authored by agent code into
+ * the current agent's conversation history. Field-for-field the code-side
+ * twin of a `kind: 'signal'` delivered message (same validation, same
+ * rendering) — minus delivery semantics: an append annotates the running
+ * submission and never wakes the agent.
  */
 export interface AgentSignalAppend {
 	type: string;
@@ -50,17 +51,66 @@ export interface AgentSignalAppend {
 	tagName?: string;
 }
 
+const SignalAppendSchema = v.strictObject(
+	{
+		type: v.pipe(v.string(), v.nonEmpty('signal "type" must not be empty')),
+		body: v.string('signal "body" must be a string'),
+		attributes: v.optional(v.record(v.string(), v.string())),
+		// The tag name is rendered unescaped as the signal's XML envelope in
+		// model context, so it must be a valid XML name — anything looser would
+		// let a caller-controlled value inject markup that the body/attribute
+		// escaping exists to prevent. Same rule as delivered signal messages.
+		tagName: v.optional(
+			v.pipe(
+				v.string(),
+				v.regex(
+					/^[A-Za-z_][A-Za-z0-9_.-]*$/,
+					'signal "tagName" must be a valid XML tag name ' +
+						'(letters, digits, "_", "-", "."; must not start with a digit, "-", or ".")',
+				),
+			),
+		),
+	},
+	(issue) =>
+		issue.expected === 'never' ? `received unknown signal field ${issue.received}` : issue.message,
+);
+
+/** Validate one effect `append()` argument; throws with field-level detail. */
+export function assertSignalAppend(signal: unknown): AgentSignalAppend {
+	const parsed = v.safeParse(SignalAppendSchema, signal);
+	if (!parsed.success) {
+		throw new Error(
+			`[flue] append() signal is invalid: ${parsed.issues.map((issue) => issue.message).join('; ')}.`,
+		);
+	}
+	const { type, body, attributes, tagName } = parsed.output;
+	return {
+		type,
+		body,
+		...(attributes ? { attributes } : {}),
+		...(tagName ? { tagName } : {}),
+	};
+}
+
 /**
  * The context a `useEffect` run callback receives. `log` emits progress lines
- * into the conversation stream (the model never sees them); `signal` is the
- * submission's abort signal; `harness` is the invocation-scoped runtime
- * surface (sandbox `shell`/`fs`, child sessions, model calls) — available on
- * every effect, materialized lazily on first access, so an effect that never
- * touches it pays nothing.
+ * into the conversation stream (the model never sees them); `append` writes a
+ * signal into the running submission — durable and flushed live, ordered
+ * before the model's next turn, atomic with the effect's outcome batch;
+ * `signal` is the submission's abort signal; `harness` is the
+ * invocation-scoped runtime surface (sandbox `shell`/`fs`, child sessions,
+ * model calls) — available on every effect, materialized lazily on first
+ * access, so an effect that never touches it pays nothing.
+ *
+ * Transitional: `useEffect` (and with it this context) is slated to be
+ * replaced by event hooks mapped to pi events (onSessionStart, onToolCall,
+ * ...); `append` rides along until then rather than surviving as standalone
+ * API.
  */
 export interface EffectContext {
 	readonly harness: FlueHarness;
 	readonly log: FlueLogger;
+	readonly append: (signal: AgentSignalAppend) => void;
 	readonly signal: AbortSignal;
 }
 
@@ -78,9 +128,8 @@ export interface AgentEffectDeclaration {
  * The output channel shared between renders and the session, mirroring the
  * `useState` buffer pattern: created once per harness lifetime, handed to
  * both sides. Renders replace `producers` and `effects` wholesale each render
- * (fresh closures); `useMessageData` writers call `writeMessageData` and
- * `useAppend` writers call `appendSignal`; the session connects the sinks
- * that append durable records.
+ * (fresh closures); `useMessageData` writers call `writeMessageData`; the
+ * session connects the sink that appends durable records.
  */
 export interface AgentOutputChannel {
 	/** Metadata producers from the latest render. */
@@ -90,14 +139,10 @@ export interface AgentOutputChannel {
 	/** Wire the session-side sink data writes flow into. */
 	connect(sink: (name: string, data: unknown) => void): void;
 	writeMessageData(name: string, data: unknown): void;
-	/** Wire the session-side sink signal appends flow into. */
-	connectSignals(sink: (signal: AgentSignalAppend) => void): void;
-	appendSignal(signal: AgentSignalAppend): void;
 }
 
 export function createAgentOutputChannel(): AgentOutputChannel {
 	let sink: ((name: string, data: unknown) => void) | undefined;
-	let signalSink: ((signal: AgentSignalAppend) => void) | undefined;
 	return {
 		producers: { start: [], finish: [] },
 		effects: [],
@@ -111,17 +156,6 @@ export function createAgentOutputChannel(): AgentOutputChannel {
 				);
 			}
 			sink(name, data);
-		},
-		connectSignals(next) {
-			signalSink = next;
-		},
-		appendSignal(signal) {
-			if (!signalSink) {
-				throw new Error(
-					'[flue] append() has no durable runtime behind this render, so signal appends are unavailable.',
-				);
-			}
-			signalSink(signal);
 		},
 	};
 }

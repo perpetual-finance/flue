@@ -10,9 +10,8 @@ import { requireRenderFrame } from './frame.ts';
  * ```ts
  * export default function IssueTriage() {
  *   const delivery = useDelivery();
- *   const append = useAppend();
  *
- *   useEffect(async ({ harness, log }) => {
+ *   useEffect(async ({ harness, append }) => {
  *     const issue = await loadIssue(deliveredIssueNumber(delivery));
  *     await harness.fs.writeFile(`triage/gh-${issue.number}/issue.md`, digest(issue));
  *     setIssue(issue);
@@ -36,13 +35,15 @@ import { requireRenderFrame } from './frame.ts';
  *   from its last completed run in the record log. An effect that changes
  *   its own deps does not retrigger within the submission.
  * - `run` may be async and is awaited; it returns void — no cleanup
- *   function. All output is explicit: signals via `useAppend`, durable
- *   values via state setters, files via the harness. A throw fails the
- *   submission before the model runs.
- * - `run` receives a context argument — `{ harness, log, signal }` — so
- *   zero-argument React-style callbacks work unchanged. `harness` is the
+ *   function. All output is explicit: signals via the context's `append`,
+ *   durable values via state setters, files via the harness. A throw fails
+ *   the submission before the model runs.
+ * - `run` receives a context argument — `{ harness, log, append, signal }` —
+ *   so zero-argument React-style callbacks work unchanged. `harness` is the
  *   invocation-scoped runtime surface (sandbox shell/fs, child sessions for
- *   scoped model calls), materialized lazily on first access.
+ *   scoped model calls), materialized lazily on first access; `append`
+ *   writes a durable signal into the running submission, ordered before the
+ *   model's next turn and atomic with the effect's outcome batch.
  * - Identity is call order. Across deploys, inserting or reordering effects
  *   shifts indices — append new effects after existing ones; expect at worst
  *   a one-time re-run (or, when a shifted effect's deps fingerprint happens

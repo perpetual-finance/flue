@@ -1,0 +1,380 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import {
+	type FauxProviderRegistration,
+	fauxAssistantMessage,
+	fauxToolCall,
+	registerFauxProvider,
+} from '@earendil-works/pi-ai/compat';
+import { afterEach, describe, expect, it } from 'vitest';
+import { defineAgent } from '../src/agent-definition.ts';
+import type { ConversationRecord } from '../src/conversation-records.ts';
+import {
+	createReducedInstanceState,
+	getActiveConversationPath,
+	reduceConversationRecords,
+} from '../src/conversation-reducer.ts';
+import { renderWithFrame } from '../src/hooks/frame.ts';
+import { renderAgentFunctionWithStructure } from '../src/hooks/render.ts';
+import { useDispatchMessage } from '../src/hooks/use-dispatch-message.ts';
+import { useTool } from '../src/hooks/use-tool.ts';
+import {
+	configureFlueRuntime,
+	createFlueContext,
+	createNodeAgentCoordinator,
+	createNodeDispatchQueue,
+	type DispatchInput,
+} from '../src/internal.ts';
+import { sqlite } from '../src/node/agent-execution-store.ts';
+import { resetFlueRuntimeForTests } from '../src/runtime/flue-app.ts';
+import type { CreateAgentContextFn } from '../src/runtime/handle-agent.ts';
+import type { DeliveredMessage, DispatchReceipt } from '../src/types.ts';
+import { createNoopSessionEnv } from './fixtures/session-env.ts';
+import { agentRecord, nodeRuntime } from './helpers/runtime-config.ts';
+
+const providers: FauxProviderRegistration[] = [];
+const tempDirs: string[] = [];
+
+afterEach(() => {
+	resetFlueRuntimeForTests();
+	for (const provider of providers.splice(0)) provider.unregister();
+	for (const dir of tempDirs.splice(0)) {
+		try {
+			rmSync(dir, { recursive: true });
+		} catch {}
+	}
+});
+
+function createFauxProvider(): FauxProviderRegistration {
+	const provider = registerFauxProvider({
+		provider: `agent-dispatch-message-test-${crypto.randomUUID()}`,
+	});
+	providers.push(provider);
+	return provider;
+}
+
+function createTempDbPath(): string {
+	const dir = mkdtempSync(join(tmpdir(), 'flue-agent-dispatch-message-'));
+	tempDirs.push(dir);
+	return join(dir, 'agent.db');
+}
+
+function makeFauxCreateContext(provider: FauxProviderRegistration): CreateAgentContextFn {
+	return ({ id, agentName, request, initialEventIndex, dispatchId }) =>
+		createFlueContext({
+			id,
+			agentName,
+			dispatchId,
+			env: {},
+			req: request,
+			initialEventIndex,
+			agentConfig: {
+				subagents: {},
+				resolveModel: () => provider.getModel(),
+			},
+			createDefaultEnv: async () => createNoopSessionEnv({ cwd: '/' }),
+		});
+}
+
+async function connectSqlite(dbPath: string) {
+	const adapter = sqlite(dbPath);
+	await adapter.migrate?.();
+	return adapter.connect();
+}
+
+function readDurableRecords(dbPath: string): ConversationRecord[] {
+	const db = new DatabaseSync(dbPath);
+	const rows = db
+		.prepare('SELECT data FROM flue_conversation_stream_batches ORDER BY seq')
+		.all() as Array<{ data: string }>;
+	db.close();
+	return rows.flatMap((row) => JSON.parse(row.data) as ConversationRecord[]);
+}
+
+/**
+ * The active conversation path, collapsed to one label per entry — `role`
+ * for ordinary messages, `signal:<type>` for signals, else the entry type.
+ * Mirrors the shape used across the runtime test suite to assert conversation
+ * topology without pinning every envelope field.
+ */
+function activePathKinds(records: ConversationRecord[]): string[] {
+	const reduced = reduceConversationRecords(createReducedInstanceState(), records);
+	const conversation = [...reduced.conversations.values()][0];
+	if (!conversation) throw new Error('no conversation');
+	return getActiveConversationPath(conversation).map((entry) =>
+		entry.type === 'message'
+			? entry.message.role === 'signal'
+				? `signal:${entry.message.type}`
+				: entry.message.role
+			: entry.type,
+	);
+}
+
+/**
+ * Sets up a coordinator running a single "assistant" agent, plus a Flue
+ * runtime configured so `useDispatchMessage()` resolves real dispatches
+ * through that same coordinator — the ambient runtime the hook requires.
+ */
+function setupDispatchHarness(
+	provider: FauxProviderRegistration,
+	assistant: () => string | undefined,
+) {
+	const dbPath = createTempDbPath();
+	const executionStorePromise = connectSqlite(dbPath);
+	return executionStorePromise.then((stores) => {
+		const coordinator = createNodeAgentCoordinator({
+			submissions: stores.executionStore.submissions,
+			agents: [
+				{
+					name: 'assistant',
+					definition: defineAgent(assistant, {
+						model: `${provider.getModel().provider}/${provider.getModel().id}`,
+					}),
+				},
+			],
+			createContext: makeFauxCreateContext(provider),
+			conversationStreamStore: stores.conversationStreamStore,
+			attachmentStore: stores.attachmentStore,
+		});
+		configureFlueRuntime({
+			...nodeRuntime(),
+			agents: [agentRecord('assistant')],
+			dispatchQueue: createNodeDispatchQueue(coordinator),
+		});
+		return { dbPath, coordinator };
+	});
+}
+
+async function admitAndSettle(
+	coordinator: ReturnType<typeof createNodeAgentCoordinator>,
+	message: DeliveredMessage,
+	id = 'instance-1',
+): Promise<void> {
+	await coordinator.admitDispatch({
+		dispatchId: `dispatch-${crypto.randomUUID()}`,
+		agent: 'assistant',
+		id,
+		message,
+		acceptedAt: new Date().toISOString(),
+	} satisfies DispatchInput);
+	await coordinator.waitForIdle();
+}
+
+const CONFIG = { model: 'faux/agent-dispatch-message' };
+
+describe('useDispatchMessage()', () => {
+	it('a tool-triggered mid-run dispatch reaches the model as a real delivery, not an in-run append', async () => {
+		const provider = createFauxProvider();
+		let turnThreeTexts: string[] | undefined;
+		provider.setResponses([
+			fauxAssistantMessage(fauxToolCall('trigger_dispatch', {}, { id: 'tool-td-1' }), {
+				stopReason: 'toolUse',
+			}),
+			fauxAssistantMessage('Turn one done.'),
+			(context) => {
+				turnThreeTexts = context.messages.map((message) =>
+					typeof message.content === 'string'
+						? message.content
+						: message.content
+								.map((block) => ('text' in block ? block.text : `[${block.type}]`))
+								.join('\n'),
+				);
+				return fauxAssistantMessage('Turn two done.');
+			},
+		]);
+
+		const receipts: DispatchReceipt[] = [];
+		function assistant() {
+			const dispatchMessage = useDispatchMessage();
+			useTool({
+				name: 'trigger_dispatch',
+				description: 'Dispatch a follow-up signal to this same instance mid-run.',
+				run: async () => {
+					const receipt = await dispatchMessage({
+						kind: 'signal',
+						type: 'note',
+						body: 'Follow-up signal.',
+						attributes: { source: 'tool' },
+					});
+					receipts.push(receipt);
+					return 'dispatched';
+				},
+			});
+			return 'Agent.';
+		}
+
+		const { dbPath, coordinator } = await setupDispatchHarness(provider, assistant);
+		await admitAndSettle(coordinator, { kind: 'user', body: 'Go.' });
+		await coordinator.shutdown();
+
+		expect(receipts).toHaveLength(1);
+		expect(receipts[0]?.dispatchId).toEqual(expect.any(String));
+
+		expect(turnThreeTexts).toBeDefined();
+		const joined = (turnThreeTexts ?? []).join('\n---\n');
+		expect(joined).toContain('<signal type="note" source="tool">');
+		expect(joined).toContain('Follow-up signal.');
+
+		// Real delivery: the signal record carries a dispatchId (unlike an
+		// effect's `append`, which never does) and lands as its own turn
+		// boundary — after the tool-call turn settled, not inline within it.
+		const records = readDurableRecords(dbPath);
+		const signalRecord = records.find((record) => record.type === 'signal');
+		expect(signalRecord).toMatchObject({
+			signalType: 'note',
+			content: 'Follow-up signal.',
+			attributes: { source: 'tool' },
+		});
+		expect(signalRecord?.dispatchId).toEqual(expect.any(String));
+
+		expect(activePathKinds(records)).toEqual([
+			'user',
+			'assistant',
+			'toolResult',
+			'assistant',
+			'signal:note',
+			'assistant',
+		]);
+	});
+
+	it('a dispatch captured mid-run but called after the agent goes idle wakes a new submission', async () => {
+		const provider = createFauxProvider();
+		provider.setResponses([
+			fauxAssistantMessage(fauxToolCall('capture_dispatch', {}, { id: 'tool-cd-1' }), {
+				stopReason: 'toolUse',
+			}),
+			fauxAssistantMessage('Turn one done.'),
+			fauxAssistantMessage('Woke up.'),
+		]);
+
+		let captured: ((message: DeliveredMessage) => Promise<DispatchReceipt>) | undefined;
+		function assistant() {
+			const dispatchMessage = useDispatchMessage();
+			useTool({
+				name: 'capture_dispatch',
+				description: 'Capture the dispatcher for later, out-of-band use.',
+				run: () => {
+					captured = dispatchMessage;
+					return 'captured';
+				},
+			});
+			return 'Agent.';
+		}
+
+		const { dbPath, coordinator } = await setupDispatchHarness(provider, assistant);
+		await admitAndSettle(coordinator, { kind: 'user', body: 'Go.' });
+
+		expect(captured).toBeDefined();
+		// The run has fully settled — this call behaves exactly like an
+		// external sender's dispatch to an idle instance.
+		const receipt = await captured?.({ kind: 'signal', type: 'wake', body: 'Waking up.' });
+		expect(receipt?.dispatchId).toEqual(expect.any(String));
+		await coordinator.waitForIdle();
+		await coordinator.shutdown();
+
+		const records = readDurableRecords(dbPath);
+		const signalRecord = records.find((record) => record.type === 'signal');
+		expect(signalRecord).toMatchObject({ signalType: 'wake', content: 'Waking up.' });
+		expect(signalRecord?.dispatchId).toEqual(expect.any(String));
+
+		expect(activePathKinds(records)).toEqual([
+			'user',
+			'assistant',
+			'toolResult',
+			'assistant',
+			'signal:wake',
+			'assistant',
+		]);
+	});
+
+	it('a kind:"user" self-dispatch queues a real follow-up turn', async () => {
+		const provider = createFauxProvider();
+		provider.setResponses([
+			fauxAssistantMessage(fauxToolCall('capture_dispatch', {}, { id: 'tool-cd-2' }), {
+				stopReason: 'toolUse',
+			}),
+			fauxAssistantMessage('Turn one done.'),
+			fauxAssistantMessage('Continued.'),
+		]);
+
+		let captured: ((message: DeliveredMessage) => Promise<DispatchReceipt>) | undefined;
+		function assistant() {
+			const dispatchMessage = useDispatchMessage();
+			useTool({
+				name: 'capture_dispatch',
+				description: 'Capture the dispatcher for later, out-of-band use.',
+				run: () => {
+					captured = dispatchMessage;
+					return 'captured';
+				},
+			});
+			return 'Agent.';
+		}
+
+		const { dbPath, coordinator } = await setupDispatchHarness(provider, assistant);
+		await admitAndSettle(coordinator, { kind: 'user', body: 'Go.' });
+
+		expect(captured).toBeDefined();
+		const receipt = await captured?.({ kind: 'user', body: 'Continue please.' });
+		expect(receipt?.dispatchId).toEqual(expect.any(String));
+		await coordinator.waitForIdle();
+		await coordinator.shutdown();
+
+		// A `user` self-dispatch is a real follow-up turn — a second
+		// `user_message` record, not a `signal`.
+		const records = readDurableRecords(dbPath);
+		expect(records.some((record) => record.type === 'signal')).toBe(false);
+		const userMessages = records.filter((record) => record.type === 'user_message');
+		expect(userMessages).toHaveLength(2);
+		expect(userMessages[1]?.content).toEqual([{ type: 'text', text: 'Continue please.' }]);
+
+		expect(activePathKinds(records)).toEqual([
+			'user',
+			'assistant',
+			'toolResult',
+			'assistant',
+			'user',
+			'assistant',
+		]);
+	});
+
+	it('rejects a dispatch call made during render', async () => {
+		let duringRenderPromise: Promise<DispatchReceipt> | undefined;
+		renderAgentFunctionWithStructure(() => {
+			const dispatchMessage = useDispatchMessage();
+			duringRenderPromise = dispatchMessage({ kind: 'signal', type: 'note', body: 'Rendered.' });
+			// Attach a no-op catch so vitest's process-level unhandled-rejection
+			// guard does not flag the rejection we are about to assert on.
+			duringRenderPromise.catch(() => {});
+			return 'Base.';
+		}, CONFIG);
+
+		await expect(duringRenderPromise).rejects.toThrow(/called during render/);
+	});
+
+	it('is unavailable in subagent renders', () => {
+		expect(() =>
+			renderWithFrame(
+				() => {
+					useDispatchMessage();
+				},
+				undefined,
+				'subagent',
+			),
+		).toThrow(/not available in a subagent render/);
+	});
+
+	it('throws on call when the render has no durable runtime behind it (bare render)', async () => {
+		let dispatchMessage: ((message: DeliveredMessage) => Promise<DispatchReceipt>) | undefined;
+		renderAgentFunctionWithStructure(() => {
+			dispatchMessage = useDispatchMessage();
+			return 'Base.';
+		}, CONFIG);
+
+		await expect(
+			dispatchMessage?.({ kind: 'signal', type: 'note', body: 'Unbacked.' }),
+		).rejects.toThrow(/no durable runtime behind this render/);
+	});
+});
