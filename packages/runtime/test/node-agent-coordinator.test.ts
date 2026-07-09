@@ -1808,6 +1808,15 @@ describe('NodeAgentCoordinator', () => {
 					outcome: 'completed',
 				}),
 			);
+			// The dispatch host settles through the same outbox — its durable
+			// settled record is what an awaited handle.dispatch() observes.
+			expect(records).toContainEqual(
+				expect.objectContaining({
+					type: 'submission_settled',
+					submissionId: 'join-host-dispatch',
+					outcome: 'completed',
+				}),
+			);
 			expect(providerCalls).toBe(1);
 		});
 	});
@@ -1879,7 +1888,8 @@ describe('NodeAgentCoordinator', () => {
 
 			const submission = await executionStore.submissions.getSubmission('direct-terminalized');
 			expect(submission).toMatchObject({ status: 'settled' });
-			expect(submission?.error).toBeUndefined();
+			// The operational row mirrors the failed settlement's error.
+			expect(submission?.error).toMatch(/interrupted after input application/);
 		});
 
 	});

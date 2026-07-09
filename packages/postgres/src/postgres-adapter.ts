@@ -624,7 +624,7 @@ class PgSubmissionStore implements AgentSubmissionStore {
 	}
 
 	async listPendingSubmissionSettlements(): Promise<SubmissionSettlementObligation[]> {
-		const rows = await this.runner.query(`SELECT submission_id, session_key, attempt_id, settlement_record_id, settlement_record FROM flue_agent_submissions WHERE kind = 'direct' AND status = 'terminalizing' ORDER BY sequence ASC`);
+		const rows = await this.runner.query(`SELECT submission_id, session_key, attempt_id, settlement_record_id, settlement_record FROM flue_agent_submissions WHERE status = 'terminalizing' ORDER BY sequence ASC`);
 		return rows.map(parseSettlementObligation);
 	}
 
@@ -632,16 +632,17 @@ class PgSubmissionStore implements AgentSubmissionStore {
 		if (settlement.record.id !== settlement.recordId) return null;
 		return this.runner.transaction(async (tx) => {
 			const data = JSON.stringify(settlement.record);
-			// Two reservable shapes: the direct submission's own running attempt,
-			// or a direct delivery JOINED into a host that is running under the
-			// caller's attempt — the host settles the joined waiter's record
-			// under its own authority, adopting the row (attempt_id/started_at)
-			// so the terminalizing invariants and finalize fencing hold.
+			// Two reservable shapes, for either submission kind: the submission's
+			// own running attempt, or a delivery JOINED into a host that is
+			// running under the caller's attempt — the host settles the joined
+			// waiter's record under its own authority, adopting the row
+			// (attempt_id/started_at) so the terminalizing invariants and
+			// finalize fencing hold.
 			const rows = await tx.query(
 				`UPDATE flue_agent_submissions AS current
 				 SET status = 'terminalizing', settlement_record_id = $1, settlement_record = $2,
 				     attempt_id = $3, started_at = COALESCE(started_at, $4)
-				 WHERE current.submission_id = $5 AND current.kind = 'direct'
+				 WHERE current.submission_id = $5
 				   AND current.settlement_record_id IS NULL
 				   AND (
 				     (current.status = 'running' AND current.attempt_id = $6 AND current.owner_id IS NOT NULL)
@@ -655,26 +656,44 @@ class PgSubmissionStore implements AgentSubmissionStore {
 				[settlement.recordId, data, attempt.attemptId, Date.now(), attempt.submissionId, attempt.attemptId, attempt.attemptId],
 			);
 			if (rows[0]) return parseSettlementObligation(rows[0]);
-			const existing = await tx.query(`SELECT submission_id, session_key, attempt_id, settlement_record_id, settlement_record FROM flue_agent_submissions WHERE submission_id = $1 AND kind = 'direct' AND status = 'terminalizing' AND attempt_id = $2`, [attempt.submissionId, attempt.attemptId]);
+			const existing = await tx.query(`SELECT submission_id, session_key, attempt_id, settlement_record_id, settlement_record FROM flue_agent_submissions WHERE submission_id = $1 AND status = 'terminalizing' AND attempt_id = $2`, [attempt.submissionId, attempt.attemptId]);
 			return existing[0]?.settlement_record_id === settlement.recordId && existing[0]?.settlement_record === data ? parseSettlementObligation(existing[0]) : null;
 		});
 	}
 
-	async finalizeSubmissionSettlement(attempt: SubmissionAttemptRef, recordId: string): Promise<boolean> {
+	async finalizeSubmissionSettlement(
+		attempt: SubmissionAttemptRef,
+		recordId: string,
+		options?: { errorMessage?: string },
+	): Promise<boolean> {
 		return this.runner.transaction(async (tx) => {
-			const rows = await tx.query(`UPDATE flue_agent_submissions SET status = 'settled', settled_at = $1 WHERE submission_id = $2 AND kind = 'direct' AND status = 'terminalizing' AND attempt_id = $3 AND settlement_record_id = $4 RETURNING submission_id, settlement_record`, [Date.now(), attempt.submissionId, attempt.attemptId, recordId]);
-			if (!rows[0]) return false;
-			// A direct host settles through the outbox; fan its outcome out to
-			// joined deliveries the same way completeSubmission/failSubmission do.
-			const record = JSON.parse(String(rows[0].settlement_record)) as {
+			const pending = await tx.query(
+				`SELECT settlement_record FROM flue_agent_submissions
+				 WHERE submission_id = $1 AND status = 'terminalizing' AND attempt_id = $2 AND settlement_record_id = $3`,
+				[attempt.submissionId, attempt.attemptId, recordId],
+			);
+			if (!pending[0]) return false;
+			// The durable settlement record is the outcome authority; the row's
+			// error column mirrors it — the caller's raw server-side message
+			// when provided, else the record's client-safe one.
+			const record = JSON.parse(String(pending[0].settlement_record)) as {
 				outcome?: string;
 				error?: { message?: string };
 			};
-			await this.settleJoinedSubmissions(
-				tx,
-				attempt.submissionId,
-				record.outcome === 'completed' ? null : (record.error?.message ?? 'The host submission did not complete.'),
+			const errorMessage =
+				record.outcome === 'completed'
+					? null
+					: (options?.errorMessage ?? record.error?.message ?? 'The submission did not complete.');
+			const rows = await tx.query(
+				`UPDATE flue_agent_submissions SET status = 'settled', settled_at = $1, error = $2
+				 WHERE submission_id = $3 AND status = 'terminalizing' AND attempt_id = $4 AND settlement_record_id = $5
+				 RETURNING submission_id`,
+				[Date.now(), errorMessage, attempt.submissionId, attempt.attemptId, recordId],
 			);
+			if (!rows[0]) return false;
+			// A host settles through the outbox; fan its outcome out to joined
+			// deliveries the same way completeSubmission/failSubmission do.
+			await this.settleJoinedSubmissions(tx, attempt.submissionId, errorMessage);
 			return true;
 		});
 	}

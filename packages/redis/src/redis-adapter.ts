@@ -428,7 +428,7 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 		const output: import('@flue/runtime/adapter').SubmissionSettlementObligation[] = [];
 		for (const id of await this.backend.zrange(this.backend.keys.submissionStatus('terminalizing'))) {
 			const row = await this.backend.hgetall(this.backend.keys.submission(id));
-			if (row.kind === 'direct' && row.status === 'terminalizing') output.push({ submissionId: id, sessionKey: required(row.sessionKey, 'Persisted Redis settlement session is missing.'), attemptId: required(row.attemptId, 'Persisted Redis settlement attempt is missing.'), recordId: required(row.settlementRecordId, 'Persisted Redis settlement record id is missing.'), record: JSON.parse(required(row.settlementRecord, 'Persisted Redis settlement record is missing.')) });
+			if (row.status === 'terminalizing') output.push({ submissionId: id, sessionKey: required(row.sessionKey, 'Persisted Redis settlement session is missing.'), attemptId: required(row.attemptId, 'Persisted Redis settlement attempt is missing.'), recordId: required(row.settlementRecordId, 'Persisted Redis settlement record id is missing.'), record: JSON.parse(required(row.settlementRecord, 'Persisted Redis settlement record is missing.')) });
 		}
 		return output;
 	}
@@ -437,28 +437,36 @@ class RedisSubmissionStore implements AgentSubmissionStore {
 		const id = attempt.submissionId;
 		const row = await this.backend.hgetall(this.backend.keys.submission(id));
 		if (!row.sessionKey) return null;
-		// Two reservable shapes: the direct submission's own running attempt, or
-		// a direct delivery JOINED into a host running under the caller's attempt.
-		// The host hash key is passed only when the pre-read saw a join; the
-		// script re-verifies every mutable predicate (status, joinedInto, host
-		// status/attempt) atomically before adopting the row.
+		// Two reservable shapes, for either submission kind: the submission's
+		// own running attempt, or a delivery JOINED into a host running under
+		// the caller's attempt. The host hash key is passed only when the
+		// pre-read saw a join; the script re-verifies every mutable predicate
+		// (status, joinedInto, host status/attempt) atomically before
+		// adopting the row.
 		const keys = [this.backend.keys.submission(id), this.backend.keys.submissionStatus('running'), this.backend.keys.submissionStatus('terminalizing'), this.backend.keys.sessionUnsettled(row.sessionKey), this.backend.keys.submissionStatus('joined')];
 		if (row.joinedInto) keys.push(this.backend.keys.submission(row.joinedInto));
 		await this.backend.eval(reserveSettlementScript, keys, [attempt.attemptId, id, settlement.recordId, json(settlement.record), row.joinedInto ?? empty, Date.now()]);
 		const current = await this.backend.hgetall(this.backend.keys.submission(id));
 		return current.status === 'terminalizing' && current.sessionKey && current.attemptId === attempt.attemptId && current.settlementRecordId === settlement.recordId && current.settlementRecord === json(settlement.record) ? { submissionId: id, sessionKey: current.sessionKey, attemptId: attempt.attemptId, recordId: settlement.recordId, record: settlement.record } : null;
 	}
-	async finalizeSubmissionSettlement(attempt: SubmissionAttemptRef, recordId: string): Promise<boolean> {
+	async finalizeSubmissionSettlement(
+		attempt: SubmissionAttemptRef,
+		recordId: string,
+		options?: { errorMessage?: string },
+	): Promise<boolean> {
 		const row = await this.backend.hgetall(this.backend.keys.submission(attempt.submissionId));
 		if (!row.sessionKey) return false;
-		// A direct host settles through the outbox; fan its outcome out to
-		// joined deliveries the same way completeSubmission/failSubmission do.
-		// The reserved record is immutable once terminalizing, so reading the
-		// outcome ahead of the script is race-free.
+		// A host settles through the outbox; fan its outcome out to joined
+		// deliveries the same way completeSubmission/failSubmission do. The
+		// reserved record is immutable once terminalizing, so reading the
+		// outcome ahead of the script is race-free. The durable settlement
+		// record is the outcome authority; the row's error field mirrors it —
+		// the caller's raw server-side message when provided, else the
+		// record's client-safe one.
 		const record = row.settlementRecord ? (JSON.parse(row.settlementRecord) as { outcome?: string; error?: { message?: string } }) : undefined;
-		const error = record?.outcome === 'completed' ? empty : (record?.error?.message ?? 'The host submission did not complete.');
+		const errorMessage = record?.outcome === 'completed' ? empty : (options?.errorMessage ?? record?.error?.message ?? 'The submission did not complete.');
 		const joins = await this.listJoinIds(attempt.submissionId);
-		return integer(await this.backend.eval(finalizeSettlementScript, [this.backend.keys.submission(attempt.submissionId), this.backend.keys.submissionStatus('terminalizing'), this.backend.keys.sessionUnsettled(row.sessionKey), this.backend.keys.submissionStatus('queued'), this.backend.keys.submissionStatus('joining'), this.backend.keys.submissionStatus('joined'), this.backend.keys.submissionStatus('settled'), ...joins.map((id) => this.backend.keys.submission(id))], [attempt.submissionId, Date.now(), attempt.attemptId, recordId, error, empty, empty, ...joins])) === 1;
+		return integer(await this.backend.eval(finalizeSettlementScript, [this.backend.keys.submission(attempt.submissionId), this.backend.keys.submissionStatus('terminalizing'), this.backend.keys.sessionUnsettled(row.sessionKey), this.backend.keys.submissionStatus('queued'), this.backend.keys.submissionStatus('joining'), this.backend.keys.submissionStatus('joined'), this.backend.keys.submissionStatus('settled'), ...joins.map((id) => this.backend.keys.submission(id))], [attempt.submissionId, Date.now(), attempt.attemptId, recordId, errorMessage, empty, empty, ...joins])) === 1;
 	}
 
 	completeSubmission(attempt: SubmissionAttemptRef): Promise<boolean> {

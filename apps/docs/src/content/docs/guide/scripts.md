@@ -28,7 +28,7 @@ Use `dispatch(...)` when you only need to deliver input ([Schedules](/docs/guide
 
 ### On Cloudflare
 
-`prompt()` is a Node-side API by design. A deployed Worker is always a server in front of its agent Durable Objects, and holding a handler open to await a whole agent run works against the platform — a cron invocation has a hard wall-clock ceiling, and the reply usually belongs to the agent anyway. Deliver input with `dispatch(...)` or `init(...).dispatch(...)` — both work on every target, including [Cron Triggers](/docs/guide/schedules/#scheduling-on-cloudflare) — and let the agent deliver its own result through a tool, a finish hook, or a channel. To await a reply from outside the Worker, use the `@flue/sdk` client against the agent's HTTP routes.
+The awaited handle is a Node-side API by design. A deployed Worker is always a server in front of its agent Durable Objects, and holding a handler open to await a whole agent run works against the platform — a cron invocation has a hard wall-clock ceiling, and the reply usually belongs to the agent anyway. Deliver input with the top-level `dispatch(...)` — fire-and-forget, works on every target including [Cron Triggers](/docs/guide/schedules/#scheduling-on-cloudflare) — and let the agent deliver its own result through a tool, a finish hook, or a channel. To await a reply from outside the Worker, use the `@flue/sdk` client against the agent's HTTP routes.
 
 ## Standalone scripts: `start()`
 
@@ -77,7 +77,7 @@ reply.submissionId; // this run's settled submission
 
 A failed or aborted run rejects with `AgentRunError` (`error.outcome`, `error.submissionId`, `error.cause`). Concurrent prompts to one instance serialize, or join a live response at a turn boundary — a joined prompt resolves with the coalesced reply that answered it.
 
-`dispatch(message)` on the handle is fire-and-forget delivery to the same instance — `dispatch()` bound to the handle's address.
+`dispatch(message, options?)` on the handle delivers through the dispatch queue and awaits the settled reply the same way — the handle is the "control this agent" surface, so both verbs resolve with the reply (a delivery that joined a live response resolves with the coalesced reply that answered it). When you only need to deliver input and move on, use the top-level `dispatch(...)` instead.
 
 ## Durability is the store's, not the await's
 

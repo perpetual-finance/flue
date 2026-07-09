@@ -405,17 +405,18 @@ class AgentSubmissionStoreImpl implements AgentSubmissionStore {
 		if (settlement.record.id !== settlement.recordId) return null;
 		const recordJson = JSON.stringify(settlement.record);
 		return this.transactionSync(() => {
-			// Two reservable shapes: the direct submission's own running attempt,
-			// or a direct delivery JOINED into a host that is running under the
-			// caller's attempt — the host settles the joined waiter's record
-			// under its own authority, adopting the row (attempt_id/started_at)
-			// so the terminalizing invariants and finalize fencing hold.
+			// Two reservable shapes, for either submission kind: the submission's
+			// own running attempt, or a delivery JOINED into a host that is
+			// running under the caller's attempt — the host settles the joined
+			// waiter's record under its own authority, adopting the row
+			// (attempt_id/started_at) so the terminalizing invariants and
+			// finalize fencing hold.
 			const inserted = this.sql
 				.exec(
 					`UPDATE flue_agent_submissions AS current
 					 SET status = 'terminalizing', settlement_record_id = ?, settlement_record_json = ?,
 					     attempt_id = ?, started_at = COALESCE(started_at, ?)
-					 WHERE current.submission_id = ? AND current.kind = 'direct'
+					 WHERE current.submission_id = ?
 					   AND (
 					     (current.status = 'running' AND current.attempt_id = ?)
 					     OR (current.status = 'joined' AND EXISTS (
@@ -441,7 +442,7 @@ class AgentSubmissionStoreImpl implements AgentSubmissionStore {
 					`SELECT submission_id, session_key, attempt_id, settlement_record_id,
 					        settlement_record_json
 					 FROM flue_agent_submissions
-					 WHERE submission_id = ? AND kind = 'direct' AND status = 'terminalizing'
+					 WHERE submission_id = ? AND status = 'terminalizing'
 					   AND attempt_id = ? AND settlement_record_id = ? AND settlement_record_json = ?`,
 					attempt.submissionId,
 					attempt.attemptId,
@@ -457,32 +458,51 @@ class AgentSubmissionStoreImpl implements AgentSubmissionStore {
 	async finalizeSubmissionSettlement(
 		attempt: SubmissionAttemptRef,
 		recordId: string,
+		options?: { errorMessage?: string },
 	): Promise<boolean> {
 		return this.transactionSync(() => {
+			const pending = this.sql
+				.exec(
+					`SELECT settlement_record_json FROM flue_agent_submissions
+					 WHERE submission_id = ? AND status = 'terminalizing' AND attempt_id = ?
+					   AND settlement_record_id = ?`,
+					attempt.submissionId,
+					attempt.attemptId,
+					recordId,
+				)
+				.toArray()[0];
+			if (!pending) return false;
+			// The durable settlement record is the outcome authority; the row's
+			// error column mirrors it — the caller's raw server-side message when
+			// provided, else the record's client-safe one.
+			const record = JSON.parse(String(pending.settlement_record_json)) as {
+				outcome?: string;
+				error?: { message?: string };
+			};
+			const errorMessage =
+				record.outcome === 'completed'
+					? null
+					: (options?.errorMessage ??
+						record.error?.message ??
+						'The submission did not complete.');
 			const row = this.sql
 				.exec(
 					`UPDATE flue_agent_submissions
-					 SET status = 'settled', settled_at = ?, error = NULL
+					 SET status = 'settled', settled_at = ?, error = ?
 					 WHERE submission_id = ? AND status = 'terminalizing' AND attempt_id = ?
 					   AND settlement_record_id = ?
-					 RETURNING submission_id, settlement_record_json`,
+					 RETURNING submission_id`,
 					Date.now(),
+					errorMessage,
 					attempt.submissionId,
 					attempt.attemptId,
 					recordId,
 				)
 				.toArray()[0];
 			if (!row) return false;
-			// A direct host settles through the outbox; fan its outcome out to
-			// joined deliveries the same way completeSubmission/failSubmission do.
-			const record = JSON.parse(String(row.settlement_record_json)) as {
-				outcome?: string;
-				error?: { message?: string };
-			};
-			this.settleJoinedSubmissions(
-				attempt.submissionId,
-				record.outcome === 'completed' ? null : (record.error?.message ?? 'The host submission did not complete.'),
-			);
+			// A host settles through the outbox; fan its outcome out to joined
+			// deliveries the same way completeSubmission/failSubmission do.
+			this.settleJoinedSubmissions(attempt.submissionId, errorMessage);
 			return true;
 		});
 	}

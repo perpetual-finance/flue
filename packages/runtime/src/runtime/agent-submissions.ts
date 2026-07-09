@@ -367,7 +367,7 @@ export async function reconcileInterruptedSubmission(
 		s.inspectSubmissionInput(input),
 	)(ctx) as AgentSubmissionInspection;
 	if (state === 'completed') {
-		await settleJoinedDirectSubmissions(
+		await settleJoinedSubmissions(
 			submissions,
 			attempt,
 			ctx,
@@ -375,18 +375,15 @@ export async function reconcileInterruptedSubmission(
 			undefined,
 			conversationWriter,
 		);
-		if (submission.kind === 'direct') {
-			await settleDirectSubmission(
-				submissions,
-				attempt,
-				ctx,
-				'completed',
-				undefined,
-				conversationWriter,
-			);
-		} else {
-			await submissions.completeSubmission(attempt);
-		}
+		await settleSubmissionWithRecord(
+			submissions,
+			submission.kind,
+			attempt,
+			ctx,
+			'completed',
+			undefined,
+			conversationWriter,
+		);
 		return undefined;
 	}
 
@@ -748,7 +745,7 @@ export async function processSubmission(opts: ProcessSubmissionOptions): Promise
 				);
 				return;
 			}
-			await settleJoinedDirectSubmissions(
+			await settleJoinedSubmissions(
 				submissions,
 				attempt,
 				ctx,
@@ -756,21 +753,18 @@ export async function processSubmission(opts: ProcessSubmissionOptions): Promise
 				error,
 				opts.conversationWriter,
 			);
-			if (submission.kind === 'direct') {
-				await settleDirectSubmission(
-					submissions,
-					attempt,
-					ctx,
-					'failed',
-					error,
-					opts.conversationWriter,
-				);
-			} else {
-				await submissions.failSubmission(attempt, error);
-			}
+			await settleSubmissionWithRecord(
+				submissions,
+				submission.kind,
+				attempt,
+				ctx,
+				'failed',
+				error,
+				opts.conversationWriter,
+			);
 			throw error;
 		}
-		await settleJoinedDirectSubmissions(
+		await settleJoinedSubmissions(
 			submissions,
 			attempt,
 			ctx,
@@ -778,18 +772,15 @@ export async function processSubmission(opts: ProcessSubmissionOptions): Promise
 			undefined,
 			opts.conversationWriter,
 		);
-		if (submission.kind === 'direct') {
-			await settleDirectSubmission(
-				submissions,
-				attempt,
-				ctx,
-				'completed',
-				undefined,
-				opts.conversationWriter,
-			);
-		} else {
-			await submissions.completeSubmission(attempt);
-		}
+		await settleSubmissionWithRecord(
+			submissions,
+			submission.kind,
+			attempt,
+			ctx,
+			'completed',
+			undefined,
+			opts.conversationWriter,
+		);
 	} finally {
 		opts.onSettled?.();
 	}
@@ -836,7 +827,7 @@ async function failInterruptedSubmission(
 		);
 	}
 	const error = createError(interruptedTools?.length ? interruptedTools : undefined);
-	await settleJoinedDirectSubmissions(
+	await settleJoinedSubmissions(
 		submissions,
 		attempt,
 		ctx,
@@ -844,18 +835,15 @@ async function failInterruptedSubmission(
 		error,
 		conversationWriter,
 	);
-	if (submission.kind === 'direct') {
-		await settleDirectSubmission(
-			submissions,
-			attempt,
-			ctx,
-			'failed',
-			error,
-			conversationWriter,
-		);
-	} else {
-		await submissions.failSubmission(attempt, error);
-	}
+	await settleSubmissionWithRecord(
+		submissions,
+		submission.kind,
+		attempt,
+		ctx,
+		'failed',
+		error,
+		conversationWriter,
+	);
 }
 
 /**
@@ -865,10 +853,9 @@ async function failInterruptedSubmission(
  *
  * Both kinds record a `submission_aborted` conversation advisory (best-effort —
  * a persistent save failure must not wedge settlement in a reconciliation loop)
- * so the abort is always visible in the message timeline. Direct submissions
- * additionally settle through the two-phase outbox with `outcome: 'aborted'`,
- * the durable terminal record a reconnecting waiter observes; dispatch
- * submissions settle the operational row with `failSubmission`.
+ * so the abort is always visible in the message timeline, and both settle
+ * through the two-phase outbox with `outcome: 'aborted'` — the durable
+ * terminal record a reconnecting waiter observes.
  */
 async function settleAbortedWithContext(
 	submissions: AgentSubmissionStore,
@@ -896,7 +883,7 @@ async function settleAbortedWithContext(
 			advisoryError,
 		);
 	}
-	await settleJoinedDirectSubmissions(
+	await settleJoinedSubmissions(
 		submissions,
 		attempt,
 		ctx,
@@ -904,34 +891,31 @@ async function settleAbortedWithContext(
 		error,
 		conversationWriter,
 	);
-	if (submission.kind === 'direct') {
-		await settleDirectSubmission(
-			submissions,
-			attempt,
-			ctx,
-			'aborted',
-			error,
-			conversationWriter,
-		);
-	} else {
-		await submissions.failSubmission(attempt, error);
-	}
+	await settleSubmissionWithRecord(
+		submissions,
+		submission.kind,
+		attempt,
+		ctx,
+		'aborted',
+		error,
+		conversationWriter,
+	);
 }
 
 /**
- * Settle every direct (HTTP) delivery joined into the host through the
- * settlement outbox — each gets its durable `submission_settled` record with
- * the host's outcome, reserved and finalized under the host's attempt — so
- * HTTP waiters (`wait()` observes that record) always resolve. Runs BEFORE
- * the host's own settle in every terminal path; this ordering shares the
- * single-process hazard model of the existing pre-settle terminal advisory
- * (see the TODO(multi-process) note in `reconcileInterruptedSubmission`).
- * Idempotent across re-attempts: a row already terminalizing replays its
- * retained obligation, and one already settled is skipped by the reserve
- * gate. Joined dispatch deliveries are untouched — the store's settle
- * fan-out covers them (and remains the kind-agnostic backstop).
+ * Settle every delivery joined into the host through the settlement outbox —
+ * each gets its durable `submission_settled` record with the host's outcome,
+ * reserved and finalized under the host's attempt — so settlement waiters
+ * (HTTP `wait()`, an awaited `init()` handle call) always resolve. Runs
+ * BEFORE the host's own settle in every terminal path; this ordering shares
+ * the single-process hazard model of the existing pre-settle terminal
+ * advisory (see the TODO(multi-process) note in
+ * `reconcileInterruptedSubmission`). Idempotent across re-attempts: a row
+ * already terminalizing replays its retained obligation, and one already
+ * settled is skipped by the reserve gate. The store's settle fan-out remains
+ * the backstop for any joined row still present when the host settles.
  */
-async function settleJoinedDirectSubmissions(
+async function settleJoinedSubmissions(
 	submissions: AgentSubmissionStore,
 	hostAttempt: SubmissionAttemptRef,
 	ctx: FlueContextInternal,
@@ -940,9 +924,10 @@ async function settleJoinedDirectSubmissions(
 	conversationWriter?: ConversationRecordWriter,
 ): Promise<void> {
 	for (const joined of await submissions.listJoinedSubmissions(hostAttempt.submissionId)) {
-		if (joined.kind !== 'direct' || joined.status !== 'joined') continue;
-		await settleDirectSubmission(
+		if (joined.status !== 'joined') continue;
+		await settleSubmissionWithRecord(
 			submissions,
+			joined.kind,
 			{ submissionId: joined.submissionId, attemptId: hostAttempt.attemptId },
 			ctx,
 			outcome,
@@ -952,8 +937,9 @@ async function settleJoinedDirectSubmissions(
 	}
 }
 
-async function settleDirectSubmission(
+async function settleSubmissionWithRecord(
 	submissions: AgentSubmissionStore,
+	kind: AgentSubmission['kind'],
 	attempt: SubmissionAttemptRef,
 	ctx: FlueContextInternal,
 	outcome: 'completed' | 'failed' | 'aborted',
@@ -966,8 +952,28 @@ async function settleDirectSubmission(
 		outcome,
 		...(outcome === 'completed' ? {} : { error: serializeSubmissionError(error) }),
 	});
-	if (!conversationWriter) return;
-	const eventKey = `record_direct-submission:${attempt.submissionId}:settled`;
+	const publishTerminalEvent = async () => {
+		ctx.publishEvent(event);
+		try {
+			await ctx.flushEventCallbacks();
+		} catch (callbackError) {
+			console.error('[flue:subscriber] Terminal event subscriber failed:', callbackError);
+		}
+	};
+	// No canonical stream to record against, or no conversation to anchor the
+	// record to (degenerate/test setups, a submission that never materialized):
+	// settle the operational row directly so the submission still terminates
+	// instead of wedging the session queue.
+	const settleOperationalRow = async () => {
+		if (outcome === 'completed') await submissions.completeSubmission(attempt);
+		else await submissions.failSubmission(attempt, error ?? new SubmissionAbortedError());
+		await publishTerminalEvent();
+	};
+	if (!conversationWriter) {
+		await settleOperationalRow();
+		return;
+	}
+	const eventKey = `record_${kind}-submission:${attempt.submissionId}:settled`;
 	const reduced = await conversationWriter.loadReducedState();
 	const conversation =
 		[...reduced.conversations.values()].find((candidate) =>
@@ -976,7 +982,10 @@ async function settleDirectSubmission(
 		[...reduced.conversations.values()].find(
 			(candidate) => candidate.harness === 'default' && candidate.session === 'default',
 		);
-	if (!conversation) return;
+	if (!conversation) {
+		await settleOperationalRow();
+		return;
+	}
 	const pending = (await submissions.listPendingSubmissionSettlements()).find(
 		(candidate) => candidate.submissionId === attempt.submissionId,
 	);
@@ -1018,13 +1027,12 @@ async function settleDirectSubmission(
 			{ submissionId: attempt.submissionId, recordId: eventKey },
 		);
 	}
-	ctx.publishEvent(event);
-	try {
-		await ctx.flushEventCallbacks();
-	} catch (callbackError) {
-		console.error('[flue:subscriber] Terminal event subscriber failed:', callbackError);
-	}
-	await submissions.finalizeSubmissionSettlement(attempt, eventKey);
+	await publishTerminalEvent();
+	await submissions.finalizeSubmissionSettlement(attempt, eventKey, {
+		...(outcome === 'completed' || error === undefined
+			? {}
+			: { errorMessage: error instanceof Error ? error.message : String(error) }),
+	});
 }
 
 function decodeBase64(value: string): Uint8Array {

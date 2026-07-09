@@ -242,7 +242,7 @@ export const reserveSettlementScript = `${guard}
 require_type(KEYS[1], 'hash')
 for i = 2, 5 do require_type(KEYS[i], 'zset') end
 if #KEYS >= 6 then require_type(KEYS[6], 'hash') end
-if redis.call('HGET', KEYS[1], 'kind') ~= 'direct' or redis.call('HEXISTS', KEYS[1], 'settlementRecordId') == 1 then return 0 end
+if redis.call('HEXISTS', KEYS[1], 'settlementRecordId') == 1 then return 0 end
 local status = redis.call('HGET', KEYS[1], 'status')
 local running = status == 'running' and redis.call('HGET', KEYS[1], 'attemptId') == ARGV[1] and redis.call('HGET', KEYS[1], 'ownerId') ~= false
 local joined = status == 'joined' and #KEYS >= 6 and ARGV[5] ~= '' and redis.call('HGET', KEYS[1], 'joinedInto') == ARGV[5] and redis.call('HGET', KEYS[6], 'status') == 'running' and redis.call('HGET', KEYS[6], 'attemptId') == ARGV[1]
@@ -261,10 +261,11 @@ export const finalizeSettlementScript = `${guard}${joinFanOut}
 require_type(KEYS[1], 'hash')
 for i = 2, 7 do require_type(KEYS[i], 'zset') end
 for i = 8, #KEYS do require_type(KEYS[i], 'hash') end
-if redis.call('HGET', KEYS[1], 'kind') ~= 'direct' or redis.call('HGET', KEYS[1], 'status') ~= 'terminalizing' or redis.call('HGET', KEYS[1], 'attemptId') ~= ARGV[3] or redis.call('HGET', KEYS[1], 'settlementRecordId') ~= ARGV[4] then return 0 end
+if redis.call('HGET', KEYS[1], 'status') ~= 'terminalizing' or redis.call('HGET', KEYS[1], 'attemptId') ~= ARGV[3] or redis.call('HGET', KEYS[1], 'settlementRecordId') ~= ARGV[4] then return 0 end
 redis.call('ZREM', KEYS[2], ARGV[1])
 redis.call('ZREM', KEYS[3], ARGV[1])
 redis.call('HSET', KEYS[1], 'status', 'settled', 'settledAt', ARGV[2])
+if ARGV[5] == '' then redis.call('HDEL', KEYS[1], 'error') else redis.call('HSET', KEYS[1], 'error', ARGV[5]) end
 settle_joins(ARGV[1], ARGV[2], ARGV[5], KEYS[4], KEYS[5], KEYS[6], KEYS[7], KEYS[3])
 return 1
 `;

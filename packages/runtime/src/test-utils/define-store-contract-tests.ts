@@ -625,20 +625,91 @@ export function defineStoreContractTests(label: string, backend: StoreContractTe
 				expect(await store.submissions.hasUnsettledSubmissions()).toBe(false);
 			});
 
-			it('leaves dispatch settlement behavior unchanged', async () => {
+			it('lists a pending dispatch settlement obligation', async () => {
+				// The obligation listing is kind-agnostic: a dispatch reserved for
+				// settlement must surface here exactly like a direct submission.
 				const store = await create();
 				await admitDispatchReady(store,dispatchInput());
 				await store.submissions.claimSubmission(claim('dispatch-1', 'attempt-1'));
-				const record = settlementRecord('completed');
+				const ref = attempt('dispatch-1', 'attempt-1');
+				const record = {
+					...settlementRecord('completed'),
+					id: 'dispatch-1:settled',
+					submissionId: 'dispatch-1',
+				};
+				await store.submissions.reserveSubmissionSettlement(ref, {
+					recordId: record.id,
+					record,
+				});
+				expect(await store.submissions.listPendingSubmissionSettlements()).toContainEqual(
+					expect.objectContaining({
+						submissionId: 'dispatch-1',
+						recordId: 'dispatch-1:settled',
+					}),
+				);
+			});
+
+			it('settles a dispatch through the same reserve/finalize outbox', async () => {
+				// Settlement is kind-agnostic: dispatch submissions reserve and
+				// finalize their durable settled record exactly like directs, so
+				// awaited dispatch callers observe the same terminal record.
+				const store = await create();
+				await admitDispatchReady(store,dispatchInput());
+				await store.submissions.claimSubmission(claim('dispatch-1', 'attempt-1'));
+				const record = {
+					...settlementRecord('completed'),
+					id: 'dispatch-1:settled',
+					submissionId: 'dispatch-1',
+				};
 				expect(
-					await store.submissions.reserveSubmissionSettlement(attempt('dispatch-1', 'attempt-1'), {
+					await store.submissions.reserveSubmissionSettlement(attempt('dispatch-1', 'stale'), {
 						recordId: record.id,
 						record,
 					}),
 				).toBeNull();
+				const reserved = await store.submissions.reserveSubmissionSettlement(
+					attempt('dispatch-1', 'attempt-1'),
+					{ recordId: record.id, record },
+				);
+				expect(reserved).toMatchObject({ submissionId: 'dispatch-1', recordId: record.id });
+				expect(await store.submissions.getSubmission('dispatch-1')).toMatchObject({
+					status: 'terminalizing',
+				});
 				expect(
-					await store.submissions.completeSubmission(attempt('dispatch-1', 'attempt-1')),
+					await store.submissions.finalizeSubmissionSettlement(
+						attempt('dispatch-1', 'attempt-1'),
+						record.id,
+					),
 				).toBe(true);
+				const settled = await store.submissions.getSubmission('dispatch-1');
+				expect(settled).toMatchObject({ status: 'settled' });
+				expect(settled?.error).toBeUndefined();
+			});
+
+			it('mirrors the failed settlement error onto the operational row', async () => {
+				const store = await create();
+				await admitDispatchReady(store,dispatchInput());
+				await store.submissions.claimSubmission(claim('dispatch-1', 'attempt-1'));
+				const record = {
+					...settlementRecord('failed'),
+					id: 'dispatch-1:settled',
+					submissionId: 'dispatch-1',
+				};
+				await store.submissions.reserveSubmissionSettlement(attempt('dispatch-1', 'attempt-1'), {
+					recordId: record.id,
+					record,
+				});
+				expect(
+					await store.submissions.finalizeSubmissionSettlement(
+						attempt('dispatch-1', 'attempt-1'),
+						record.id,
+						{ errorMessage: 'provider exploded: boom' },
+					),
+				).toBe(true);
+				expect(await store.submissions.getSubmission('dispatch-1')).toMatchObject({
+					status: 'settled',
+					error: 'provider exploded: boom',
+				});
 			});
 		});
 

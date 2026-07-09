@@ -150,7 +150,7 @@ describe('start() + init(): the scripted client', () => {
 		expect((error as AgentRunError).submissionId).toEqual(expect.any(String));
 	});
 
-	it('handle.dispatch() enqueues a real fire-and-forget dispatch', async () => {
+	it('handle.dispatch() awaits the settled reply like prompt()', async () => {
 		const { provider, model } = createFauxProvider();
 		provider.setResponses([
 			fauxAssistantMessage('signal ack'),
@@ -167,22 +167,46 @@ describe('start() + init(): the scripted client', () => {
 
 		await startFlue({ name: 'listener', agent: listener });
 		const agent = init(listener, { id: 'dispatch-1' });
-		const receipt = await agent.dispatch({
+		// The handle is the awaited surface for both verbs: the dispatch
+		// resolves with the reply that answered the signal (its durable
+		// settled record, unified with directs, is what the await observes).
+		const ack = await agent.dispatch({
 			kind: 'signal',
 			type: 'trigger',
 			body: 'from the script',
 		});
-		expect(receipt.dispatchId).toEqual(expect.any(String));
-		// An immediate follow-up prompt either joins the dispatch's live
-		// response or runs right behind it — both must settle cleanly (this
-		// interleaving used to fail with "the session advanced past this
-		// input"; the classifier now reads joined deliveries as continuation
-		// input). One faux response covers the coalesced case; the second is
-		// consumed only when the prompt runs as its own response.
-		const reply = await agent.prompt('And a question right behind it.');
-		expect(reply.text).toMatch(/signal ack|prompt reply/);
+		expect(ack.text).toBe('signal ack');
+		expect(ack.submissionId).toEqual(expect.any(String));
 		expect(deliveries).toContain('signal:from the script');
+		// A prompt right behind the awaited dispatch settles cleanly (this
+		// interleaving used to fail with "the session advanced past this
+		// input" before joined deliveries classified as continuation input).
+		const reply = await agent.prompt('And a question right behind it.');
+		expect(reply.text).toBe('prompt reply');
 		expect(deliveries).toContain('user:And a question right behind it.');
+	});
+
+	it('handle.dispatch() rejects with AgentRunError when the run fails', async () => {
+		const { provider, model } = createFauxProvider();
+		provider.setResponses([
+			() => {
+				throw new Error('provider exploded');
+			},
+		]);
+		const echo = defineAgent(() => 'Reply.', { model, durability: { maxAttempts: 1 } });
+
+		await startFlue({ name: 'echo', agent: echo });
+		const error = await init(echo, { id: 'dispatch-fail-1' })
+			.dispatch({ kind: 'signal', type: 'trigger', body: 'boom' })
+			.then(
+				() => {
+					throw new Error('Expected the dispatch to reject.');
+				},
+				(caught: unknown) => caught,
+			);
+		expect(error).toBeInstanceOf(AgentRunError);
+		expect((error as AgentRunError).outcome).toBe('failed');
+		expect((error as AgentRunError).submissionId).toEqual(expect.any(String));
 	});
 
 	it('streams projected chunks to onEvent while awaiting', async () => {

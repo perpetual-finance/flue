@@ -497,7 +497,7 @@ export function createNodeAgentCoordinator(options: {
 		await reconcileUnreadySubmissions();
 		for (const settlement of await submissions.listPendingSubmissionSettlements()) {
 			const submission = await submissions.getSubmission(settlement.submissionId);
-			if (!submission || submission.kind !== 'direct') continue;
+			if (!submission) continue;
 			if (activeSubmissions.has(submission.submissionId) || submission.leaseExpiresAt > Date.now()) {
 				continue;
 			}

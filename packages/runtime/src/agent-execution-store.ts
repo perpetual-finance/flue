@@ -250,10 +250,10 @@ export interface AgentSubmissionStore {
 	requeueSubmissionBeforeInputApplied(attempt: SubmissionAttemptRef): Promise<boolean>;
 	/**
 	 * Atomically reserve the exact canonical settlement record as an obligation.
-	 * Two shapes may transition to terminalizing: a running direct submission
-	 * owned by `attempt`, or a direct delivery `joined` into a host running
-	 * under `attempt.attemptId` — the host settles the joined waiter's record
-	 * under its own authority, adopting the row's `attemptId`/`startedAt`.
+	 * Two shapes may transition to terminalizing, for either submission kind: a
+	 * running submission owned by `attempt`, or a delivery `joined` into a host
+	 * running under `attempt.attemptId` — the host settles the joined waiter's
+	 * record under its own authority, adopting the row's `attemptId`/`startedAt`.
 	 * Exact retries return the existing obligation; conflicting record
 	 * identities or payloads return `null`.
 	 */
@@ -261,8 +261,17 @@ export interface AgentSubmissionStore {
 		attempt: SubmissionAttemptRef,
 		settlement: { recordId: string; record: SubmissionSettledRecord },
 	): Promise<SubmissionSettlementObligation | null>;
-	/** Finalize an owned terminalizing submission after its canonical record exists. */
-	finalizeSubmissionSettlement(attempt: SubmissionAttemptRef, recordId: string): Promise<boolean>;
+	/**
+	 * Finalize an owned terminalizing submission after its canonical record
+	 * exists. The row's error column mirrors the settlement outcome:
+	 * `options.errorMessage` (the raw server-side message) when the caller has
+	 * it, else the record's client-safe error message, else null on success.
+	 */
+	finalizeSubmissionSettlement(
+		attempt: SubmissionAttemptRef,
+		recordId: string,
+		options?: { errorMessage?: string },
+	): Promise<boolean>;
 	/**
 	 * Settle the submission successfully. Gated on a running submission
 	 * owned by `attempt`: a stale attempt or an already-settled submission

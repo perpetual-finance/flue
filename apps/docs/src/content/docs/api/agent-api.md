@@ -865,7 +865,7 @@ interface InitOptions {
 interface AgentInstanceHandle {
   readonly id: string;
   prompt(message: string | DeliveredMessage, options?: AgentPromptOptions): Promise<AgentReply>;
-  dispatch(message: DeliveredMessage): Promise<DispatchReceipt>;
+  dispatch(message: DeliveredMessage, options?: AgentPromptOptions): Promise<AgentReply>;
 }
 
 interface AgentReply {
@@ -877,9 +877,11 @@ interface AgentReply {
 }
 ```
 
-The programmatic client for one agent instance. `prompt(...)` admits a real direct submission — the message becomes the delivery, and every hook fires exactly as it does for a dispatch or an HTTP prompt — waits for it to settle, and resolves with the reply. A string message is shorthand for `{ kind: 'user', body }`. A `failed`/`aborted` settlement rejects with `AgentRunError` (`outcome`, `submissionId`, `cause`). `AgentPromptOptions` carries `onEvent` (every projected `ConversationStreamChunk` as it is durably recorded) and `signal` (durable abort intent; the prompt rejects once the aborted settlement lands).
+The programmatic client for one agent instance — the "control this agent" surface, where both verbs await the settled reply. `prompt(...)` admits a real direct submission — the message becomes the delivery, and every hook fires exactly as it does for a dispatch or an HTTP prompt — waits for it to settle, and resolves with the reply; a string message is shorthand for `{ kind: 'user', body }`. `dispatch(...)` delivers through the dispatch queue and awaits the same way (a delivery that joined a live response resolves with the coalesced reply that answered it); for fire-and-forget delivery use the top-level [`dispatch()`](#dispatch). A `failed`/`aborted` settlement rejects with `AgentRunError` (`outcome`, `submissionId`, `cause`). `AgentPromptOptions` carries `onEvent` (every projected `ConversationStreamChunk` as it is durably recorded) and `signal` (durable abort intent; the call rejects once the aborted settlement lands).
 
-The handle is an address: nothing is created until first contact, `data`/`uid` gate that first send, and after a prompt the handle pins the incarnation it contacted. Like `dispatch()`, `init()` taps the process's configured runtime — inside a Flue server it works directly; in a standalone script call `start()` from `@flue/runtime/node` first. Prompting is Node-only today (on Cloudflare, `prompt()` throws; `dispatch()` works everywhere).
+The handle is an address: nothing is created until first contact, `data`/`uid` gate that first send, and after a send the handle pins the incarnation it contacted. Like `dispatch()`, `init()` taps the process's configured runtime — inside a Flue server it works directly; in a standalone script call `start()` from `@flue/runtime/node` first. The awaited handle is Node-only today: on Cloudflare both verbs throw — deliver with the top-level `dispatch()` there and let the agent publish its own result (see [Scripts › On Cloudflare](/docs/guide/scripts/#on-cloudflare)).
+
+Inside a tool, prompting the agent that is currently running you deadlocks by design — the awaited delivery joins your own live response, which cannot settle while the tool is still executing. A tool never needs it: the `harness` prop is the tool's own model surface, with its own scratch session. Handles inside tools are for *other* instances.
 
 See the [Scripts guide](/docs/guide/scripts/) for the script, cron, and test recipes.
 

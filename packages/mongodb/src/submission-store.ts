@@ -218,28 +218,29 @@ export class MongoSubmissionStore implements AgentSubmissionStore {
 	}
 
 	async listPendingSubmissionSettlements(): Promise<import('@flue/runtime/adapter').SubmissionSettlementObligation[]> {
-		return (await this.c('submissions').find({ kind: 'direct', status: 'terminalizing' }, { sort: { sequence: 1 } })).map((row) => ({ submissionId: String(row.submissionId), sessionKey: String(row.sessionKey), attemptId: String(row.attemptId), recordId: String(row.settlementRecordId), record: row.settlementRecord as import('@flue/runtime/adapter').SubmissionSettledRecord }));
+		return (await this.c('submissions').find({ status: 'terminalizing' }, { sort: { sequence: 1 } })).map((row) => ({ submissionId: String(row.submissionId), sessionKey: String(row.sessionKey), attemptId: String(row.attemptId), recordId: String(row.settlementRecordId), record: row.settlementRecord as import('@flue/runtime/adapter').SubmissionSettledRecord }));
 	}
 	async reserveSubmissionSettlement(attempt: SubmissionAttemptRef, settlement: { recordId: string; record: import('@flue/runtime/adapter').SubmissionSettledRecord }): Promise<import('@flue/runtime/adapter').SubmissionSettlementObligation | null> {
 		if (settlement.record.id !== settlement.recordId) return null;
 		return this.runner.transaction(async (tx) => {
 			const submissions = tx.collection(collectionName(this.prefix, 'submissions'));
-			// Two reservable shapes: the direct submission's own running attempt,
-			// or a direct delivery JOINED into a host that is running under the
-			// caller's attempt — the host settles the joined waiter's record
-			// under its own authority, adopting the row (attemptId/startedAt)
-			// so the terminalizing invariants and finalize fencing hold.
+			// Two reservable shapes, for either submission kind: the submission's
+			// own running attempt, or a delivery JOINED into a host that is
+			// running under the caller's attempt — the host settles the joined
+			// waiter's record under its own authority, adopting the row
+			// (attemptId/startedAt) so the terminalizing invariants and
+			// finalize fencing hold.
 			let row = await submissions.findOneAndUpdate(
-				{ submissionId: attempt.submissionId, kind: 'direct', status: 'running', attemptId: attempt.attemptId, ownerId: { $ne: null }, settlementRecordId: null },
+				{ submissionId: attempt.submissionId, status: 'running', attemptId: attempt.attemptId, ownerId: { $ne: null }, settlementRecordId: null },
 				{ $set: { status: 'terminalizing', settlementRecordId: settlement.recordId, settlementRecord: settlement.record } }, { returnDocument: 'after' });
 			if (!row) {
-				const joined = await submissions.findOne({ submissionId: attempt.submissionId, kind: 'direct', status: 'joined' });
+				const joined = await submissions.findOne({ submissionId: attempt.submissionId, status: 'joined' });
 				const host = joined?.joinedInto
 					? await submissions.findOne({ submissionId: joined.joinedInto, status: 'running', attemptId: attempt.attemptId })
 					: null;
 				if (host) {
 					row = await submissions.findOneAndUpdate(
-						{ submissionId: attempt.submissionId, kind: 'direct', status: 'joined', joinedInto: joined?.joinedInto },
+						{ submissionId: attempt.submissionId, status: 'joined', joinedInto: joined?.joinedInto },
 						[{ $set: { status: 'terminalizing', settlementRecordId: settlement.recordId, settlementRecord: settlement.record, attemptId: attempt.attemptId, startedAt: { $ifNull: ['$startedAt', Date.now()] } } }],
 						{ returnDocument: 'after' },
 					);
@@ -250,23 +251,37 @@ export class MongoSubmissionStore implements AgentSubmissionStore {
 			return { submissionId: String(current.submissionId), sessionKey: String(current.sessionKey), attemptId: String(current.attemptId), recordId: String(current.settlementRecordId), record: current.settlementRecord as import('@flue/runtime/adapter').SubmissionSettledRecord };
 		});
 	}
-	async finalizeSubmissionSettlement(attempt: SubmissionAttemptRef, recordId: string): Promise<boolean> {
+	async finalizeSubmissionSettlement(
+		attempt: SubmissionAttemptRef,
+		recordId: string,
+		options?: { errorMessage?: string },
+	): Promise<boolean> {
 		return this.runner.transaction(async (tx) => {
 			const submissions = tx.collection(collectionName(this.prefix, 'submissions'));
+			const pending = await submissions.findOne({
+				submissionId: attempt.submissionId,
+				status: 'terminalizing',
+				attemptId: attempt.attemptId,
+				settlementRecordId: recordId,
+			});
+			if (!pending) return false;
+			// The durable settlement record is the outcome authority; the row's
+			// error field mirrors it — the caller's raw server-side message when
+			// provided, else the record's client-safe one.
+			const record = pending.settlementRecord as { outcome?: string; error?: { message?: string } };
+			const errorMessage =
+				record.outcome === 'completed'
+					? null
+					: (options?.errorMessage ?? record.error?.message ?? 'The submission did not complete.');
 			const row = await submissions.findOneAndUpdate(
-				{ submissionId: attempt.submissionId, kind: 'direct', status: 'terminalizing', attemptId: attempt.attemptId, settlementRecordId: recordId },
-				{ $set: { status: 'settled', settledAt: Date.now() } },
+				{ submissionId: attempt.submissionId, status: 'terminalizing', attemptId: attempt.attemptId, settlementRecordId: recordId },
+				{ $set: { status: 'settled', settledAt: Date.now(), error: errorMessage } },
 				{ returnDocument: 'after' },
 			);
 			if (!row) return false;
-			// A direct host settles through the outbox; fan its outcome out to
-			// joined deliveries the same way completeSubmission/failSubmission do.
-			const record = row.settlementRecord as { outcome?: string; error?: { message?: string } };
-			await this.settleJoinedSubmissions(
-				submissions,
-				attempt.submissionId,
-				record.outcome === 'completed' ? null : (record.error?.message ?? 'The host submission did not complete.'),
-			);
+			// A host settles through the outbox; fan its outcome out to joined
+			// deliveries the same way completeSubmission/failSubmission do.
+			await this.settleJoinedSubmissions(submissions, attempt.submissionId, errorMessage);
 			return true;
 		});
 	}
