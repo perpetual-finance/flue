@@ -26,6 +26,10 @@ new Cron('7 3 * * *', async () => {
 
 Use `dispatch(...)` when you only need to deliver input ([Schedules](/docs/guide/schedules/)); use `init(...).prompt(...)` when the script needs the result.
 
+### On Cloudflare
+
+`prompt()` is a Node-side API by design. A deployed Worker is always a server in front of its agent Durable Objects, and holding a handler open to await a whole agent run works against the platform — a cron invocation has a hard wall-clock ceiling, and the reply usually belongs to the agent anyway. Deliver input with `dispatch(...)` or `init(...).dispatch(...)` — both work on every target, including [Cron Triggers](/docs/guide/schedules/#scheduling-on-cloudflare) — and let the agent deliver its own result through a tool, a finish hook, or a channel. To await a reply from outside the Worker, use the `@flue/sdk` client against the agent's HTTP routes.
+
 ## Standalone scripts: `start()`
 
 Outside a Flue server — `node ./scripts/nightly.ts` — boot the runtime first with `start()` from `@flue/runtime/node`. It performs the same startup a generated server entry does (agent registration, persistence, the durable submission coordinator) with no HTTP surface:

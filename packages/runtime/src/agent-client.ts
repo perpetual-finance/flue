@@ -242,9 +242,12 @@ function requireRuntime(api: string): FlueRuntime {
 function requireNodeRuntime(rt: FlueRuntime): NodeRuntime {
 	if (rt.target !== 'node') {
 		throw new Error(
-			'[flue] init().prompt() is not yet supported on the Cloudflare target. ' +
-				'The agent Durable Object serves the same admission, and an implementation ' +
-				'over it is planned; use dispatch() or the @flue/sdk client meanwhile.',
+			'[flue] init().prompt() is not supported on the Cloudflare target. ' +
+				'A Worker is a server in front of its agent Durable Objects, and holding a ' +
+				'handler open to await a whole agent run works against the platform. ' +
+				'Deliver input with agent.dispatch() (works everywhere, including cron ' +
+				'triggers) and let the agent publish its own result, or await a reply from ' +
+				'outside the Worker with the @flue/sdk client.',
 		);
 	}
 	return rt;
