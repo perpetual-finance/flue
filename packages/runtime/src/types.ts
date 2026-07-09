@@ -27,6 +27,7 @@ export type {
 	ToolInputSchema,
 	ToolOutput,
 	ToolOutputSchema,
+	ToolStep,
 } from './tool-types.ts';
 
 export type { ThinkingLevel };

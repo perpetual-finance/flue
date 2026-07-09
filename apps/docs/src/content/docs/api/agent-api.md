@@ -1,7 +1,7 @@
 ---
 title: Agent API
 description: Reference for defining agents, composing behavior with Flue Hooks, and running agent operations with @flue/runtime.
-lastReviewedAt: 2026-07-07
+lastReviewedAt: 2026-07-08
 ---
 
 The agent API is exported from `@flue/runtime`.
@@ -87,6 +87,7 @@ import {
   type ToolInputSchema,
   type ToolOutput,
   type ToolOutputSchema,
+  type ToolStep,
   type ToolValidationIssue,
 } from '@flue/runtime';
 ```
@@ -252,6 +253,7 @@ function useTool(tool: {
   input?: ToolInputSchema;
   output?: ToolOutputSchema;
   harness?: boolean;
+  durable?: boolean;
   run: ToolDefinition['run'];
 }): void;
 ```
@@ -265,7 +267,7 @@ function Retention() {
 }
 ```
 
-Duplicate active tool names across the whole render fail fast. See [`defineTool(...)`](#definetool) for the full tool contract, including `harness`.
+Duplicate active tool names across the whole render fail fast. See [`defineTool(...)`](#definetool) for the full tool contract, including `harness` and `durable`.
 
 ### `useInstruction(...)`
 
@@ -616,14 +618,16 @@ function defineTool<
   TInput extends ToolInputSchema | undefined = undefined,
   TOutput extends ToolOutputSchema | undefined = undefined,
   THarness extends boolean = false,
+  TDurable extends boolean = false,
 >(options: {
   name: string;
   description: string;
   input?: TInput;
   output?: TOutput;
   harness?: THarness;
-  run: ToolDefinition<TInput, TOutput, THarness>['run'];
-}): ToolDefinition<TInput, TOutput, THarness>;
+  durable?: TDurable;
+  run: ToolDefinition<TInput, TOutput, THarness, TDurable>['run'];
+}): ToolDefinition<TInput, TOutput, THarness, TDurable>;
 ```
 
 Validates a custom model-callable tool and returns a frozen definition. Pass the returned value to [`useTool(...)`](#usetool) (or a `tools` array on a harness operation). Tool names are checked for collisions with other active tools when an operation assembles its tool list.
@@ -639,6 +643,7 @@ Validates a custom model-callable tool and returns a frozen definition. Pass the
 | `input`       | `ToolInputSchema`               | Optional top-level Valibot object schema.                                                                                                                                                                                                                           |
 | `output`      | `ToolOutputSchema`              | Optional Valibot schema for typed, validated output.                                                                                                                                                                                                                |
 | `harness`     | `boolean`                       | Connects the tool to the agent's runtime: `run` receives `harness`, the one interface to the sandbox (`harness.shell()`, `harness.fs`) and to models (`harness.prompt()`, `harness.skill()`, `harness.task()`). Tools without it are pure functions of their input. |
+| `durable`     | `boolean`                       | Opts the tool into checkpointed execution: `run` receives `step`, every side effect goes through `step.do(...)`, and an interrupted call is re-executed on recovery with completed steps replaying their recorded values. See [Durable tools](/docs/guide/tools/#durable-tools). |
 | `run`         | `(context) => value \| Promise` | Receives a [`ToolContext`](#toolcontext). Returns JSON-compatible structured data.                                                                                                                                                                                  |
 
 ```ts
@@ -672,17 +677,38 @@ const runIntake = defineTool({
 
 Harness invocations are scoped to the tool call, count against the delegation-depth cap, and retain any child conversations they open. Harness tools only run inside an agent session — never standalone (`validateAndRunTool` throws for one).
 
+A `durable: true` tool gets `step` for checkpointed, recovery-safe execution (see [Durable tools](/docs/guide/tools/#durable-tools) for the full contract):
+
+```ts
+const syncCustomers = defineTool({
+  name: 'sync_customers',
+  description: 'Sync updated CRM customers into the local database.',
+  input: v.object({ since: v.string() }),
+  durable: true,
+  async run({ data, step }) {
+    const customers = await step.do('fetch', () => crm.listCustomers({ since: data.since }));
+    for (const customer of customers) {
+      await step.do(`upsert:${customer.id}`, () => db.upsert(customer));
+    }
+    return { synced: customers.length };
+  },
+});
+```
+
+`step.do(name, fn)` runs `fn` once per name for the tool call, durably records the returned JSON-serializable value before resolving, and replays the recorded value when recovery re-executes the call. Reusing a name within one call throws. The flags compose — a `durable: true, harness: true` tool receives both `step` and `harness` (wrap `harness.prompt(...)` in a step to avoid re-prompting on recovery). Outside an agent session, `step.do` executes with identical semantics but records nothing.
+
 #### `ToolContext`
 
 ```ts
-type ToolContext<S, H> = {
+type ToolContext<S, H, D> = {
   readonly signal?: AbortSignal;
   readonly log: FlueLogger;
 } & (S extends ToolInputSchema ? { readonly data: v.InferOutput<S> } : {}) &
-  (H extends true ? { readonly harness: FlueHarness } : {});
+  (H extends true ? { readonly harness: FlueHarness } : {}) &
+  (D extends true ? { readonly step: ToolStep } : {});
 ```
 
-Every tool's `run` receives `log` (streamed into the conversation as progress events, never seen by the model) and the tool call's `signal`. `data` — the call's arguments parsed by the `input` schema — is present when the definition declares an `input` schema; `harness` is present when the definition declares `harness: true`.
+Every tool's `run` receives `log` (streamed into the conversation as progress events, never seen by the model) and the tool call's `signal`. `data` — the call's arguments parsed by the `input` schema — is present when the definition declares an `input` schema; `harness` is present when the definition declares `harness: true`; `step` is present when the definition declares `durable: true`.
 
 ### Breaking migration
 

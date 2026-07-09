@@ -659,6 +659,14 @@ export function applyConversationRecord(
 		}
 		case 'submission_settled':
 			break;
+		case 'tool_step_settled':
+			// Durable-step memo: read back by deterministic id from
+			// `recordsById` when a `durable: true` tool call re-executes.
+			// Operational — no graph entry, so it can never enter model context.
+			if (!record.toolCallId || !record.stepName) {
+				fail(record, `A tool step memo requires its toolCallId and stepName.`);
+			}
+			break;
 		case 'state_write':
 			state.state.set(record.name, record.value);
 			break;

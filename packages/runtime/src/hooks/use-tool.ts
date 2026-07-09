@@ -23,6 +23,7 @@ export function useTool<
 	const TInput extends ToolInputSchema | undefined = undefined,
 	const TOutput extends ToolOutputSchema | undefined = undefined,
 	const THarness extends boolean = false,
+	const TDurable extends boolean = false,
 >(tool: {
 	name: string;
 	description: string;
@@ -35,7 +36,13 @@ export function useTool<
 	 * their data.
 	 */
 	harness?: THarness;
-	run: ToolDefinition<TInput, TOutput, THarness>['run'];
+	/**
+	 * Declare this tool durable: `run` receives `step`, every side effect
+	 * goes through `step.do(...)`, and an interrupted call is re-executed on
+	 * recovery with completed steps replaying their recorded values.
+	 */
+	durable?: TDurable;
+	run: ToolDefinition<TInput, TOutput, THarness, TDurable>['run'];
 }): void {
 	const frame = requireRenderFrame('useTool');
 	assertToolDefinition(tool, 'useTool()');

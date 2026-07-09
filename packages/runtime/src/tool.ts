@@ -12,6 +12,7 @@ import type {
 	ToolInputSchema,
 	ToolOutput,
 	ToolOutputSchema,
+	ToolStep,
 } from './tool-types.ts';
 import type { FlueHarness, FlueLogger } from './types.ts';
 
@@ -19,14 +20,16 @@ export function defineTool<
 	const TInput extends ToolInputSchema | undefined = undefined,
 	const TOutput extends ToolOutputSchema | undefined = undefined,
 	const THarness extends boolean = false,
+	const TDurable extends boolean = false,
 >(options: {
 	name: string;
 	description: string;
 	input?: TInput;
 	output?: TOutput;
 	harness?: THarness;
-	run: ToolDefinition<TInput, TOutput, THarness>['run'];
-}): ToolDefinition<TInput, TOutput, THarness> {
+	durable?: TDurable;
+	run: ToolDefinition<TInput, TOutput, THarness, TDurable>['run'];
+}): ToolDefinition<TInput, TOutput, THarness, TDurable> {
 	assertToolDefinition(options, 'defineTool()');
 	return Object.freeze({
 		name: options.name,
@@ -34,6 +37,7 @@ export function defineTool<
 		input: options.input as TInput,
 		output: options.output as TOutput,
 		harness: options.harness as THarness,
+		durable: options.durable as TDurable,
 		run: options.run,
 	});
 }
@@ -64,6 +68,9 @@ export function assertToolDefinition(
 	if (tool.harness !== undefined && typeof tool.harness !== 'boolean') {
 		throw new Error(`[flue] ${label} harness must be a boolean.`);
 	}
+	if (tool.durable !== undefined && typeof tool.durable !== 'boolean') {
+		throw new Error(`[flue] ${label} durable must be a boolean.`);
+	}
 	if (typeof tool.run !== 'function') {
 		throw new Error(`[flue] ${label} run must be a function.`);
 	}
@@ -74,6 +81,8 @@ export interface ToolRunFacilities {
 	log: FlueLogger;
 	/** Present only for `harness: true` tools, created per invocation. */
 	harness?: FlueHarness;
+	/** Present only for `durable: true` tools, created per invocation. */
+	step?: ToolStep;
 }
 
 export function parseToolInput<TTool extends ToolDefinition>(
@@ -86,6 +95,10 @@ export function parseToolInput<TTool extends ToolDefinition>(
 		signal,
 		log: facilities?.log ?? NOOP_LOGGER,
 		...(facilities?.harness ? { harness: facilities.harness } : {}),
+		// A durable tool always sees `step`. Outside a session (standalone
+		// runs, evals) nothing is durable to begin with, so the step executes
+		// without recording — same semantics, no persistence.
+		...(tool.durable ? { step: facilities?.step ?? createEphemeralToolStep(tool.name) } : {}),
 	};
 	if (!tool.input) return { context: base as Parameters<TTool['run']>[0], data: undefined };
 	const parsed = parseValibot(tool.input, data === undefined ? {} : data);
@@ -104,6 +117,47 @@ const NOOP_LOGGER: FlueLogger = {
 	warn: () => {},
 	error: () => {},
 };
+
+/**
+ * Guard one invocation's step names: non-empty, and never reused — a reused
+ * name would silently alias two steps onto one memo, which only surfaces as
+ * wrong values during recovery. Shared by the session's durable step and the
+ * ephemeral one so the contract is identical everywhere.
+ */
+export function claimStepName(name: unknown, toolName: string, used: Set<string>): string {
+	if (typeof name !== 'string' || name.trim().length === 0) {
+		throw new Error(`[flue] Tool "${toolName}" step.do() requires a non-empty step name.`);
+	}
+	if (used.has(name)) {
+		throw new Error(
+			`[flue] Tool "${toolName}" ran step.do("${name}") twice in one call. Step names ` +
+				'identify the logical work for replay — derive a distinct name per step ' +
+				'(e.g. "item:" + id).',
+		);
+	}
+	used.add(name);
+	return name;
+}
+
+/** Clone a step value, enforcing the JSON-serializability contract. */
+export function cloneStepValue(value: unknown, toolName: string, stepName: string): unknown {
+	return cloneJsonSerializable(value, `Tool "${toolName}" step "${stepName}" value`);
+}
+
+/**
+ * The `step` a durable tool sees outside an agent session: identical
+ * semantics (name discipline, JSON-serializable values), no persistence —
+ * a standalone run has no durability for the memo to extend.
+ */
+export function createEphemeralToolStep(toolName: string): ToolStep {
+	const used = new Set<string>();
+	return {
+		async do(name, fn) {
+			const stepName = claimStepName(name, toolName, used);
+			return cloneStepValue(await fn(), toolName, stepName) as Awaited<ReturnType<typeof fn>>;
+		},
+	};
+}
 
 export function validateToolOutput<TTool extends ToolDefinition>(
 	tool: TTool,

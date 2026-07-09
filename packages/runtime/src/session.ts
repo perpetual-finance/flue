@@ -64,6 +64,7 @@ import {
 	type ConversationRecord,
 	generateConversationEntryId,
 	generateConversationRecordId,
+	toolStepRecordId,
 } from './conversation-records.ts';
 import {
 	getActiveConversationPath,
@@ -156,7 +157,13 @@ import {
 	findTrailingPartialToolBatch,
 	isRetryableModelError,
 } from './submission-state.ts';
-import { assertToolDefinition, parseToolInput, validateToolOutput } from './tool.ts';
+import {
+	assertToolDefinition,
+	claimStepName,
+	cloneStepValue,
+	parseToolInput,
+	validateToolOutput,
+} from './tool.ts';
 import { getPreparedToolAdapter } from './tool-adapter.ts';
 import type {
 	AgentConfig,
@@ -167,6 +174,7 @@ import type {
 	FlueEventInputCallback,
 	FlueFs,
 	FlueHarness,
+	FlueLogger,
 	FlueObservationDetail,
 	FlueSession,
 	ModelRequestInfo,
@@ -189,6 +197,7 @@ import type {
 	TaskOptions,
 	ThinkingLevel,
 	ToolDefinition,
+	ToolStep,
 } from './types.ts';
 import { addUsage, emptyUsage, fromProviderUsage } from './usage.ts';
 
@@ -2295,9 +2304,12 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	 * instead of replaying — and re-executing — tool calls whose results were
 	 * already recorded. Conservative by construction: every recorded result is
 	 * preserved (first-write-wins) and unresolved calls get explicit
-	 * unknown-outcome error results — never a re-execution. The batch is
-	 * derived from persisted canonical history. No-op when no trailing partial
-	 * batch exists.
+	 * unknown-outcome error results — never a blind re-execution. Two scoped
+	 * exceptions resolve real outcomes pre-commit: in-flight `task` children
+	 * are resumed, and `durable: true` tool calls are re-executed with their
+	 * completed steps replaying from durable memos. The batch is derived from
+	 * persisted canonical history. No-op when no trailing partial batch
+	 * exists.
 	 */
 	private async repairTrailingPartialToolBatch(
 		inputEntryId: string,
@@ -2313,16 +2325,13 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		// batch by resuming their in-flight children in-process, BEFORE the atomic
 		// commit, so the committed outcome is the real child result rather than an
 		// interrupted marker. Sequential and pre-commit by design (see plan §P1.4).
-		const resolvedTaskOutcomes = await this.resumeUnresolvedTaskCalls(
-			conversation,
-			partial,
-			signal,
-		);
+		const resolvedOutcomes = await this.resumeUnresolvedTaskCalls(conversation, partial, signal);
+		await this.resumeDurableToolCalls(conversation, partial, signal, resolvedOutcomes);
 		await this.appendRepairedToolResultBatch(
 			partial.entryId,
 			partial.toolCalls,
 			conversation,
-			resolvedTaskOutcomes,
+			resolvedOutcomes,
 		);
 	}
 
@@ -2366,6 +2375,93 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			);
 		}
 		return resolved;
+	}
+
+	/**
+	 * Re-execute each unresolved `durable: true` tool call in a trailing
+	 * partial batch — the scoped exception to the never-re-execute doctrine.
+	 * The durable tool's contract is that every side effect goes through
+	 * `step.do`, so the re-run replays completed steps from their durable
+	 * memos (same toolCallId → same memo ids) and only executes what never
+	 * finished. Semantics mirror live execution: a throw becomes an isError
+	 * outcome the model sees (never a propagated failure burning the
+	 * submission's retry budget); only an abort propagates. A call whose
+	 * current render no longer declares the tool — or no longer marks it
+	 * durable — is left for the interrupted-marker path, so a redeploy
+	 * degrades to today's behavior instead of guessing.
+	 */
+	private async resumeDurableToolCalls(
+		conversation: ReducedConversationState,
+		partial: {
+			entryId: string;
+			assistant: AssistantMessage;
+			toolCalls: ReadonlyArray<{ id: string; name: string }>;
+		},
+		signal: AbortSignal,
+		resolved: Map<string, ConversationRecord>,
+	): Promise<void> {
+		for (const toolCall of partial.toolCalls) {
+			if (resolved.has(toolCall.id)) continue;
+			if (conversation.toolOutcomes.get(toolOutcomeKey(partial.entryId, toolCall.id))) continue;
+			const toolDef = this.agentTools.find((candidate) => candidate.name === toolCall.name);
+			if (!toolDef?.durable) continue;
+			if (signal.aborted) throw abortErrorFor(signal);
+			resolved.set(
+				toolCall.id,
+				await this.reexecuteDurableToolCall(partial, toolCall.id, toolDef, signal),
+			);
+		}
+	}
+
+	/** One durable re-execution, from the durable tool-call block to a real
+	 *  `tool_outcome` record in the live outcome format. */
+	private async reexecuteDurableToolCall(
+		partial: { entryId: string; assistant: AssistantMessage },
+		toolCallId: string,
+		toolDef: ToolDefinition,
+		signal: AbortSignal,
+	): Promise<ConversationRecord> {
+		const block = partial.assistant.content.find(
+			(candidate): candidate is Extract<typeof candidate, { type: 'toolCall' }> =>
+				candidate.type === 'toolCall' && candidate.id === toolCallId,
+		);
+		const params = block?.arguments ?? {};
+		const startedAt = Date.now();
+		const outcomeKey = `${encodeCanonicalId(partial.entryId)}_${encodeCanonicalId(toolCallId)}`;
+		const buildOutcome = (isError: boolean, text: string, output?: unknown): ConversationRecord => ({
+			...this.canonicalEnvelope('tool_outcome', `record_tool_outcome_${outcomeKey}`),
+			type: 'tool_outcome',
+			assistantMessageId: partial.entryId,
+			toolCallId,
+			toolName: toolDef.name,
+			isError,
+			content: [{ type: 'text', text }],
+			...(output !== undefined ? { output } : {}),
+			durationMs: durationSince(startedAt),
+		});
+		const log = this.createToolLogger(toolDef.name, toolCallId);
+		// Fresh invocation scope per execution attempt (see createCustomTools):
+		// child sessions never collide with a prior attempt's retained
+		// conversations, while step memos — keyed by toolCallId — carry across.
+		const invocationId = toolDef.harness ? generateInvocationId() : undefined;
+		const harness = invocationId ? this.createInvocationHarness(invocationId, signal) : undefined;
+		try {
+			const parsed = parseToolInput(toolDef, params, signal, {
+				log,
+				step: this.createToolStep(toolDef.name, toolCallId, log),
+				...(harness ? { harness } : {}),
+			});
+			const output = validateToolOutput(toolDef, await toolDef.run(parsed.context));
+			return buildOutcome(false, output === undefined ? 'null' : JSON.stringify(output), output);
+		} catch (error) {
+			if (signal.aborted) throw error;
+			return buildOutcome(true, error instanceof Error ? error.message : String(error));
+		} finally {
+			if (harness) {
+				this.activeActionHarnesses.delete(harness);
+				await harness.close();
+			}
+		}
 	}
 
 	/** Reattach to one in-flight child, resume it to completion, and build the
@@ -3199,6 +3295,45 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	}
 
 	/**
+	 * The invocation-scoped `step` behind `durable: true` tools. Each
+	 * completed step settles as a `tool_step_settled` record under the
+	 * deterministic id derived from `(toolCallId, stepName)`, and the append
+	 * is awaited before `do` resolves — a checkpoint that has not landed is
+	 * not a checkpoint. A recovery re-execution of the same toolCallId finds
+	 * a prior attempt's memo by that id and replays the recorded value
+	 * instead of running the step again. The returned value is always the
+	 * JSON clone, so first execution and replay hand the caller identical
+	 * shapes.
+	 */
+	private createToolStep(toolName: string, toolCallId: string, log: FlueLogger): ToolStep {
+		const used = new Set<string>();
+		return {
+			do: async <T>(name: string, fn: () => T | Promise<T>): Promise<T> => {
+				const stepName = claimStepName(name, toolName, used);
+				const recordId = toolStepRecordId(toolCallId, stepName);
+				const existing = await this.conversationWriter.getRecord(recordId);
+				if (existing?.type === 'tool_step_settled') {
+					log.info(`step "${stepName}" replayed`, { step: stepName });
+					return existing.value as T;
+				}
+				const value = cloneStepValue(await fn(), toolName, stepName);
+				await this.appendCanonical([
+					{
+						...this.canonicalEnvelope('tool_step_settled', recordId),
+						type: 'tool_step_settled',
+						toolCallId,
+						toolName,
+						stepName,
+						value,
+					},
+				]);
+				log.info(`step "${stepName}" completed`, { step: stepName });
+				return value as T;
+			},
+		};
+	}
+
+	/**
 	 * The invocation-scoped harness behind `harness: true` tools and
 	 * lifecycle hook runs: the one interface between tool code and the agent's runtime
 	 * (sandbox shell/fs, sessions, model calls). Scoped to the invocation
@@ -3291,8 +3426,12 @@ export class Session implements FlueSession, AgentSubmissionSession {
 						result: toolResultText,
 					};
 				}
+				const toolLogger = this.createToolLogger(toolDef.name, toolCallId);
 				const parsed = parseToolInput(toolDef, params, signal, {
-					log: this.createToolLogger(toolDef.name, toolCallId),
+					log: toolLogger,
+					...(toolDef.durable
+						? { step: this.createToolStep(toolDef.name, toolCallId, toolLogger) }
+						: {}),
 				});
 				return {
 					args: parsed.data,
@@ -4679,9 +4818,10 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			}
 			case 'tool_use_unresolved': {
 				// A tool turn made durable but interrupted before ANY tool
-				// outcome was recorded. Repair the batch — every unresolved
-				// call gets an explicit unknown-outcome error, never a
-				// re-execution — and continue, identical to a partial batch.
+				// outcome was recorded. Repair the batch — unresolved calls
+				// get explicit unknown-outcome errors (only `durable: true`
+				// calls re-execute, replaying their recorded steps) — and
+				// continue, identical to a partial batch.
 				// (Before the turn-journal removal this was reached only when
 				// the journal said the turn never started, and was settled
 				// as-is; canonical recovery cannot prove "never started", so it

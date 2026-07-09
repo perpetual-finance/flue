@@ -1,7 +1,7 @@
 ---
 title: Tools
 description: Give agents application capabilities through custom tools and MCP servers.
-lastReviewedAt: 2026-07-07
+lastReviewedAt: 2026-07-08
 ---
 
 Tools let an agent retrieve information or perform actions while it works. Define tools when an agent needs to call your application's data layer or services, such as looking up an order, creating a ticket, or approving a request.
@@ -89,6 +89,44 @@ export const reviewChange = defineTool({
 ```
 
 Mount it like any other tool with `useTool(reviewChange)`. Harness invocations are scoped to the tool call, count against the delegation-depth cap, and retain any child conversations they open — the same accounting a delegated [subagent](/docs/guide/subagents/) uses. Tools without `harness` cannot reach the runtime; keep them pure functions of their input.
+
+## Durable tools
+
+Ordinary tool code is never re-executed after an interruption: if the process dies mid-run, recovery settles the call with an explicit unknown-outcome error and the model decides what to do next (see [Durable Agents](/docs/concepts/durable-execution/)). That is the right default for arbitrary side effects — but it means a long, multi-effect tool loses all its progress to a crash.
+
+`durable: true` opts a tool into checkpointed execution. `run` receives `step`, and every side effect goes through `step.do(name, fn)`: the step's return value is durably recorded the moment it completes, and if the call is interrupted, recovery **re-executes the whole `run`** — completed steps return their recorded values without running again, and execution continues from the first step that never finished.
+
+```ts title="src/shared/sync-tools.ts"
+import { defineTool } from '@flue/runtime';
+import * as v from 'valibot';
+import { crm, db } from './clients.ts';
+
+export const syncCustomers = defineTool({
+  name: 'sync_customers',
+  description: 'Sync updated CRM customers into the local database.',
+  input: v.object({ since: v.string() }),
+  durable: true,
+  async run({ data, step, log }) {
+    const customers = await step.do('fetch', () => crm.listCustomers({ since: data.since }));
+    for (const customer of customers) {
+      // One memo per customer: a crash after customer 40 of 200 replays the
+      // fetch and the 40 finished upserts, then runs upsert 41 fresh.
+      await step.do(`upsert:${customer.id}`, () => db.upsert(customer));
+    }
+    log.info('sync complete', { count: customers.length });
+    return { synced: customers.length };
+  },
+});
+```
+
+The contract, in exchange for re-execution:
+
+- **Everything effectful goes in a step.** Code between steps re-executes on recovery, so keep it cheap and effect-free — derive values, branch, loop.
+- **Step names identify the logical work.** Derive them deterministically (`` `upsert:${id}` ``); reusing a name within one call throws immediately, since two steps sharing a memo is a bug that would otherwise only surface during recovery.
+- **Values are small JSON.** Step return values are recorded in the conversation; they must be JSON-serializable, and large artifacts belong in the sandbox with the memo holding a pointer.
+- **Steps are exactly-once-recorded, at-least-once-executed.** A crash in the narrow window between a step finishing and its record landing re-runs that one step. Make steps around external effects individually idempotent — the same discipline Temporal, Inngest, or Cloudflare Workflows ask for.
+
+A thrown error is not an interruption: like any tool, a durable tool that throws settles the call as a tool error the model sees, and nothing retries automatically. `durable` composes with `harness` — wrap `harness.prompt(...)` in a step to avoid re-prompting on recovery. Memos are scoped to one tool call: when the model invokes the tool again, its steps run fresh. Outside an agent session (a standalone run in a test or eval), `step.do` executes with the same name and serializability rules but records nothing — there is no durability for it to extend there.
 
 ## Protect access
 

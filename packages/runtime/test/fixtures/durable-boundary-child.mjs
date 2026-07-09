@@ -311,6 +311,57 @@ if (mode === 'child-tool-repair') {
 	]);
 }
 
+if (mode === 'durable-tool-repair') {
+	// Killed mid tool-batch like tool-repair, but the batch holds one
+	// `durable: true` call ('sync', which completed its first step durably
+	// before the crash) alongside one plain call ('lookup'). Recovery must
+	// re-execute sync — replaying step "one" from its memo, running step
+	// "two" fresh — and marker-settle lookup, in one repaired batch.
+	await append([
+		{
+			...scope,
+			id: 'record-tool-started',
+			type: 'assistant_message_started',
+			messageId: 'entry_tool_assistant',
+			parentId: inputEntryId,
+			modelInfo: { api: 'faux', provider: 'faux', model: 'reviewer' },
+		},
+		...[
+			{ id: 'tool-call-1', name: 'sync' },
+			{ id: 'tool-call-2', name: 'lookup' },
+		].map((toolCall, index) => ({
+			...scope,
+			id: `record-tool-call-${index}`,
+			type: 'assistant_tool_call',
+			messageId: 'entry_tool_assistant',
+			blockId: `block-tool-${index}`,
+			blockIndex: index,
+			toolCallId: toolCall.id,
+			name: toolCall.name,
+			arguments: {},
+		})),
+		{
+			...scope,
+			id: 'record-tool-completed',
+			type: 'assistant_message_completed',
+			messageId: 'entry_tool_assistant',
+			stopReason: 'toolUse',
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+		},
+		// The killed attempt's completed first step — the memo recovery replays.
+		// Id must match toolStepRecordId(toolCallId, stepName).
+		{
+			...scope,
+			id: `record_tool_step_${Buffer.from('tool-call-1').toString('base64url')}_${Buffer.from('one').toString('base64url')}`,
+			type: 'tool_step_settled',
+			toolCallId: 'tool-call-1',
+			toolName: 'sync',
+			stepName: 'one',
+			value: 'memo-one',
+		},
+	]);
+}
+
 if (mode === 'settlement') {
 	const settlement = {
 		...scope,

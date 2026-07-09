@@ -23,11 +23,13 @@
  *   stop/length response): inspection reports `'completed'`, but the
  *   preamble treats it as an overflow resume (compact and continue).
  * - `tool_use_unresolved`: inspection reports `'uncertain'`; the preamble
- *   repairs the trailing tool batch (every unresolved call gets an explicit
- *   unknown-outcome error, never a re-execution) and continues — identical to
- *   a partial batch. (Before the turn-journal removal a zero-result batch was
- *   settled as-is; canonical recovery cannot prove a tool "never started", so
- *   it conservatively repairs and lets the model proceed.)
+ *   repairs the trailing tool batch (unresolved calls get explicit
+ *   unknown-outcome errors — never a blind re-execution; only `durable: true`
+ *   tool calls re-execute, replaying recorded steps) and continues —
+ *   identical to a partial batch. (Before the turn-journal removal a
+ *   zero-result batch was settled as-is; canonical recovery cannot prove a
+ *   tool "never started", so it conservatively repairs and lets the model
+ *   proceed.)
  * - `advanced_past_input`: inspection reports `'uncertain'`, the preamble
  *   fails the operation.
  */

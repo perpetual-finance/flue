@@ -1,7 +1,7 @@
 ---
 title: Durable Agents
 description: Understand how Flue agents handle server restarts, interrupted connections, and other disruptions.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-08
 ---
 
 Durable execution is about recovering safely when running work is disrupted by a server restart, deployment, lost connection, or unexpected failure. In Flue, the durable unit is the **conversation**: every piece of agent work — a direct prompt, a dispatched webhook, a scheduled job — is an operation inside one durable conversation, and recovery always works from that conversation's canonical record.
@@ -36,11 +36,11 @@ dispatch(...) input ────────────────────
 
 The connection that submitted a prompt observes the work but does not own it. If the response closes after Cloudflare accepts the prompt, backend processing can continue. Clients can reconnect to the canonical conversation stream from a durable offset.
 
-After interruption, Flue decides what to do next from the canonical conversation stream alone. It recognizes already-completed output, continues usable partial output from durable deltas, and reuses completed tool results. A tool call with no durable result is represented as interrupted with an unknown outcome rather than run again automatically. When no output was durably persisted before the interruption, recovery may re-dispatch the provider once — consistent with at-least-once execution.
+After interruption, Flue decides what to do next from the canonical conversation stream alone. It recognizes already-completed output, continues usable partial output from durable deltas, and reuses completed tool results. A tool call with no durable result is represented as interrupted with an unknown outcome rather than run again automatically — the one exception is a [`durable: true` tool](/docs/guide/tools/#durable-tools), whose author has promised that every side effect goes through `step.do(...)`, so recovery re-executes it and completed steps replay their recorded values. When no output was durably persisted before the interruption, recovery may re-dispatch the provider once — consistent with at-least-once execution.
 
 This recovery is intentionally conservative because repeating model or tool activity can duplicate external effects. Use application-owned idempotency keys where repeated effects would be harmful. See [Cloudflare](/docs/guide/targets/cloudflare/) for platform configuration and migrations.
 
-When recovery cannot complete the work — the retry budget (`durability.maxAttempts`) is exhausted, the processing timeout expires, or an abort settles a crash-interrupted submission — the submission is terminalized and its conversation is settled to a deterministic rest state. Every tool call without a confirmed outcome receives an explicit interrupted-error result (never a re-execution), an interrupted partial stream is completed as aborted, and a terminal advisory records the reason with the interrupted calls as structured metadata. No tool call is ever left permanently unresolved, and the settled turn stays visible to future model context.
+When recovery cannot complete the work — the retry budget (`durability.maxAttempts`) is exhausted, the processing timeout expires, or an abort settles a crash-interrupted submission — the submission is terminalized and its conversation is settled to a deterministic rest state. Every tool call without a confirmed outcome receives an explicit interrupted-error result (never a re-execution — durable tools included; their re-execution only happens within the retry budget), an interrupted partial stream is completed as aborted, and a terminal advisory records the reason with the interrupted calls as structured metadata. No tool call is ever left permanently unresolved, and the settled turn stays visible to future model context.
 
 ### Durable Agents on Node.js
 
@@ -76,6 +76,12 @@ If the parent's budget runs out while a subagent is still unresolved, the parent
 
 Programmatic `harness.task(...)` calls made directly from your own code are not recovered this way: like other programmatic harness calls, they have no durable submission to resume from.
 
+### Durable tools (`step.do`)
+
+Ordinary tool code is never re-executed on recovery because the runtime cannot know which side effects already happened. A tool declared [`durable: true`](/docs/guide/tools/#durable-tools) opts into a different contract: every side effect in its `run` goes through `step.do(name, fn)`, and each completed step settles as a durable conversation record before the next step runs. When an interruption strikes mid-run, recovery re-executes the tool call — completed steps return their recorded values without running again, and execution continues from the first step that never finished.
+
+Step records are operational: they never enter model context (the model sees only the tool's final result), and step progress is visible live as the tool call's log events. `step.do` is exactly-once-recorded but at-least-once-executed — a crash in the narrow window between a step finishing and its record landing re-runs that one step — so steps around external effects should be individually idempotent, the same discipline every checkpointing workflow system asks for.
+
 ### Keep workspace state separate
 
 Persisting a conversation does not make sandbox files durable. The default virtual sandbox is an in-memory workspace, while a durable remote workspace does not preserve conversation records by itself. Choose workspace and conversation persistence independently. See [Sandboxes](/docs/guide/sandboxes/).
@@ -84,6 +90,8 @@ Persisting a conversation does not make sandbox files durable. The default virtu
 
 Flue has no separate durable job primitive. Bounded, job-like work — a nightly report, a document review, a CI task — is an agent (usually with a [harness tool](/docs/guide/tools/#harness-tools) owning the reliability-critical steps) driven through a conversation whose id the caller chooses: a fresh id per occurrence for independent runs, or a stable id for work that should remember its history. The conversation is the run record; read it back with the SDK's `history()` or `observe()`.
 
-Flue does not checkpoint arbitrary TypeScript execution and resume a function from its last completed line. Your application decides whether repeating interrupted work is safe: delivering the message again (a new `dispatch(...)` or a new `flue run` invocation) is a new operation in the conversation, and the durable record shows what the previous attempt completed. Use application-owned idempotency keys around external effects whose earlier outcome may be unknown. If a job requires resumable checkpointed steps, use a durable orchestration system suited to that requirement.
+Flue does not checkpoint arbitrary TypeScript execution and resume a function from its last completed line. Your application decides whether repeating interrupted work is safe: delivering the message again (a new `dispatch(...)` or a new `flue run` invocation) is a new operation in the conversation, and the durable record shows what the previous attempt completed. Use application-owned idempotency keys around external effects whose earlier outcome may be unknown.
+
+The boundary for checkpointed steps is the agent itself. *Inside* the agent — application-controlled work the model invokes — a [durable tool](/docs/guide/tools/#durable-tools) gives that work resumable `step.do` checkpoints backed by the conversation's own durability. *Outside* the agent — the endpoint, script, or cron that drives it — use the workflow engine your platform provides (Cloudflare Workflows, Inngest, or plain re-runs) and treat Flue like any other service you call from it.
 
 See [Observability](/docs/guide/observability/) for runtime telemetry.

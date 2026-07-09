@@ -356,6 +356,35 @@ interface MessageMetadataRecord extends ConversationRecordEnvelope {
 }
 
 /**
+ * One completed step of a `durable: true` tool call (`step.do`). The memo a
+ * recovery re-execution replays instead of running the step again: keyed by
+ * the deterministic record id derived from `(toolCallId, stepName)`, so the
+ * same logical step across execution attempts resolves to one record.
+ * Operational — never part of model context; the model sees only the tool
+ * call's final result.
+ */
+export interface ToolStepSettledRecord extends ConversationRecordEnvelope {
+	type: 'tool_step_settled';
+	toolCallId: string;
+	toolName: string;
+	stepName: string;
+	value: unknown;
+}
+
+/** The deterministic memo id one durable step settles under. */
+export function toolStepRecordId(toolCallId: string, stepName: string): string {
+	return `record_tool_step_${encodeCanonicalId(toolCallId)}_${encodeCanonicalId(stepName)}`;
+}
+
+// Twin: private copies in conversation-reducer.ts and session.ts — keep in sync.
+function encodeCanonicalId(id: string): string {
+	const bytes = new TextEncoder().encode(id);
+	let binary = '';
+	for (const byte of bytes) binary += String.fromCharCode(byte);
+	return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+}
+
+/**
  * The declared resource sets (tools, skills, subagents) as last narrated to
  * the model. Written batch-atomically with the `resources` signal records
  * that announced a delta, so a rehydrated render re-diffs against exactly
@@ -395,6 +424,7 @@ export type ConversationRecord =
 	| AgentFinishCycleRecord
 	| MessageDataWriteRecord
 	| MessageMetadataRecord
+	| ToolStepSettledRecord
 	| ResourceSnapshotRecord;
 
 export function generateConversationRecordId(): string {
