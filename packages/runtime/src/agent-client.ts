@@ -31,8 +31,9 @@ import { enqueueDispatch } from './runtime/dispatch.ts';
 import type { FlueRuntime, NodeRuntime } from './runtime/flue-app.ts';
 import { getFlueRuntime } from './runtime/flue-app.ts';
 import { generateInstanceId } from './runtime/ids.ts';
+import { normalizeSignalMessage, normalizeUserMessage } from './runtime/message-input.ts';
 import { agentStreamPath } from './runtime/stream-offsets.ts';
-import type { AgentModuleValue, DeliveredMessage } from './types.ts';
+import type { AgentModuleValue, AgentSignalMessage, AgentUserMessage } from './types.ts';
 
 export interface InitOptions {
 	/**
@@ -102,22 +103,24 @@ export interface AgentInstanceHandle {
 	/** The instance address this handle targets. */
 	readonly id: string;
 	/**
-	 * Send one message as a direct submission and await its settled reply.
-	 * A string is shorthand for `{ kind: 'user', body }`. Concurrent prompts
-	 * to one instance serialize (or join a live response at a turn boundary);
-	 * a prompt that joined resolves with the coalesced reply that answered it.
-	 * Rejects with {@link AgentRunError} on a failed or aborted settlement.
+	 * Send one user message as a direct submission and await its settled
+	 * reply — the verb implies the kind; a string is shorthand for `{ body }`.
+	 * Concurrent prompts to one instance serialize (or join a live response
+	 * at a turn boundary); a prompt that joined resolves with the coalesced
+	 * reply that answered it. Rejects with {@link AgentRunError} on a failed
+	 * or aborted settlement. Signals belong to {@link dispatch}.
 	 */
-	prompt(message: string | DeliveredMessage, options?: AgentPromptOptions): Promise<AgentReply>;
+	prompt(message: AgentUserMessage, options?: AgentPromptOptions): Promise<AgentReply>;
 	/**
-	 * Deliver one message through the dispatch queue and await its settled
+	 * Deliver one signal through the dispatch queue and await its settled
 	 * reply, exactly like {@link prompt} — the handle is the awaited surface,
-	 * the verbs differ only in transport. A delivery that joined a live
-	 * response resolves with the coalesced reply that answered it. Rejects
-	 * with {@link AgentRunError} on a failed or aborted settlement. For
-	 * fire-and-forget delivery, use the top-level `dispatch()` instead.
+	 * the verbs differ only in message kind (implied, so `kind` may be
+	 * omitted). A delivery that joined a live response resolves with the
+	 * coalesced reply that answered it. Rejects with {@link AgentRunError} on
+	 * a failed or aborted settlement. For fire-and-forget delivery, use the
+	 * top-level `dispatch()`; user messages belong to {@link prompt}.
 	 */
-	dispatch(message: DeliveredMessage, options?: AgentPromptOptions): Promise<AgentReply>;
+	dispatch(message: AgentSignalMessage, options?: AgentPromptOptions): Promise<AgentReply>;
 }
 
 /**
@@ -221,8 +224,7 @@ export function init(agent: AgentModuleValue, options: InitOptions = {}): AgentI
 			const rt = requireRuntime('init');
 			const node = requireNodeRuntime(rt, 'init().prompt()');
 			const name = resolveAgentName(rt, agent, 'init');
-			const delivered: DeliveredMessage =
-				typeof message === 'string' ? { kind: 'user', body: message } : message;
+			const delivered = normalizeUserMessage('init().prompt()', message);
 
 			throwIfAborted(promptOptions.signal);
 			const admit = node.createAgentAdmission(name, id);
@@ -246,10 +248,11 @@ export function init(agent: AgentModuleValue, options: InitOptions = {}): AgentI
 			const rt = requireRuntime('init');
 			const node = requireNodeRuntime(rt, 'init().dispatch()');
 			const name = resolveAgentName(rt, agent, 'init');
+			const delivered = normalizeSignalMessage('init().dispatch()', message);
 
 			throwIfAborted(dispatchOptions.signal);
 			const receipt = await enqueueDispatch({
-				request: { agent: name, id, message, ...contactOptions() },
+				request: { agent: name, id, message: delivered, ...contactOptions() },
 				dispatchQueue: rt.dispatchQueue,
 				rt,
 			});

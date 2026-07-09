@@ -24,7 +24,7 @@ new Cron('7 3 * * *', async () => {
 });
 ```
 
-Use `dispatch(...)` when you only need to deliver input ([Schedules](/docs/guide/schedules/)); use `init(...).prompt(...)` when the script needs the result.
+Use the fire-and-forget verbs when you only need to deliver input and move on — `dispatch(...)` for signals ([Schedules](/docs/guide/schedules/)), `prompt(...)` for user messages; both resolve at durable admission. Use the `init(...)` handle when the script needs the result.
 
 ### On Cloudflare
 
@@ -63,7 +63,7 @@ Two loader caveats for bare `node`: attributed imports (`with { type: 'markdown'
 - `data` — creation data, validated against the agent's `input:` schema; the seed, consulted only when the handle's first send creates the instance.
 - `uid` — a [send condition](/docs/guide/building-agents/) for the first contact: a string continues only that incarnation, `null` creates only. After a prompt, the handle pins the incarnation it contacted and later prompts continue it.
 
-`prompt(message, options?)` accepts a string (shorthand for `{ kind: 'user', body }`) or any `DeliveredMessage`, and resolves with the settled reply:
+`prompt(message, options?)` accepts a user message — a string (shorthand for `{ body }`) or `{ body, attachments? }`; the verb implies the kind — and resolves with the settled reply:
 
 ```ts
 const reply = await agent.prompt('Summarize the failures.', {
@@ -77,7 +77,7 @@ reply.submissionId; // this run's settled submission
 
 A failed or aborted run rejects with `AgentRunError` (`error.outcome`, `error.submissionId`, `error.cause`). Concurrent prompts to one instance serialize, or join a live response at a turn boundary — a joined prompt resolves with the coalesced reply that answered it.
 
-`dispatch(message, options?)` on the handle delivers through the dispatch queue and awaits the settled reply the same way — the handle is the "control this agent" surface, so both verbs resolve with the reply (a delivery that joined a live response resolves with the coalesced reply that answered it). When you only need to deliver input and move on, use the top-level `dispatch(...)` instead.
+`dispatch(message, options?)` on the handle takes a signal — `{ type, body, attributes?, tagName? }`, kind implied — delivers it through the dispatch queue, and awaits the settled reply the same way: the handle is the "control this agent" surface, so both verbs resolve with the reply (a delivery that joined a live response resolves with the coalesced reply that answered it). When you only need to deliver input and move on, use the top-level fire-and-forget verbs instead.
 
 ## Durability is the store's, not the await's
 

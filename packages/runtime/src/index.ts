@@ -80,7 +80,12 @@ export { ResultUnavailableError } from './result.ts';
 export type { ChannelRouteDefinition, MountableChannel } from './runtime/channel-routes.ts';
 export { createChannelRouter } from './runtime/channel-routes.ts';
 export { type FlueEventSubscriber, observe } from './runtime/events.ts';
-export { type AgentInstanceInfo, dispatch, getAgentInstance } from './runtime/flue-app.ts';
+export {
+	type AgentInstanceInfo,
+	dispatch,
+	getAgentInstance,
+	prompt,
+} from './runtime/flue-app.ts';
 export {
 	type HttpProviderRegistration,
 	type ProviderRegistration,
@@ -96,9 +101,12 @@ export type {
 	AgentDispatchRequest,
 	AgentFunction,
 	AgentModuleValue,
+	AgentPromptRequest,
 	AgentProps,
 	AgentRouteHandler,
 	AgentRuntimeConfig,
+	AgentSignalMessage,
+	AgentUserMessage,
 	AttachedAgentEvent,
 	BashFactory,
 	BashLike,

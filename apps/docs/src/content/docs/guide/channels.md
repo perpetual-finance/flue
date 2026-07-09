@@ -217,10 +217,11 @@ if (payload.type === 'event_callback' && payload.event.type === 'app_mention') {
 }
 ```
 
-Channel deliveries use `kind: 'signal'` rather than `kind: 'user'`. A `user`
-message models one person talking directly to the assistant, which fits a
-direct 1:1 chat surface such as an SDK-driven chat UI. Most channels are more
-advanced than that: a Slack thread, GitHub issue, or group chat is a
+Channel deliveries are signals — `dispatch(...)` delivers signals by
+construction (a user message belongs to `prompt(...)`). A `user` message
+models one person talking directly to the assistant, which fits a direct 1:1
+chat surface such as an SDK-driven chat UI. Most channels are more advanced
+than that: a Slack thread, GitHub issue, or group chat is a
 multi-user conversation that the agent participates in as one member, and
 signals model that activity — with sender identity carried in `attributes` —
 without conflating other participants with the assistant's own user.

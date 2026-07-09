@@ -170,8 +170,8 @@ describe('start() + init(): the scripted client', () => {
 		// The handle is the awaited surface for both verbs: the dispatch
 		// resolves with the reply that answered the signal (its durable
 		// settled record, unified with directs, is what the await observes).
+		// The verb implies the kind, so `kind: 'signal'` may be omitted.
 		const ack = await agent.dispatch({
-			kind: 'signal',
 			type: 'trigger',
 			body: 'from the script',
 		});

@@ -25,6 +25,7 @@ import {
   dispatch,
   getAgentInstance,
   init,
+  prompt,
   useAgentFinish,
   useAgentStart,
   useDelivery,
@@ -43,9 +44,12 @@ import {
   type AgentFunction,
   type AgentInstanceInfo,
   type AgentModuleValue,
+  type AgentPromptRequest,
   type AgentResponseToolCall,
   type AgentSignalAppend,
+  type AgentSignalMessage,
   type AgentStartContext,
+  type AgentUserMessage,
   type BashFactory,
   type CallHandle,
   type CompactionConfig,
@@ -520,7 +524,7 @@ The value is immutable — `data` on messages to an existing instance is ignored
 function useDispatchMessage(): (message: DeliveredMessage) => Promise<DispatchReceipt>;
 ```
 
-Gets a dispatcher bound to this agent instance — the agent-scoped form of [`dispatch()`](#dispatch), the way a router hook overloads a browser primitive with the router-scoped version. The returned function takes just the message: the instance already exists, so there is no creation `data` and no `uid` condition to pass.
+Gets a dispatcher bound to this agent instance — the agent-scoped form of [`dispatch()`](#dispatch-and-prompt), the way a router hook overloads a browser primitive with the router-scoped version. The returned function takes just the message: the instance already exists, so there is no creation `data` and no `uid` condition to pass.
 
 ```ts
 export default function IssueTriage() {
@@ -758,14 +762,22 @@ interface McpServerConnection {
 | `tools`   | MCP tools ready to pass directly in `tools` arrays. |
 | `close()` | Close the underlying MCP client connection.         |
 
-## `dispatch(...)`
+## `dispatch(...)` and `prompt(...)`
 
 ```ts
 function dispatch(agent: AgentModuleValue, request: AgentDispatchRequest): Promise<DispatchReceipt>;
+function prompt(agent: AgentModuleValue, request: AgentPromptRequest): Promise<DispatchReceipt>;
 
 interface AgentDispatchRequest {
   id: string;
-  message: DeliveredMessage;
+  message: AgentSignalMessage; // { type, body, attributes?, tagName? } — kind implied
+  data?: unknown;
+  uid?: string | null;
+}
+
+interface AgentPromptRequest {
+  id: string;
+  message: AgentUserMessage; // a string, or { body, attachments? } — kind implied
   data?: unknown;
   uid?: string | null;
 }
@@ -777,7 +789,7 @@ interface DispatchReceipt {
 }
 ```
 
-Delivers a message for asynchronous processing by a continuing agent instance. The `agent` argument is a registered agent module value — the default export of a `'use agent'` module — so no HTTP mount is required.
+The fire-and-forget delivery verbs, split by message kind: `dispatch(...)` delivers a **signal**, `prompt(...)` delivers a **user message**, and the verb implies the kind — `kind` may be omitted, and a bare string to `prompt` is shorthand for `{ body }`. Passing the other kind rejects with a pointer to the right verb. Both admit through the same queue with the same receipt, ordering, and durability; to await the settled reply instead, use the [`init()` handle](#init). The `agent` argument is a registered agent module value — the default export of a `'use agent'` module — so no HTTP mount is required.
 
 | Field           | Description                                                                                                                                                                                                                                                                                    |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -789,7 +801,7 @@ Delivers a message for asynchronous processing by a continuing agent instance. T
 | `acceptedAt`    | ISO timestamp assigned when dispatch admission begins.                                                                                                                                                                                                                                         |
 | `uid` (receipt) | The contacted instance's uid — minted when this send created the instance, echoed when it continued one. Absent for instances created before uids shipped.                                                                                                                                     |
 
-`await dispatch(...)` resolves when the current runtime accepts and queues the message. It does not wait for model processing, tool calls, or an agent reply. Dispatched activity belongs to the continuing agent instance and shares one accepted order with direct HTTP prompts to the same instance.
+`await dispatch(...)` / `await prompt(...)` resolve when the current runtime accepts and queues the message. They do not wait for model processing, tool calls, or an agent reply. Delivered activity belongs to the continuing agent instance and shares one accepted order with direct HTTP prompts to the same instance.
 
 #### Conditional sends
 
@@ -822,7 +834,7 @@ type DeliveredMessage =
     };
 ```
 
-The single unified message shape delivered into an agent's conversation, whether it arrives through `dispatch(...)`, a direct HTTP prompt, or [`useDelivery()`](#usedelivery).
+The single unified message shape delivered into an agent's conversation, whether it arrives through the delivery verbs, a direct HTTP prompt, or [`useDelivery()`](#usedelivery). The verbs imply the kind at their call sites (`AgentSignalMessage` / `AgentUserMessage`); every delivered message is normalized to this kind-carrying form.
 
 `kind: 'user'` is a real, user-attributed chat turn. It produces a canonical `user_message` record and projects into the model conversation like any other user message. Use it when one person is talking directly to the assistant — a direct 1:1 chat surface such as an SDK-driven chat UI — optionally carrying image attachments.
 
@@ -864,8 +876,8 @@ interface InitOptions {
 
 interface AgentInstanceHandle {
   readonly id: string;
-  prompt(message: string | DeliveredMessage, options?: AgentPromptOptions): Promise<AgentReply>;
-  dispatch(message: DeliveredMessage, options?: AgentPromptOptions): Promise<AgentReply>;
+  prompt(message: AgentUserMessage, options?: AgentPromptOptions): Promise<AgentReply>;
+  dispatch(message: AgentSignalMessage, options?: AgentPromptOptions): Promise<AgentReply>;
 }
 
 interface AgentReply {
@@ -877,7 +889,7 @@ interface AgentReply {
 }
 ```
 
-The programmatic client for one agent instance — the "control this agent" surface, where both verbs await the settled reply. `prompt(...)` admits a real direct submission — the message becomes the delivery, and every hook fires exactly as it does for a dispatch or an HTTP prompt — waits for it to settle, and resolves with the reply; a string message is shorthand for `{ kind: 'user', body }`. `dispatch(...)` delivers through the dispatch queue and awaits the same way (a delivery that joined a live response resolves with the coalesced reply that answered it); for fire-and-forget delivery use the top-level [`dispatch()`](#dispatch). A `failed`/`aborted` settlement rejects with `AgentRunError` (`outcome`, `submissionId`, `cause`). `AgentPromptOptions` carries `onEvent` (every projected `ConversationStreamChunk` as it is durably recorded) and `signal` (durable abort intent; the call rejects once the aborted settlement lands).
+The programmatic client for one agent instance — the "control this agent" surface, where both verbs await the settled reply and, like the top-level verbs, imply the message kind: `prompt` takes a user message (a string is shorthand for `{ body }`), `dispatch` takes a signal. `prompt(...)` admits a real direct submission — the message becomes the delivery, and every hook fires exactly as it does for a dispatch or an HTTP prompt — waits for it to settle, and resolves with the reply. `dispatch(...)` delivers through the dispatch queue and awaits the same way (a delivery that joined a live response resolves with the coalesced reply that answered it); for fire-and-forget delivery use the top-level [verbs](#dispatch-and-prompt). A `failed`/`aborted` settlement rejects with `AgentRunError` (`outcome`, `submissionId`, `cause`). `AgentPromptOptions` carries `onEvent` (every projected `ConversationStreamChunk` as it is durably recorded) and `signal` (durable abort intent; the call rejects once the aborted settlement lands).
 
 The handle is an address: nothing is created until first contact, `data`/`uid` gate that first send, and after a send the handle pins the incarnation it contacted. Like `dispatch()`, `init()` taps the process's configured runtime — inside a Flue server it works directly; in a standalone script call `start()` from `@flue/runtime/node` first. The awaited handle is Node-only today: on Cloudflare both verbs throw — deliver with the top-level `dispatch()` there and let the agent publish its own result (see [Scripts › On Cloudflare](/docs/guide/scripts/#on-cloudflare)).
 
