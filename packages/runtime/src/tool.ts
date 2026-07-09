@@ -149,7 +149,7 @@ export function cloneStepValue(value: unknown, toolName: string, stepName: strin
  * semantics (name discipline, JSON-serializable values), no persistence —
  * a standalone run has no durability for the memo to extend.
  */
-export function createEphemeralToolStep(toolName: string): ToolStep {
+function createEphemeralToolStep(toolName: string): ToolStep {
 	const used = new Set<string>();
 	return {
 		async do(name, fn) {

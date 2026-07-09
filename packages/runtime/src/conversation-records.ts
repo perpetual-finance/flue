@@ -363,7 +363,7 @@ interface MessageMetadataRecord extends ConversationRecordEnvelope {
  * Operational — never part of model context; the model sees only the tool
  * call's final result.
  */
-export interface ToolStepSettledRecord extends ConversationRecordEnvelope {
+interface ToolStepSettledRecord extends ConversationRecordEnvelope {
 	type: 'tool_step_settled';
 	toolCallId: string;
 	toolName: string;
