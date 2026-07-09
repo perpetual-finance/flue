@@ -194,6 +194,78 @@ describe('usePersistentState (render)', () => {
 		circular.self = circular;
 		expect(() => setAny?.(circular)).toThrow(/not JSON-serializable/);
 	});
+
+	it('resolves a functional update against the buffered current value (read-your-writes)', () => {
+		const state = renderStateContext([['count', 1]]);
+		let setCount: StateSetter<number> | undefined;
+		renderAgentFunction(
+			() => {
+				[, setCount] = usePersistentState('count', 0);
+			},
+			CONFIG,
+			state,
+		);
+		// The first updater reads the snapshot; the second reads the first's
+		// buffered write — the whole point over spreading the render value.
+		setCount?.((previous) => previous + 1);
+		setCount?.((previous) => previous * 10);
+		expect(state.store.drain()).toEqual([
+			{ name: 'count', value: 2, previousValue: 1 },
+			{ name: 'count', value: 20, previousValue: 2 },
+		]);
+	});
+
+	it('functional update reads the default before the first write, undefined without one', () => {
+		const state = renderStateContext();
+		let setCount: StateSetter<number> | undefined;
+		let setNote: StateSetter<string | undefined> | undefined;
+		renderAgentFunction(
+			() => {
+				[, setCount] = usePersistentState('count', 3);
+				[, setNote] = usePersistentState<string>('note');
+			},
+			CONFIG,
+			state,
+		);
+		setCount?.((previous) => previous + 1);
+		let seenNote: unknown = 'sentinel';
+		setNote?.((previous) => {
+			seenNote = previous;
+			return 'first';
+		});
+		expect(seenNote).toBeUndefined();
+		expect(state.store.drain().map((write) => write.value)).toEqual([4, 'first']);
+	});
+
+	it('hands a persisted null to the updater — a value, not an absence', () => {
+		const state = renderStateContext([['flag', null]]);
+		let setFlag: StateSetter<unknown> | undefined;
+		renderAgentFunction(
+			() => {
+				[, setFlag] = usePersistentState<unknown>('flag', 'fallback');
+			},
+			CONFIG,
+			state,
+		);
+		let seen: unknown = 'sentinel';
+		setFlag?.((previous: unknown) => {
+			seen = previous;
+			return 'next';
+		});
+		expect(seen).toBeNull();
+	});
+
+	it('validates a functional update result like a plain write', () => {
+		let setAny: StateSetter<unknown> | undefined;
+		renderAgentFunction(
+			() => {
+				[, setAny] = usePersistentState('anything');
+			},
+			CONFIG,
+			renderStateContext(),
+		);
+		expect(() => setAny?.(() => undefined)).toThrow(/cannot be set to undefined/);
+	});
 });
 
 describe('hook state buffer', () => {

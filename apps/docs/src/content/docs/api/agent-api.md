@@ -287,26 +287,36 @@ export default function marketing() {
 
 ```ts
 function usePersistentState<T>(name: string, defaultValue: T): [T, StateSetter<T>];
-function usePersistentState<T = unknown>(name: string): [T | undefined, StateSetter<T>];
+function usePersistentState<T = unknown>(name: string): [T | undefined, StateSetter<T | undefined>];
+
+type StateSetter<T> = (value: T | ((previous: T) => T)) => void;
 ```
 
-Durable agent state: an API over the record log of the agent instance. Reads the value as of this render (reduced from the instance's `state_write` records) and returns a setter that persists a new value.
+Durable agent state: an API over the record log of the agent instance. Reads the value as of this render (reduced from the instance's `state_write` records) and returns a setter that persists a new value — either directly or through an updater resolved at call time.
 
 ```ts
 export default function SupportAgent() {
   const [phase, setPhase] = usePersistentState<'gathering' | 'drafting'>('phase', 'gathering');
+  const [factsChecked, setFactsChecked] = usePersistentState('factsChecked', 0);
 
+  useTool({
+    name: 'check_fact',
+    description: 'Verify one case fact.',
+    run: () => setFactsChecked((previous) => previous + 1),
+  });
   useTool({
     name: 'begin_draft',
     description: 'Call once the case facts are verified.',
     run: () => setPhase('drafting'),
   });
 
-  return `Current phase: ${phase}.`;
+  return `Current phase: ${phase}. Facts checked: ${factsChecked}.`;
 }
 ```
 
 Values are JSON: writes are normalized through a JSON round-trip and throw on non-serializable input. There is no unset — a name, once written, always has a value (`defaultValue` fills in before the first write and is never persisted itself). Writing the current value again is a no-op. The setter throws during render — write from tool `run` functions and other runtime callbacks. State is scoped to the agent instance and keyed by `name`; declaring the same name twice in one render throws. Not available in a subagent render (delegates run detached tasks with no state channel).
+
+Reach for the updater form whenever the next value derives from the current one. The render value is a snapshot — closures refresh per turn, so two tools called in one turn that each spread it would silently drop each other's writes. An updater's `previous` resolves at call time (this attempt's writes over the snapshot, `defaultValue` before the first write ever), so updaters compose: a second updater in the same turn sees the first one's write. Any function argument is treated as an updater — a function was never a legal state value, since values are JSON.
 
 ### `useSkill(...)`
 

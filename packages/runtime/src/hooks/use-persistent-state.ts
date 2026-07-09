@@ -4,7 +4,9 @@ import { type HookStateStore, isRendering, requireRenderFrame } from './frame.ts
  * Durable agent state: an API over the record log of the agent instance.
  *
  * `usePersistentState` reads the value as of this render (reduced from the instance's
- * `state_write` records) and returns a setter that persists a new value.
+ * `state_write` records) and returns a setter that persists a new value —
+ * either directly (`setPhase('drafting')`) or through an updater
+ * (`setCount((previous) => previous + 1)`) resolved at call time.
  * Reads are render-time snapshots; writes are silent — they never post a
  * message, never wake the agent, and never re-render mid-run. The next
  * turn's render reads the latest persisted values.
@@ -28,6 +30,13 @@ import { type HookStateStore, isRendering, requireRenderFrame } from './frame.ts
  *   throw on non-serializable input. There is no unset — a name, once
  *   written, always has a value (`defaultValue` fills in before the first
  *   write and is never persisted itself).
+ * - The updater form is the read-modify-write path: `previous` resolves at
+ *   CALL time through the write buffer (this attempt's writes over the
+ *   snapshot; `defaultValue` before the first write ever). The render value
+ *   is a snapshot — two callbacks in one turn each spreading it would drop
+ *   each other's writes; updaters compose instead. Any function argument is
+ *   treated as an updater (a function was never a legal value — values are
+ *   JSON).
  * - Writing the current value again is a no-op: no record is appended.
  * - Writes made by tools become durable atomically with the tool batch that
  *   made them — if the batch settles, the write is durable; if recovery
@@ -43,7 +52,9 @@ import { type HookStateStore, isRendering, requireRenderFrame } from './frame.ts
  *   reads and validates writes).
  */
 export function usePersistentState<T>(name: string, defaultValue: T): [T, StateSetter<T>];
-export function usePersistentState<T = unknown>(name: string): [T | undefined, StateSetter<T>];
+export function usePersistentState<T = unknown>(
+	name: string,
+): [T | undefined, StateSetter<T | undefined>];
 export function usePersistentState(
 	name: string,
 	defaultValue?: unknown,
@@ -81,12 +92,20 @@ export function usePersistentState(
 				`[flue] State "${name}" has no durable runtime behind this render, so writes are unavailable.`,
 			);
 		}
+		// An updater's `previous` resolves through the buffer at call time —
+		// read-your-writes within the attempt — not the render snapshot the
+		// closure was born with. The boxed `current` keeps persisted null/false
+		// from falling back to the default.
+		if (typeof next === 'function') {
+			const current = store.current(name);
+			next = (next as (previous: unknown) => unknown)(current ? current.value : defaultValue);
+		}
 		store.write(name, normalizeStateValue(name, next));
 	};
 	return [value, setValue];
 }
 
-export type StateSetter<T> = (value: T) => void;
+export type StateSetter<T> = (value: T | ((previous: T) => T)) => void;
 
 /** One durable write, in call order, as drained by the session for appending. */
 export interface HookStateWrite {
