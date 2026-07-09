@@ -79,13 +79,14 @@ export function instructionsChanged(previous: ResourceSnapshot, next: ResourceSn
 }
 
 /**
- * The `instructions` signal body: announcement only, no diff. The model's
- * live system prompt already IS the new version — the signal exists so the
- * model can explain earlier behavior to itself instead of being confused by
- * history written under instructions it can no longer see.
+ * The `instructions` signal body: a marker, not a message. The model's live
+ * system prompt already IS the new version, so the signal only pins WHEN the
+ * ground shifted — which is all a model needs to explain its own earlier
+ * behavior to itself. Deliberately tiny: an agent whose instruction document
+ * churns emits this every turn, and that visibility is a feature (churn is
+ * a smell worth surfacing), so the marker must cost almost nothing.
  */
-export const INSTRUCTIONS_UPDATED_SIGNAL_BODY =
-	'Your system instructions have changed. The current system prompt is in effect from this turn onward; earlier turns may reflect the previous version.';
+export const INSTRUCTIONS_UPDATED_SIGNAL_BODY = 'System instructions updated.';
 
 export type ResourceKind = 'skill' | 'tool' | 'subagent';
 

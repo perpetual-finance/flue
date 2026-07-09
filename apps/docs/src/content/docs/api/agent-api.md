@@ -246,11 +246,11 @@ The composed instruction document gets the same treatment, simpler: the system p
 
 ```
 <signal type="instructions">
-Your system instructions have changed. The current system prompt is in effect from this turn onward; earlier turns may reflect the previous version.
+System instructions updated.
 </signal>
 ```
 
-The value is hindsight, not content — the model can already see the new instructions. Without the signal, a model reading its own earlier turns would be confused by behavior that followed a version of the instructions it can no longer see; with it, the transcript records when the ground shifted. Compaction rebaselines instructions like resources: the fresh prompt is the new baseline, no signal.
+The value is hindsight, not content — the model can already see the new instructions. Without the signal, a model reading its own earlier turns would be confused by behavior that followed a version of the instructions it can no longer see; with it, the transcript records when the ground shifted. The marker is deliberately tiny: an instruction document that interpolates fast-moving state emits it every turn, and that visibility is itself useful — instructions that churn constantly are a smell, and the signals make the churn countable. Compaction rebaselines instructions like resources: the fresh prompt is the new baseline, no signal.
 
 ### `useTool(...)`
 
