@@ -24,7 +24,7 @@ function Hello() {
 				provider: response.model.provider,
 				model: response.model.id,
 			});
-			await harness.shell('cat AGENTS.md');
+			await harness.sandbox.exec('cat AGENTS.md');
 			return response.data;
 		},
 	});

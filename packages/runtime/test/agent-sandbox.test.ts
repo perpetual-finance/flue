@@ -163,7 +163,7 @@ describe('harness tools outside a session', () => {
 			description: 'Probe the environment.',
 			input: v.object({}),
 			harness: true,
-			run: ({ harness }) => harness.shell('pwd').then((result) => result.stdout),
+			run: ({ harness }) => harness.sandbox.exec('pwd').then((result) => result.stdout),
 		});
 		await expect(validateAndRunTool(tool, {})).rejects.toThrow(
 			/Tool "probe" declares `harness: true` and can only run inside an agent session/,
@@ -224,8 +224,8 @@ describe('useSandbox end to end (node coordinator, faux provider)', () => {
 				input: v.object({}),
 				harness: true,
 				run: async ({ harness }) => {
-					const status = await harness.shell('git status --porcelain');
-					const notes = await harness.fs.readFile('/notes.md');
+					const status = await harness.sandbox.exec('git status --porcelain');
+					const notes = await harness.sandbox.readFile('/notes.md');
 					observed = `${status.stdout}|${notes}`;
 					return observed;
 				},

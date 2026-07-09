@@ -8,7 +8,7 @@ import type { HookStateBuffer } from './hooks/use-persistent-state.ts';
 import type { AgentOutputChannel } from './message-output.ts';
 import type { AttachmentStore } from './runtime/attachment-store.ts';
 import { generateConversationId, generateSessionAffinityKey } from './runtime/ids.ts';
-import { createCwdSessionEnv, createFlueFs } from './sandbox.ts';
+import { createCwdSessionEnv } from './sandbox.ts';
 import {
 	type CreateTaskSessionOptions,
 	createPublicSession,
@@ -21,16 +21,12 @@ import {
 	createActionScopeName,
 	createTaskSessionName,
 } from './session-identity.ts';
-import { execShellWithEvents } from './shell.ts';
 import type {
 	AgentConfig,
 	CallHandle,
 	DeliveredMessage,
-	FlueEventInput,
 	FlueEventInputCallback,
-	FlueFs,
 	FlueHarness,
-	FlueObservationDetail,
 	FlueSession,
 	PromptOptions,
 	PromptResponse,
@@ -38,11 +34,6 @@ import type {
 	ResolvedSubagent,
 	SessionEnv,
 	SessionToolFactory,
-	ShellOptions,
-	ShellResult,
-	SkillOptions,
-	SkillReference,
-	TaskOptions,
 	ToolDefinition,
 } from './types.ts';
 
@@ -53,7 +44,7 @@ type OpenMode = 'get-or-create' | 'get' | 'create';
 export class Harness implements FlueHarness {
 	/**
 	 * Explicit session management. Not part of the public {@link FlueHarness}
-	 * surface (the flattened prompt/skill/task methods drive the default
+	 * surface (the flattened `prompt`/`compact` methods drive the default
 	 * session); retained on the class for the runtime's own callers — the
 	 * submission opener addresses its session by name — and as an internal
 	 * escape hatch.
@@ -63,11 +54,15 @@ export class Harness implements FlueHarness {
 		create: (name?: string) => this.openSession(name, 'create'),
 	};
 
-	readonly fs: FlueFs;
+	/**
+	 * The agent's initialized environment — the live {@link SessionEnv} the
+	 * configured sandbox resolved to at harness init (the runtime default when
+	 * none was attached). The public direct-to-sandbox surface.
+	 */
+	readonly sandbox: SessionEnv;
 
 	private openSessions = new Map<string, Session>();
 	private pendingSessionOperations = new Map<string, Promise<void>>();
-	private activeShellCalls = new Set<CallHandle<ShellResult>>();
 	private scopeAbortController = new AbortController();
 	private closePromise: Promise<void> | undefined;
 
@@ -123,7 +118,7 @@ export class Harness implements FlueHarness {
 		/** Dynamic-resource runtime (function agents only); same routing as hookState. */
 		private resources?: SessionResourceRuntime,
 	) {
-		this.fs = createFlueFs(env);
+		this.sandbox = env;
 		if (scopeSignal) {
 			if (scopeSignal.aborted) this.scopeAbortController.abort(scopeSignal.reason);
 			else
@@ -137,8 +132,8 @@ export class Harness implements FlueHarness {
 
 	/**
 	 * Get or create a session by name (defaults to `'default'`). Not part of
-	 * the public {@link FlueHarness} surface — the flattened
-	 * prompt/skill/task/compact methods below drive the default session.
+	 * the public {@link FlueHarness} surface — the flattened `prompt`/`compact`
+	 * methods below drive the default session.
 	 */
 	async session(name?: string): Promise<FlueSession> {
 		return this.openSession(name, 'get-or-create');
@@ -152,31 +147,6 @@ export class Harness implements FlueHarness {
 	prompt(text: string, options?: PromptOptions<v.GenericSchema | undefined>): CallHandle<any> {
 		return this.defaultSessionCall(options?.signal, (session, signal) =>
 			session.prompt(text, { ...options, signal } as PromptOptions),
-		);
-	}
-
-	skill<S extends v.GenericSchema>(
-		skill: SkillReference | string,
-		options: SkillOptions<S> & { result: S },
-	): CallHandle<PromptResultResponse<v.InferOutput<S>>>;
-	skill(skill: SkillReference | string, options?: SkillOptions): CallHandle<PromptResponse>;
-	skill(
-		skill: SkillReference | string,
-		options?: SkillOptions<v.GenericSchema | undefined>,
-	): CallHandle<any> {
-		return this.defaultSessionCall(options?.signal, (session, signal) =>
-			session.skill(skill, { ...options, signal } as SkillOptions),
-		);
-	}
-
-	task<S extends v.GenericSchema>(
-		text: string,
-		options: TaskOptions<S> & { result: S },
-	): CallHandle<PromptResultResponse<v.InferOutput<S>>>;
-	task(text: string, options?: TaskOptions): CallHandle<PromptResponse>;
-	task(text: string, options?: TaskOptions<v.GenericSchema | undefined>): CallHandle<any> {
-		return this.defaultSessionCall(options?.signal, (session, signal) =>
-			session.task(text, { ...options, signal } as TaskOptions),
 		);
 	}
 
@@ -201,28 +171,6 @@ export class Harness implements FlueHarness {
 			const session = await this.session();
 			return run(session, signal);
 		});
-	}
-
-	shell(command: string, options?: ShellOptions): CallHandle<ShellResult> {
-		const externalSignal = options?.signal
-			? AbortSignal.any([options.signal, this.scopeAbortController.signal])
-			: this.scopeAbortController.signal;
-		const call = createCallHandle(externalSignal, (signal) =>
-			execShellWithEvents(
-				this.env,
-				(event, detail) => this.emit(event, detail),
-				command,
-				options,
-				signal,
-				this.executionContext,
-			),
-		);
-		this.activeShellCalls.add(call);
-		void call.then(
-			() => this.activeShellCalls.delete(call),
-			() => this.activeShellCalls.delete(call),
-		);
-		return call;
 	}
 
 	private async openSession(name: string | undefined, mode: OpenMode): Promise<FlueSession> {
@@ -466,23 +414,14 @@ export class Harness implements FlueHarness {
 	close(): Promise<void> {
 		if (this.closePromise) return this.closePromise;
 		this.scopeAbortController.abort();
-		for (const call of this.activeShellCalls) call.abort();
 		for (const session of this.openSessions.values()) session.abort();
 		this.closePromise = (async () => {
-			await Promise.allSettled([
-				...this.pendingSessionOperations.values(),
-				...this.activeShellCalls,
-			]);
-			this.activeShellCalls.clear();
+			await Promise.allSettled(this.pendingSessionOperations.values());
 			const sessions = [...this.openSessions.values()];
 			await Promise.allSettled(sessions.map((session) => session.close()));
 			this.openSessions.clear();
 		})();
 		return this.closePromise;
-	}
-
-	private emit(event: FlueEventInput, observation?: FlueObservationDetail): void {
-		this.eventCallback?.({ ...event, harness: event.harness ?? this.name }, observation);
 	}
 
 	private decorateEventCallback(

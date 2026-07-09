@@ -36,7 +36,7 @@ describe('local()', () => {
 			);
 
 			await expect(
-				harness.shell(
+				harness.sandbox.exec(
 					`${JSON.stringify(process.execPath)} -e 'process.stdout.write(process.cwd())'`,
 				),
 			).resolves.toEqual({ stdout: await realpath(directory), stderr: '', exitCode: 0 });
@@ -62,7 +62,7 @@ describe('local()', () => {
 			);
 
 			await expect(
-				harness.shell(
+				harness.sandbox.exec(
 					`${JSON.stringify(process.execPath)} -e 'process.stdout.write(process.cwd())'`,
 				),
 			).resolves.toEqual({
@@ -89,7 +89,7 @@ describe('local()', () => {
 		);
 
 		await expect(
-			harness.shell(`${JSON.stringify(process.execPath)} -e 'process.stdout.write(process.cwd())'`),
+			harness.sandbox.exec(`${JSON.stringify(process.execPath)} -e 'process.stdout.write(process.cwd())'`),
 		).resolves.toEqual({
 			stdout: await realpath(join(directory, 'workspace')),
 			stderr: '',
@@ -112,7 +112,7 @@ describe('local()', () => {
 		// fix, but '/bin/sh' under Node's default — even on hosts where sh
 		// is bash in sh-mode, so this catches a regression that bashism
 		// probes would miss.
-		const result = await harness.shell('echo "$0"');
+		const result = await harness.sandbox.exec('echo "$0"');
 		expect(result.exitCode).toBe(0);
 		expect(result.stdout.trim()).toMatch(/(^|\/)bash$/);
 	});
@@ -133,7 +133,7 @@ describe('local()', () => {
 			);
 
 			await expect(
-				harness.shell(
+				harness.sandbox.exec(
 					`${JSON.stringify(process.execPath)} -e 'process.stdout.write(JSON.stringify({ PATH: process.env.PATH, secret: process.env.FLUE_LOCAL_TEST_SECRET ?? null }))'`,
 				),
 			).resolves.toEqual({
@@ -160,7 +160,7 @@ describe('local()', () => {
 		);
 
 		await expect(
-			harness.shell(
+			harness.sandbox.exec(
 				`${JSON.stringify(process.execPath)} -e 'process.stdout.write(process.env.FLUE_LOCAL_TEST_EXPLICIT ?? "missing")'`,
 			),
 		).resolves.toEqual({ stdout: 'available', stderr: '', exitCode: 0 });
@@ -180,7 +180,7 @@ describe('local()', () => {
 			);
 
 			await expect(
-				harness.shell(
+				harness.sandbox.exec(
 					`${JSON.stringify(process.execPath)} -e 'process.stdout.write(String(Object.hasOwn(process.env, "HOME")))'`,
 				),
 			).resolves.toEqual({ stdout: 'false', stderr: '', exitCode: 0 });
@@ -205,7 +205,7 @@ describe('local()', () => {
 			process.env.HOME = '/flue-test-home-after-init';
 
 			await expect(
-				harness.shell(
+				harness.sandbox.exec(
 					`${JSON.stringify(process.execPath)} -e 'process.stdout.write(process.env.HOME ?? "missing")'`,
 				),
 			).resolves.toEqual({ stdout: '/flue-test-home-before-init', stderr: '', exitCode: 0 });
@@ -230,7 +230,7 @@ describe('local()', () => {
 		);
 
 		await expect(
-			harness.shell(
+			harness.sandbox.exec(
 				`${JSON.stringify(process.execPath)} -e 'process.stdout.write(JSON.stringify({ layer: process.env.FLUE_LOCAL_TEST_LAYER, base: process.env.FLUE_LOCAL_TEST_BASE }))'`,
 				{ env: { FLUE_LOCAL_TEST_LAYER: 'command' } },
 			),
@@ -252,7 +252,7 @@ describe('local()', () => {
 		);
 
 		await expect(
-			harness.shell(
+			harness.sandbox.exec(
 				`${JSON.stringify(process.execPath)} -e 'process.stdout.write("stdout text"); process.stderr.write("stderr text"); process.exit(7)'`,
 			),
 		).resolves.toEqual({ stdout: 'stdout text', stderr: 'stderr text', exitCode: 7 });
@@ -269,10 +269,10 @@ describe('local()', () => {
 			),
 		);
 
-		await harness.fs.writeFile('generated/nested/result.txt', 'written');
+		await harness.sandbox.writeFile('generated/nested/result.txt', 'written');
 
-		await expect(harness.fs.readFile('generated/nested/result.txt')).resolves.toBe('written');
-		await expect(harness.fs.exists('generated/nested/result.txt')).resolves.toBe(true);
+		await expect(harness.sandbox.readFile('generated/nested/result.txt')).resolves.toBe('written');
+		await expect(harness.sandbox.exists('generated/nested/result.txt')).resolves.toBe(true);
 		await rm(directory, { recursive: true, force: true });
 	});
 
@@ -289,13 +289,13 @@ describe('local()', () => {
 			),
 		);
 
-		await expect(harness.fs.stat('link.txt')).resolves.toMatchObject({
+		await expect(harness.sandbox.stat('link.txt')).resolves.toMatchObject({
 			isFile: true,
 			isDirectory: false,
 			isSymbolicLink: true,
 			size: 5,
 		});
-		await expect(harness.fs.stat('target.txt')).resolves.toMatchObject({
+		await expect(harness.sandbox.stat('target.txt')).resolves.toMatchObject({
 			isFile: true,
 			isSymbolicLink: false,
 		});
@@ -317,7 +317,7 @@ describe('local()', () => {
 
 			// Background a long-lived grandchild from the shell, record its pid,
 			// then keep the shell alive so the abort lands mid-command.
-			const call = harness.shell('sleep 60 & echo $! > grandchild.pid; wait', {
+			const call = harness.sandbox.exec('sleep 60 & echo $! > grandchild.pid; wait', {
 				signal: controller.signal,
 			});
 			await expect

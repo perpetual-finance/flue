@@ -57,7 +57,7 @@ A `task()` call without an `agent` name is not a subagent delegation: the child 
 
 ## Use subagents in tools
 
-A [harness tool](/docs/guide/tools/#harness-tools) can choose delegation directly when application logic requires work from a particular subagent. Call `harness.task(...)` with the name of a declared subagent, and provide `result` when the tool needs validated data:
+A [harness tool](/docs/guide/tools/#harness-tools) can direct delegation to a particular subagent when application logic requires its work. Call `harness.prompt(...)` naming the subagent: it runs in the same conversation as the agent's own turns, so the built-in `task` tool and this tool's declared subagent are both already available to it. Provide `result` when the tool needs validated data:
 
 ```ts title="src/shared/review-tools.ts"
 import { defineTool } from '@flue/runtime';
@@ -75,16 +75,16 @@ export const reviewChange = defineTool({
   harness: true,
 
   async run({ harness, data }) {
-    const response = await harness.task(data.change, {
-      agent: 'reviewer',
-      result: Review,
-    });
+    const response = await harness.prompt(
+      `Delegate a review of this change to the \`reviewer\` subagent:\n\n${data.change}`,
+      { result: Review },
+    );
     return response.data;
   },
 });
 ```
 
-Here, application code chooses `reviewer` rather than leaving delegation to the parent agent. The agent that mounts this tool must also declare the `reviewer` delegate with its own `useSubagent({ name: 'reviewer', ... })` call. See the [Agent API](/docs/api/agent-api/) for task options and result types.
+Here, application code directs delegation to `reviewer` by naming it in the instruction, rather than leaving the choice to the parent agent. The agent that mounts this tool must also declare the `reviewer` delegate with its own `useSubagent({ name: 'reviewer', ... })` call, so it appears on the `task` tool's roster for the model to select. See the [Agent API](/docs/api/agent-api/) for prompt options and result types.
 
 ## Next steps
 
@@ -92,5 +92,5 @@ Here, application code chooses `reviewer` rather than leaving delegation to the 
 - [Tools](/docs/guide/tools/) — give a subagent's agent function its own tools, or delegate from inside a harness tool.
 - [Skills](/docs/guide/skills/) — reusable instructions a delegate's agent function can mount.
 - [Sandboxes](/docs/guide/sandboxes/) — how a delegate shares the parent's environment.
-- [Agent API](/docs/api/agent-api/) — look up `harness.task(...)` options and results.
+- [Agent API](/docs/api/agent-api/) — look up `harness.prompt(...)` options and results.
 - [Observability](/docs/guide/observability/) — inspect delegated activity alongside other agent work.

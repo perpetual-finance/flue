@@ -24,8 +24,8 @@ function WithTools() {
 				{ tools: [calculator] },
 			);
 			results['custom tool works'] = text.includes('42');
-			await harness.shell('mkdir -p /home/user/task-workspace');
-			await harness.shell(
+			await harness.sandbox.exec('mkdir -p /home/user/task-workspace');
+			await harness.sandbox.exec(
 				'echo "You are a math helper. Always respond with just the numeric answer, nothing else." > /home/user/task-workspace/AGENTS.md',
 			);
 			const taskResponse = await harness.prompt(

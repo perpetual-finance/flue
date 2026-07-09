@@ -56,7 +56,6 @@ import {
   type DispatchReceipt,
   type DurabilityConfig,
   type FileStat,
-  type FlueFs,
   type FlueHarness,
   type FlueLogger,
   type FunctionAgentConfig,
@@ -72,14 +71,12 @@ import {
   type PromptResultResponse,
   type PromptUsage,
   type SandboxFactory,
-  type ShellOptions,
+  type SessionEnv,
   type ShellResult,
   type Skill,
-  type SkillOptions,
   type SkillReference,
   type StateSetter,
   type SubagentDefinition,
-  type TaskOptions,
   type ThinkingLevel,
   type ToolContext,
   type ToolDefinition,
@@ -329,6 +326,32 @@ function ReproducePhase() {
 
 Accepts a `SkillReference` (a `SKILL.md` import `with { type: 'skill' }`, or [`defineSkill(...)`](#defineskill)) or a bare `{ name, description }` catalog entry for content the model reads from the workspace itself. Duplicate names across the render fail fast. See [Skills](/docs/guide/skills/).
 
+#### `SkillReference`
+
+```ts
+interface SkillReference {
+  readonly __flueSkillReference: true;
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+}
+```
+
+Opaque skill reference accepted by `useSkill()`. Produced by importing a `SKILL.md` value or by [`defineSkill(...)`](#defineskill).
+
+#### `Skill`
+
+```ts
+type Skill =
+  | SkillReference
+  | {
+      name: string;
+      description: string;
+    };
+```
+
+Skill metadata mountable with `useSkill()`. Imported `SkillReference` values bundle application-owned skill content. Inline metadata adds only a named catalog entry; it does not package or inject an instruction body. See [Skills](/docs/guide/skills/).
+
 ### `useSubagent(...)`
 
 ```ts
@@ -363,7 +386,7 @@ function ReproducePhase() {
 | `model`         | `string`        | Model specifier override. Inherits the parent's model when omitted.     |
 | `thinkingLevel` | `ThinkingLevel` | Reasoning-effort override. Inherits when omitted.                       |
 
-Inside the delegate's render, custom hooks, `useTool()`, `useInstruction()`, `useSkill()`, and nested `useSubagent()` all compose as usual; `usePersistentState()` and `useSandbox()` throw (durable state is instance-scoped and delegates share the parent environment). Duplicate delegate names in one render fail fast. Select a declared subagent from a `harness.task()` call with `options.agent`; see [`harness.task(...)`](#harnesstask).
+Inside the delegate's render, custom hooks, `useTool()`, `useInstruction()`, `useSkill()`, and nested `useSubagent()` all compose as usual; `usePersistentState()` and `useSandbox()` throw (durable state is instance-scoped and delegates share the parent environment). Duplicate delegate names in one render fail fast.
 
 ### `useSandbox(...)`
 
@@ -423,7 +446,7 @@ export default function IssueTriage() {
   useAgentStart(async ({ harness, log }) => {
     if (issue) return; // durable guard: the intake dispatch fires these hooks itself
     const loaded = await loadIssue(issueNumber);
-    await harness.fs.writeFile(`triage/gh-${loaded.number}/issue.md`, digest(loaded));
+    await harness.sandbox.writeFile(`triage/gh-${loaded.number}/issue.md`, digest(loaded));
     setIssue(loaded);
     await dispatch({ kind: 'signal', type: 'intake', body: `Issue #${loaded.number} loaded.` });
   });
@@ -441,7 +464,7 @@ interface AgentStartContext {
 }
 ```
 
-`harness` is the invocation-scoped runtime surface (sandbox `shell`/`fs`, child sessions, model calls), materialized lazily on first access. `log` emits progress lines into the conversation stream — the model never sees them. `signal` is the submission's abort signal. `append` writes a signal into this response without registering a delivery (no `useAgentStart` run of its own, so no guard needed) — an annotation like "the digest is saved at `triage/gh-42/issue.md`"; it is legal only during the callback's execution window. Dispatching is the delivery-grade alternative.
+`harness` is the invocation-scoped runtime surface (`sandbox` for command and file access, `prompt` for model calls), materialized lazily on first access. `log` emits progress lines into the conversation stream — the model never sees them. `signal` is the submission's abort signal. `append` writes a signal into this response without registering a delivery (no `useAgentStart` run of its own, so no guard needed) — an annotation like "the digest is saved at `triage/gh-42/issue.md`"; it is legal only during the callback's execution window. Dispatching is the delivery-grade alternative.
 
 ### `useAgentFinish(...)`
 
@@ -642,7 +665,7 @@ Validates a custom model-callable tool and returns a frozen definition. Pass the
 | `description` | `string`                        | Tells the model when and how to use this tool.                                                                                                                                                                                                                      |
 | `input`       | `ToolInputSchema`               | Optional top-level Valibot object schema.                                                                                                                                                                                                                           |
 | `output`      | `ToolOutputSchema`              | Optional Valibot schema for typed, validated output.                                                                                                                                                                                                                |
-| `harness`     | `boolean`                       | Connects the tool to the agent's runtime: `run` receives `harness`, the one interface to the sandbox (`harness.shell()`, `harness.fs`) and to models (`harness.prompt()`, `harness.skill()`, `harness.task()`). Tools without it are pure functions of their input. |
+| `harness`     | `boolean`                       | Connects the tool to the agent's runtime: `run` receives `harness`, the one interface to the sandbox (`harness.sandbox`) and to models (`harness.prompt()`). Tools without it are pure functions of their input.                                                  |
 | `durable`     | `boolean`                       | Opts the tool into checkpointed execution: `run` receives `step`, every side effect goes through `step.do(...)`, and an interrupted call is re-executed on recovery with completed steps replaying their recorded values. See [Durable tools](/docs/guide/tools/#durable-tools). |
 | `run`         | `(context) => value \| Promise` | Receives a [`ToolContext`](#toolcontext). Returns JSON-compatible structured data.                                                                                                                                                                                  |
 
@@ -720,7 +743,7 @@ The old `parameters` and `execute` markers now throw when a tool is defined. Ren
 function defineSkill(options: DefineSkillOptions): SkillReference;
 ```
 
-Defines a packaged skill and returns a `SkillReference` ready to pass to [`useSkill(...)`](#useskill) or `harness.skill(...)`. Use this when a skill's instructions are authored inline in code rather than in a `SKILL.md` file.
+Defines a packaged skill and returns a `SkillReference` ready to pass to [`useSkill(...)`](#useskill). Use this when a skill's instructions are authored inline in code rather than in a `SKILL.md` file.
 
 ```ts
 import { defineSkill } from '@flue/runtime';
@@ -954,17 +977,14 @@ Initialized agent environment for model operations and workspace access.
 interface FlueHarness {
   readonly name: string;
   prompt(text: string, options?: PromptOptions): CallHandle<PromptResponse>;
-  skill(skill: SkillReference | string, options?: SkillOptions): CallHandle<PromptResponse>;
-  task(text: string, options?: TaskOptions): CallHandle<PromptResponse>;
   compact(): Promise<void>;
-  shell(command: string, options?: ShellOptions): CallHandle<ShellResult>;
-  readonly fs: FlueFs;
+  readonly sandbox: SessionEnv;
 }
 ```
 
-`prompt()`, `skill()`, and `task()` drive the harness's own scratch conversation: repeated calls continue it, one active operation at a time. `shell()` and `fs` touch the sandbox directly and are not recorded in the conversation.
+`prompt()` drives the harness's own scratch conversation: repeated calls continue it, one active operation at a time. `sandbox` is the agent's initialized environment itself — the live `SessionEnv` the configured sandbox (`useSandbox()` / the `sandbox:` config, or the runtime default) produced once at initialization — touched directly, with no conversation record.
 
-The `prompt()`, `skill()`, and `task()` signatures above omit structured-result overloads. Pass a Valibot schema as `options.result` to resolve with validated `response.data`.
+The `prompt()` signature above omits its structured-result overload. Pass a Valibot schema as `options.result` to resolve with validated `response.data`.
 
 ### `harness.prompt(...)`
 
@@ -1034,91 +1054,49 @@ interface PromptResultResponse<T> {
 
 A structured-result operation throws `ResultUnavailableError` when the agent cannot produce validated data.
 
-### `harness.skill(...)`
+### `harness.sandbox`
+
+- **Type:** `SessionEnv`
+
+The agent's live resolved environment: the `SessionEnv` produced once at initialization from the agent's configured sandbox (`useSandbox()` / the `sandbox:` config), or the runtime default. One object carries the whole surface — `exec`, the file verbs, `cwd`, and `resolvePath` — and operations on it are never recorded in the conversation.
 
 ```ts
-skill(skill: SkillReference | string, options?: SkillOptions): CallHandle<PromptResponse>;
-```
+interface SessionEnv {
+  exec(
+    command: string,
+    options?: {
+      cwd?: string;
+      env?: Record<string, string>;
+      timeoutMs?: number;
+      signal?: AbortSignal;
+    },
+  ): Promise<ShellResult>;
 
-Runs a registered skill in the harness conversation. Pass `options.result` to require validated structured data instead of freeform text.
+  readFile(path: string): Promise<string>;
+  readFileBuffer(path: string): Promise<Uint8Array>;
+  writeFile(path: string, content: string | Uint8Array): Promise<void>;
+  stat(path: string): Promise<FileStat>;
+  readdir(path: string): Promise<string[]>;
+  exists(path: string): Promise<boolean>;
+  mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
+  rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
 
-#### `SkillReference`
-
-```ts
-interface SkillReference {
-  readonly __flueSkillReference: true;
-  readonly id: string;
-  readonly name: string;
-  readonly description: string;
+  readonly cwd: string;
+  resolvePath(path: string): string;
 }
 ```
 
-Opaque skill reference accepted by `useSkill()` and `harness.skill()`. Produced by importing a `SKILL.md` value or by [`defineSkill(...)`](#defineskill).
-
-#### `Skill`
-
 ```ts
-type Skill =
-  | SkillReference
-  | {
-      name: string;
-      description: string;
-    };
+async run({ harness, data }) {
+  await harness.sandbox.writeFile('document.md', data.document);
+  await harness.prompt('Review document.md and write your findings to review.md.');
+  return { review: await harness.sandbox.readFile('review.md') };
+},
 ```
 
-Skill metadata mountable with `useSkill()`. Imported `SkillReference` values bundle application-owned skill content. Inline metadata adds only a named catalog entry; it does not package or inject an instruction body. See [Skills](/docs/guide/skills/).
+Paths may be absolute or relative. Relative paths use the configured `cwd`, or the sandbox adapter's default when `cwd` is omitted; use absolute paths for portability across sandbox adapters. `writeFile()` creates missing parent directories automatically, in every sandbox mode — no prior `mkdir()` is needed before writing to a nested path. `resolvePath()` resolves a relative path against `cwd` without touching the filesystem — use it when your own logic needs the absolute path (for example, to derive a parent directory).
 
-#### `SkillOptions`
-
-| Field           | Type                      | Description                                                                   |
-| --------------- | ------------------------- | ----------------------------------------------------------------------------- |
-| `args`          | `Record<string, unknown>` | Arguments included with the skill instruction.                                |
-| `result`        | Valibot schema            | Require validated structured data and resolve with `response.data`.           |
-| `tools`         | `ToolDefinition[]`        | Additional custom model-callable tools for this operation.                    |
-| `model`         | `string`                  | Model specifier override for this operation.                                  |
-| `thinkingLevel` | `ThinkingLevel`           | Reasoning-effort override for this operation.                                 |
-| `signal`        | `AbortSignal`             | Cancel this operation.                                                        |
-| `images`        | `PromptImage[]`           | Images attached to the skill's user message. Requires a vision-capable model. |
-
-### `harness.task(...)`
-
-```ts
-task(text: string, options?: TaskOptions): CallHandle<PromptResponse>;
-```
-
-Delegates work to a detached child conversation. Pass `options.agent` to select a subagent by the name declared with [`useSubagent(...)`](#usesubagent) and `options.result` to require validated data.
-
-#### `TaskOptions`
-
-| Field           | Type               | Description                                                                          |
-| --------------- | ------------------ | ------------------------------------------------------------------------------------ |
-| `agent`         | `string`           | Name of the subagent (declared with `useSubagent()`) to delegate to for this call.   |
-| `result`        | Valibot schema     | Require validated structured data and resolve with `response.data`.                  |
-| `tools`         | `ToolDefinition[]` | Additional custom model-callable tools for this operation.                           |
-| `model`         | `string`           | Model specifier override for this operation.                                         |
-| `thinkingLevel` | `ThinkingLevel`    | Reasoning-effort override for this operation.                                        |
-| `cwd`           | `string`           | Working directory for the detached task. Defaults to the parent's cwd.               |
-| `signal`        | `AbortSignal`      | Cancel this task.                                                                    |
-| `images`        | `PromptImage[]`    | Images attached to the task's initial user message. Requires a vision-capable model. |
-
-Rejects with `SubagentNotDeclaredError` when `options.agent` names a subagent that was not declared with `useSubagent()` in the current render.
-
-### `harness.shell(...)`
-
-```ts
-shell(command: string, options?: ShellOptions): CallHandle<ShellResult>;
-```
-
-Runs a shell command in the harness sandbox without recording it in the conversation.
-
-#### `ShellOptions`
-
-| Field       | Type                     | Description                                                                             |
-| ----------- | ------------------------ | --------------------------------------------------------------------------------------- |
-| `env`       | `Record<string, string>` | Environment variables supplied to the command.                                          |
-| `cwd`       | `string`                 | Working directory supplied to the command.                                              |
-| `timeoutMs` | `number`                 | Wall-clock deadline in milliseconds, forwarded to the sandbox adapter's native timeout. |
-| `signal`    | `AbortSignal`            | Cancel this operation.                                                                  |
+Sandboxes are heterogeneous: an adapter may not support every generic verb — it throws where it cannot (the Cloudflare Shell adapter's `exec()` throws, since its durable Workspace has no shell) — and may enrich the object it returns with its own native surface. Adapter packages ship runtime-checked accessors to narrow to that surface, such as Cloudflare Shell's `shellWorkspace(harness.sandbox)`, which returns its `Workspace`. Call the sandbox the way it actually works — check the integration's documentation for its capabilities and any native accessor. See [Sandboxes](/docs/guide/sandboxes/) and the [Sandbox Adapter API](/docs/api/sandbox-api/) for the full `SessionEnv` contract.
 
 #### `ShellResult`
 
@@ -1130,11 +1108,19 @@ interface ShellResult {
 }
 ```
 
-### `harness.fs`
+#### `FileStat`
 
-- **Type:** `FlueFs`
+```ts
+interface FileStat {
+  isFile: boolean;
+  isDirectory: boolean;
+  isSymbolicLink?: boolean;
+  size?: number;
+  mtime?: Date;
+}
+```
 
-Reads and writes files in the harness sandbox without recording them in the conversation.
+`isSymbolicLink`, `size`, and `mtime` are omitted when the sandbox adapter's provider does not expose them.
 
 ### `harness.compact()`
 
@@ -1153,39 +1139,6 @@ interface CallHandle<T> extends Promise<T> {
 }
 ```
 
-`prompt()`, `skill()`, `task()`, and `shell()` return awaitable call handles. Retain the handle when application code needs to cancel in-flight work. Aborting rejects the awaited operation with an `AbortError` (`DOMException`). Pass `options.signal` to merge an external abort signal with the handle's signal.
+`prompt()` returns an awaitable call handle. Retain the handle when application code needs to cancel in-flight work. Aborting rejects the awaited operation with an `AbortError` (`DOMException`). Pass `options.signal` to merge an external abort signal with the handle's signal. `harness.sandbox.exec(...)` is cancelled the same way — pass `options.signal` — since it resolves a plain `Promise` rather than a `CallHandle`.
 
-Other operation failures reject with typed `FlueError` subclasses such as `SessionBusyError`, `SkillNotRegisteredError`, and `SubagentNotDeclaredError`, all importable from `@flue/runtime`. See the [Errors Reference](/docs/api/errors-reference/) for the full vocabulary.
-
-#### `FlueFs`
-
-```ts
-interface FlueFs {
-  readFile(path: string): Promise<string>;
-  readFileBuffer(path: string): Promise<Uint8Array>;
-  writeFile(path: string, content: string | Uint8Array): Promise<void>;
-  stat(path: string): Promise<FileStat>;
-  readdir(path: string): Promise<string[]>;
-  exists(path: string): Promise<boolean>;
-  mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
-  rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
-}
-```
-
-Paths may be absolute or relative. Relative paths use the configured `cwd`, or the sandbox adapter's default when `cwd` is omitted; use absolute paths for portability across sandbox adapters. These operations are out-of-band and do not appear in conversation history.
-
-`writeFile()` creates missing parent directories automatically, in every sandbox mode — no prior `mkdir()` is needed before writing to a nested path.
-
-#### `FileStat`
-
-```ts
-interface FileStat {
-  isFile: boolean;
-  isDirectory: boolean;
-  isSymbolicLink?: boolean;
-  size?: number;
-  mtime?: Date;
-}
-```
-
-`isSymbolicLink`, `size`, and `mtime` are omitted when the sandbox adapter's provider does not expose them.
+Other operation failures reject with typed `FlueError` subclasses such as `SessionBusyError`, all importable from `@flue/runtime`. See the [Errors Reference](/docs/api/errors-reference/) for the full vocabulary.

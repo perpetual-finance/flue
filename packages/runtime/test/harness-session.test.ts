@@ -23,46 +23,45 @@ describe('FlueHarness', () => {
 		);
 		const session = await harness.session('workspace');
 
-		await harness.fs.mkdir('drafts', { recursive: true });
-		await harness.fs.writeFile('drafts/report.txt', 'reviewed');
+		await harness.sandbox.mkdir('drafts', { recursive: true });
+		await harness.sandbox.writeFile('drafts/report.txt', 'reviewed');
 		await session.fs.writeFile('drafts/summary.txt', new Uint8Array([100, 111, 110, 101]));
 
-		await expect(harness.fs.readFile('drafts/report.txt')).resolves.toBe('reviewed');
-		await expect(harness.fs.readFileBuffer('drafts/summary.txt')).resolves.toEqual(
+		await expect(harness.sandbox.readFile('drafts/report.txt')).resolves.toBe('reviewed');
+		await expect(harness.sandbox.readFileBuffer('drafts/summary.txt')).resolves.toEqual(
 			new Uint8Array([100, 111, 110, 101]),
 		);
-		await expect(harness.fs.stat('drafts/report.txt')).resolves.toMatchObject({
+		await expect(harness.sandbox.stat('drafts/report.txt')).resolves.toMatchObject({
 			isFile: true,
 			isDirectory: false,
 			size: 8,
 		});
-		await expect(harness.fs.readdir('drafts')).resolves.toEqual(['report.txt', 'summary.txt']);
-		await expect(harness.fs.exists('drafts/report.txt')).resolves.toBe(true);
+		await expect(harness.sandbox.readdir('drafts')).resolves.toEqual(['report.txt', 'summary.txt']);
+		await expect(harness.sandbox.exists('drafts/report.txt')).resolves.toBe(true);
 
-		await harness.fs.rm('drafts', { recursive: true });
+		await harness.sandbox.rm('drafts', { recursive: true });
 
-		await expect(harness.fs.exists('drafts/report.txt')).resolves.toBe(false);
+		await expect(harness.sandbox.exists('drafts/report.txt')).resolves.toBe(false);
 	});
 
-	it('executes an out-of-band shell command when shell() is called', async () => {
+	it('runs a command straight through the live sandbox when sandbox.exec() is called', async () => {
 		const exec = vi.fn(async () => ({ stdout: 'checked\n', stderr: '', exitCode: 0 }));
 		const harness = await createContext(createEnv({ exec })).initializeRootHarness(
 			defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' }),
 		);
 
-		await expect(harness.shell('printf checked')).resolves.toEqual({
+		await expect(harness.sandbox.exec('printf checked')).resolves.toEqual({
 			stdout: 'checked\n',
 			stderr: '',
 			exitCode: 0,
 		});
-		expect(exec).toHaveBeenCalledWith('printf checked', {
-			env: undefined,
-			cwd: undefined,
-			signal: expect.any(AbortSignal),
-		});
+		// Unlike the old flattened harness.shell(), sandbox.exec() is the raw
+		// SessionEnv the sandbox factory produced — no operation wrapper, no
+		// injected AbortSignal, no options object invented on the caller's behalf.
+		expect(exec).toHaveBeenCalledWith('printf checked');
 	});
 
-	it('redacts environment values from tool events when shell() receives environment variables', async () => {
+	it('never records events or observations for a direct sandbox.exec() call, even with env values', async () => {
 		const exec = vi.fn(async () => ({ stdout: 'configured', stderr: '', exitCode: 0 }));
 		const events: FlueEvent[] = [];
 		const observations: FlueObservation[] = [];
@@ -76,22 +75,19 @@ describe('FlueHarness', () => {
 		const harness = await ctx.initializeRootHarness(defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' }));
 
 		try {
-			await harness.shell('printenv TOKEN', { env: { TOKEN: 'secret-value' }, cwd: '/repo' });
+			await harness.sandbox.exec('printenv TOKEN', { env: { TOKEN: 'secret-value' }, cwd: '/repo' });
 
+			// The real values reach the sandbox unchanged...
 			expect(exec).toHaveBeenCalledWith('printenv TOKEN', {
 				env: { TOKEN: 'secret-value' },
 				cwd: '/repo',
-				signal: expect.any(AbortSignal),
 			});
-			expect(observations).toContainEqual(
-				expect.objectContaining({
-					type: 'tool_start',
-					harness: 'default',
-					toolName: 'bash',
-					args: { command: 'printenv TOKEN', cwd: '/repo', env: { TOKEN: '<redacted>' } },
-				}),
-			);
-			expect(events.find((event) => event.type === 'tool_start')).not.toHaveProperty('args');
+			// ...but, per FlueHarness.sandbox's contract ("operations on it are
+			// never recorded in a conversation"), a direct sandbox.exec() call
+			// produces no tool events at all — unlike session.shell(), there is
+			// nothing to redact and nothing that could leak the secret.
+			expect(events).toHaveLength(0);
+			expect(observations).toHaveLength(0);
 			expect(JSON.stringify(observations)).not.toContain('secret-value');
 			expect(JSON.stringify(events)).not.toContain('secret-value');
 		} finally {

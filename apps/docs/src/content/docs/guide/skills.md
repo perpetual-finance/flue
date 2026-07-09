@@ -95,7 +95,7 @@ Unknown frontmatter fields are ignored, so skills that carry extra host-specific
 
 Normally you can trust the agent to use the skills you provide it, as needed, to complete its work.
 
-In application-controlled code such as a [harness tool](/docs/guide/tools/#harness-tools), you can manually trigger a skill through the `harness.skill(name: string)` API method. This works with both registered imported skills and workspace-discovered skills.
+In application-controlled code such as a [harness tool](/docs/guide/tools/#harness-tools), you can direct a skill through `harness.prompt(...)`: it runs in the same conversation context as the agent's own turns — same system prompt, skill catalog, and tools — so naming the skill in the instruction is enough for the model to activate it. This works with both registered imported skills and workspace-discovered skills.
 
 ```ts title="src/shared/review-tools.ts"
 import { defineTool } from '@flue/runtime';
@@ -108,8 +108,7 @@ export const reviewChange = defineTool({
   harness: true,
 
   async run({ harness, data }) {
-    const response = await harness.skill('review', {
-      args: { change: data.change },
+    const response = await harness.prompt(`Apply the review skill to this change:\n\n${data.change}`, {
       result: v.object({
         approved: v.boolean(),
         summary: v.string(),
@@ -120,7 +119,7 @@ export const reviewChange = defineTool({
 });
 ```
 
-`args` provides input for this invocation of the skill. The `result` schema makes `response.data` a validated structured result; omit it when you want text output from `response.text`. The string passed to `harness.skill(...)` is the declared skill name, not a path to `SKILL.md` — here the agent that mounts this tool also mounts the `review` skill with `useSkill(...)`.
+The `result` schema makes `response.data` a validated structured result; omit it when you want text output from `response.text`. `review` here is the declared skill name, not a path to `SKILL.md` — the agent that mounts this tool also mounts the `review` skill with `useSkill(...)`, so it's already in this conversation's catalog for the model to activate.
 
 See the [Agent API](/docs/api/agent-api/) for operation options and response types.
 

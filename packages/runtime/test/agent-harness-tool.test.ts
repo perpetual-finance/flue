@@ -107,7 +107,7 @@ describe('defineTool({ harness })', () => {
 			name: 'connected',
 			description: 'Runtime-connected tool.',
 			harness: true,
-			run: ({ harness }) => harness.shell('pwd').then((result) => result.stdout),
+			run: ({ harness }) => harness.sandbox.exec('pwd').then((result) => result.stdout),
 		});
 		expect(tool.harness).toBe(true);
 	});
@@ -130,7 +130,7 @@ describe('defineTool({ harness })', () => {
 				name: 'connected',
 				description: 'Runtime-connected tool.',
 				harness: true,
-				run: ({ harness }) => harness.shell('pwd').then((result) => result.stdout),
+				run: ({ harness }) => harness.sandbox.exec('pwd').then((result) => result.stdout),
 			});
 			return 'Base.';
 		}, CONFIG);
@@ -358,7 +358,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 				description: 'Run one check in the environment.',
 				harness: true,
 				run: async ({ harness }) => {
-					const result = await harness.shell('git status --porcelain');
+					const result = await harness.sandbox.exec('git status --porcelain');
 					return result.stdout;
 				},
 			});
@@ -416,7 +416,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 				description: 'Record the note durably.',
 				harness: true,
 				run: async ({ harness }) => {
-					await harness.shell('true');
+					await harness.sandbox.exec('true');
 					setNote('written');
 					return 'ok';
 				},
@@ -458,11 +458,10 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 // sandbox reuse — that has no equivalent elsewhere, rewritten in
 // `useTool({ harness: true })` terms.
 describe('harness tool delegation and lifecycle (ported from action-execution.test.ts)', () => {
-	it('inherits declared subagent capabilities through Task to a harness tool to Task', async () => {
+	it('inherits declared subagent capabilities through Task to a harness tool', async () => {
 		const provider = createFauxProvider();
 		const exec = vi.fn(async () => ({ stdout: 'ok', stderr: '', exitCode: 0 }));
 		let promptToolNames: string[] = [];
-		let nestedTaskToolNames: string[] = [];
 		const selectedTool = defineTool({
 			name: 'selected_tool',
 			description: 'Selected profile tool.',
@@ -476,12 +475,8 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 				description: 'Inspect the selected task scope.',
 				harness: true,
 				run: async ({ harness }) => {
-					await harness.shell('pwd');
+					await harness.sandbox.exec('pwd');
 					await harness.prompt('List inherited capabilities.');
-					// Agent-less task: inherits this (reviewer) session's own
-					// resolved config wholesale, same as the model's `task` tool
-					// would without an explicit `agent` target.
-					await harness.task('Inspect inherited task capabilities.');
 					return undefined;
 				},
 			});
@@ -509,10 +504,6 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 				promptToolNames = (context.tools ?? []).map((tool) => tool.name);
 				return fauxAssistantMessage('Capabilities inherited.');
 			},
-			(context) => {
-				nestedTaskToolNames = (context.tools ?? []).map((tool) => tool.name);
-				return fauxAssistantMessage('Nested task complete.');
-			},
 			fauxAssistantMessage('Task complete.'),
 			fauxAssistantMessage('Root complete.'),
 		]);
@@ -533,11 +524,15 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 		);
 		expect(promptToolNames).toContain('selected_tool');
 		expect(promptToolNames).toContain('inspect_task_scope');
-		expect(nestedTaskToolNames).toContain('selected_tool');
-		expect(nestedTaskToolNames).toContain('inspect_task_scope');
 	});
 
-	it('cancels a direct harness shell call and waits for cleanup before a harness tool settles', async () => {
+	// `harness.sandbox.exec()` is the raw, untracked SessionEnv — unlike the
+	// old flattened harness.shell(), it carries no implicit AbortSignal and
+	// isn't awaited by the harness's own close(). The cancel-on-close cascade
+	// this test pins now only applies to session-backed operations, so it
+	// drives the shell call through a harness-opened session instead of the
+	// harness directly.
+	it("cancels a harness tool's session shell call and waits for cleanup before the tool settles", async () => {
 		const provider = createFauxProvider();
 		let startedResolve: () => void = () => {};
 		const started = new Promise<void>((resolve) => {
@@ -563,7 +558,14 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 				description: 'Run a direct harness shell call.',
 				harness: true,
 				run: async ({ harness }) => {
-					void harness.shell('wait').then(
+					// Named sessions are internal machinery now (the public surface
+					// is `harness.sandbox` plus the flattened default-session ops);
+					// this test pins the cancel-on-close cascade for a harness-opened
+					// session, so it reaches through to the class the same way the
+					// "retains child sessions..." test below does.
+					const internal = harness as unknown as Harness;
+					const session = await internal.session();
+					void session.shell('wait').then(
 						() => {
 							settled = true;
 						},
@@ -671,7 +673,7 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 				description: 'Write a report.',
 				harness: true,
 				run: async ({ harness }) => {
-					await harness.fs.writeFile('report.txt', 'complete');
+					await harness.sandbox.writeFile('report.txt', 'complete');
 					return { done: true };
 				},
 			});

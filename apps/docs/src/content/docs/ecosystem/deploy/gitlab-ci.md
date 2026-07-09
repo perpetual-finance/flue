@@ -111,13 +111,12 @@ Now let's build something useful — an issue triage agent that analyzes an issu
 
 ### Structured work with skills and actions
 
-An agent's deterministic orchestration lives in [harness tools](/docs/guide/tools/#harness-tools) — finite, schema-validated jobs the model calls — and [skills](/docs/guide/skills/), reusable instruction files. Inside either, the harness gives you three core methods:
+An agent's deterministic orchestration lives in [harness tools](/docs/guide/tools/#harness-tools) — finite, schema-validated jobs the model calls — and [skills](/docs/guide/skills/), reusable instruction files. Inside either, the harness gives you two core methods:
 
-- **`harness.shell(cmd)`** — Run a shell command in the sandbox. Returns `{ stdout, stderr, exitCode }`.
-- **`harness.prompt(text, opts)`** — Send a prompt to the agent and get back a result.
-- **`harness.skill(name, opts)`** — Run a named skill — a reusable agent task defined by a markdown instruction file.
+- **`harness.sandbox.exec(cmd)`** — Run a shell command in the sandbox. Returns `{ stdout, stderr, exitCode }`.
+- **`harness.prompt(text, opts)`** — Send a prompt to the agent and get back a result. `harness.prompt(...)` runs in the same conversation context as the agent's own turns, so naming a mounted skill in the instruction is enough to direct the model to apply it.
 
-Both `prompt()` and `skill()` accept a `result` option — a [Valibot](https://valibot.dev) schema that defines the expected output shape. Flue parses the agent's response and returns it on `response.data`, fully typed:
+`prompt()` accepts a `result` option — a [Valibot](https://valibot.dev) schema that defines the expected output shape. Flue parses the agent's response and returns it on `response.data`, fully typed:
 
 ```typescript
 import * as v from 'valibot';
@@ -128,13 +127,15 @@ const { data: summary } = await harness.prompt(`Summarize this diff:\n${diff}`, 
 });
 
 // diagnosis: { reproducible: boolean, skipped: boolean }
-const { data: diagnosis } = await harness.skill('triage', {
-  args: { issueIid, issue },
-  result: v.object({
-    reproducible: v.boolean(),
-    skipped: v.boolean(),
-  }),
-});
+const { data: diagnosis } = await harness.prompt(
+  `Apply the triage skill to issue !${issueIid}:\n\n${issue}`,
+  {
+    result: v.object({
+      reproducible: v.boolean(),
+      skipped: v.boolean(),
+    }),
+  },
+);
 ```
 
 ### Connecting external CLIs
@@ -251,7 +252,7 @@ Add these as CI/CD variables (**Settings > CI/CD > Variables**, masked):
 
 ## Typed results and orchestration
 
-Result schemas aren't just for type safety — they're how you orchestrate multi-step work. Wrap the orchestration in a harness-connected tool (`useTool({ harness: true })`): you get typed data back from `prompt()` and `skill()` and can branch on it in plain code, all inside one durable conversation:
+Result schemas aren't just for type safety — they're how you orchestrate multi-step work. Wrap the orchestration in a harness-connected tool (`useTool({ harness: true })`): you get typed data back from `prompt()` and can branch on it in plain code, all inside one durable conversation:
 
 ```typescript title="src/agents/auto-triage.ts"
 'use agent';
@@ -267,18 +268,19 @@ function AutoTriage() {
     input: v.object({ issueIid: v.number() }),
     harness: true,
     async run({ harness, data }) {
-      const { data: triage } = await harness.skill('triage', {
-        args: { issueIid: data.issueIid },
-        result: v.object({
-          severity: v.picklist(['low', 'medium', 'high', 'critical']),
-          reproducible: v.boolean(),
-          summary: v.string(),
-        }),
-      });
+      const { data: triage } = await harness.prompt(
+        `Apply the triage skill to issue !${data.issueIid}.`,
+        {
+          result: v.object({
+            severity: v.picklist(['low', 'medium', 'high', 'critical']),
+            reproducible: v.boolean(),
+            summary: v.string(),
+          }),
+        },
+      );
 
       if (triage.severity === 'critical' && triage.reproducible) {
-        await harness.skill('auto-fix', {
-          args: { issueIid: data.issueIid },
+        await harness.prompt(`Apply the auto-fix skill to issue !${data.issueIid}.`, {
           result: v.object({ fix_applied: v.boolean(), branch: v.optional(v.string()) }),
         });
       }
@@ -291,7 +293,7 @@ function AutoTriage() {
 export default defineAgent(AutoTriage, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
-This pattern — prompt or skill call, check the result, decide what to do next — is how you build sophisticated agents that go beyond single-shot prompts.
+This pattern — prompt, check the result, decide what to do next — is how you build sophisticated agents that go beyond single-shot prompts.
 
 ## Running agents locally
 

@@ -189,7 +189,7 @@ export default defineAgent(Reporter, { model: 'openai/gpt-5.5' });
 
 ## Sandbox context
 
-The agent reads `AGENTS.md` and skills from its sandbox at runtime. With `local()`, that's your real project root, so any files there are visible. With the default virtual sandbox the filesystem starts empty — you'd set up context via `harness.shell()` or skip these features for simple prompt-and-response agents.
+The agent reads `AGENTS.md` and skills from its sandbox at runtime. With `local()`, that's your real project root, so any files there are visible. With the default virtual sandbox the filesystem starts empty — you'd set up context via `harness.sandbox` or skip these features for simple prompt-and-response agents.
 
 **Skills** are reusable agent tasks defined as markdown files in `.agents/skills/`. They give the agent a focused instruction set for a specific job:
 
@@ -207,13 +207,12 @@ Focus on the key points and keep it to 2-3 sentences.
 
 **`AGENTS.md`** at the root of the sandbox is the agent's system prompt — it provides global context about the project.
 
-Call a skill from an Action or tool body:
+Direct a skill from an Action or tool body with `harness.prompt(...)` — it shares the agent's own conversation context, so naming the skill is enough for the model to activate it:
 
 ```typescript
 import * as v from 'valibot';
 
-const { data } = await harness.skill('summarize', {
-  args: { text: document },
+const { data } = await harness.prompt(`Apply the summarize skill to this text:\n\n${document}`, {
   result: v.object({ summary: v.string() }),
 });
 ```
@@ -305,7 +304,7 @@ Flue does not add a health endpoint or inspection routes by default. Define a ho
 Here's the progression of sandbox types available on Node.js, from simplest to most powerful:
 
 1. **Empty virtual sandbox** — `defineAgent(() => {}, { model: 'openai/gpt-5.5' })`. Fast, cheap, stateless. Good for prompt-and-response agents.
-2. **Virtual sandbox with shell setup** — Use `harness.shell()` to write files and configure the workspace. Still fast and cheap, good for agents that need small amounts of static context.
+2. **Virtual sandbox with shell setup** — Use `harness.sandbox` to write files and configure the workspace. Still fast and cheap, good for agents that need small amounts of static context.
 3. **Local sandbox** — `useSandbox(local())` in the agent function, with `defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' })`. Direct host filesystem and shell access. Ideal for self-hosted agents, CI tasks, and dev tooling — anywhere the host environment already provides isolation. Import `local` from `@flue/runtime/node` and pass `env: { ... }` to expose specific host env vars to the agent's shell.
 4. **Remote sandbox** — Full isolated Linux environment via a sandbox adapter. For multi-tenant agents, coding sandboxes, and anything that needs per-session isolation.
 

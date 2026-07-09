@@ -3,7 +3,8 @@
 	"ignore": ["demo/**"],
 	"ignoreDependencies": ["@flue/cli", "agents", "wrangler"],
 	"ignoreIssues": {
-		"packages/runtime/src/runtime/schemas.ts": ["duplicates"]
+		"packages/runtime/src/runtime/schemas.ts": ["duplicates"],
+		"examples/cloudflare/src/sandboxes/cloudflare-shell.ts": ["exports", "types"]
 	},
 	"workspaces": {
 		".": {

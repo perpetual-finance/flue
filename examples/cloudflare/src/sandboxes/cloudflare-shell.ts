@@ -68,6 +68,30 @@ function absolutize(key: string): string {
 	return key.startsWith('/') ? key : `/${key}`;
 }
 
+/**
+ * The environment a cf-shell agent runs in: the generic `SessionEnv` file
+ * verbs route through the workspace, and the workspace itself rides along as
+ * the sandbox's native surface. Narrow to it with {@link shellWorkspace}.
+ */
+export interface ShellSandboxEnv extends SessionEnv {
+	readonly workspace: Workspace;
+}
+
+/**
+ * Narrow an agent's `harness.sandbox` to this sandbox's native surface — the
+ * `@cloudflare/shell` {@link Workspace} — with a runtime check. Throws when
+ * the agent runs on a different sandbox.
+ */
+export function shellWorkspace(sandbox: SessionEnv): Workspace {
+	const workspace = (sandbox as Partial<ShellSandboxEnv>).workspace;
+	if (!(workspace instanceof Workspace)) {
+		throw new Error(
+			'[flue] shellWorkspace(harness.sandbox) requires the cf-shell sandbox — this agent runs on a different environment.',
+		);
+	}
+	return workspace;
+}
+
 export function getShellSandbox(options: GetShellSandboxOptions): SandboxFactory {
 	if (!options?.workspace) {
 		throw new Error(
@@ -94,8 +118,8 @@ export function getShellSandbox(options: GetShellSandboxOptions): SandboxFactory
 	const toolFactory: SessionToolFactory = () => [createCodeTool(executor, stateProvider)];
 
 	return {
-		async createSessionEnv() {
-			return createWorkspaceSessionEnv(workspace, fs, '/');
+		async createSessionEnv(): Promise<ShellSandboxEnv> {
+			return { ...createWorkspaceSessionEnv(workspace, fs, '/'), workspace };
 		},
 		tools: toolFactory,
 	};
@@ -173,8 +197,9 @@ function createWorkspaceSessionEnv(
 
 const EXEC_NOT_SUPPORTED_MESSAGE =
 	"[flue] The cf-shell sandbox does not support exec(). The agent's `code` tool runs JavaScript " +
-	'in an isolated Worker against the workspace; from your own code, use `session.fs` / `harness.fs` ' +
-	'(readFile, writeFile, stat, readdir, etc.) — they route through the same Workspace. If you ' +
+	'in an isolated Worker against the workspace; from your own code, use the file verbs on ' +
+	'`harness.sandbox` (readFile, writeFile, stat, readdir, etc.) or narrow to the native surface ' +
+	'with `shellWorkspace(harness.sandbox)` — both route through the same Workspace. If you ' +
 	'specifically need bash/grep/find or a real Linux environment, use `@cloudflare/sandbox` ' +
 	'(Containers + mountBucket) instead.';
 

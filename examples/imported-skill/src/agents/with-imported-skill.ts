@@ -3,15 +3,18 @@ import { defineAgent, useSkill, useTool } from '@flue/runtime';
 import review from '../skills/review/SKILL.md' with { type: 'skill' };
 
 function WithImportedSkill() {
-	// Registering the reference exposes the skill's packaged files to ordinary
-	// prompts too, not just the direct `harness.skill(review)` call below.
+	// Registering the reference packages the skill's files with the build and
+	// exposes it to every model turn — including the tool's scratch prompt
+	// below, whose session carries the same skill catalog.
 	useSkill(review);
 	useTool({
 		name: 'run-review-skill',
-		description: 'Run the imported `review` skill directly and return its answer.',
+		description: 'Run the imported `review` skill and return its answer.',
 		harness: true,
 		async run({ harness }) {
-			const response = await harness.skill(review);
+			const response = await harness.prompt(
+				`Use the "${review.name}" skill and report its result.`,
+			);
 			return { text: response.text, reference: review.name };
 		},
 	});

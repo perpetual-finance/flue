@@ -25,14 +25,14 @@ export const reviewDocument = defineTool({
   harness: true,
 
   async run({ harness, data }) {
-    await harness.fs.writeFile('document.md', data.document);
+    await harness.sandbox.writeFile('document.md', data.document);
     await harness.prompt('Review document.md and write your findings to review.md.');
-    return { review: await harness.fs.readFile('review.md') };
+    return { review: await harness.sandbox.readFile('review.md') };
   },
 });
 ```
 
-Configure the agent that mounts this tool with `cwd: '/workspace'` and no `useSandbox()` call: omitting it selects the virtual sandbox, and `cwd` sets the working directory, so these relative file paths resolve below `/workspace`. The agent can use built-in file and command capabilities in that workspace, while application code uses `harness.fs` to provide inputs and retrieve results.
+Configure the agent that mounts this tool with `cwd: '/workspace'` and no `useSandbox()` call: omitting it selects the virtual sandbox, and `cwd` sets the working directory, so these relative file paths resolve below `/workspace`. The agent can use built-in file and command capabilities in that workspace, while application code uses `harness.sandbox` to provide inputs and retrieve results.
 
 The virtual sandbox starts without your application files or host filesystem, and its files do not persist beyond its in-memory lifetime. Its command environment is suitable for lightweight workspace work, not an arbitrary Linux toolchain. It is also not a network isolation boundary: current generated runtimes permit network access from the virtual sandbox.
 

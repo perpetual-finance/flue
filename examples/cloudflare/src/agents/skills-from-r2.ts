@@ -6,10 +6,10 @@
  * self-authored `SandboxFactory` passed to `useSandbox` — lazy, per the
  * `SandboxFactory` contract: constructing the factory object is cheap; the
  * expensive R2 read happens once, inside `createSessionEnv()`, at
- * initialization. The deterministic skill invocation lives in the
- * model-callable `check_spam` tool below (`harness: true` gives its run a
- * child harness — `harness.skill(...)` works exactly as it did in
- * the workflow body this agent replaced):
+ * initialization. The skill invocation lives in the model-callable
+ * `check_spam` tool below (`harness: true` gives its run a child harness
+ * whose scratch session discovers the same hydrated skills — the prompt
+ * names the skill and requires a structured verdict):
  *
  *   curl -X POST /agents/skills-from-r2/<id> \
  *     -H 'Content-Type: application/json' \
@@ -45,14 +45,16 @@ const checkSpam = defineTool({
 	}),
 	harness: true,
 	async run({ harness, data }) {
-		const result = await harness.skill('spam-filter', {
-			args: { message: data.message },
-			result: v.object({
-				spam: v.boolean(),
-				confidence: v.picklist(['low', 'medium', 'high']),
-				reasoning: v.string(),
-			}),
-		});
+		const result = await harness.prompt(
+			`Use the spam-filter skill to classify the following message:\n\n${data.message}`,
+			{
+				result: v.object({
+					spam: v.boolean(),
+					confidence: v.picklist(['low', 'medium', 'high']),
+					reasoning: v.string(),
+				}),
+			},
+		);
 		return result.data;
 	},
 });

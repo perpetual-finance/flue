@@ -308,7 +308,7 @@ function Support() {
     input: v.object({ message: v.string() }),
     harness: true,
     async run({ harness, data }) {
-      await harness.fs.writeFile(
+      await harness.sandbox.writeFile(
         '/workspace/articles/reset-password.md',
         '# Reset your password\n\nUse the account settings page to request a password reset email.',
       );
@@ -501,7 +501,7 @@ Flue stamps every Durable Object database with its persisted schema version in a
 
 `AGENTS.md` and skills are optional workspace-context files that the agent reads from its sandbox at `init()` time. They live at conventional paths inside whatever sandbox the agent is using — Flue looks for `<cwd>/AGENTS.md` and `<cwd>/.agents/skills/<name>/SKILL.md`. Whatever's there gets loaded; whatever isn't, doesn't. Most agents don't need either to do useful work.
 
-If you want to use them, put them in your sandbox. How you do that depends on which sandbox you're using: write them in via `harness.shell()` or `harness.fs` for the default virtual sandbox, or `COPY` them in for a container.
+If you want to use them, put them in your sandbox. How you do that depends on which sandbox you're using: write them in via `harness.sandbox` for the default virtual sandbox, or `COPY` them in for a container.
 
 **Skills** are reusable agent tasks defined as markdown files in `.agents/skills/`:
 
@@ -519,11 +519,10 @@ greeting. Keep it to one or two sentences.
 
 **`AGENTS.md`** at the root of the sandbox is the agent's system prompt — it provides global context about the project.
 
-Call a skill from an Action or tool body:
+Direct a skill from an Action or tool body with `harness.prompt(...)` — it shares the agent's own conversation context, so naming the skill is enough for the model to activate it:
 
 ```typescript
-const { data } = await harness.skill('greet', {
-  args: { name: 'World' },
+const { data } = await harness.prompt('Apply the greet skill for the name "World".', {
   result: v.object({ greeting: v.string() }),
 });
 ```
@@ -557,7 +556,7 @@ Read the conversation with `GET .../agents/translator/customer-123` (history), o
 Here's the progression of sandbox types available on Cloudflare, from simplest to most powerful:
 
 1. **Empty virtual sandbox** — `defineAgent(() => {}, { model: 'anthropic/claude-sonnet-4-6' })`. Fast, cheap, stateless. Good for prompt-and-response agents.
-2. **Virtual sandbox with shell setup** — Use `harness.shell()` to write files and configure the workspace. Still fast and cheap, good for agents that need small amounts of static context.
+2. **Virtual sandbox with shell setup** — Use `harness.sandbox` to write files and configure the workspace. Still fast and cheap, good for agents that need small amounts of static context.
 3. **Container sandbox** — Full Linux environment via `@cloudflare/sandbox`. For coding agents, complex dev environments, and anything that needs real system tools.
 
 Start simple. Move up when you need to.

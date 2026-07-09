@@ -10,21 +10,22 @@ function FsTest() {
 		harness: true,
 		async run({ harness }) {
 			const results: Record<string, boolean> = {};
-			await harness.shell('echo "Seeded workspace instructions" > AGENTS.md');
-			results['read workspace file'] = (await harness.shell('cat AGENTS.md')).stdout.trim().length > 0;
+			await harness.sandbox.exec('echo "Seeded workspace instructions" > AGENTS.md');
+			results['read workspace file'] =
+				(await harness.sandbox.exec('cat AGENTS.md')).stdout.trim().length > 0;
 			await harness.prompt(
 				'Create a file called "hello.txt" in the current directory. Its contents should be exactly: Hello from the agent',
 			);
 			results['llm write file'] =
-				(await harness.shell('cat hello.txt')).stdout.trim() === 'Hello from the agent';
+				(await harness.sandbox.exec('cat hello.txt')).stdout.trim() === 'Hello from the agent';
 			await harness.prompt(
 				'Read the file AGENTS.md, then overwrite it with exactly this content: MODIFIED BY AGENT',
 			);
 			results['llm overwrite workspace file'] =
-				(await harness.shell('cat AGENTS.md')).stdout.trim() === 'MODIFIED BY AGENT';
-			await harness.shell('echo "shell content" > shell-created.txt');
+				(await harness.sandbox.exec('cat AGENTS.md')).stdout.trim() === 'MODIFIED BY AGENT';
+			await harness.sandbox.exec('echo "shell content" > shell-created.txt');
 			results['shell write file'] =
-				(await harness.shell('cat shell-created.txt')).stdout.trim() === 'shell content';
+				(await harness.sandbox.exec('cat shell-created.txt')).stdout.trim() === 'shell content';
 			return { results, allPassed: Object.values(results).every(Boolean) };
 		},
 	});

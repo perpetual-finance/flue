@@ -31,7 +31,7 @@ export function useTool<
 	output?: TOutput;
 	/**
 	 * Connect this tool to the agent's runtime: `run` receives `harness` —
-	 * the one interface to the sandbox (`harness.shell()`, `harness.fs`) and
+	 * the one interface to the agent's environment (`harness.sandbox`) and
 	 * to models (`harness.prompt()`). Tools without it are pure functions of
 	 * their data.
 	 */

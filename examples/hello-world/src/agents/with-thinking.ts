@@ -1,32 +1,22 @@
 'use agent';
-import { defineAgent, useSubagent, useTool } from '@flue/runtime';
+import { defineAgent, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 
-/** No instructions of its own — only the high `thinkingLevel` override matters here. */
-function Auditor() {}
-
 function WithThinking() {
-	useSubagent({
-		name: 'auditor',
-		description: 'Reviews a claim carefully at a high reasoning effort.',
-		agent: Auditor,
-		thinkingLevel: 'high',
-	});
 	useTool({
 		name: 'thinking-test',
-		description: 'Compare thinking levels across the harness conversation and a high-thinking subagent.',
+		description: 'Compare per-call thinking-level overrides in the harness conversation.',
 		harness: true,
 		async run({ harness }) {
 			const Answer = v.object({ answer: v.string() });
 			const fast = await harness.prompt('In one word: capital of France?', { result: Answer });
-			const careful = await harness.task('Is 1009 prime? Justify briefly.', {
-				agent: 'auditor',
+			const careful = await harness.prompt('Is 1009 prime? Justify briefly.', {
 				result: Answer,
+				thinkingLevel: 'high',
 			});
-			const minimal = await harness.task('Echo back: hello', {
-				agent: 'auditor',
-				thinkingLevel: 'minimal',
+			const minimal = await harness.prompt('Echo back: hello', {
 				result: Answer,
+				thinkingLevel: 'minimal',
 			});
 			return { fast: fast.data, careful: careful.data, minimal: minimal.data };
 		},

@@ -646,10 +646,11 @@ export interface FlueLogger {
  * Initialized agent environment owned by a runtime runner — the surface a
  * `harness: true` tool and the lifecycle-hook contexts receive.
  *
- * `prompt`/`skill`/`task` drive the harness's own scratch conversation:
- * repeated calls continue it, so a later prompt sees what earlier calls
- * established. `shell` and `fs` touch the sandbox directly, with no
- * conversation record.
+ * `prompt` drives the harness's own scratch conversation: repeated calls
+ * continue it, so a later prompt sees what earlier calls established.
+ * `sandbox` is the agent's initialized environment itself — the live
+ * {@link SessionEnv} the configured {@link SandboxFactory} produced — touched
+ * directly, with no conversation record.
  */
 export interface FlueHarness {
 	readonly name: string;
@@ -666,40 +667,27 @@ export interface FlueHarness {
 	prompt(text: string, options?: PromptOptions): CallHandle<PromptResponse>;
 
 	/**
-	 * Run a registered skill in the harness conversation. Pass
-	 * `options.result` to require validated structured data.
-	 */
-	skill<S extends v.GenericSchema>(
-		skill: SkillReference | string,
-		options: SkillOptions<S> & { result: S },
-	): CallHandle<PromptResultResponse<v.InferOutput<S>>>;
-	skill(skill: SkillReference | string, options?: SkillOptions): CallHandle<PromptResponse>;
-
-	/**
-	 * Delegate work to a detached child session. Pass `options.agent` to
-	 * select a named subagent and `options.result` to require validated data.
-	 */
-	task<S extends v.GenericSchema>(
-		text: string,
-		options: TaskOptions<S> & { result: S },
-	): CallHandle<PromptResultResponse<v.InferOutput<S>>>;
-	task(text: string, options?: TaskOptions): CallHandle<PromptResponse>;
-
-	/**
 	 * Trigger compaction of the harness conversation immediately. Resolves
 	 * (no-op) when there is nothing to compact; rejects when summarization
 	 * fails or another operation is in flight.
 	 */
 	compact(): Promise<void>;
 
-	/** Run a shell command in the harness sandbox without recording it in a conversation. */
-	shell(command: string, options?: ShellOptions): CallHandle<ShellResult>;
-
 	/**
-	 * Read and write files in the harness sandbox without recording them in a
-	 * conversation. See {@link FlueFs}.
+	 * The environment this agent runs in: the live {@link SessionEnv} resolved
+	 * from the agent's configured sandbox (`useSandbox()` / the `sandbox:`
+	 * config), or the runtime default. One object carries the whole surface —
+	 * `exec`, the file verbs (`readFile`/`writeFile`/`stat`/`readdir`/
+	 * `exists`/`mkdir`/`rm`), `cwd`, `resolvePath` — and operations on it are
+	 * never recorded in a conversation.
+	 *
+	 * Sandboxes are heterogeneous: an adapter may not support every generic
+	 * verb (it throws where it cannot) and may enrich the object it returns
+	 * with its native surface. Adapter packages ship runtime-checked accessors
+	 * that narrow to that surface — call the sandbox the way it actually
+	 * works.
 	 */
-	readonly fs: FlueFs;
+	readonly sandbox: SessionEnv;
 }
 
 // ─── Flue Session ───────────────────────────────────────────────────────────

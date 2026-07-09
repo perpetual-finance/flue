@@ -6,28 +6,29 @@ function FsSurfaceTest() {
 	useSandbox(bash(() => new Bash({ fs: new InMemoryFs() })));
 	useTool({
 		name: 'fs-surface-test',
-		description: 'Exercise the harness.fs filesystem surface.',
+		description: 'Exercise the harness.sandbox filesystem surface.',
 		harness: true,
 		async run({ harness }) {
 			const results: Record<string, boolean> = {};
-			await harness.fs.writeFile('/tmp/agent.txt', 'agent.fs content');
+			await harness.sandbox.writeFile('/tmp/agent.txt', 'agent.fs content');
 			results['writeFile/readFile round-trip'] =
-				(await harness.fs.readFile('/tmp/agent.txt')) === 'agent.fs content';
-			await harness.fs.writeFile('/tmp/agent-visible.txt', 'staged by harness.fs');
-			results['visible to harness.shell'] =
-				(await harness.shell('cat /tmp/agent-visible.txt')).stdout.trim() === 'staged by harness.fs';
-			await harness.fs.mkdir('/tmp/scratch', { recursive: true });
-			await harness.fs.writeFile('/tmp/scratch/a.txt', 'a');
-			await harness.fs.writeFile('/tmp/scratch/b.txt', 'b');
-			const entries = (await harness.fs.readdir('/tmp/scratch')).sort();
+				(await harness.sandbox.readFile('/tmp/agent.txt')) === 'agent.fs content';
+			await harness.sandbox.writeFile('/tmp/agent-visible.txt', 'staged by harness.fs');
+			results['visible to harness.sandbox.exec'] =
+				(await harness.sandbox.exec('cat /tmp/agent-visible.txt')).stdout.trim() ===
+				'staged by harness.fs';
+			await harness.sandbox.mkdir('/tmp/scratch', { recursive: true });
+			await harness.sandbox.writeFile('/tmp/scratch/a.txt', 'a');
+			await harness.sandbox.writeFile('/tmp/scratch/b.txt', 'b');
+			const entries = (await harness.sandbox.readdir('/tmp/scratch')).sort();
 			results.readdir = entries.length === 2 && entries[0] === 'a.txt' && entries[1] === 'b.txt';
-			const existsBefore = await harness.fs.exists('/tmp/scratch/a.txt');
-			await harness.fs.rm('/tmp/scratch', { recursive: true, force: true });
-			results['exists + rm'] = existsBefore && !(await harness.fs.exists('/tmp/scratch/a.txt'));
-			await harness.fs.writeFile('/tmp/stat-target.txt', 'hello');
-			const stat = await harness.fs.stat('/tmp/stat-target.txt');
+			const existsBefore = await harness.sandbox.exists('/tmp/scratch/a.txt');
+			await harness.sandbox.rm('/tmp/scratch', { recursive: true, force: true });
+			results['exists + rm'] = existsBefore && !(await harness.sandbox.exists('/tmp/scratch/a.txt'));
+			await harness.sandbox.writeFile('/tmp/stat-target.txt', 'hello');
+			const stat = await harness.sandbox.stat('/tmp/stat-target.txt');
 			results['stat returns FileStat'] = stat.isFile && stat.size === 5;
-			const buffer = await harness.fs.readFileBuffer('/tmp/stat-target.txt');
+			const buffer = await harness.sandbox.readFileBuffer('/tmp/stat-target.txt');
 			results['readFileBuffer returns bytes'] = new TextDecoder().decode(buffer) === 'hello';
 			return { results, allPassed: Object.values(results).every(Boolean) };
 		},

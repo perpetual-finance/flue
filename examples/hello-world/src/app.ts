@@ -5,7 +5,6 @@
  */
 import { registerProvider } from '@flue/runtime';
 import { Hono } from 'hono';
-import childSession from './agents/child-session.ts';
 import compactionTest from './agents/compaction-test.ts';
 import fsSurfaceTest from './agents/fs-surface-test.ts';
 import fsTest from './agents/fs-test.ts';
@@ -57,7 +56,6 @@ app.get('/api/ping', (c) => c.json({ pong: true, at: new Date().toISOString() })
 // mount path is user-chosen (these preserve the conventional
 // /agents/<file-basename> addresses), and per-agent middleware comes from
 // the module's own `route` named export.
-app.route('/agents/child-session', childSession.route());
 app.route('/agents/compaction-test', compactionTest.route());
 app.route('/agents/fs-surface-test', fsSurfaceTest.route());
 app.route('/agents/fs-test', fsTest.route());

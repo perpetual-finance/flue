@@ -11,10 +11,10 @@ function WithSkill() {
 		input: v.object({ name: v.optional(v.string()) }),
 		harness: true,
 		async run({ harness, data }) {
-			const { data: result } = await harness.skill('greet', {
-				args: { name: data.name ?? 'World' },
-				result: v.object({ greeting: v.string() }),
-			});
+			const { data: result } = await harness.prompt(
+				`Use the greet skill to greet the user named "${data.name ?? 'World'}".`,
+				{ result: v.object({ greeting: v.string() }) },
+			);
 			return result;
 		},
 	});

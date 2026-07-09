@@ -35,15 +35,16 @@ function WithAbort() {
 			}
 			let shellTimeoutAborted = false;
 			try {
-				await harness.shell('sleep 30', { signal: AbortSignal.timeout(1_000) });
+				await harness.sandbox.exec('sleep 30', { signal: AbortSignal.timeout(1_000) });
 			} catch (error) {
 				shellTimeoutAborted = isAbortError(error);
 			}
-			const shellHandle = harness.shell('sleep 30');
-			setTimeout(() => shellHandle.abort('shell-user-cancel'), 1_000);
+			const shellAbortController = new AbortController();
+			const shellPromise = harness.sandbox.exec('sleep 30', { signal: shellAbortController.signal });
+			setTimeout(() => shellAbortController.abort('shell-user-cancel'), 1_000);
 			let shellManualAborted = false;
 			try {
-				await shellHandle;
+				await shellPromise;
 			} catch (error) {
 				shellManualAborted = isAbortError(error);
 			}
