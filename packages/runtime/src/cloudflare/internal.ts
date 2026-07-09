@@ -17,4 +17,10 @@ export type { ResolvedCloudflareExtension } from './extension.ts';
 export { resolveCloudflareExtension } from './extension.ts';
 export type { CreateFlueAgentClassOptions } from './flue-agent-class.ts';
 export { createFlueAgentClass } from './flue-agent-class.ts';
+export type {
+	CloudflareAgentIdentity,
+	CloudflareWorkerConfig,
+	CreateCloudflareWorkerConfigOptions,
+} from './worker-config.ts';
+export { createCloudflareWorkerConfig } from './worker-config.ts';
 export { getCloudflareAIBindingApiProvider } from './workers-ai-provider.ts';

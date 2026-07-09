@@ -14,21 +14,30 @@
  *
  * Like the top-level verb, the handle taps the process's one configured Flue
  * runtime: it works inside a Flue server (a cron callback in app.ts), in a
- * standalone script after `start()` from `@flue/runtime/node`, and under
- * `flue run`. Awaiting holds no durable state — if the process dies
- * mid-await, the submission itself survives exactly as the configured store
- * persists it, but the awaiting promise is gone. That trade is the point:
- * scripts and CI runs get a plain awaitable call and accept the loss.
+ * standalone script after `start()` from `@flue/runtime/node`, under
+ * `flue run`, and inside a deployed Cloudflare Worker — including Workflow
+ * steps, where the settled reply becomes the step's durable result. Awaiting
+ * holds no durable state — if the process dies mid-await, the submission
+ * itself survives exactly as the configured store persists it, but the
+ * awaiting promise is gone. That trade is the point: scripts and CI runs get
+ * a plain awaitable call and accept the loss.
  */
 
-import type { ConversationStreamChunk } from './conversation-public.ts';
+import type {
+	AgentConversationSnapshot,
+	ConversationStreamChunk,
+} from './conversation-public.ts';
 import { InvalidRequestError } from './errors.ts';
 import {
 	observeSubmissionSettlement,
 	readSubmissionReply,
+	replyFromSnapshot,
+	type SubmissionReply,
+	type SubmissionSettlement,
+	settlementFromChunk,
 } from './runtime/conversation-observer.ts';
 import { enqueueDispatch } from './runtime/dispatch.ts';
-import type { FlueRuntime, NodeRuntime } from './runtime/flue-app.ts';
+import type { CloudflareRuntime, FlueRuntime, NodeRuntime } from './runtime/flue-app.ts';
 import { getFlueRuntime } from './runtime/flue-app.ts';
 import { generateInstanceId } from './runtime/ids.ts';
 import { normalizeMessageInput } from './runtime/message-input.ts';
@@ -153,67 +162,11 @@ export function init(agent: AgentModuleValue, options: InitOptions = {}): AgentI
 	const contactOptions = () =>
 		contacted ? { ...(pinnedUid !== undefined ? { uid: pinnedUid } : {}) } : firstContact();
 
-	/**
-	 * The awaited tail of a handle send: watch the stream for the admitted
-	 * submission's durable settlement (wiring the caller's abort signal as a
-	 * durable abort intent), then read and return the reply.
-	 */
-	const awaitSettledReply = async (
-		node: NodeRuntime,
-		name: string,
-		target: { submissionId: string; offset: string; uid?: string },
-		options: AgentDispatchOptions,
-	): Promise<AgentReply> => {
-		const path = agentStreamPath(name, id);
-		let abortRequested = false;
-		const requestAbort = () => {
-			if (abortRequested) return;
-			abortRequested = true;
-			// Durable abort intent; the aborted settlement arrives on the
-			// stream, which the observation below keeps watching.
-			void node.abortAgentInstance(name, id).catch((error) => {
-				console.error('[flue] init() abort request failed:', error);
-			});
-		};
-		if (options.signal?.aborted) requestAbort();
-		options.signal?.addEventListener('abort', requestAbort, { once: true });
-
-		try {
-			const settlement = await observeSubmissionSettlement({
-				store: node.conversationStreamStore,
-				path,
-				submissionId: target.submissionId,
-				offset: target.offset,
-				...(options.onEvent !== undefined ? { onEvent: options.onEvent } : {}),
-			});
-			if (settlement.outcome !== 'completed') {
-				throw new AgentRunError({
-					outcome: settlement.outcome,
-					submissionId: target.submissionId,
-					...(settlement.error === undefined ? {} : { cause: settlement.error }),
-				});
-			}
-			const reply = await readSubmissionReply({
-				store: node.conversationStreamStore,
-				path,
-				submissionId: target.submissionId,
-			});
-			return {
-				...reply,
-				...(target.uid !== undefined ? { uid: target.uid } : {}),
-				submissionId: target.submissionId,
-			};
-		} finally {
-			options.signal?.removeEventListener('abort', requestAbort);
-		}
-	};
-
 	return {
 		id,
 
 		async dispatch(message, dispatchOptions = {}) {
 			const rt = requireRuntime('init');
-			const node = requireNodeRuntime(rt);
 			const name = resolveAgentName(rt, agent, 'init');
 			const delivered = normalizeMessageInput(message);
 
@@ -230,8 +183,7 @@ export function init(agent: AgentModuleValue, options: InitOptions = {}): AgentI
 			// offset, and an idempotent replay may already be settled — reading
 			// from the start finds a past settlement instead of waiting forever.
 			return awaitSettledReply(
-				node,
-				name,
+				createSettlementTransport(rt, name, id),
 				{
 					submissionId: receipt.dispatchId,
 					offset: '-1',
@@ -243,6 +195,159 @@ export function init(agent: AgentModuleValue, options: InitOptions = {}): AgentI
 	};
 }
 
+/**
+ * How one target aborts an instance's in-flight work, observes a submission's
+ * settlement, and reads its reply. The awaited choreography above these three
+ * operations is target-neutral ({@link awaitSettledReply}).
+ */
+interface SettlementTransport {
+	/** Durable abort intent; the aborted settlement arrives on the stream. */
+	requestAbort(): Promise<unknown>;
+	observe(target: {
+		submissionId: string;
+		offset: string;
+		onEvent?: (chunk: ConversationStreamChunk) => void;
+	}): Promise<SubmissionSettlement>;
+	readReply(submissionId: string): Promise<SubmissionReply>;
+}
+
+/**
+ * The awaited tail of a handle send: watch the stream for the admitted
+ * submission's durable settlement (wiring the caller's abort signal as a
+ * durable abort intent), then read and return the reply.
+ */
+async function awaitSettledReply(
+	transport: SettlementTransport,
+	target: { submissionId: string; offset: string; uid?: string },
+	options: AgentDispatchOptions,
+): Promise<AgentReply> {
+	let abortRequested = false;
+	const requestAbort = () => {
+		if (abortRequested) return;
+		abortRequested = true;
+		// Durable abort intent; the aborted settlement arrives on the
+		// stream, which the observation below keeps watching.
+		void transport.requestAbort().catch((error) => {
+			console.error('[flue] init() abort request failed:', error);
+		});
+	};
+	if (options.signal?.aborted) requestAbort();
+	options.signal?.addEventListener('abort', requestAbort, { once: true });
+
+	try {
+		const settlement = await transport.observe({
+			submissionId: target.submissionId,
+			offset: target.offset,
+			...(options.onEvent !== undefined ? { onEvent: options.onEvent } : {}),
+		});
+		if (settlement.outcome !== 'completed') {
+			throw new AgentRunError({
+				outcome: settlement.outcome,
+				submissionId: target.submissionId,
+				...(settlement.error === undefined ? {} : { cause: settlement.error }),
+			});
+		}
+		const reply = await transport.readReply(target.submissionId);
+		return {
+			...reply,
+			...(target.uid !== undefined ? { uid: target.uid } : {}),
+			submissionId: target.submissionId,
+		};
+	} finally {
+		options.signal?.removeEventListener('abort', requestAbort);
+	}
+}
+
+function createSettlementTransport(
+	rt: FlueRuntime,
+	agentName: string,
+	instanceId: string,
+): SettlementTransport {
+	return rt.target === 'node'
+		? nodeSettlementTransport(rt, agentName, instanceId)
+		: cloudflareSettlementTransport(rt, agentName, instanceId);
+}
+
+function nodeSettlementTransport(
+	node: NodeRuntime,
+	agentName: string,
+	instanceId: string,
+): SettlementTransport {
+	const path = agentStreamPath(agentName, instanceId);
+	return {
+		requestAbort: () => node.abortAgentInstance(agentName, instanceId),
+		observe: (target) =>
+			observeSubmissionSettlement({
+				store: node.conversationStreamStore,
+				path,
+				submissionId: target.submissionId,
+				offset: target.offset,
+				...(target.onEvent !== undefined ? { onEvent: target.onEvent } : {}),
+			}),
+		readReply: (submissionId) =>
+			readSubmissionReply({ store: node.conversationStreamStore, path, submissionId }),
+	};
+}
+
+/**
+ * Cloudflare: the conversation stream store lives inside the agent's Durable
+ * Object, so observation runs over the DO's existing conversation read route —
+ * a loop of bounded long-poll requests (each within the route's 30s window),
+ * the same protocol the web client reads. Settlement chunks appear on that
+ * stream for every submission kind, so no dedicated wait contract is needed.
+ * Requests route with no per-request env; the entry's runtime seed falls back
+ * to the worker's module-scope env, which is what lets the handle work in
+ * cron callbacks, queue consumers, and Workflow steps.
+ */
+function cloudflareSettlementTransport(
+	cf: CloudflareRuntime,
+	agentName: string,
+	instanceId: string,
+): SettlementTransport {
+	const base = `https://flue.invalid/agents/${encodeURIComponent(agentName)}/${encodeURIComponent(instanceId)}`;
+	const route = async (request: Request): Promise<Response> => {
+		const response = await cf.routeAgentRequest(request, undefined, { agentName, instanceId });
+		if (!response) {
+			throw new Error(
+				`[flue] init() target agent "${agentName}" Durable Object binding is unavailable.`,
+			);
+		}
+		return response;
+	};
+	return {
+		requestAbort: () => route(new Request(`${base}/abort`, { method: 'POST' })),
+		async observe(target) {
+			let offset = target.offset;
+			while (true) {
+				const response = await route(
+					new Request(`${base}?view=updates&offset=${encodeURIComponent(offset)}&live=long-poll`),
+				);
+				if (!response.ok) throw routeFailure('conversation observation', agentName, response);
+				const chunks = (await response.json()) as ConversationStreamChunk[];
+				let settlement: SubmissionSettlement | undefined;
+				for (const chunk of chunks) {
+					target.onEvent?.(chunk);
+					settlement ??= settlementFromChunk(chunk, target.submissionId);
+				}
+				if (settlement) return settlement;
+				offset = response.headers.get('Stream-Next-Offset') ?? offset;
+			}
+		},
+		async readReply(submissionId) {
+			const response = await route(new Request(`${base}?view=history`));
+			if (!response.ok) throw routeFailure('reply read', agentName, response);
+			const snapshot = (await response.json()) as AgentConversationSnapshot;
+			return replyFromSnapshot(snapshot, submissionId);
+		},
+	};
+}
+
+function routeFailure(action: string, agentName: string, response: Response): Error {
+	return new Error(
+		`[flue] init() ${action} for agent "${agentName}" failed with status ${response.status}.`,
+	);
+}
+
 function requireRuntime(api: string): FlueRuntime {
 	const rt = getFlueRuntime();
 	if (!rt) {
@@ -250,21 +355,6 @@ function requireRuntime(api: string): FlueRuntime {
 			`[flue] ${api}() was used before the Flue runtime was configured. ` +
 				'Inside a Flue-built server this happens automatically; in a standalone ' +
 				"script, call start() from '@flue/runtime/node' first.",
-		);
-	}
-	return rt;
-}
-
-function requireNodeRuntime(rt: FlueRuntime): NodeRuntime {
-	if (rt.target !== 'node') {
-		throw new Error(
-			"[flue] init().dispatch() awaits the agent's settled reply, which is not " +
-				'supported on the Cloudflare target. A Worker is a server in front of its ' +
-				'agent Durable Objects, and holding a handler open to await a whole agent ' +
-				'run works against the platform. Deliver input with the top-level ' +
-				'dispatch(agent, { id, message }) (fire-and-forget, works everywhere ' +
-				'including cron triggers) and let the agent publish its own result, or ' +
-				'await a reply from outside the Worker with the @flue/sdk client.',
 		);
 	}
 	return rt;

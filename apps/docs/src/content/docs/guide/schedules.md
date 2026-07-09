@@ -4,7 +4,7 @@ description: Dispatch agent input on a schedule with Cloudflare or Node.js.
 lastReviewedAt: 2026-07-07
 ---
 
-Schedules often start bounded work such as daily summaries, recurring reports, data synchronization, or cleanup. Model that work as an agent and deliver each occurrence with `dispatch(...)`. When the schedule's code needs the agent's result — to post it somewhere, or to gate a follow-up step — use the awaited `init(...).dispatch(...)` handle instead on the Node target; on Cloudflare, deliver the input and let the agent publish its own result (see [Scripts](/docs/guide/scripts/#on-cloudflare)).
+Schedules often start bounded work such as daily summaries, recurring reports, data synchronization, or cleanup. Model that work as an agent and deliver each occurrence with `dispatch(...)`. When the schedule's code needs the agent's result — to post it somewhere, or to gate a follow-up step — use the awaited `init(...).dispatch(...)` handle instead; on Cloudflare that awaiting belongs in a Workflow step rather than the cron invocation itself (see [Scripts](/docs/guide/scripts/#on-cloudflare)).
 
 The conversation `id` you dispatch to sets the work's memory. A fresh id per occurrence (`daily-2026-07-02`) gives every run an independent conversation; a stable id (`daily-summary`) makes successive occurrences share conversation state, which is useful when the agent should remember what it reported yesterday.
 

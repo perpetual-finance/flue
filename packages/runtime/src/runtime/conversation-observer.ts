@@ -174,7 +174,13 @@ export async function observeSubmissionSettlement(
 	}
 }
 
-function settlementFromChunk(
+/**
+ * Extract the given submission's settlement from one projected chunk, in both
+ * projected forms (see {@link observeSubmissionSettlement}). Shared by the
+ * in-process observation above and the Cloudflare client, which consumes the
+ * same chunks over the agent DO's conversation read route.
+ */
+export function settlementFromChunk(
 	chunk: ConversationStreamChunk,
 	submissionId: string,
 ): SubmissionSettlement | undefined {
@@ -237,8 +243,20 @@ export async function readSubmissionReply(
 	const state = await loadReducedConversationState({ store: options.store, path: options.path });
 	const snapshot = projectAgentConversationSnapshot(state);
 	if (!snapshot) return { text: '', data: {} };
+	return replyFromSnapshot(snapshot, options.submissionId);
+}
+
+/**
+ * Extract a submission's reply from a materialized conversation snapshot.
+ * Shared by {@link readSubmissionReply} and the Cloudflare client, which reads
+ * the same snapshot over the agent DO's history route.
+ */
+export function replyFromSnapshot(
+	snapshot: AgentConversationSnapshot,
+	submissionId: string,
+): SubmissionReply {
 	const assistantMessages = snapshot.messages.filter((message) => message.role === 'assistant');
-	const own = assistantMessages.filter((message) => message.submissionId === options.submissionId);
+	const own = assistantMessages.filter((message) => message.submissionId === submissionId);
 	const reply = (own.length > 0 ? own : assistantMessages).at(-1);
 	if (!reply) return { text: '', data: {} };
 

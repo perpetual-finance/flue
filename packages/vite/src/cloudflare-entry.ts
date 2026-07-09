@@ -81,8 +81,6 @@ import { registerApiProvider, registerProvider } from '@flue/runtime';
 import {
 	Bash,
 	bashFactoryToSessionEnv,
-	CLOUDFLARE_AGENT_INTERNAL_DISPATCH_PATH,
-	CLOUDFLARE_AGENT_INTERNAL_INSTANCE_INFO_PATH,
 	configureFlueRuntime,
 	createCloudflareAgentRuntime,
 	createFlueContext,
@@ -93,6 +91,7 @@ import {
 	resolveModel,
 } from '@flue/runtime/internal';
 import {
+	createCloudflareWorkerConfig,
 	createFlueAgentClass,
 	getCloudflareAIBindingApiProvider,
 	runWithCloudflareContext,
@@ -176,36 +175,7 @@ async function createDefaultEnv() {
 
 // ─── Agent wiring ───────────────────────────────────────────────────────────
 
-const dispatchQueue = {
-	async enqueue(input) {
-		const identity = agentIdentities[input.agent];
-		const binding = env?.[identity?.bindingName];
-		if (!binding) throw new Error('[flue] dispatch() target agent "' + input.agent + '" Durable Object binding is unavailable.');
-		const response = await fetchAgent(binding, input.id, new Request('https://flue.invalid' + CLOUDFLARE_AGENT_INTERNAL_DISPATCH_PATH, {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify(input),
-		}));
-		if (!response.ok) {
-			// Admission rejections (failed uid conditions, invalid creation data)
-			// arrive as structured JSON — surface the caller-safe details instead
-			// of a bare status.
-			let rejection;
-			try { rejection = await response.json(); } catch {}
-			if (rejection && typeof rejection.error === 'string') {
-				const details = typeof rejection.details === 'string' ? ' ' + rejection.details : '';
-				throw Object.assign(
-					new Error('[flue] dispatch() target agent "' + input.agent + '" rejected admission: ' + rejection.error + details),
-					{ status: response.status, details: rejection.details },
-				);
-			}
-			throw new Error('[flue] dispatch() target agent "' + input.agent + '" rejected durable admission with status ' + response.status + '.');
-		}
-		return response.json();
-	},
-};
-
-function createAgentContextForRequest({ executionStore, instance, agentName, request, initialEventIndex, dispatchId }) {
+function createAgentContextForRequest({ instance, agentName, request, initialEventIndex, dispatchId }) {
 	return createFlueContext({
 		id: instance.name,
 		agentName,
@@ -215,7 +185,6 @@ function createAgentContextForRequest({ executionStore, instance, agentName, req
 		dispatchId,
 		agentConfig: { resolveModel },
 		createDefaultEnv,
-		submissionStore: executionStore.submissions,
 	});
 }
 
@@ -252,26 +221,16 @@ const cloudflareAgents = createCloudflareAgentRuntime({
 ${agentClassExports}
 
 // ─── Runtime seed ───────────────────────────────────────────────────────────
+// The worker-side seams (dispatch queue, DO request router, instance lookup)
+// are built by tested runtime code; the entry injects the module-scope env
+// and the \`agents\`-package fetch capability, which must stay out of the
+// runtime's import graph.
 
 configureFlueRuntime({
 	target: 'cloudflare',
 	devMode: import.meta.env.DEV,
 	agents,
-	dispatchQueue,
-	routeAgentRequest: async (request, reqEnv, target) => {
-		const binding = reqEnv?.[agentIdentities[target.agentName]?.bindingName];
-		if (!binding) return null;
-		return fetchAgent(binding, target.instanceId, request);
-	},
-	instanceInfo: async (agentName, instanceId) => {
-		const binding = env?.[agentIdentities[agentName]?.bindingName];
-		if (!binding) throw new Error('[flue] getAgentInstance() target agent "' + agentName + '" Durable Object binding is unavailable.');
-		const response = await fetchAgent(binding, instanceId, new Request('https://flue.invalid' + CLOUDFLARE_AGENT_INTERNAL_INSTANCE_INFO_PATH, { method: 'GET' }));
-		if (!response.ok) throw new Error('[flue] getAgentInstance() lookup for agent "' + agentName + '" failed with status ' + response.status + '.');
-		const info = await response.json();
-		if (!info || info.exists !== true) return null;
-		return { id: instanceId, ...(typeof info.uid === 'string' ? { uid: info.uid } : {}) };
-	},
+	...createCloudflareWorkerConfig({ env, agentIdentities, fetchAgent }),
 });
 
 // ─── App composition ────────────────────────────────────────────────────────

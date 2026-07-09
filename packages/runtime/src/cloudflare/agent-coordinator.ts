@@ -778,15 +778,23 @@ class CloudflareAgentCoordinator {
 				loadReducedState: async () => (await this.ensureConversationWriter()).loadReducedState(),
 			});
 		} catch (error) {
-			// Structured body so the dispatch() caller's enqueue can rethrow with
-			// the caller-safe details (e.g. the 409's existing uid) intact.
+			// Structured body so the dispatch() caller's enqueue can rehydrate the
+			// typed admission error (`type` selects the class, `uid` restores the
+			// 409's existing-incarnation field) with caller-safe details intact.
 			if (
 				error instanceof InvalidRequestError ||
 				error instanceof AgentInstanceNotFoundError ||
 				error instanceof AgentInstanceExistsError
 			) {
 				return Response.json(
-					{ error: error.message, details: error.details },
+					{
+						type: error.type,
+						error: error.message,
+						details: error.details,
+						...(error instanceof AgentInstanceExistsError && error.uid !== undefined
+							? { uid: error.uid }
+							: {}),
+					},
 					{ status: error.status },
 				);
 			}

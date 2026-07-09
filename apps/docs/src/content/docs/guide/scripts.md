@@ -28,7 +28,33 @@ Use the top-level `dispatch(...)` when you only need to deliver input and move o
 
 ### On Cloudflare
 
-The awaited handle is a Node-side API by design. A deployed Worker is always a server in front of its agent Durable Objects, and holding a handler open to await a whole agent run works against the platform — a cron invocation has a hard wall-clock ceiling, and the reply usually belongs to the agent anyway. Deliver input with the top-level `dispatch(...)` — fire-and-forget, works on every target including [Cron Triggers](/docs/guide/schedules/#scheduling-on-cloudflare) — and let the agent deliver its own result through a tool, a finish hook, or a channel. To await a reply from outside the Worker, use the `@flue/sdk` client against the agent's HTTP routes.
+The handle works in a deployed Worker too — the awaited send admits the message to the agent's Durable Object and observes its settlement over the same bounded reads the web client uses, so nothing holds a request open against the platform. The context that makes awaiting genuinely worthwhile is a [Cloudflare Workflow](https://developers.cloudflare.com/workflows/) step, where the reply becomes the step's durable result:
+
+```ts title="src/workflows.ts"
+import { init } from '@flue/runtime';
+import { WorkflowEntrypoint } from 'cloudflare:workers';
+import reviewer from './agents/reviewer.ts';
+
+export class NightlyReview extends WorkflowEntrypoint {
+  async run(event, step) {
+    const findings = await step.do('collect findings', () => collect(event.payload));
+
+    // Once this step completes, the workflow engine never re-runs it — the
+    // reply is recorded in the workflow's own history.
+    const review = await step.do('agent review', async () => {
+      const agent = init(reviewer, { id: `nightly-${event.payload.date}` });
+      const reply = await agent.dispatch(`Review these findings:\n${findings}`);
+      return { text: reply.text, data: reply.data };
+    });
+
+    await step.do('file report', () => fileReport(review));
+  }
+}
+```
+
+A step that fails mid-await is re-fired by the workflow engine and dispatches again — `dispatch` delivery is at-least-once, and the step boundary is the dedup: keep one agent send per step, and let the completed step's recorded result stand in for the reply on every later access.
+
+In plain fetch handlers and [Cron Triggers](/docs/guide/schedules/#scheduling-on-cloudflare), prefer the top-level `dispatch(...)` — fire-and-forget at durable admission — and let the agent deliver its own result through a tool, a finish hook, or a channel: an agent run can outlast what those invocation contexts want to hold open, and each settlement poll while awaiting counts against the invocation's subrequest budget. To await a reply from outside the Worker, use the `@flue/sdk` client against the agent's HTTP routes.
 
 ## Standalone scripts: `start()`
 
