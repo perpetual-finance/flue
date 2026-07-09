@@ -138,6 +138,9 @@ export function classifySignal(signalType: string): {
 		// Dynamic-resource narration: runtime bookkeeping announcing that the
 		// declared tools/skills/subagents changed, not a caller dispatch.
 		case 'resources':
+		// Instruction-change narration: the composed instruction document
+		// moved between renders; announcement only, same bookkeeping family.
+		case 'instructions':
 			return { purpose: 'advisory', display: 'diagnostic' };
 		default:
 			return { purpose: 'dispatch', display: 'diagnostic' };

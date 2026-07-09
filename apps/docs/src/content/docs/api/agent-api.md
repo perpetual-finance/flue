@@ -242,6 +242,16 @@ All available skills: faq, refunds
 
 The presentation surfaces the model already read stay frozen so a flip never invalidates the provider's prompt cache: the system prompt's skill catalog and the `task` tool's agent roster keep their birth-time snapshot, and `activate_skill` takes a plain string name (unknown names get a factual miss listing what is available). Activation and task delegation always resolve against the live set. When the conversation [compacts](/docs/api/agent-api/#compactionconfig), the runtime rebaselines: the post-compaction prompt snapshots the then-current resource state — exactly what a first message would see — and the earlier delta bookkeeping stops mattering.
 
+The composed instruction document gets the same treatment, simpler: the system prompt already follows every render live (interpolated text stays current), so when the document changes between renders — a state interpolation flipped, or a redeploy shipped new prose — the runtime appends an `instructions` signal at the same boundary. It is an announcement only, never a diff:
+
+```
+<signal type="instructions">
+Your system instructions have changed. The current system prompt is in effect from this turn onward; earlier turns may reflect the previous version.
+</signal>
+```
+
+The value is hindsight, not content — the model can already see the new instructions. Without the signal, a model reading its own earlier turns would be confused by behavior that followed a version of the instructions it can no longer see; with it, the transcript records when the ground shifted. Compaction rebaselines instructions like resources: the fresh prompt is the new baseline, no signal.
+
 ### `useTool(...)`
 
 ```ts

@@ -116,6 +116,8 @@ import { createUserContextMessage, renderSignalMessage } from './message-renderi
 import { assertImagesWithinLimit } from './persisted-images.ts';
 import {
 	diffResourceSnapshots,
+	INSTRUCTIONS_UPDATED_SIGNAL_BODY,
+	instructionsChanged,
 	type ResourceEntry,
 	type ResourceKind,
 	type ResourceSnapshot,
@@ -825,11 +827,14 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	 * The dynamic-resources reconciler: diff the latest render's declared
 	 * sets against the durable last-narrated snapshot and announce the delta
 	 * — one `resources` signal per changed kind (delta lines + the kind's
-	 * current roster), batch-atomic with the updated `resource_snapshot`
-	 * record. Crash between steer and commit re-diffs on the re-attempt and
-	 * emits again; a committed batch never re-narrates. First contact (no
-	 * durable snapshot) records the current render as the silent baseline —
-	 * it IS what the frozen presentation surfaces were composed from.
+	 * current roster), plus an `instructions` signal (announcement only, no
+	 * diff — the live prompt already IS the new version) when the composed
+	 * instruction document's digest moved. All batch-atomic with the updated
+	 * `resource_snapshot` record. Crash between steer and commit re-diffs on
+	 * the re-attempt and emits again; a committed batch never re-narrates.
+	 * First contact (no durable snapshot) records the current render as the
+	 * silent baseline — it IS what the frozen presentation surfaces were
+	 * composed from.
 	 */
 	private async narrateResourceDelta(): Promise<void> {
 		const rendered = this.lastRenderedResources;
@@ -842,8 +847,15 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			return;
 		}
 		const deltas = diffResourceSnapshots(previous, current);
-		if (deltas.length === 0) return;
+		const instructionsUpdated = instructionsChanged(previous, current);
+		if (deltas.length === 0 && !instructionsUpdated) return;
 		const parentId = await this.conversationWriter.getConversationLeaf(this.conversationId);
+		if (instructionsUpdated) {
+			this.enqueueSignalAppend({
+				type: 'instructions',
+				body: INSTRUCTIONS_UPDATED_SIGNAL_BODY,
+			});
+		}
 		for (const delta of deltas) {
 			this.enqueueSignalAppend({
 				type: 'resources',

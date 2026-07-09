@@ -10,6 +10,7 @@ import {
 } from './hooks/render.ts';
 import { createHookStateBuffer } from './hooks/use-persistent-state.ts';
 import { createAgentOutputChannel } from './message-output.ts';
+import { digestInstructions } from './resources.ts';
 import { type AttachmentStore, InMemoryAttachmentStore } from './runtime/attachment-store.ts';
 import { InMemoryConversationStreamStore } from './runtime/conversation-stream-store.ts';
 import { dispatchGlobalEvent } from './runtime/events.ts';
@@ -358,6 +359,7 @@ export async function initializeRootHarness(
 			snapshot: {
 				...rendered.structure.resources,
 				skills: skillCatalogEntries(skills),
+				instructionsDigest: digestInstructions(rendered.config.instructions),
 			},
 			skills,
 			subagents: Object.fromEntries(

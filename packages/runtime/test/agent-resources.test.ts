@@ -17,6 +17,9 @@ import { createNodeAgentCoordinator } from '../src/node/agent-coordinator.ts';
 import { sqlite } from '../src/node/agent-execution-store.ts';
 import {
 	diffResourceSnapshots,
+	digestInstructions,
+	INSTRUCTIONS_UPDATED_SIGNAL_BODY,
+	instructionsChanged,
 	type ResourceSnapshot,
 	renderResourceSignalBody,
 } from '../src/resources.ts';
@@ -198,7 +201,101 @@ describe('renderResourceSignalBody()', () => {
 	});
 });
 
+describe('digestInstructions() / instructionsChanged()', () => {
+	it('is deterministic, distinguishes texts, and treats undefined as empty', () => {
+		expect(digestInstructions('Support agent.')).toBe(digestInstructions('Support agent.'));
+		expect(digestInstructions('Support agent.')).not.toBe(digestInstructions('Sales agent.'));
+		expect(digestInstructions(undefined)).toBe(digestInstructions(''));
+		expect(digestInstructions(undefined)).not.toBe(digestInstructions('Support agent.'));
+	});
+
+	it('detects a digest move, never a pre-digest baseline', () => {
+		const before = snapshot({ instructionsDigest: digestInstructions('Phase: gathering.') });
+		const after = snapshot({ instructionsDigest: digestInstructions('Phase: drafting.') });
+		expect(instructionsChanged(before, after)).toBe(true);
+		expect(instructionsChanged(before, snapshot(before))).toBe(false);
+		// A snapshot recorded before the field existed adopts silently.
+		expect(instructionsChanged(snapshot({}), after)).toBe(false);
+	});
+});
+
 describe('dynamic resources end to end (node coordinator, faux provider)', () => {
+	it('announces an instruction change between renders — signal only, no diff', async () => {
+		const dbPath = createTempDbPath();
+		const adapter = sqlite(dbPath);
+		await adapter.migrate?.();
+		const { executionStore, conversationStreamStore, attachmentStore } = await adapter.connect();
+		const provider = createFauxProvider();
+
+		let turnOneSystemPrompt: string | undefined;
+		let turnTwoSystemPrompt: string | undefined;
+		let turnTwoMessages: string | undefined;
+		let turnThreeMessages: string | undefined;
+		provider.setResponses([
+			(context) => {
+				turnOneSystemPrompt = context.systemPrompt;
+				return fauxAssistantMessage(fauxToolCall('begin_draft', {}, { id: 'tool:draft-1' }), {
+					stopReason: 'toolUse',
+				});
+			},
+			(context) => {
+				// The prompt swapped live; the change is announced in-conversation.
+				turnTwoSystemPrompt = context.systemPrompt;
+				turnTwoMessages = JSON.stringify(context.messages);
+				return fauxAssistantMessage(fauxToolCall('noop', {}, { id: 'tool:noop-1' }), {
+					stopReason: 'toolUse',
+				});
+			},
+			(context) => {
+				// No instruction change between turn 2 and 3: no second signal.
+				turnThreeMessages = JSON.stringify(context.messages);
+				return fauxAssistantMessage('Drafting.');
+			},
+		]);
+
+		function assistant() {
+			const [phase, setPhase] = usePersistentState('phase', 'gathering');
+			useTool({
+				name: 'begin_draft',
+				description: 'Move to drafting.',
+				run: () => {
+					setPhase('drafting');
+					return 'ok';
+				},
+			});
+			useTool({ name: 'noop', description: 'Do nothing.', run: () => 'ok' });
+			return `Support agent. Current phase: ${phase}.`;
+		}
+
+		const coordinator = createNodeAgentCoordinator({
+			submissions: executionStore.submissions,
+			agents: [
+				{
+					name: 'assistant',
+					definition: defineAgent(assistant, {
+						model: `${provider.getModel().provider}/${provider.getModel().id}`,
+					}),
+				},
+			],
+			createContext: makeFauxCreateContext(provider),
+			conversationStreamStore,
+			attachmentStore,
+		});
+		await coordinator.admitDispatch(makeDispatchInput({ id: 'instance-instruction-flip' }));
+		await coordinator.waitForIdle();
+		await coordinator.shutdown();
+
+		// The prompt itself follows the render (live interpolation)…
+		expect(turnOneSystemPrompt).toContain('Current phase: gathering.');
+		expect(turnTwoSystemPrompt).toContain('Current phase: drafting.');
+		// …and the change is announced: signal only, never the content.
+		expect(turnTwoMessages).toContain(INSTRUCTIONS_UPDATED_SIGNAL_BODY);
+		expect(turnTwoMessages).not.toContain('gathering'); // no diff, no old text
+		// An unchanged render narrates nothing new.
+		const occurrences = turnThreeMessages?.split(INSTRUCTIONS_UPDATED_SIGNAL_BODY).length;
+		expect(occurrences).toBe(2); // exactly one occurrence → split yields two parts
+	});
+
 	it('flips a skill mid-run: narrated, activatable, catalog stays frozen', async () => {
 		const dbPath = createTempDbPath();
 		const adapter = sqlite(dbPath);

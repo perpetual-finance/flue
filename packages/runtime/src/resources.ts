@@ -37,7 +37,55 @@ export interface ResourceSnapshot {
 	skills: ResourceEntry[];
 	tools: ToolResourceEntry[];
 	subagents: ResourceEntry[];
+	/**
+	 * Digest of the render's composed instruction document (returned prose +
+	 * `useInstruction` contributions). Tracked so an instruction change is
+	 * announced with an `instructions` signal — the content itself is never
+	 * reprinted (the live prompt reaches the model natively). Absent on
+	 * snapshots recorded before this field existed; such a baseline adopts
+	 * silently.
+	 */
+	instructionsDigest?: string;
 }
+
+/**
+ * Digest one render's composed instruction document (FNV-1a 64-bit — change
+ * detection, not cryptography). `undefined` (an agent with no instruction
+ * document) digests as the empty string, so gaining or losing the document
+ * counts as a change like any edit.
+ */
+export function digestInstructions(instructions: string | undefined): string {
+	const text = instructions ?? '';
+	let hash = 0xcbf29ce484222325n;
+	for (let index = 0; index < text.length; index++) {
+		hash ^= BigInt(text.charCodeAt(index));
+		hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
+	}
+	return hash.toString(16).padStart(16, '0');
+}
+
+/**
+ * Whether the instruction document changed between two snapshots. A previous
+ * snapshot without a digest (recorded before the field existed) never counts
+ * as changed — the next recorded snapshot carries the digest and detection
+ * starts from there.
+ */
+export function instructionsChanged(previous: ResourceSnapshot, next: ResourceSnapshot): boolean {
+	return (
+		previous.instructionsDigest !== undefined &&
+		next.instructionsDigest !== undefined &&
+		previous.instructionsDigest !== next.instructionsDigest
+	);
+}
+
+/**
+ * The `instructions` signal body: announcement only, no diff. The model's
+ * live system prompt already IS the new version — the signal exists so the
+ * model can explain earlier behavior to itself instead of being confused by
+ * history written under instructions it can no longer see.
+ */
+export const INSTRUCTIONS_UPDATED_SIGNAL_BODY =
+	'Your system instructions have changed. The current system prompt is in effect from this turn onward; earlier turns may reflect the previous version.';
 
 export type ResourceKind = 'skill' | 'tool' | 'subagent';
 
