@@ -108,7 +108,9 @@ import {
 	type AgentStartContext,
 	type AgentStartDeclaration,
 	assertAppendMessage,
-	runMessageMetadataProducers,
+	type ResponseFinishContext,
+	type ResponseStartContext,
+	runResponseMetadataHooks,
 } from './message-output.ts';
 import { createUserContextMessage, renderSignalMessage } from './message-rendering.ts';
 import { assertImagesWithinLimit } from './persisted-images.ts';
@@ -413,9 +415,10 @@ interface SessionInitOptions {
 	rerender?: SessionRerender;
 	/**
 	 * Client-facing output channel from the harness's render (function agents
-	 * only): `useMessageData` writes flow through its sink into immediate
-	 * durable appends, and `useMessageMetadata` producers are read off it at
-	 * the response's start/finish points.
+	 * only): `useDataWriter` writes flow through its sink into
+	 * immediate durable appends; lifecycle (`useAgentStart`/`useAgentFinish`)
+	 * and response boundary (`useResponseStart`/`useResponseFinish`)
+	 * declarations are read off it at their seams.
 	 */
 	output?: AgentOutputChannel;
 	/**
@@ -680,9 +683,9 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	private responseHasCompletedStep = false;
 	/** Aggregate usage across the active submission's completed assistant steps. */
 	private responseUsage: PromptUsage | undefined;
-	/** Merged `useMessageMetadata('start')` output, stamped onto the response's first started record. */
+	/** Merged `useResponseStart` metadata, stamped onto the response's first started record. */
 	private responseStartMetadata: Record<string, unknown> | undefined;
-	/** Ordered append chain for `useMessageData` writes; awaited before the response settles. */
+	/** Ordered append chain for `useDataWriter` writes; awaited before the response settles. */
 	private outputWriteQueue: Promise<unknown> = Promise.resolve();
 	/**
 	 * Lifecycle-callback appends (`ctx.append` in `useAgentStart`/
@@ -910,7 +913,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	}
 
 	/**
-	 * Sink for `useMessageData` writers. Unlike `usePersistentState` writes (buffered,
+	 * Sink for `useDataWriter` writers. Unlike `usePersistentState` writes (buffered,
 	 * batch-atomic), data writes append immediately — live client progress is
 	 * their whole point. The writer API is synchronous, so appends chain on an
 	 * ordered queue; the queue is awaited before the response settles, and an
@@ -1027,8 +1030,8 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	 * submission adopts it instead of re-running). A resume re-entry whose
 	 * response already has durable assistant steps skips evaluation wholesale:
 	 * start hooks had their chance before turn one of the original attempt. A
-	 * throw fails the submission (fail-fast, like the metadata start
-	 * producers).
+	 * throw fails the submission (fail-fast, like the `useResponseStart`
+	 * hooks).
 	 */
 	private async runAgentStartHooks(
 		signal: AbortSignal,
@@ -1499,7 +1502,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		// `this` is shadowed inside the ctx getter below.
 		const session = this;
 		const ctx: AgentFinishContext = {
-			response: { toolCalls },
+			response: { toolCalls, usage: this.responseUsage ?? emptyUsage() },
 			append: (message) => {
 				if (!appendWindowOpen) {
 					throw new Error(
@@ -1532,7 +1535,10 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	}
 
 	/** `ctx.log` for one lifecycle hook run, attributed by declaration index. */
-	private createHookLogger(hook: 'useAgentStart' | 'useAgentFinish', hookIndex: number) {
+	private createHookLogger(
+		hook: 'useAgentStart' | 'useAgentFinish' | 'useResponseStart' | 'useResponseFinish',
+		hookIndex: number,
+	) {
 		const emit = (
 			level: 'info' | 'warn' | 'error',
 			message: string,
@@ -1550,10 +1556,11 @@ export class Session implements FlueSession, AgentSubmissionSession {
 
 	/**
 	 * Begin the response's client-facing output: reset per-submission tracking
-	 * and run the `useMessageMetadata('start')` producers (fail-fast — a throw
-	 * fails the submission before the first model call). A resume re-entry
-	 * whose response already has durable assistant steps adopts them instead:
-	 * start producers ran on the original attempt.
+	 * and run the `useResponseStart` hooks — the response's wake, once per
+	 * response, before the first model call and before any `useAgentStart`
+	 * hook (fail-fast — a throw fails the submission before the model runs). A
+	 * resume re-entry whose response already has durable assistant steps
+	 * adopts them instead: the wake hooks ran on the original attempt.
 	 */
 	private async beginResponseOutput(): Promise<void> {
 		this.responseMessageId = undefined;
@@ -1569,31 +1576,55 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			this.responseHasCompletedStep = true;
 			return;
 		}
-		const producers = this.outputChannel.producers.start;
-		if (producers.length === 0) return;
-		this.responseStartMetadata = runMessageMetadataProducers(producers, {
-			point: 'start',
-			submissionId: this.activeSubmissionId,
-		});
+		const declarations = this.outputChannel.responseStarts;
+		if (declarations.length === 0) return;
+		this.responseStartMetadata = runResponseMetadataHooks(
+			'useResponseStart',
+			declarations,
+			(metadata, index): ResponseStartContext => ({
+				metadata,
+				log: this.createHookLogger('useResponseStart', index),
+			}),
+			{},
+		);
 	}
 
 	/**
 	 * Settle the response's client-facing output: wait for queued data writes
-	 * (surfacing any append failure) and run the `useMessageMetadata('finish')`
-	 * producers, appending their merged result. Runs inside the submission's
-	 * normal execution path, so a throw here settles the submission `failed` —
-	 * no retry, no recovery.
+	 * (surfacing any append failure) and run the `useResponseFinish` hooks —
+	 * the response's true end, once per response, after the last
+	 * `useAgentFinish` cycle — appending their merged result. Each hook sees
+	 * the response's accumulated metadata (what the wake hooks attached, read
+	 * from the durable log so it survives re-attempts) and the final
+	 * aggregates. Runs inside the submission's normal execution path, so a
+	 * throw here settles the submission `failed` — no retry, no recovery.
 	 */
 	private async flushResponseOutput(): Promise<void> {
 		await this.outputWriteQueue;
 		if (!this.activeSubmissionId || !this.outputChannel || !this.responseMessageId) return;
-		const producers = this.outputChannel.producers.finish;
-		if (producers.length === 0) return;
-		const metadata = runMessageMetadataProducers(producers, {
-			point: 'finish',
-			submissionId: this.activeSubmissionId,
+		const submissionId = this.activeSubmissionId;
+		const declarations = this.outputChannel.responseFinishes;
+		if (declarations.length === 0) return;
+		const state = await this.conversationWriter.loadReducedState();
+		// Copied out of reducer state: the first hook's ctx.metadata is this
+		// object, and hook code must not be able to mutate the reduced view.
+		const durableMetadata = {
+			...state.conversations.get(this.conversationId)?.responseMetadata.get(submissionId),
+		};
+		const response: ResponseFinishContext['response'] = {
 			usage: this.responseUsage ?? emptyUsage(),
-		});
+			toolCalls: await this.collectResponseToolCalls(submissionId),
+		};
+		const metadata = runResponseMetadataHooks(
+			'useResponseFinish',
+			declarations,
+			(current, index): ResponseFinishContext => ({
+				metadata: current,
+				response,
+				log: this.createHookLogger('useResponseFinish', index),
+			}),
+			durableMetadata,
+		);
 		if (!metadata) return;
 		await this.appendCanonical([
 			{ ...this.canonicalEnvelope('message_metadata'), type: 'message_metadata', metadata },

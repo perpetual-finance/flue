@@ -69,6 +69,8 @@ export interface AgentRenderStructure {
 	 */
 	agentStartCount: number;
 	agentFinishCount: number;
+	responseStartCount: number;
+	responseFinishCount: number;
 	/**
 	 * The render's declared resources with content fingerprints (tool schema
 	 * digests included), in declaration order. The session diffs consecutive
@@ -88,15 +90,13 @@ export function renderAgentFunctionWithStructure(
 	const { result, frame } = renderWithFrame(() => agent(props), state);
 	assertAgentInstruction(result);
 	assertUniqueToolNames(frame);
-	// Hand the render's metadata producers and lifecycle declarations to the
-	// session through the shared output channel — replaced wholesale each
-	// render, so per-turn re-renders refresh the closures the same way tools
-	// and instructions refresh.
+	// Hand the render's lifecycle and boundary declarations to the session
+	// through the shared output channel — replaced wholesale each render, so
+	// per-turn re-renders refresh the closures the same way tools and
+	// instructions refresh.
 	if (state?.output) {
-		state.output.producers = {
-			start: [...frame.metadataProducers.start],
-			finish: [...frame.metadataProducers.finish],
-		};
+		state.output.responseStarts = [...frame.responseStarts];
+		state.output.responseFinishes = [...frame.responseFinishes];
 		state.output.agentStarts = [...frame.agentStarts];
 		state.output.agentFinishes = [...frame.agentFinishes];
 	}
@@ -121,6 +121,8 @@ export function renderAgentFunctionWithStructure(
 			hasSandbox: frame.sandbox !== undefined,
 			agentStartCount: frame.agentStarts.length,
 			agentFinishCount: frame.agentFinishes.length,
+			responseStartCount: frame.responseStarts.length,
+			responseFinishCount: frame.responseFinishes.length,
 			resources: {
 				skills: frame.skills.map((skill) => ({
 					name: skill.name,
@@ -210,6 +212,16 @@ export function assertRenderStructureInvariance(
 	if (previous.agentFinishCount !== next.agentFinishCount) {
 		problems.push(
 			`useAgentFinish count changed (${previous.agentFinishCount} → ${next.agentFinishCount})`,
+		);
+	}
+	if (previous.responseStartCount !== next.responseStartCount) {
+		problems.push(
+			`useResponseStart count changed (${previous.responseStartCount} → ${next.responseStartCount})`,
+		);
+	}
+	if (previous.responseFinishCount !== next.responseFinishCount) {
+		problems.push(
+			`useResponseFinish count changed (${previous.responseFinishCount} → ${next.responseFinishCount})`,
 		);
 	}
 	if (problems.length > 0) {

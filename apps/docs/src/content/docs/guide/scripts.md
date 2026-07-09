@@ -96,8 +96,8 @@ const reply = await agent.dispatch('Summarize the failures.', {
   onEvent: (chunk) => process.stdout.write(chunk.type === 'message-delta' ? chunk.delta : ''),
 });
 reply.text; // final assistant text
-reply.data; // useMessageData parts, keyed by name
-reply.metadata; // useMessageMetadata, when produced
+reply.data; // useDataWriter parts, keyed by name
+reply.metadata; // useResponseStart/useResponseFinish, when attached
 reply.submissionId; // this run's settled submission
 ```
 

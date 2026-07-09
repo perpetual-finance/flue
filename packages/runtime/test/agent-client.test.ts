@@ -12,7 +12,7 @@ import { useAgentFinish } from '../src/hooks/use-agent-finish.ts';
 import { useAgentStart } from '../src/hooks/use-agent-start.ts';
 import { useDelivery } from '../src/hooks/use-delivery.ts';
 import { useInitialData } from '../src/hooks/use-initial-data.ts';
-import { useMessageMetadata } from '../src/hooks/use-message-metadata.ts';
+import { useResponseFinish } from '../src/hooks/use-response-finish.ts';
 import { type Flue, start } from '../src/node/start.ts';
 import { resetFlueRuntimeForTests } from '../src/runtime/flue-app.ts';
 import { registerProvider, resetProviderRuntime } from '../src/runtime/providers.ts';
@@ -131,7 +131,7 @@ describe('start() + init(): the scripted client', () => {
 		const { provider, model } = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('doomed')]);
 		function Doomed() {
-			useMessageMetadata('finish', () => {
+			useResponseFinish(() => {
 				throw new Error('finish boom');
 			});
 			return 'Reply.';

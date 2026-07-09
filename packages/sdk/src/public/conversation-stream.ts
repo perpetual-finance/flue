@@ -46,7 +46,7 @@ export type ConversationStreamChunk =
 			/** Turn this assistant message belongs to; stamped onto the synthesized
 			 *  message so live grouping matches the snapshot projection. */
 			turnId?: string;
-			/** Agent-authored response metadata from `useMessageMetadata('start')` producers. */
+			/** Agent-authored response metadata from `useResponseStart` hooks. */
 			metadata?: Record<string, unknown>;
 			position: ConversationChunkPosition;
 	  }

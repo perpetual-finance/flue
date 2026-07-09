@@ -13,7 +13,7 @@ import {
 	fauxToolCall,
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
-import { defineAgent, useMessageData, useTool } from '@flue/runtime';
+import { defineAgent, useDataWriter, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 
 // Scripted model so the demo runs fully offline. Module scope, not the agent
@@ -36,10 +36,10 @@ const openingTurn: Parameters<typeof faux.setResponses>[0][number] = () => {
 faux.setResponses([openingTurn]);
 
 function Demo() {
-	// A live progress card streamed to the client. `useMessageData` returns a
+	// A live progress card streamed to the client. `useDataWriter` returns a
 	// write-only function: the model never sees data parts, and repeated
 	// writes to the same name update the same card in place.
-	const writeJobCardData = useMessageData({
+	const writeJobCardData = useDataWriter({
 		name: 'jobCard',
 		schema: v.object({
 			status: v.picklist(['running', 'done']),

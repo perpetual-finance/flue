@@ -2,12 +2,12 @@
 /**
  * A real-model chat agent used to exercise the demo app end-to-end: it streams
  * text, emits reasoning (via `thinkingLevel`), calls tools, delegates to a
- * subagent, and showcases both output hooks — `useMessageMetadata` (the demo
+ * subagent, and showcases both output surfaces — `useResponseStart` metadata (the demo
  * footer's timestamp/model come from here; the runtime stamps nothing) and
- * `useMessageData` (the weather tool streams a live card the demo renders).
+ * `useDataWriter` (the weather tool streams a live card the demo renders).
  * Requires `ANTHROPIC_API_KEY` in the environment.
  */
-import { defineAgent, useMessageData, useMessageMetadata, useSubagent, useTool } from '@flue/runtime';
+import { defineAgent, useDataWriter, useResponseStart, useSubagent, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 
 const MODEL = 'anthropic/claude-haiku-4-5';
@@ -23,12 +23,12 @@ function pretendForecast(city: string): { tempC: number; condition: string } {
 function Helper() {
 	// Message metadata is agent-authored: the demo UI reads `timestamp` for its
 	// relative "time ago" label and `model` for the footer.
-	useMessageMetadata('start', () => ({ timestamp: new Date().toISOString(), model: MODEL }));
+	useResponseStart(() => ({ timestamp: new Date().toISOString(), model: MODEL }));
 
 	// A live weather card. Writes stream to the client immediately, so the
 	// "loading" state is visible while the lookup runs; the second write
 	// updates the same card in place (the name is its identity).
-	const writeWeatherData = useMessageData({
+	const writeWeatherData = useDataWriter({
 		name: 'weather',
 		schema: v.object({
 			city: v.string(),

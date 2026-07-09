@@ -6,8 +6,8 @@ import { isRendering, requireRenderFrame } from './frame.ts';
  * function that streams it.
  *
  * Output is one-way and non-reactive: the model never sees data parts, writes
- * never re-run the agent, and nothing is ever read back — which is why the
- * hook returns only a writer (name the binding `write<Name>Data`). Mounting
+ * never re-run the agent, and nothing is ever read back — the hook returns
+ * only a writer (name the binding `write<Name>Data`). Mounting
  * emits nothing; the part exists only once it is first written. Each write is
  * appended durably and streamed to clients immediately, so a part can show
  * live progress mid-tool-run. The `name` is the part's identity within the
@@ -17,7 +17,7 @@ import { isRendering, requireRenderFrame } from './frame.ts';
  *
  * ```ts
  * function useCaseContext() {
- *   const writeCaseCardData = useMessageData({
+ *   const writeCaseCardData = useDataWriter({
  *     name: 'caseCard',
  *     schema: v.object({ caseId: v.string(), status: v.picklist(['loading', 'loaded']) }),
  *   });
@@ -42,27 +42,27 @@ import { isRendering, requireRenderFrame } from './frame.ts';
  *   submission — from tool `run` functions and other callbacks that run
  *   during one. The writer throws during render.
  * - Names are unique per render and part of the render's structural identity
- *   (never mount `useMessageData` conditionally).
+ *   (never mount `useDataWriter` conditionally).
  */
-export function useMessageData<TSchema extends v.GenericSchema>(options: {
+export function useDataWriter<TSchema extends v.GenericSchema>(options: {
 	name: string;
 	schema: TSchema;
 }): (data: v.InferOutput<TSchema>) => void;
-export function useMessageData(options: { name: string }): (data: unknown) => void;
-export function useMessageData(options: {
+export function useDataWriter(options: { name: string }): (data: unknown) => void;
+export function useDataWriter(options: {
 	name: string;
 	schema?: v.GenericSchema;
 }): (data: unknown) => void {
-	const frame = requireRenderFrame('useMessageData');
+	const frame = requireRenderFrame('useDataWriter');
 	if (frame.kind === 'subagent') {
 		throw new Error(
-			"[flue] useMessageData() is not available in a subagent render. Data parts stream to the agent's public conversation; delegates run detached tasks with no client-facing output. Return what the delegate produced as its task result instead.",
+			"[flue] useDataWriter() is not available in a subagent render. Data parts stream to the agent's public conversation; delegates run detached tasks with no client-facing output. Return what the delegate produced as its task result instead.",
 		);
 	}
-	const { name, schema } = assertUseMessageDataOptions(options);
+	const { name, schema } = assertUseDataWriterOptions(options);
 	if (frame.messageDataNames.has(name)) {
 		throw new Error(
-			`[flue] Duplicate useMessageData name "${name}" in one render. Data part names identify a part within the response and must be unique.`,
+			`[flue] Duplicate useDataWriter name "${name}" in one render. Data part names identify a part within the response and must be unique.`,
 		);
 	}
 	frame.messageDataNames.add(name);
@@ -92,21 +92,21 @@ export function useMessageData(options: {
 	};
 }
 
-const UseMessageDataOptionsSchema = v.strictObject(
+const UseDataWriterOptionsSchema = v.strictObject(
 	{
 		name: v.pipe(v.string(), v.minLength(1)),
 		schema: v.optional(v.custom<v.GenericSchema>(looksLikeSchema)),
 	},
 	(issue) =>
 		issue.expected === 'never'
-			? `received unknown useMessageData option ${issue.received}`
+			? `received unknown useDataWriter option ${issue.received}`
 			: issue.message,
 );
 
-function assertUseMessageDataOptions(options: unknown): { name: string; schema?: v.GenericSchema } {
-	const parsed = v.safeParse(UseMessageDataOptionsSchema, options);
+function assertUseDataWriterOptions(options: unknown): { name: string; schema?: v.GenericSchema } {
+	const parsed = v.safeParse(UseDataWriterOptionsSchema, options);
 	if (!parsed.success) {
-		throw new Error(`[flue] useMessageData() options are invalid: ${formatIssues(parsed.issues)}.`);
+		throw new Error(`[flue] useDataWriter() options are invalid: ${formatIssues(parsed.issues)}.`);
 	}
 	const { name, schema } = parsed.output;
 	return { name, ...(schema ? { schema } : {}) };

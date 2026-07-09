@@ -2,7 +2,8 @@ import type {
 	AgentFinishDeclaration,
 	AgentOutputChannel,
 	AgentStartDeclaration,
-	MessageMetadataProducers,
+	ResponseFinishDeclaration,
+	ResponseStartDeclaration,
 } from '../message-output.ts';
 import type { ToolDefinition } from '../tool-types.ts';
 import type { DeliveredMessage, SandboxFactory, Skill, SubagentDefinition } from '../types.ts';
@@ -49,9 +50,9 @@ export interface RenderStateContext {
 	 */
 	agentName?: string;
 	/**
-	 * The client-facing output channel (`useMessageData` writes, metadata
-	 * producers). Absent when there is no durable runtime behind the render —
-	 * data writers then throw on call.
+	 * The client-facing output channel (`useDataWriter` writes,
+	 * lifecycle and boundary hook declarations). Absent when there is no
+	 * durable runtime behind the render — data writers then throw on call.
 	 */
 	output?: AgentOutputChannel;
 	/**
@@ -88,10 +89,12 @@ export interface RenderFrame {
 	root: AttachScope;
 	/** `usePersistentState` names declared this render; duplicates throw. */
 	stateNames: Set<string>;
-	/** `useMessageData` names declared this render; duplicates throw. */
+	/** `useDataWriter` names declared this render; duplicates throw. */
 	messageDataNames: Set<string>;
-	/** `useMessageMetadata` producers declared this render, in call order per point. */
-	metadataProducers: MessageMetadataProducers;
+	/** `useResponseStart` declarations this render, in call order (identity = index). */
+	responseStarts: ResponseStartDeclaration[];
+	/** `useResponseFinish` declarations this render, in call order (identity = index). */
+	responseFinishes: ResponseFinishDeclaration[];
 	/** `useAgentStart` declarations this render, in call order (identity = index). */
 	agentStarts: AgentStartDeclaration[];
 	/** `useAgentFinish` declarations this render, in call order (identity = index). */
@@ -140,7 +143,8 @@ export function renderWithFrame<T>(
 		root,
 		stateNames: new Set(),
 		messageDataNames: new Set(),
-		metadataProducers: { start: [], finish: [] },
+		responseStarts: [],
+		responseFinishes: [],
 		agentStarts: [],
 		agentFinishes: [],
 		sandbox: undefined,

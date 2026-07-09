@@ -31,8 +31,8 @@ function messageText(message: FlueConversationMessage | undefined): string {
 
 /**
  * Message metadata is agent-authored. This harness reads the convention the
- * example agent follows: `useMessageMetadata('finish', (event) => ({ usage:
- * event.usage, model: '<provider>/<id>' }))`. Agents that attach nothing
+ * example agent follows: `useResponseFinish(({ response }) => ({ usage:
+ * response.usage, model: '<provider>/<id>' }))`. Agents that attach nothing
  * simply report no usage.
  */
 interface EvalUsageMetadata {
@@ -110,7 +110,7 @@ export function createFlueAgentHarness(options: FlueAgentHarnessOptions) {
 			return {
 				output: messageText(reply),
 				toolCalls: collectToolCalls(history.messages),
-				// Usage/model come from the agent's own `useMessageMetadata('finish')`
+				// Usage/model come from the agent's own `useResponseFinish`
 				// producer — see the convention documented on readUsageMetadata.
 				...((usage ?? model)
 					? {

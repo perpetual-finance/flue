@@ -119,7 +119,7 @@ export interface AssistantMessageStartedRecord extends ConversationRecordEnvelop
 	parentId: string | null;
 	modelInfo: AssistantModelInfo;
 	/**
-	 * Custom response metadata from the render's `useMessageMetadata('start')`
+	 * Custom response metadata from the render's `useResponseStart` hooks
 	 * producers. Stamped only on a submission's first assistant message (the
 	 * response message); merged with any later `message_metadata` records in
 	 * stream order.
@@ -333,7 +333,7 @@ interface AgentFinishCycleRecord extends ConversationRecordEnvelope {
 }
 
 /**
- * One write to a named, client-facing data part (`useMessageData`). Scoped to
+ * One write to a named, client-facing data part (`useDataWriter`). Scoped to
  * the submission in the envelope: the part renders on the submission's
  * response message, anchored after the assistant step that had completed when
  * the write was made. The name is the part's identity within the response —
@@ -347,7 +347,7 @@ interface MessageDataWriteRecord extends ConversationRecordEnvelope {
 
 /**
  * Custom response metadata produced at a lifecycle point after the response
- * started (`useMessageMetadata('finish')`). Scoped to the submission in the
+ * started (`useResponseFinish` hooks). Scoped to the submission in the
  * envelope; deep-merged with the response's earlier metadata in stream order.
  */
 interface MessageMetadataRecord extends ConversationRecordEnvelope {

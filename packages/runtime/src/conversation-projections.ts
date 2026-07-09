@@ -27,7 +27,7 @@ import { addUsage, emptyUsage, fromProviderUsage } from './usage.ts';
 type ConversationUiPart =
 	| { type: 'text'; text: string; state: 'streaming' | 'done' }
 	| { type: 'reasoning'; text: string; state: 'streaming' | 'done' }
-	// A named client-facing data part (`useMessageData`), AI SDK convention:
+	// A named client-facing data part (`useDataWriter`), AI SDK convention:
 	// the part type is `data-<name>` and the payload rides `data`.
 	| { type: `data-${string}`; data: unknown }
 	// `url` mirrors the SDK shape but is never set server-side (the runtime does
@@ -103,7 +103,7 @@ export interface ConversationUiMessage {
 	signal?: ConversationSignalDescriptor;
 	parts: ConversationUiPart[];
 	/**
-	 * Message metadata is entirely agent-authored (`useMessageMetadata`
+	 * Message metadata is entirely agent-authored (`useResponseStart`/`useResponseFinish`
 	 * producers, deep-merged in call order). The runtime stamps nothing — keys
 	 * like `timestamp`, `usage`, or `model` are app conventions, present only
 	 * when the agent attaches them.
@@ -288,7 +288,7 @@ function appendAnchoredDataParts(
 	}
 }
 
-/** Attach the response's agent-authored metadata (`useMessageMetadata`). */
+/** Attach the response's agent-authored metadata (`useResponseStart`/`useResponseFinish`). */
 function applyResponseMetadata(
 	message: ConversationUiMessage,
 	conversation: ReducedConversationState,

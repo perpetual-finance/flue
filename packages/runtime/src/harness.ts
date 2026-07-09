@@ -94,7 +94,7 @@ export class Harness implements FlueHarness {
 		private hookState?: HookStateBuffer,
 		/** Per-turn re-render for function agents; same routing as hookState. */
 		private rerender?: SessionRerender,
-		/** Client-facing output channel (useMessageData/useMessageMetadata); same routing as hookState. */
+		/** Client-facing output channel (useDataWriter, lifecycle/boundary hooks); same routing as hookState. */
 		private output?: AgentOutputChannel,
 		/**
 		 * Instance-creation data, present only when this harness is the

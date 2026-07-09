@@ -12,7 +12,7 @@ export type FlueConversationPart =
 	| { type: 'reasoning'; text: string; state: 'streaming' | 'done' }
 	/**
 	 * A named, client-facing data part streamed by the agent's
-	 * `useMessageData` writers (AI SDK convention: `data-<name>` type, payload
+	 * `useDataWriter` writers (AI SDK convention: `data-<name>` type, payload
 	 * on `data`). The name is the part's identity within the response — a
 	 * later write updates the part in place.
 	 */
@@ -108,7 +108,7 @@ export interface FlueConversationMessage {
 	parts: FlueConversationPart[];
 	/**
 	 * Message metadata is entirely agent-authored: whatever the agent's
-	 * `useMessageMetadata` producers return, deep-merged in call order. The
+	 * `useResponseStart`/`useResponseFinish` hooks return, deep-merged in call order. The
 	 * runtime stamps nothing — keys like `timestamp`, `usage`, or `model` are
 	 * app conventions, present only when the agent attaches them.
 	 */

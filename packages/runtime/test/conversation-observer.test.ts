@@ -10,8 +10,8 @@ import {
 import * as v from 'valibot';
 import { afterEach, describe, expect, it } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
-import { useMessageData } from '../src/hooks/use-message-data.ts';
-import { useMessageMetadata } from '../src/hooks/use-message-metadata.ts';
+import { useDataWriter } from '../src/hooks/use-data-writer.ts';
+import { useResponseFinish } from '../src/hooks/use-response-finish.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import {
 	agentStreamPath,
@@ -149,11 +149,11 @@ describe('observeSubmissionSettlement + readSubmissionReply', () => {
 		]);
 
 		function assistant() {
-			const writeReportData = useMessageData({
+			const writeReportData = useDataWriter({
 				name: 'report',
 				schema: v.object({ status: v.string() }),
 			});
-			useMessageMetadata('finish', () => ({ reviewedBy: 'observer-test' }));
+			useResponseFinish(() => ({ reviewedBy: 'observer-test' }));
 			useTool({
 				name: 'publish_report',
 				description: 'Publish the report and stream its status.',

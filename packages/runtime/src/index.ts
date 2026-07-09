@@ -61,13 +61,14 @@ export type {
 } from './execution-interceptor.ts';
 export { useAgentFinish } from './hooks/use-agent-finish.ts';
 export { useAgentStart } from './hooks/use-agent-start.ts';
+export { useDataWriter } from './hooks/use-data-writer.ts';
 export { useDelivery } from './hooks/use-delivery.ts';
 export { useDispatchMessage } from './hooks/use-dispatch-message.ts';
 export { useInitialData } from './hooks/use-initial-data.ts';
 export { useInstruction } from './hooks/use-instruction.ts';
-export { useMessageData } from './hooks/use-message-data.ts';
-export { useMessageMetadata } from './hooks/use-message-metadata.ts';
 export { type StateSetter, usePersistentState } from './hooks/use-persistent-state.ts';
+export { useResponseFinish } from './hooks/use-response-finish.ts';
+export { useResponseStart } from './hooks/use-response-start.ts';
 export { useSandbox } from './hooks/use-sandbox.ts';
 export { useSkill } from './hooks/use-skill.ts';
 export { useSubagent } from './hooks/use-subagent.ts';
@@ -82,9 +83,9 @@ export type {
 	AgentResponseToolCall,
 	AgentSignalAppend,
 	AgentStartContext,
-	MessageMetadataEvent,
-	MessageMetadataPoint,
-	MessageMetadataProducer,
+	ResponseFinishContext,
+	ResponseMetadataCallback,
+	ResponseStartContext,
 } from './message-output.ts';
 export type { FlueObservationSubscriber } from './observation.ts';
 export { ResultUnavailableError } from './result.ts';

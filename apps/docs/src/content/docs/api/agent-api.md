@@ -30,9 +30,10 @@ import {
   useDelivery,
   useDispatchMessage,
   useInstruction,
-  useMessageData,
-  useMessageMetadata,
+  useDataWriter,
   usePersistentState,
+  useResponseFinish,
+  useResponseStart,
   useSandbox,
   useSkill,
   useSubagent,
@@ -62,14 +63,14 @@ import {
   type FunctionAgentDefinition,
   type McpServerConnection,
   type McpServerOptions,
-  type MessageMetadataEvent,
-  type MessageMetadataPoint,
   type PromptImage,
   type PromptModel,
   type PromptOptions,
   type PromptResponse,
   type PromptResultResponse,
   type PromptUsage,
+  type ResponseFinishContext,
+  type ResponseStartContext,
   type SandboxFactory,
   type SessionEnv,
   type ShellResult,
@@ -123,7 +124,7 @@ export default defineAgent(Support, { model: 'anthropic/claude-sonnet-4-6' });
 
 The directive gives the agent its durable identity (the file basename) and registers it with the built application — there is no name-based addressing beyond that identity. To expose the agent over HTTP, mount `agent.route()` in `app.ts`; see the [Routing API](/docs/api/routing-api/). A dispatch-only agent needs no mount. `flue run <path>` and raw `defineAgent()` values in unit tests do not require the directive.
 
-The agent function re-renders every turn as durable state changes — it must return synchronously. Its identity hooks (`usePersistentState()`, `useMessageData()`, `useSandbox()`, and the lifecycle hooks) must stay identical across renders; its resources (`useTool()`, `useSkill()`, `useSubagent()`) may be declared conditionally, with changes announced to the model (see [Dynamic resources](#dynamic-resources)). Async work belongs in tools, lifecycle hooks (`useAgentStart()`, `useAgentFinish()`), or resource factories, never in the agent function body itself.
+The agent function re-renders every turn as durable state changes — it must return synchronously. Its identity hooks (`usePersistentState()`, `useDataWriter()`, `useSandbox()`, and the lifecycle hooks) must stay identical across renders; its resources (`useTool()`, `useSkill()`, `useSubagent()`) may be declared conditionally, with changes announced to the model (see [Dynamic resources](#dynamic-resources)). Async work belongs in tools, lifecycle hooks (`useAgentStart()`, `useAgentFinish()`), or resource factories, never in the agent function body itself.
 
 The runtime passes the top-level agent function an `AgentProps` object — the agent's route data, the way a web framework passes route params to the page component. Zero-argument agent functions stay assignable unchanged. Only the root receives it: custom hooks get whatever arguments their caller passes, and a subagent's agent function gets nothing (a delegate runs in isolation from the parent).
 
@@ -225,7 +226,7 @@ function Support() {
 }
 ```
 
-Resources are dynamic; identity and lifecycle are static. The resource hooks — `useTool`, `useSkill`, `useSubagent` — may be called conditionally (`if (pro) useSkill(refundsSkill)`): when a render's resource set changes, the runtime announces the delta to the model as a `resources` signal instead of rewriting the system prompt (see [Dynamic resources](#dynamic-resources)). Every other hook — `usePersistentState`, `useMessageData`, `useSandbox`, `useAgentStart`, `useAgentFinish` — is part of the agent's durable identity and must be declared identically on every render; a custom hook that mixes both kinds inherits the stricter rule. A custom hook may take arguments and return values to its caller like any other function, and may call other custom hooks.
+Resources are dynamic; identity and lifecycle are static. The resource hooks — `useTool`, `useSkill`, `useSubagent` — may be called conditionally (`if (pro) useSkill(refundsSkill)`): when a render's resource set changes, the runtime announces the delta to the model as a `resources` signal instead of rewriting the system prompt (see [Dynamic resources](#dynamic-resources)). Every other hook — `usePersistentState`, `useDataWriter`, `useSandbox`, `useAgentStart`, `useAgentFinish`, `useResponseStart`, `useResponseFinish` — is part of the agent's durable identity and must be declared identically on every render; a custom hook that mixes both kinds inherits the stricter rule. A custom hook may take arguments and return values to its caller like any other function, and may call other custom hooks.
 
 #### Dynamic resources
 
@@ -494,7 +495,10 @@ Appending during the callback continues the response with another turn; once tha
 
 ```ts
 interface AgentFinishContext {
-  response: { toolCalls: readonly AgentResponseToolCall[] };
+  response: {
+    toolCalls: readonly AgentResponseToolCall[];
+    usage: PromptUsage; // aggregate so far — a steering input; final totals belong to useResponseFinish
+  };
   append: (message: AgentAppendMessage) => void;
   harness: FlueHarness;
   log: FlueLogger;
@@ -515,7 +519,7 @@ interface AgentAppendMessage {
 }
 ```
 
-`response.toolCalls` aggregates every tool call the response has made — across all turns, derived from durable records, so a resumed response still sees calls made before an interruption. `append` takes the same signal form `dispatch()` messages use (`kind: 'user'` is rejected — real new input belongs on the dispatcher) and is legal only during the callback's execution window: a captured reference throws after the callback settles. An append is the response steering itself — no `useAgentStart` run, no submission of its own; a dispatch is a real delivery. The rest is the `useAgentStart` context surface.
+`response.toolCalls` aggregates every tool call the response has made — across all turns, derived from durable records, so a resumed response still sees calls made before an interruption; `response.usage` is the aggregate usage so far, for budget-aware continuation decisions. `append` takes the same signal form `dispatch()` messages use (`kind: 'user'` is rejected — real new input belongs on the dispatcher) and is legal only during the callback's execution window: a captured reference throws after the callback settles. An append is the response steering itself — no `useAgentStart` run, no submission of its own; a dispatch is a real delivery. The rest is the `useAgentStart` context surface.
 
 ### `useInitialData()`
 
@@ -574,21 +578,21 @@ Same semantics as the global `dispatch()` — same queue, same admission, same d
 
 The one thing a dispatch is not: a `useAgentFinish` _continuation_. Inside that callback, `ctx.append` steers a signal into the response without registering new input — no `useAgentStart` run, no submission — and is counted against the framework's continuation ceiling. Everywhere else, dispatching is the way to put something in front of the model.
 
-### `useMessageData(...)`
+### `useDataWriter(...)`
 
 ```ts
-function useMessageData<TSchema extends v.GenericSchema>(options: {
+function useDataWriter<TSchema extends v.GenericSchema>(options: {
   name: string;
   schema: TSchema;
 }): (data: v.InferOutput<TSchema>) => void;
-function useMessageData(options: { name: string }): (data: unknown) => void;
+function useDataWriter(options: { name: string }): (data: unknown) => void;
 ```
 
 Declares a named, client-facing data part and returns a write-only function that streams it. Output is one-way and non-reactive: the model never sees data parts, writes never re-run the agent. Each write is appended durably and streamed to clients immediately, so a part can show live progress mid-tool-run.
 
 ```ts
 function useCaseContext() {
-  const writeCaseCardData = useMessageData({
+  const writeCaseCardData = useDataWriter({
     name: 'caseCard',
     schema: v.object({ caseId: v.string(), status: v.picklist(['loading', 'loaded']) }),
   });
@@ -606,33 +610,44 @@ function useCaseContext() {
 }
 ```
 
-Values are JSON; `schema` (when given) validates before each write. Writes are legal only while the agent is responding to a tracked submission. Names are unique per render and part of the render's structural identity — never mount `useMessageData` conditionally. Not available in a subagent render.
+Values are JSON; `schema` (when given) validates before each write. Writes are legal only while the agent is responding to a tracked submission. Names are unique per render and part of the render's structural identity — never mount `useDataWriter` conditionally. Not available in a subagent render.
 
-### `useMessageMetadata(...)`
-
-```ts
-function useMessageMetadata<TPoint extends MessageMetadataPoint>(
-  point: TPoint,
-  produce: (
-    event: Extract<MessageMetadataEvent, { point: TPoint }>,
-  ) => Record<string, unknown> | undefined,
-): void;
-```
-
-Attaches a synchronous metadata producer to the response message. `'start'` runs once per response, before the first model call; `'finish'` runs after the response's last model step completes, with the response's aggregate usage on the event. Whatever the producer returns is deep-merged onto the response message's `metadata`.
+### `useResponseStart(...)` / `useResponseFinish(...)`
 
 ```ts
-function useTimestamps() {
-  useMessageMetadata('start', () => ({ timestamp: new Date().toISOString() }));
-  useMessageMetadata('finish', () => ({ finishedAt: Date.now() }));
+function useResponseStart(run: (ctx: ResponseStartContext) => Record<string, unknown> | void): void;
+function useResponseFinish(run: (ctx: ResponseFinishContext) => Record<string, unknown> | void): void;
+
+interface ResponseStartContext {
+  metadata: Record<string, unknown>; // accumulated so far this response
+  log: FlueLogger;
 }
-
-function useUsageStats() {
-  useMessageMetadata('finish', (event) => ({ totalTokens: event.usage.totalTokens }));
+interface ResponseFinishContext {
+  metadata: Record<string, unknown>; // accumulated, incl. useResponseStart's
+  response: {
+    usage: PromptUsage; // final aggregate across all turns and re-attempts
+    toolCalls: readonly AgentResponseToolCall[];
+  };
+  log: FlueLogger;
 }
 ```
 
-Output is non-reactive and model-invisible: producers never re-run the agent and their output never reaches the prompt. Producers are fail-fast — a throw fails the submission. Not available in a subagent render.
+Observe the response's true boundaries — once per response, synchronously. `useResponseStart` runs at the wake: before the first model call and before any `useAgentStart` hook, and it does **not** re-fire for deliveries that join the live response (those re-fire `useAgentStart`; the response only wakes once). `useResponseFinish` runs at the true end: after the last `useAgentFinish` cycle, when the response is actually settling, so its `response` aggregates are final.
+
+Return an object to deep-merge onto the response message's `metadata` (the UIMessage envelope field clients read outside the content flow — for content, stream a [data part](#usedatawriter)); return nothing to observe without attaching. `ctx.metadata` is the metadata accumulated so far — handed in at call time, never a stale render capture — so a finish hook can compute over what a start hook attached:
+
+```ts
+function useRunStats() {
+  useResponseStart(() => ({ startedAt: Date.now() }));
+  useResponseFinish(({ metadata, response }) => ({
+    finishedAt: Date.now(),
+    elapsed: Date.now() - (metadata.startedAt as number),
+    totalTokens: response.usage.totalTokens,
+  }));
+}
+```
+
+These hooks are observers, not participants: no `append`, no dispatch, no harness — and they must be synchronous (a returned promise fails the submission; async work at these seams belongs in `useAgentStart`/`useAgentFinish`). Output is non-reactive and model-invisible: metadata never reaches the prompt, and the runtime stamps nothing — keys exist only when you attach them. Fail-fast: a throw fails the submission. Not available in a subagent render.
 
 ## `defineTool(...)`
 
@@ -919,8 +934,8 @@ interface AgentInstanceHandle {
 
 interface AgentReply {
   text: string; // final assistant text ('' when none)
-  data: Record<string, unknown[]>; // useMessageData parts, keyed by name
-  metadata?: Record<string, unknown>; // useMessageMetadata, when produced
+  data: Record<string, unknown[]>; // useDataWriter parts, keyed by name
+  metadata?: Record<string, unknown>; // useResponseStart/useResponseFinish, when attached
   uid?: string; // the contacted incarnation
   submissionId: string;
 }

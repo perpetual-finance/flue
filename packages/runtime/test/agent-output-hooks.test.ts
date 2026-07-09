@@ -22,11 +22,12 @@ import {
 	assertRenderStructureInvariance,
 	renderAgentFunctionWithStructure,
 } from '../src/hooks/render.ts';
-import { useMessageData } from '../src/hooks/use-message-data.ts';
-import { useMessageMetadata } from '../src/hooks/use-message-metadata.ts';
+import { useDataWriter } from '../src/hooks/use-data-writer.ts';
+import { useResponseFinish } from '../src/hooks/use-response-finish.ts';
+import { useResponseStart } from '../src/hooks/use-response-start.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { createFlueContext, type DispatchInput } from '../src/internal.ts';
-import { createAgentOutputChannel } from '../src/message-output.ts';
+import { createAgentOutputChannel, runResponseMetadataHooks } from '../src/message-output.ts';
 import { createNodeAgentCoordinator } from '../src/node/agent-coordinator.ts';
 import { sqlite } from '../src/node/agent-execution-store.ts';
 import type { CreateAgentContextFn } from '../src/runtime/handle-agent.ts';
@@ -102,22 +103,22 @@ function readDurableRecords(dbPath: string): ConversationRecord[] {
 
 const CONFIG = { model: 'faux/agent-output-hooks' };
 
-describe('useMessageData()', () => {
+describe('useDataWriter()', () => {
 	it('rejects duplicate names in one render', () => {
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
-				useMessageData({ name: 'caseCard' });
-				useMessageData({ name: 'caseCard' });
+				useDataWriter({ name: 'caseCard' });
+				useDataWriter({ name: 'caseCard' });
 				return 'Base.';
 			}, CONFIG),
-		).toThrow(/Duplicate useMessageData name "caseCard"/);
+		).toThrow(/Duplicate useDataWriter name "caseCard"/);
 	});
 
 	it('is unavailable in subagent renders', () => {
 		expect(() =>
 			renderWithFrame(
 				() => {
-					useMessageData({ name: 'caseCard' });
+					useDataWriter({ name: 'caseCard' });
 				},
 				undefined,
 				'subagent',
@@ -128,7 +129,7 @@ describe('useMessageData()', () => {
 	it('rejects writes made during render', () => {
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
-				const writeCaseCardData = useMessageData({ name: 'caseCard' });
+				const writeCaseCardData = useDataWriter({ name: 'caseCard' });
 				writeCaseCardData({ status: 'loading' });
 				return 'Base.';
 			}, CONFIG),
@@ -138,7 +139,7 @@ describe('useMessageData()', () => {
 	it('throws on write when no durable runtime backs the render', () => {
 		let writeCaseCardData: ((data: unknown) => void) | undefined;
 		renderAgentFunctionWithStructure(() => {
-			writeCaseCardData = useMessageData({ name: 'caseCard' });
+			writeCaseCardData = useDataWriter({ name: 'caseCard' });
 			return 'Base.';
 		}, CONFIG);
 		expect(() => writeCaseCardData?.({ status: 'loading' })).toThrow(/no durable runtime/);
@@ -152,7 +153,7 @@ describe('useMessageData()', () => {
 		renderAgentFunctionWithStructure(
 			() => {
 				// Widened on purpose: the test feeds schema-invalid values through.
-				writeCaseCardData = useMessageData({
+				writeCaseCardData = useDataWriter({
 					name: 'caseCard',
 					schema: v.object({ status: v.picklist(['loading', 'loaded']) }),
 				}) as (data: unknown) => void;
@@ -171,7 +172,7 @@ describe('useMessageData()', () => {
 	it('joins the render structure, so conditional mounts violate invariance', () => {
 		const render = (mount: boolean) =>
 			renderAgentFunctionWithStructure(() => {
-				if (mount) useMessageData({ name: 'caseCard' });
+				if (mount) useDataWriter({ name: 'caseCard' });
 				return 'Base.';
 			}, CONFIG).structure;
 		expect(() => assertRenderStructureInvariance(render(true), render(false))).toThrow(
@@ -180,22 +181,38 @@ describe('useMessageData()', () => {
 	});
 });
 
-describe('useMessageMetadata()', () => {
-	it('rejects unknown lifecycle points', () => {
+describe('useResponseStart() / useResponseFinish()', () => {
+	it('rejects a non-function argument', () => {
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
-				// @ts-expect-error point must be 'start' or 'finish'
-				useMessageMetadata('step', () => ({}));
+				// @ts-expect-error the hook takes a callback
+				useResponseStart({ startedAt: 1 });
 				return 'Base.';
 			}, CONFIG),
-		).toThrow(/point must be 'start' or 'finish'/);
+		).toThrow(/takes a callback as its only argument/);
+		expect(() =>
+			renderAgentFunctionWithStructure(() => {
+				// @ts-expect-error the hook takes a callback
+				useResponseFinish({ finishedAt: 1 });
+				return 'Base.';
+			}, CONFIG),
+		).toThrow(/takes a callback as its only argument/);
 	});
 
 	it('is unavailable in subagent renders', () => {
 		expect(() =>
 			renderWithFrame(
 				() => {
-					useMessageMetadata('start', () => ({}));
+					useResponseStart(() => ({}));
+				},
+				undefined,
+				'subagent',
+			),
+		).toThrow(/not available in a subagent render/);
+		expect(() =>
+			renderWithFrame(
+				() => {
+					useResponseFinish(() => ({}));
 				},
 				undefined,
 				'subagent',
@@ -203,25 +220,122 @@ describe('useMessageMetadata()', () => {
 		).toThrow(/not available in a subagent render/);
 	});
 
-	it('hands the render\'s producers to the output channel in call order', () => {
+	it("hands the render's declarations to the output channel in call order", () => {
 		const channel = createAgentOutputChannel();
 		renderAgentFunctionWithStructure(
 			() => {
-				useMessageMetadata('start', () => ({ a: 1 }));
-				useMessageMetadata('finish', () => ({ b: 2 }));
-				useMessageMetadata('finish', () => ({ c: 3 }));
+				useResponseStart(() => ({ a: 1 }));
+				useResponseFinish(() => ({ b: 2 }));
+				useResponseFinish(() => ({ c: 3 }));
 				return 'Base.';
 			},
 			CONFIG,
 			{ snapshot: new Map(), store: undefined, output: channel },
 		);
-		expect(channel.producers.start).toHaveLength(1);
-		expect(channel.producers.finish).toHaveLength(2);
+		expect(channel.responseStarts).toHaveLength(1);
+		expect(channel.responseFinishes).toHaveLength(2);
+	});
+
+	it('joins the render structure, so conditional mounts violate invariance', () => {
+		const render = (mount: boolean) =>
+			renderAgentFunctionWithStructure(() => {
+				if (mount) useResponseStart(() => ({}));
+				useResponseFinish(() => ({}));
+				return 'Base.';
+			}, CONFIG).structure;
+		expect(() => assertRenderStructureInvariance(render(true), render(false))).toThrow(
+			/useResponseStart count changed \(1 → 0\)/,
+		);
+	});
+});
+
+describe('runResponseMetadataHooks()', () => {
+	const ctxOf = (metadata: Record<string, unknown>) => ({ metadata });
+
+	it('threads accumulated metadata into each context and returns only contributions', () => {
+		const seen: Record<string, unknown>[] = [];
+		const result = runResponseMetadataHooks(
+			'useResponseStart',
+			[
+				{
+					run: (ctx: { metadata: Record<string, unknown> }) => {
+						seen.push(ctx.metadata);
+						return { a: 1 };
+					},
+				},
+				{
+					run: (ctx: { metadata: Record<string, unknown> }) => {
+						seen.push(ctx.metadata);
+						return { b: (ctx.metadata.a as number) + 1 };
+					},
+				},
+			],
+			ctxOf,
+			{ seed: 'durable' },
+		);
+		// Each hook saw the initial metadata plus earlier contributions…
+		expect(seen).toEqual([{ seed: 'durable' }, { seed: 'durable', a: 1 }]);
+		// …but the return carries only what the hooks contributed.
+		expect(result).toEqual({ a: 1, b: 2 });
+	});
+
+	it('returns undefined when no hook contributes', () => {
+		expect(
+			runResponseMetadataHooks('useResponseFinish', [{ run: () => undefined }], ctxOf, {}),
+		).toBeUndefined();
+	});
+
+	it('rejects a promise return with the synchronous-observer error', () => {
+		expect(() =>
+			runResponseMetadataHooks(
+				'useResponseStart',
+				[{ run: () => Promise.resolve({}) as unknown as Record<string, unknown> }],
+				ctxOf,
+				{},
+			),
+		).toThrow(/useResponseStart callback \(hook #0 in declaration order\) returned a promise/);
+	});
+
+	it('rejects non-object returns', () => {
+		expect(() =>
+			runResponseMetadataHooks(
+				'useResponseFinish',
+				[{ run: () => 42 as unknown as Record<string, unknown> }],
+				ctxOf,
+				{},
+			),
+		).toThrow(/must return a plain object of metadata \(or nothing\) — got number/);
+		expect(() =>
+			runResponseMetadataHooks(
+				'useResponseFinish',
+				[{ run: () => [1] as unknown as Record<string, unknown> }],
+				ctxOf,
+				{},
+			),
+		).toThrow(/must return a plain object of metadata \(or nothing\) — got an array/);
+	});
+
+	it('wraps a throw with the hook name and declaration index', () => {
+		expect(() =>
+			runResponseMetadataHooks(
+				'useResponseFinish',
+				[
+					{ run: () => ({}) },
+					{
+						run: () => {
+							throw new Error('boom');
+						},
+					},
+				],
+				ctxOf,
+				{},
+			),
+		).toThrow(/useResponseFinish callback \(hook #1 in declaration order\) threw: boom/);
 	});
 });
 
 describe('output hooks end to end (node coordinator, faux provider)', () => {
-	it('streams live data parts onto the response message and stamps start/finish metadata', async () => {
+	it('streams live data parts onto the response message and stamps boundary metadata', async () => {
 		const dbPath = createTempDbPath();
 		const { executionStore, conversationStreamStore, attachmentStore } =
 			await connectSqlite(dbPath);
@@ -235,14 +349,17 @@ describe('output hooks end to end (node coordinator, faux provider)', () => {
 		]);
 
 		function assistant() {
-			const writeCaseCardData = useMessageData({
+			const writeCaseCardData = useDataWriter({
 				name: 'caseCard',
 				schema: v.object({ status: v.picklist(['loading', 'loaded']) }),
 			});
-			useMessageMetadata('start', () => ({ op: { startedAt: 111 } }));
-			useMessageMetadata('finish', (event) => ({
+			useResponseStart(() => ({ op: { startedAt: 111 } }));
+			// The finish hook computes over the start hook's contribution — the
+			// metadata came back through the durable record log, not a closure.
+			useResponseFinish(({ metadata, response }) => ({
 				op: { finishedAt: 222 },
-				totalTokens: event.usage.totalTokens,
+				elapsed: 222 - (metadata.op as { startedAt: number }).startedAt,
+				totalTokens: response.usage.totalTokens,
 			}));
 			useTool({
 				name: 'load_case',
@@ -294,16 +411,22 @@ describe('output hooks end to end (node coordinator, faux provider)', () => {
 			{ type: 'data-caseCard', data: { status: 'loaded' } },
 			{ type: 'text', text: 'Done.' },
 		]);
-		// The metadata is exactly what the producers wrote (start + finish
-		// deep-merged); the finish event carried the response's aggregate usage.
+		// The metadata is exactly what the boundary hooks returned (start +
+		// finish deep-merged); the finish hook read the start hook's value off
+		// its context and the final aggregate usage off `response`.
 		expect(response?.metadata).toMatchObject({
 			op: { startedAt: 111, finishedAt: 222 },
+			elapsed: 111,
 		});
 		expect(typeof response?.metadata?.totalTokens).toBe('number');
-		expect(Object.keys(response?.metadata ?? {}).sort()).toEqual(['op', 'totalTokens']);
+		expect(Object.keys(response?.metadata ?? {}).sort()).toEqual([
+			'elapsed',
+			'op',
+			'totalTokens',
+		]);
 	});
 
-	it('fails the submission when a finish producer throws — settled failed, no retry, no recovery', async () => {
+	it('fails the submission when a finish hook throws — settled failed, no retry, no recovery', async () => {
 		const dbPath = createTempDbPath();
 		const { executionStore, conversationStreamStore, attachmentStore } =
 			await connectSqlite(dbPath);
@@ -311,7 +434,7 @@ describe('output hooks end to end (node coordinator, faux provider)', () => {
 		provider.setResponses([fauxAssistantMessage('Fine.')]);
 
 		function assistant() {
-			useMessageMetadata('finish', () => {
+			useResponseFinish(() => {
 				throw new Error('finish boom');
 			});
 			return 'Case agent.';
@@ -337,18 +460,64 @@ describe('output hooks end to end (node coordinator, faux provider)', () => {
 		await coordinator.shutdown();
 
 		// The throw converted to a durable failed settlement on the FIRST
-		// attempt — producers are not retried and never enter recovery.
+		// attempt — boundary hooks are not retried and never enter recovery.
 		const db = new DatabaseSync(dbPath);
 		const submission = db
 			.prepare('SELECT status, error, attempt_count FROM flue_agent_submissions')
 			.get() as { status: string; error: string | null; attempt_count: number };
 		db.close();
 		expect(submission.status).toBe('settled');
-		expect(submission.error).toMatch(/useMessageMetadata\('finish'\) producer threw: finish boom/);
+		expect(submission.error).toMatch(
+			/useResponseFinish callback \(hook #0 in declaration order\) threw: finish boom/,
+		);
 		expect(submission.attempt_count).toBe(1);
 		// No metadata record was written for the failed response.
 		expect(readDurableRecords(dbPath).some((record) => record.type === 'message_metadata')).toBe(
 			false,
 		);
+	});
+
+	it('fails the submission when a boundary hook is async — the sync contract has teeth', async () => {
+		const dbPath = createTempDbPath();
+		const { executionStore, conversationStreamStore, attachmentStore } =
+			await connectSqlite(dbPath);
+		const provider = createFauxProvider();
+		provider.setResponses([fauxAssistantMessage('Fine.')]);
+
+		function assistant() {
+			// @ts-expect-error response boundary hooks are synchronous observers
+			useResponseStart(async () => ({ startedAt: Date.now() }));
+			return 'Case agent.';
+		}
+
+		const coordinator = createNodeAgentCoordinator({
+			submissions: executionStore.submissions,
+			agents: [
+				{
+					name: 'assistant',
+					definition: defineAgent(assistant, {
+						model: `${provider.getModel().provider}/${provider.getModel().id}`,
+					}),
+				},
+			],
+			createContext: makeFauxCreateContext(provider),
+			conversationStreamStore,
+			attachmentStore,
+		});
+
+		await coordinator.admitDispatch(makeDispatchInput({ dispatchId: 'dispatch:output-async-1' }));
+		await coordinator.waitForIdle();
+		await coordinator.shutdown();
+
+		const db = new DatabaseSync(dbPath);
+		const submission = db
+			.prepare('SELECT status, error, attempt_count FROM flue_agent_submissions')
+			.get() as { status: string; error: string | null; attempt_count: number };
+		db.close();
+		expect(submission.status).toBe('settled');
+		expect(submission.error).toMatch(
+			/useResponseStart callback \(hook #0 in declaration order\) returned a promise/,
+		);
+		expect(submission.attempt_count).toBe(1);
 	});
 });

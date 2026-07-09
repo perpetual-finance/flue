@@ -2,39 +2,59 @@ import * as v from 'valibot';
 import type { FlueHarness, FlueLogger, PromptUsage } from './types.ts';
 
 /**
- * The write channels behind the output hooks. Client-facing output
- * (`useMessageData`, `useMessageMetadata`) decorates the agent's response
- * message for clients and never reaches the model; model-facing appends
+ * The output channels behind the client-facing hooks. Data parts
+ * (`useDataWriter`) and response metadata (returned from
+ * `useResponseStart`/`useResponseFinish`) decorate the agent's response
+ * message for clients and never reach the model; model-facing appends
  * (`ctx.append` in `useAgentFinish`) write signal records into the agent's
- * own conversation history. Both are write-only and non-reactive — nothing
- * here re-runs the agent.
+ * own conversation history. All of it is write-only and non-reactive —
+ * nothing here re-runs the agent.
  */
-
-/** Lifecycle points a `useMessageMetadata` producer can attach to. */
-export type MessageMetadataPoint = 'start' | 'finish';
 
 /**
- * The event handed to a metadata producer. `start` fires once per response,
- * before the first model call; `finish` fires after the response's last model
- * step completes, with the response's aggregate usage.
+ * The context a `useResponseStart` callback receives. `metadata` is the
+ * response metadata accumulated so far this response (earlier hooks'
+ * contributions, in declaration order) — handed in at call time, so it is
+ * never a stale render capture.
  */
-export type MessageMetadataEvent =
-	| { point: 'start'; submissionId: string }
-	| { point: 'finish'; submissionId: string; usage: PromptUsage };
+export interface ResponseStartContext {
+	readonly metadata: Record<string, unknown>;
+	readonly log: FlueLogger;
+}
 
 /**
- * A synchronous metadata producer. The returned object is deep-merged onto
- * the response message's metadata; `undefined` values are skipped. Producers
- * are fail-fast: a throw fails the submission.
+ * The context a `useResponseFinish` callback receives: the accumulated
+ * response metadata (including what `useResponseStart` hooks attached — read
+ * from the durable record log, so it survives re-attempts) and the response's
+ * final aggregates.
  */
-export type MessageMetadataProducer<TPoint extends MessageMetadataPoint = MessageMetadataPoint> = (
-	event: Extract<MessageMetadataEvent, { point: TPoint }>,
-) => Record<string, unknown> | undefined;
+export interface ResponseFinishContext {
+	readonly metadata: Record<string, unknown>;
+	readonly response: {
+		/** The response's aggregate usage across all turns and re-attempts. */
+		readonly usage: PromptUsage;
+		/** Every tool call the response made, from the durable record log. */
+		readonly toolCalls: readonly AgentResponseToolCall[];
+	};
+	readonly log: FlueLogger;
+}
 
-/** Producer lists collected from one render, in call order per point. */
-export interface MessageMetadataProducers {
-	start: MessageMetadataProducer<'start'>[];
-	finish: MessageMetadataProducer<'finish'>[];
+/**
+ * A response boundary callback: returns a plain object to deep-merge onto the
+ * response message's metadata, or nothing. Boundary hooks are synchronous
+ * observers — a returned promise throws.
+ */
+// biome-ignore lint/suspicious/noConfusingVoidType: a boundary callback may observe without attaching metadata — a bare no-return body is legal, which `| undefined` alone would reject.
+export type ResponseMetadataCallback<TCtx> = (ctx: TCtx) => Record<string, unknown> | void;
+
+/** One `useResponseStart` declaration; identity is the declaration index. */
+export interface ResponseStartDeclaration {
+	run: ResponseMetadataCallback<ResponseStartContext>;
+}
+
+/** One `useResponseFinish` declaration; identity is the declaration index. */
+export interface ResponseFinishDeclaration {
+	run: ResponseMetadataCallback<ResponseFinishContext>;
 }
 
 /**
@@ -148,7 +168,9 @@ export interface AgentResponseToolCall {
  * writer. `response.toolCalls` aggregates every tool call the response has
  * made — across all turns and across re-attempts (derived from durable
  * records, so a resumed response still sees calls made before an
- * interruption). `append` steers a signal into the same response — the model
+ * interruption); `response.usage` is the aggregate usage so far, a steering
+ * input for budget-aware continuation decisions (the settled total belongs to
+ * `useResponseFinish`). `append` steers a signal into the same response — the model
  * reads it on the continuation turn and this hook fires again at the next
  * would-stop — and is legal only during the callback's execution window
  * (a captured reference throws after the callback settles). Appends are the
@@ -157,7 +179,10 @@ export interface AgentResponseToolCall {
  * input, dispatch instead.
  */
 export interface AgentFinishContext {
-	readonly response: { readonly toolCalls: readonly AgentResponseToolCall[] };
+	readonly response: {
+		readonly toolCalls: readonly AgentResponseToolCall[];
+		readonly usage: PromptUsage;
+	};
 	readonly append: (message: AgentAppendMessage) => void;
 	readonly harness: FlueHarness;
 	readonly log: FlueLogger;
@@ -177,15 +202,17 @@ export interface AgentFinishDeclaration {
 /**
  * The output channel shared between renders and the session, mirroring the
  * `usePersistentState` buffer pattern: created once per harness lifetime, handed to
- * both sides. Renders replace `producers` and the lifecycle declarations
- * wholesale each render (fresh closures); `useMessageData` writers call
+ * both sides. Renders replace the lifecycleuseDataWriterations
+ * wholesale each render (fresh closures); `useDataWriter` writers call
  * `writeMessageData`; the session connects the sink that reaches the
  * durable log. (Finish-continuation appends never pass through here: the
  * session constructs `ctx.append` directly when it runs the callbacks.)
  */
 export interface AgentOutputChannel {
-	/** Metadata producers from the latest render. */
-	producers: MessageMetadataProducers;
+	/** `useResponseStart` declarations from the latest render, in call order. */
+	responseStarts: ResponseStartDeclaration[];
+	/** `useResponseFinish` declarations from the latest render, in call order. */
+	responseFinishes: ResponseFinishDeclaration[];
 	/** `useAgentStart` declarations from the latest render, in call order. */
 	agentStarts: AgentStartDeclaration[];
 	/** `useAgentFinish` declarations from the latest render, in call order. */
@@ -198,7 +225,8 @@ export interface AgentOutputChannel {
 export function createAgentOutputChannel(): AgentOutputChannel {
 	let sink: ((name: string, data: unknown) => void) | undefined;
 	return {
-		producers: { start: [], finish: [] },
+		responseStarts: [],
+		responseFinishes: [],
 		agentStarts: [],
 		agentFinishes: [],
 		connect(next) {
@@ -216,35 +244,60 @@ export function createAgentOutputChannel(): AgentOutputChannel {
 }
 
 /**
- * Run one point's producers in call order and deep-merge their results.
- * Fail-fast on purpose: a producer throw propagates (wrapped with the point
- * for context) and fails the submission through the normal failure path — it
- * is never retried and never enters durability recovery.
+ * Run one boundary's hooks in declaration order and deep-merge their returned
+ * metadata. Each callback's context is built at call time over the metadata
+ * accumulated so far (`initialMetadata`, then earlier hooks' contributions in
+ * order) — so a later hook can compute over an earlier hook's keys with no
+ * stale capture. Returns only what the hooks contributed (`undefined` when
+ * none did); the caller owns merging that into the durable stream.
+ *
+ * Fail-fast on purpose: a callback throw propagates (wrapped with the hook
+ * name for context) and fails the submission through the normal failure path
+ * — never retried, never in durability recovery. A returned promise is the
+ * same failure: boundary hooks are synchronous observers.
  */
-export function runMessageMetadataProducers<TPoint extends MessageMetadataPoint>(
-	producers: readonly MessageMetadataProducer<TPoint>[],
-	event: Extract<MessageMetadataEvent, { point: TPoint }>,
+export function runResponseMetadataHooks<TCtx>(
+	hookName: 'useResponseStart' | 'useResponseFinish',
+	declarations: readonly { run: ResponseMetadataCallback<TCtx> }[],
+	createContext: (metadata: Record<string, unknown>, index: number) => TCtx,
+	initialMetadata: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
-	let merged: Record<string, unknown> | undefined;
-	for (const produce of producers) {
-		let result: Record<string, unknown> | undefined;
+	let current = initialMetadata;
+	let contributed: Record<string, unknown> | undefined;
+	for (const [index, declaration] of declarations.entries()) {
+		let result: ReturnType<ResponseMetadataCallback<TCtx>>;
 		try {
-			result = produce(event);
+			result = declaration.run(createContext(current, index));
 		} catch (error) {
 			throw new Error(
-				`[flue] A useMessageMetadata('${event.point}') producer threw: ${error instanceof Error ? error.message : String(error)}`,
+				`[flue] A ${hookName} callback (hook #${index} in declaration order) threw: ${error instanceof Error ? error.message : String(error)}`,
 				{ cause: error },
 			);
 		}
 		if (result === undefined || result === null) continue;
-		if (typeof result !== 'object' || Array.isArray(result)) {
+		if (typeof result !== 'object') {
 			throw new Error(
-				`[flue] A useMessageMetadata('${event.point}') producer must return a plain object of metadata (got ${Array.isArray(result) ? 'an array' : typeof result}).`,
+				`[flue] A ${hookName} callback must return a plain object of metadata (or nothing) — got ${typeof result}.`,
 			);
 		}
-		merged = deepMergeMetadata(merged ?? {}, result);
+		if (isThenable(result)) {
+			throw new Error(
+				`[flue] A ${hookName} callback (hook #${index} in declaration order) returned a promise. Response boundary hooks are synchronous observers of the response envelope — return the metadata object directly. Move async work into useAgentStart/useAgentFinish (awaited lifecycle hooks) or tools.`,
+			);
+		}
+		if (Array.isArray(result)) {
+			throw new Error(
+				`[flue] A ${hookName} callback must return a plain object of metadata (or nothing) — got an array.`,
+			);
+		}
+		current = deepMergeMetadata(current, result);
+		contributed = deepMergeMetadata(contributed ?? {}, result);
 	}
-	return merged && Object.keys(merged).length > 0 ? merged : undefined;
+	return contributed && Object.keys(contributed).length > 0 ? contributed : undefined;
+}
+
+function isThenable(value: object): boolean {
+	return 'then' in value && typeof (value as { then: unknown }).then === 'function';
 }
 
 /**

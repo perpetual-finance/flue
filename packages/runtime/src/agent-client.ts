@@ -81,9 +81,9 @@ export interface AgentDispatchOptions {
 export interface AgentReply {
 	/** Final assistant text produced by the submission ('' when none). */
 	text: string;
-	/** Named client data parts (`useMessageData`) on the reply, keyed by name. */
+	/** Named client data parts (`useDataWriter`) on the reply, keyed by name. */
 	data: Record<string, unknown[]>;
-	/** Agent-authored response metadata (`useMessageMetadata`), when present. */
+	/** Agent-authored response metadata (`useResponseStart`/`useResponseFinish`), when present. */
 	metadata?: Record<string, unknown>;
 	/** The contacted incarnation's uid (minted when this send created). */
 	uid?: string;

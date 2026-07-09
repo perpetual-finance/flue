@@ -215,11 +215,11 @@ export interface SubmissionReply {
 	/** Final assistant text produced by the submission ('' when none). */
 	text: string;
 	/**
-	 * Named client data parts (`useMessageData`) on the reply message, keyed
+	 * Named client data parts (`useDataWriter`) on the reply message, keyed
 	 * by part name, each in emit order.
 	 */
 	data: Record<string, unknown[]>;
-	/** Agent-authored response metadata (`useMessageMetadata`), when present. */
+	/** Agent-authored response metadata (`useResponseStart`/`useResponseFinish`), when present. */
 	metadata?: Record<string, unknown>;
 }
 
