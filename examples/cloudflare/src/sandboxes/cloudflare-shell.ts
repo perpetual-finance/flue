@@ -11,12 +11,15 @@ import {
 	WorkspaceFileSystem,
 } from '@cloudflare/shell';
 import { stateTools } from '@cloudflare/shell/workers';
-import type {
-	FileStat,
-	SandboxFactory,
-	SessionEnv,
-	SessionToolFactory,
-	ShellResult,
+import {
+	createEditTool,
+	createReadTool,
+	createWriteTool,
+	type FileStat,
+	type SandboxFactory,
+	type SessionEnv,
+	type SessionToolFactory,
+	type ShellResult,
 } from '@flue/runtime';
 import { getCloudflareContext } from '@flue/runtime/cloudflare';
 
@@ -115,7 +118,16 @@ export function getShellSandbox(options: GetShellSandboxOptions): SandboxFactory
 		...executorOptions,
 	});
 	const stateProvider = resolveProvider(stateTools(workspace));
-	const toolFactory: SessionToolFactory = () => [createCodeTool(executor, stateProvider)];
+	// Compose the standard file tools (they need only the SessionEnv file
+	// verbs, which route through the workspace) with this sandbox's native
+	// codemode tool. The exec-backed standard tools (bash/grep/glob) stay
+	// out — this env has no shell.
+	const toolFactory: SessionToolFactory = (env) => [
+		createReadTool(env),
+		createWriteTool(env),
+		createEditTool(env),
+		createCodeTool(executor, stateProvider),
+	];
 
 	return {
 		async createSessionEnv(): Promise<ShellSandboxEnv> {

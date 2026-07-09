@@ -3,7 +3,7 @@ title: Cloudflare Shell
 description: Use a durable Cloudflare Workspace with code-oriented agent operations.
 ---
 
-The Cloudflare Shell adapter adapts an application-owned `@cloudflare/shell` `Workspace` into a Flue sandbox on the Cloudflare target. Unlike a Linux shell sandbox, it provides a durable workspace and a model-facing `code` tool that executes JavaScript against workspace state through a Worker Loader binding.
+The Cloudflare Shell adapter adapts an application-owned `@cloudflare/shell` `Workspace` into a Flue sandbox on the Cloudflare target. Unlike a Linux shell sandbox, it provides a durable workspace. The model keeps the standard file tools (`read`/`write`/`edit`, routed through the workspace) and gains a `code` tool that executes JavaScript against workspace state through a Worker Loader binding, in place of the shell-backed `bash`/`grep`/`glob`.
 
 ## Quickstart
 
@@ -22,7 +22,13 @@ The blueprint installs `@cloudflare/shell` and `@cloudflare/codemode`, creates `
 import { Workspace, WorkspaceFileSystem /* ... */ } from '@cloudflare/shell';
 import { stateTools } from '@cloudflare/shell/workers';
 import { DynamicWorkerExecutor, resolveProvider /* ... */ } from '@cloudflare/codemode';
-import type { SandboxFactory, SessionToolFactory /* ... */ } from '@flue/runtime';
+import {
+  createEditTool,
+  createReadTool,
+  createWriteTool,
+  type SandboxFactory,
+  type SessionToolFactory /* ... */,
+} from '@flue/runtime';
 import { getCloudflareContext } from '@flue/runtime/cloudflare';
 
 export interface GetShellSandboxOptions {
@@ -41,11 +47,18 @@ export function getShellSandbox(options: GetShellSandboxOptions): SandboxFactory
     ...executorOptions,
   });
   const stateProvider = resolveProvider(stateTools(workspace));
-  const toolFactory: SessionToolFactory = () => [createCodeTool(executor, stateProvider)];
+  // Compose the standard file tools with this sandbox's native codemode
+  // tool; the exec-backed bash/grep/glob stay out — this env has no shell.
+  const toolFactory: SessionToolFactory = (env) => [
+    createReadTool(env),
+    createWriteTool(env),
+    createEditTool(env),
+    createCodeTool(executor, stateProvider),
+  ];
 
   return {
-    async createSessionEnv() {
-      return createWorkspaceSessionEnv(workspace, fs, '/');
+    async createSessionEnv(): Promise<ShellSandboxEnv> {
+      return { ...createWorkspaceSessionEnv(workspace, fs, '/'), workspace };
     },
     tools: toolFactory,
   };
@@ -59,7 +72,7 @@ export function getDefaultWorkspace(): Workspace {
 }
 ```
 
-Create a workspace, then pass it with the `worker_loaders` binding to `getShellSandbox(...)`. Agents receive durable file operations and the isolated JavaScript `code` tool; they do not receive Linux command execution. Application-specific data loading into the workspace remains application-owned.
+Create a workspace, then pass it with the `worker_loaders` binding to `getShellSandbox(...)`. Agents receive durable file operations — the standard `read`/`write`/`edit` tools composed from Flue's exported per-tool factories — and the isolated JavaScript `code` tool; they do not receive Linux command execution. Application-specific data loading into the workspace remains application-owned.
 
 ## Configure
 
@@ -70,7 +83,7 @@ Create a workspace, then pass it with the `worker_loaders` binding to `getShellS
 | `@cloudflare/codemode` package            | **Required** — Provides code-oriented model operations.                                                                              |
 | `worker_loaders` binding such as `LOADER` | **Required on Cloudflare** — Executes JavaScript against Workspace state; this is a Cloudflare binding, not an environment variable. |
 | Environment-variable credentials          | **Not required** — The integration uses the `worker_loaders` binding instead.                                                        |
-| Ordinary Linux shell                      | **Not provided** — This adapter provides a model-facing `code` tool, not shell command execution.                                    |
+| Ordinary Linux shell                      | **Not provided** — This adapter provides the standard file tools plus a model-facing `code` tool, not shell command execution.       |
 
 Import the generated helpers from your project adapter file, not from `@flue/runtime/cloudflare`:
 

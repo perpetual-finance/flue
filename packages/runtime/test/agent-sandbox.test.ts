@@ -15,11 +15,13 @@ import {
 	renderAgentFunctionWithStructure,
 } from '../src/hooks/render.ts';
 import { useSandbox } from '../src/hooks/use-sandbox.ts';
+import { useSkill } from '../src/hooks/use-skill.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { createFlueContext, type DispatchInput } from '../src/internal.ts';
 import { createNodeAgentCoordinator } from '../src/node/agent-coordinator.ts';
 import { sqlite } from '../src/node/agent-execution-store.ts';
 import type { CreateAgentContextFn } from '../src/runtime/handle-agent.ts';
+import { defineSkill } from '../src/skill-definition.ts';
 import { defineTool, validateAndRunTool } from '../src/tool.ts';
 import type { SandboxFactory, SessionEnv } from '../src/types.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
@@ -318,5 +320,64 @@ describe('useSandbox end to end (node coordinator, faux provider)', () => {
 		expect(toolNames).toContain('task');
 		expect(toolNames).not.toContain('bash');
 		expect(toolNames).not.toContain('read');
+	});
+
+	it('hands the sandbox toolFactory an env that resolves packaged-skill paths', async () => {
+		const dbPath = createTempDbPath();
+		const adapter = sqlite(dbPath);
+		await adapter.migrate?.();
+		const { executionStore, conversationStreamStore, attachmentStore } = await adapter.connect();
+		const provider = createFauxProvider();
+		provider.setResponses([fauxAssistantMessage('Done.')]);
+
+		const review = defineSkill({
+			name: 'review',
+			description: 'Reviews changes.',
+			instructions: 'Review carefully.',
+			files: { 'references/checklist.md': 'Check errors.' },
+		});
+		const checklistPath = `/.flue/packaged-skills/${encodeURIComponent(review.id)}/references/checklist.md`;
+
+		let factoryEnv: SessionEnv | undefined;
+		const sandbox: SandboxFactory = {
+			createSessionEnv: async () => createNoopSessionEnv(),
+			tools: (env) => {
+				factoryEnv = env;
+				return [];
+			},
+		};
+
+		function assistant() {
+			useSandbox(sandbox);
+			useSkill(review);
+			return 'Reviewer agent.';
+		}
+
+		const coordinator = createNodeAgentCoordinator({
+			submissions: executionStore.submissions,
+			agents: [
+				{
+					name: 'assistant',
+					definition: defineAgent(assistant, {
+						model: `${provider.getModel().provider}/${provider.getModel().id}`,
+					}),
+				},
+			],
+			createContext: makeFauxCreateContext(provider),
+			conversationStreamStore,
+			attachmentStore,
+		});
+
+		await coordinator.admitDispatch(makeDispatchInput({ dispatchId: 'dispatch:sandbox-3' }));
+		await coordinator.waitForIdle();
+		await coordinator.shutdown();
+
+		expect(factoryEnv).toBeDefined();
+		// Adapter tools that read through the env resolve packaged paths — the
+		// env-level overlay replaced the old wrap-the-tool-named-'read' remap.
+		await expect(factoryEnv?.readFile(checklistPath)).resolves.toBe('Check errors.');
+		await expect(factoryEnv?.readFile(`${checklistPath}.missing`)).rejects.toThrow(
+			'Packaged skill file not found',
+		);
 	});
 });

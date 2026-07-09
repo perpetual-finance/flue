@@ -1,7 +1,7 @@
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { type Static, Type } from '@earendil-works/pi-ai';
 import { composeTimeoutSignal } from './abort.ts';
-import type { PackagedSkillDirectory, SessionEnv, SubagentDefinition } from './types.ts';
+import type { PackagedSkillDirectory, SessionEnv } from './types.ts';
 
 const MAX_READ_LINES = 2000;
 const MAX_READ_BYTES = 50 * 1024;
@@ -28,26 +28,28 @@ export interface TaskToolResultDetails {
 	cwd?: string;
 }
 
-export interface CreateToolsOptions {
-	task?: (
-		params: TaskToolParams,
-		signal?: AbortSignal,
-	) => Promise<AgentToolResult<TaskToolResultDetails>>;
-	subagents?: Record<string, SubagentDefinition>;
-	packagedSkills?: Record<string, PackagedSkillDirectory>;
-}
-
-export function createTools(env: SessionEnv, options?: CreateToolsOptions): AgentTool<any>[] {
-	const tools: AgentTool<any>[] = [
-		createReadTool(env, options?.packagedSkills ?? {}),
-		createWriteTool(env),
-		createEditTool(env),
-		createBashTool(env),
-		createGrepTool(env),
-		createGlobTool(env),
-	];
-	if (options?.task) tools.push(createTaskTool(options.task, Object.values(options.subagents ?? {})));
-	return tools;
+/**
+ * Layer packaged-skill routing onto an env before handing it to model-facing
+ * tool factories: `readFile` serves `/.flue/packaged-skills/` paths from the
+ * in-memory catalog (and reports unknown paths under that root as missing)
+ * and delegates everything else. Session-internal — `harness.sandbox` and
+ * `useTool` handlers see the real env, never this overlay.
+ */
+export function overlayPackagedSkills(
+	env: SessionEnv,
+	packagedSkills: Record<string, PackagedSkillDirectory>,
+): SessionEnv {
+	return {
+		...env,
+		async readFile(path: string): Promise<string> {
+			const packagedFile = readPackagedSkillFile(packagedSkills, path);
+			if (packagedFile !== undefined) return packagedFile;
+			if (path.startsWith(PACKAGED_SKILLS_ROOT)) {
+				throw new Error(`[flue] Packaged skill file not found: ${path}`);
+			}
+			return env.readFile(path);
+		},
+	};
 }
 
 const ReadParams = Type.Object({
@@ -74,10 +76,12 @@ export function createPackagedSkillReadTool(
 	};
 }
 
-function createReadTool(
-	env: SessionEnv,
-	packagedSkills: Record<string, PackagedSkillDirectory>,
-): AgentTool<typeof ReadParams> {
+/**
+ * The framework's standard `read` tool over a {@link SessionEnv}. Needs only
+ * the file verbs. Use it (with the other `create*Tool` factories) to compose
+ * a {@link SandboxFactory}'s `tools` list instead of rebuilding from scratch.
+ */
+export function createReadTool(env: SessionEnv): AgentTool<typeof ReadParams> {
 	return {
 		name: 'read',
 		label: 'Read File',
@@ -86,15 +90,6 @@ function createReadTool(
 		parameters: ReadParams,
 		async execute(_toolCallId: string, params: Static<typeof ReadParams>, signal?: AbortSignal) {
 			throwIfAborted(signal);
-
-			const packagedFile = readPackagedSkillFile(packagedSkills, params.path);
-			if (packagedFile !== undefined) {
-				return formatReadContent(params.path, packagedFile, params.offset, params.limit);
-			}
-			if (params.path.startsWith(PACKAGED_SKILLS_ROOT)) {
-				throw new Error(`[flue] Packaged skill file not found: ${params.path}`);
-			}
-
 			const content = await env.readFile(params.path);
 			return formatReadContent(params.path, content, params.offset, params.limit);
 		},
@@ -106,7 +101,11 @@ const WriteParams = Type.Object({
 	content: Type.String({ description: 'Content to write to the file' }),
 });
 
-function createWriteTool(env: SessionEnv): AgentTool<typeof WriteParams> {
+/**
+ * The framework's standard `write` tool over a {@link SessionEnv}. Needs only
+ * the file verbs.
+ */
+export function createWriteTool(env: SessionEnv): AgentTool<typeof WriteParams> {
 	return {
 		name: 'write',
 		label: 'Write File',
@@ -138,7 +137,11 @@ const EditParams = Type.Object({
 	replaceAll: Type.Optional(Type.Boolean({ description: 'Replace all occurrences' })),
 });
 
-function createEditTool(env: SessionEnv): AgentTool<typeof EditParams> {
+/**
+ * The framework's standard `edit` tool over a {@link SessionEnv}. Needs only
+ * the file verbs.
+ */
+export function createEditTool(env: SessionEnv): AgentTool<typeof EditParams> {
 	return {
 		name: 'edit',
 		label: 'Edit File',
@@ -192,7 +195,12 @@ const BashParams = Type.Object({
 	timeout: Type.Optional(Type.Number({ description: 'Timeout in seconds' })),
 });
 
-function createBashTool(env: SessionEnv): AgentTool<typeof BashParams> {
+/**
+ * The framework's standard `bash` tool over a {@link SessionEnv}. Requires a
+ * working `env.exec` — leave it out of a `tools` list for sandboxes that
+ * don't execute shell commands.
+ */
+export function createBashTool(env: SessionEnv): AgentTool<typeof BashParams> {
 	return {
 		name: 'bash',
 		label: 'Run Command',
@@ -388,10 +396,14 @@ const GrepParams = Type.Object({
 	literal: Type.Optional(Type.Boolean({ description: 'Match the pattern as literal text' })),
 });
 
-const grepBackends = new WeakMap<SessionEnv, Promise<'rg' | 'grep'>>();
+// Keyed on env.exec rather than the env object: the session hands tool
+// factories a fresh per-call overlay env (packaged-skill routing), but the
+// exec function reference is stable across overlays — so the probe still
+// runs once per underlying sandbox.
+const grepBackends = new WeakMap<SessionEnv['exec'], Promise<'rg' | 'grep'>>();
 
 function resolveGrepBackend(env: SessionEnv): Promise<'rg' | 'grep'> {
-	let backend = grepBackends.get(env);
+	let backend = grepBackends.get(env.exec);
 	if (!backend) {
 		// No caller signal here: the probe result is cached per-env, so an
 		// operation abort mid-probe would poison the cache with 'grep'. A
@@ -400,12 +412,16 @@ function resolveGrepBackend(env: SessionEnv): Promise<'rg' | 'grep'> {
 			.exec('rg --version', { timeoutMs: 10_000 })
 			.then((result) => (result.exitCode === 0 ? 'rg' : 'grep'))
 			.catch(() => 'grep');
-		grepBackends.set(env, backend);
+		grepBackends.set(env.exec, backend);
 	}
 	return backend;
 }
 
-function createGrepTool(env: SessionEnv): AgentTool<typeof GrepParams> {
+/**
+ * The framework's standard `grep` tool over a {@link SessionEnv}. Requires a
+ * working `env.exec` (searches via `rg` or `grep` in the sandbox).
+ */
+export function createGrepTool(env: SessionEnv): AgentTool<typeof GrepParams> {
 	return {
 		name: 'grep',
 		label: 'Search Files',
@@ -466,7 +482,11 @@ const GlobParams = Type.Object({
 	path: Type.Optional(Type.String({ description: 'Directory to search in (default: .)' })),
 });
 
-function createGlobTool(env: SessionEnv): AgentTool<typeof GlobParams> {
+/**
+ * The framework's standard `glob` tool over a {@link SessionEnv}. Requires a
+ * working `env.exec` (finds files via `find` in the sandbox).
+ */
+export function createGlobTool(env: SessionEnv): AgentTool<typeof GlobParams> {
 	return {
 		name: 'glob',
 		label: 'Find Files',

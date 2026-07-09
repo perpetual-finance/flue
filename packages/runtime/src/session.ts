@@ -26,9 +26,15 @@ import type * as v from 'valibot';
 import { abortErrorFor, createCallHandle } from './abort.ts';
 import {
 	createActivateSkillTool,
+	createBashTool,
+	createEditTool,
+	createGlobTool,
+	createGrepTool,
 	createPackagedSkillReadTool,
+	createReadTool,
 	createTaskTool,
-	createTools,
+	createWriteTool,
+	overlayPackagedSkills,
 	READ_SKILL_RESOURCE_TOOL_NAME,
 	type TaskToolParams,
 	type TaskToolResultDetails,
@@ -3574,36 +3580,18 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			...(packagedRead ? [packagedRead] : []),
 		];
 
+		// Tool factories (standard and adapter alike) get the env with
+		// packaged-skill routing layered onto readFile: any tool that reads
+		// through the env resolves /.flue/packaged-skills/ paths, no
+		// tool-level special-casing.
+		const toolEnv = overlayPackagedSkills(env, packagedSkills);
+
 		if (this.toolFactory) {
-			let adapterTools = this.toolFactory(env, { subagents: this.liveSubagents });
-			if (packagedRead) {
-				const adapterRead = adapterTools.find((tool) => tool.name === 'read');
-				if (adapterRead) {
-					adapterTools = adapterTools.map((tool) =>
-						tool !== adapterRead
-							? tool
-							: {
-									...tool,
-									execute: (id, params, signal) => {
-										const resourcePath =
-											typeof params === 'object' && params !== null && 'path' in params
-												? params.path
-												: undefined;
-										return typeof resourcePath === 'string' &&
-											resourcePath.startsWith('/.flue/packaged-skills/')
-											? packagedRead.execute(
-													id,
-													params as { path: string; offset?: number; limit?: number },
-													signal,
-												)
-											: adapterRead.execute(id, params, signal);
-									},
-								},
-					);
-				}
-			}
 			return [
-				{ source: 'adapter', tools: adapterTools },
+				{
+					source: 'adapter',
+					tools: this.toolFactory(toolEnv, { subagents: this.liveSubagents }),
+				},
 				{
 					source: 'framework',
 					tools: frameworkTools(createTaskTool(runTask, this.baselineSubagentRoster)),
@@ -3611,10 +3599,14 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			];
 		}
 
-		const builtinTools = createTools(env, {
-			subagents: this.liveSubagents,
-			packagedSkills,
-		});
+		const builtinTools = [
+			createReadTool(toolEnv),
+			createWriteTool(toolEnv),
+			createEditTool(toolEnv),
+			createBashTool(toolEnv),
+			createGrepTool(toolEnv),
+			createGlobTool(toolEnv),
+		];
 		return [
 			{ source: 'builtin', tools: builtinTools },
 			{

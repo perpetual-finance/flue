@@ -1,6 +1,17 @@
 /// <reference path="../types/skill-md.d.ts" />
 /// <reference path="../types/markdown-md.d.ts" />
 
+// The standard model-facing tools, one factory per tool. Compose them in a
+// SandboxFactory's `tools` list to add, drop, or swap tools without
+// rebuilding the set; omit `tools` entirely for the framework default.
+export {
+	createBashTool,
+	createEditTool,
+	createGlobTool,
+	createGrepTool,
+	createReadTool,
+	createWriteTool,
+} from './agent.ts';
 export {
 	type AgentDispatchOptions,
 	type AgentInstanceHandle,

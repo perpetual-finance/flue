@@ -926,7 +926,14 @@ export interface SandboxFactory {
 	 * calls with the same value.
 	 */
 	createSessionEnv(options: { id: string }): Promise<SessionEnv>;
-	/** Replaces the framework default tool list for this sandbox. */
+	/**
+	 * Replaces the framework default tool list for this sandbox. Omit it for
+	 * the standard set over your env. When you do supply one, compose it from
+	 * the exported per-tool factories (`createReadTool`, `createWriteTool`,
+	 * `createEditTool`, `createBashTool`, `createGrepTool`, `createGlobTool`)
+	 * plus your own tools, rather than rebuilding from scratch — e.g. an
+	 * exec-less sandbox lists the three file tools and its own executor tool.
+	 */
 	tools?: SessionToolFactory;
 }
 

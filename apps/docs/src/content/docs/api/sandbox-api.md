@@ -103,6 +103,35 @@ export type SessionToolFactory = (
 
 Use this optional factory when the sandbox exposes provider-specific model-facing tools. Flue appends the `task` tool separately.
 
+When you supply one, compose it from the standard set rather than rebuilding from scratch. Each standard tool is exported as its own factory over a `SessionEnv`:
+
+| Factory | Tool | Needs |
+| --- | --- | --- |
+| `createReadTool(env)` | `read` | file verbs |
+| `createWriteTool(env)` | `write` | file verbs |
+| `createEditTool(env)` | `edit` | file verbs |
+| `createBashTool(env)` | `bash` | `env.exec` |
+| `createGrepTool(env)` | `grep` | `env.exec` |
+| `createGlobTool(env)` | `glob` | `env.exec` |
+
+```ts
+import { createEditTool, createReadTool, createWriteTool } from '@flue/runtime';
+
+// An exec-less sandbox: keep the three file tools, add the provider's
+// native executor tool, leave bash/grep/glob out.
+const sandbox: SandboxFactory = {
+  createSessionEnv: myCreateSessionEnv,
+  tools: (env) => [
+    createReadTool(env),
+    createWriteTool(env),
+    createEditTool(env),
+    createCodeTool(executor),
+  ],
+};
+```
+
+The `env` a factory receives resolves packaged-skill paths (`/.flue/packaged-skills/…`) through `readFile`, so any tool that reads through the env serves skill resources with no special-casing.
+
 ### `FileStat`
 
 ```ts

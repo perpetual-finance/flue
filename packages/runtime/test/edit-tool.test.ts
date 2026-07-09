@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { createTools } from '../src/agent.ts';
+import { createEditTool, createReadTool } from '../src/agent.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
 
-describe('createTools()', () => {
+describe('standard file tools', () => {
 	it('rejects an edit when oldText is empty', async () => {
 		const env = createNoopSessionEnv({ readFile: async () => 'file content' });
-		const edit = createTools(env).find((tool) => tool.name === 'edit');
+		const edit = createEditTool(env);
 
 		await expect(
-			edit?.execute('call', { path: 'a.txt', oldText: '', newText: 'inserted' }),
+			edit.execute('call', { path: 'a.txt', oldText: '', newText: 'inserted' }),
 		).rejects.toThrow('oldText must be a non-empty string');
 	});
 
@@ -21,9 +21,9 @@ describe('createTools()', () => {
 				throw new Error('stat should not be called');
 			},
 		});
-		const read = createTools(env).find((tool) => tool.name === 'read');
+		const read = createReadTool(env);
 
-		await expect(read?.execute('call', { path: 'directory' })).rejects.toThrow(
+		await expect(read.execute('call', { path: 'directory' })).rejects.toThrow(
 			'EISDIR: illegal operation on a directory, read',
 		);
 	});

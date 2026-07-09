@@ -16,9 +16,11 @@ Confirm with the user only when something is genuinely ambiguous.
 ## What this adapter does
 
 Wraps an already-initialized `@cloudflare/shell` `Workspace` into Flue's
-`SandboxFactory` interface. The adapter exposes a codemode-backed `code`
-tool that runs JavaScript against the durable workspace through a Worker Loader
-binding. The user owns workspace construction and hydration.
+`SandboxFactory` interface. The adapter composes the standard file tools
+(`read`, `write`, `edit` — they route through the workspace) with a
+codemode-backed `code` tool that runs JavaScript against the durable
+workspace through a Worker Loader binding. The user owns workspace
+construction and hydration.
 
 ## Where to write the file
 
@@ -49,6 +51,9 @@ import {
 	type ResolvedProvider,
 } from '@cloudflare/codemode';
 import {
+	createEditTool,
+	createReadTool,
+	createWriteTool,
 	type FileStat,
 	type SandboxFactory,
 	type SessionEnv,
@@ -61,6 +66,30 @@ export interface GetShellSandboxOptions {
 	workspace: Workspace;
 	loader: WorkerLoader;
 	executor?: Pick<DynamicWorkerExecutorOptions, 'timeout' | 'globalOutbound' | 'modules'>;
+}
+
+/**
+ * The environment a cf-shell agent runs in: the generic `SessionEnv` file
+ * verbs route through the workspace, and the workspace itself rides along as
+ * the sandbox's native surface. Narrow to it with {@link shellWorkspace}.
+ */
+export interface ShellSandboxEnv extends SessionEnv {
+	readonly workspace: Workspace;
+}
+
+/**
+ * Narrow an agent's `harness.sandbox` to this sandbox's native surface — the
+ * `@cloudflare/shell` {@link Workspace} — with a runtime check. Throws when
+ * the agent runs on a different sandbox.
+ */
+export function shellWorkspace(sandbox: SessionEnv): Workspace {
+	const workspace = (sandbox as Partial<ShellSandboxEnv>).workspace;
+	if (!(workspace instanceof Workspace)) {
+		throw new Error(
+			'[flue] shellWorkspace(harness.sandbox) requires the cf-shell sandbox — this agent runs on a different environment.',
+		);
+	}
+	return workspace;
 }
 
 export function getShellSandbox(options: GetShellSandboxOptions): SandboxFactory {
@@ -86,11 +115,20 @@ export function getShellSandbox(options: GetShellSandboxOptions): SandboxFactory
 		...executorOptions,
 	});
 	const stateProvider = resolveProvider(stateTools(workspace));
-	const toolFactory: SessionToolFactory = () => [createCodeTool(executor, stateProvider)];
+	// Compose the standard file tools (they need only the SessionEnv file
+	// verbs, which route through the workspace) with this sandbox's native
+	// codemode tool. The exec-backed standard tools (bash/grep/glob) stay
+	// out — this env has no shell.
+	const toolFactory: SessionToolFactory = (env) => [
+		createReadTool(env),
+		createWriteTool(env),
+		createEditTool(env),
+		createCodeTool(executor, stateProvider),
+	];
 
 	return {
-		async createSessionEnv() {
-			return createWorkspaceSessionEnv(workspace, fs, '/');
+		async createSessionEnv(): Promise<ShellSandboxEnv> {
+			return { ...createWorkspaceSessionEnv(workspace, fs, '/'), workspace };
 		},
 		tools: toolFactory,
 	};
@@ -168,9 +206,10 @@ function createWorkspaceSessionEnv(
 }
 
 const EXEC_NOT_SUPPORTED_MESSAGE =
-	'[flue] The cf-shell sandbox does not support exec(). The agent\'s `code` tool runs JavaScript ' +
-	'in an isolated Worker against the workspace; from your own code, use `session.fs` / `harness.fs` ' +
-	'(readFile, writeFile, stat, readdir, etc.) — they route through the same Workspace. If you ' +
+	"[flue] The cf-shell sandbox does not support exec(). The agent's `code` tool runs JavaScript " +
+	'in an isolated Worker against the workspace; from your own code, use the file verbs on ' +
+	'`harness.sandbox` (readFile, writeFile, stat, readdir, etc.) or narrow to the native surface ' +
+	'with `shellWorkspace(harness.sandbox)` — both route through the same Workspace. If you ' +
 	'specifically need bash/grep/find or a real Linux environment, use `@cloudflare/sandbox` ' +
 	'(Containers + mountBucket) instead.';
 
@@ -267,7 +306,7 @@ function buildCodeToolDescription(): string {
 
 export function getDefaultWorkspace(): Workspace {
 	const { storage } = getCloudflareContext();
-	return new Workspace({ sql: storage.sql });
+	return new Workspace({ sql: storage.sql as SqlStorage });
 }
 ```
 
@@ -298,11 +337,14 @@ or tokens; the user authenticates through their existing Wrangler setup.
 
 ## Behavior and tradeoffs
 
-This adapter is not Flue's default just-bash virtual sandbox. It replaces the
-normal shell and file-manipulation tool set with a `code` tool that runs
-JavaScript against the Workspace `state.*` API. Application code can still use
-`session.fs` and `harness.fs` against the same Workspace; `session.shell()` and
-`harness.shell()` throw.
+This adapter is not Flue's default just-bash virtual sandbox. Its `tools`
+factory keeps the standard file tools (`read`/`write`/`edit`, composed from
+Flue's exported per-tool factories) and swaps the shell-backed tools
+(`bash`/`grep`/`glob`) for a `code` tool that runs JavaScript against the
+Workspace `state.*` API. Application code uses the file verbs on
+`harness.sandbox` against the same Workspace, or narrows to the native
+surface with `shellWorkspace(harness.sandbox)`; `harness.sandbox.exec()`
+throws.
 
 If the user needs Linux commands, language toolchains, or R2 keys exposed as
 mounted filesystem paths, use `@cloudflare/sandbox` Containers with
@@ -325,7 +367,7 @@ const { LOADER } = env as unknown as Env;
 
 function Assistant() {
   useSandbox(getShellSandbox({ workspace: getDefaultWorkspace(), loader: LOADER }));
-  return 'You explore and edit the mounted workspace with the `code` tool.';
+  return 'You explore and edit the mounted workspace with the file tools and the `code` tool.';
 }
 
 export default defineAgent(Assistant, { model: 'cloudflare/@cf/moonshotai/kimi-k2.6' });
