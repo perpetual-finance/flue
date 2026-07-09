@@ -4,8 +4,6 @@ import { configureErrorRendering, InvalidRequestError } from '../errors.ts';
 import type {
 	AgentDispatchRequest,
 	AgentModuleValue,
-	AgentPromptRequest,
-	DeliveredMessage,
 	DispatchReceipt,
 	NamedAgentDispatchRequest,
 } from '../types.ts';
@@ -14,7 +12,7 @@ import type { AttachmentStore } from './attachment-store.ts';
 import type { ConversationStreamStore } from './conversation-stream-store.ts';
 import { enqueueDispatch } from './dispatch.ts';
 import type { DispatchQueue } from './dispatch-queue.ts';
-import { normalizeSignalMessage, normalizeUserMessage } from './message-input.ts';
+import { normalizeMessageInput } from './message-input.ts';
 import type { RuntimeActivityGate } from './runtime-activity-gate.ts';
 import { agentStreamPath } from './stream-offsets.ts';
 
@@ -66,10 +64,10 @@ export interface CloudflareRuntime extends RuntimeBase {
 export type FlueRuntime = NodeRuntime | CloudflareRuntime;
 
 /**
- * Accepts a signal for asynchronous delivery to a continuing agent session —
- * the fire-and-forget half of the kind-split verbs: `dispatch()` delivers
- * signals, `prompt()` delivers user messages, and the verb implies the
- * message kind (`kind` may be omitted).
+ * Accepts input for asynchronous delivery to a continuing agent session —
+ * THE delivery verb, for both message kinds: a `kind: 'signal'` event or a
+ * `kind: 'user'` message (a bare string is shorthand for
+ * `{ kind: 'user', body }`).
  *
  * Resolves after the current runtime admits and queues the input. It does not
  * wait for model processing, tool calls, or an agent reply. The returned
@@ -89,52 +87,22 @@ export async function dispatch(
 	agent: AgentModuleValue,
 	request: AgentDispatchRequest,
 ): Promise<DispatchReceipt> {
-	return deliver('dispatch()', agent, request, (api) =>
-		normalizeSignalMessage(api, request?.message),
-	);
-}
-
-/**
- * Accepts a user message for asynchronous delivery to a continuing agent
- * session — the fire-and-forget counterpart of `dispatch()`, for the other
- * message kind: `prompt()` delivers user messages (a bare string is shorthand
- * for `{ body }`), and the verb implies the kind. Same admission, same queue,
- * same receipt; it does not wait for a reply. To await the settled reply, use
- * the `init()` handle instead.
- */
-export async function prompt(
-	agent: AgentModuleValue,
-	request: AgentPromptRequest,
-): Promise<DispatchReceipt> {
-	return deliver('prompt()', agent, request, (api) =>
-		normalizeUserMessage(api, request?.message),
-	);
-}
-
-/** Shared admission body of the kind-split delivery verbs. */
-async function deliver(
-	api: string,
-	agent: AgentModuleValue,
-	request: AgentDispatchRequest | AgentPromptRequest | undefined,
-	normalizeMessage: (api: string) => DeliveredMessage,
-): Promise<DispatchReceipt> {
 	const rt = runtimeConfig;
 	if (!rt) {
 		throw new Error(
-			`[flue] ${api} called before runtime was configured. ` +
+			'[flue] dispatch() called before runtime was configured. ' +
 				'This usually means it was used outside a Flue-built server entry.',
 		);
 	}
 	if (!isAgentDefinitionValue(agent)) {
 		throw new InvalidRequestError({
 			reason:
-				`${api} requires an agent definition as its first argument. ` +
-				`Pass the default export of a 'use agent' module: ${api.slice(0, -2)}(agent, { id, message }).`,
+				'dispatch() requires an agent definition as its first argument. ' +
+				"Pass the default export of a 'use agent' module: dispatch(agent, { id, message }).",
 		});
 	}
-	if (!request) throw new Error(`[flue] ${api.slice(0, -2)}(agent, request) requires a request.`);
 	return enqueueDispatch({
-		request: resolveAgentDefinitionDispatchRequest(api, agent, request, normalizeMessage(api), rt),
+		request: resolveAgentDefinitionDispatchRequest(agent, request, rt),
 		dispatchQueue: rt.dispatchQueue,
 		rt,
 	});
@@ -223,23 +191,21 @@ function isAgentDefinitionValue(value: unknown): value is AgentModuleValue {
 }
 
 function resolveAgentDefinitionDispatchRequest(
-	api: string,
 	agent: AgentModuleValue,
-	request: AgentDispatchRequest | AgentPromptRequest | undefined,
-	message: DeliveredMessage,
+	request: AgentDispatchRequest | undefined,
 	rt: FlueRuntime,
 ): NamedAgentDispatchRequest {
-	if (!request) throw new Error(`[flue] ${api.slice(0, -2)}(agent, request) requires a request.`);
+	if (!request) throw new Error('[flue] dispatch(agent, request) requires a dispatch request.');
 	const name = rt.agents.find((record) => record.definition === agent)?.name;
 	if (!name) {
 		throw new Error(
-			`[flue] ${api} target agent definition is not a discovered default-exported agent in this built application.`,
+			'[flue] dispatch() target agent definition is not a discovered default-exported agent in this built application.',
 		);
 	}
 	return {
 		agent: name,
 		id: request.id,
-		message,
+		message: normalizeMessageInput(request.message),
 		...(request.data !== undefined ? { data: request.data } : {}),
 		// `uid: null` is a meaningful condition (create-only), so presence is
 		// keyed on the property, not on undefined.

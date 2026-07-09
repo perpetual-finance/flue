@@ -2,15 +2,15 @@
 /// <reference path="../types/markdown-md.d.ts" />
 
 export {
+	type AgentDispatchOptions,
 	type AgentInstanceHandle,
-	type AgentPromptOptions,
 	type AgentReply,
 	AgentRunError,
 	type InitOptions,
 	init,
 } from './agent-client.ts';
 export { defineAgent } from './agent-definition.ts';
-// The live conversation projection protocol (`init().prompt`'s onEvent, the
+// The live conversation projection protocol (`init().dispatch`'s onEvent, the
 // SDK's updates view). The canonical record schema stays internal.
 export type { ConversationStreamChunk } from './conversation-public.ts';
 export {
@@ -80,12 +80,7 @@ export { ResultUnavailableError } from './result.ts';
 export type { ChannelRouteDefinition, MountableChannel } from './runtime/channel-routes.ts';
 export { createChannelRouter } from './runtime/channel-routes.ts';
 export { type FlueEventSubscriber, observe } from './runtime/events.ts';
-export {
-	type AgentInstanceInfo,
-	dispatch,
-	getAgentInstance,
-	prompt,
-} from './runtime/flue-app.ts';
+export { type AgentInstanceInfo, dispatch, getAgentInstance } from './runtime/flue-app.ts';
 export {
 	type HttpProviderRegistration,
 	type ProviderRegistration,
@@ -101,12 +96,9 @@ export type {
 	AgentDispatchRequest,
 	AgentFunction,
 	AgentModuleValue,
-	AgentPromptRequest,
 	AgentProps,
 	AgentRouteHandler,
 	AgentRuntimeConfig,
-	AgentSignalMessage,
-	AgentUserMessage,
 	AttachedAgentEvent,
 	BashFactory,
 	BashLike,
@@ -114,6 +106,7 @@ export type {
 	CompactionConfig,
 	DeliveredAttachment,
 	DeliveredMessage,
+	DeliveredMessageInput,
 	DispatchReceipt,
 	DurabilityConfig,
 	FileStat,

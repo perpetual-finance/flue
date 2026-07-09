@@ -75,34 +75,18 @@ export type DeliveredMessage =
 	  };
 
 /**
- * A signal as `dispatch(...)` accepts it — the verb implies the kind, so
- * `kind` may be omitted (and must be `'signal'` when present). User messages
- * belong to `prompt(...)`.
+ * A message as every `dispatch` surface accepts it: a {@link DeliveredMessage}
+ * with its explicit `kind`, or a bare string as shorthand for
+ * `{ kind: 'user', body }`.
  */
-export interface AgentSignalMessage {
-	kind?: 'signal';
-	/** Caller-defined event/signal type, e.g. `'slack.message'`. */
-	type: string;
-	body: string;
-	attributes?: Record<string, string>;
-	tagName?: string;
-}
-
-/**
- * A user message as `prompt(...)` accepts it — the verb implies the kind, so
- * `kind` may be omitted (and must be `'user'` when present), and a bare
- * string is shorthand for `{ body }`. Signals belong to `dispatch(...)`.
- */
-export type AgentUserMessage =
-	| string
-	| { kind?: 'user'; body: string; attachments?: DeliveredAttachment[] };
+export type DeliveredMessageInput = string | DeliveredMessage;
 
 /** Input accepted by `dispatch(agent, request)`. */
 export interface AgentDispatchRequest {
 	/** Target agent instance id. Must be a non-empty string. */
 	id: string;
-	/** The signal delivered to the session. Flue snapshots the value at admission time. */
-	message: AgentSignalMessage;
+	/** The message delivered to the session. Flue snapshots the value at admission time. */
+	message: DeliveredMessageInput;
 	/**
 	 * Instance-creation data — the seed, consulted only when this send
 	 * creates the instance: validated against the agent's `input:` schema
@@ -125,19 +109,10 @@ export interface AgentDispatchRequest {
 }
 
 /**
- * Input accepted by `prompt(agent, request)` — {@link AgentDispatchRequest}
- * with a user message in place of the signal.
- */
-export interface AgentPromptRequest extends Omit<AgentDispatchRequest, 'message'> {
-	/** The user message delivered to the session. Flue snapshots the value at admission time. */
-	message: AgentUserMessage;
-}
-
-/**
- * Internal queue wire shape: a `dispatch()`/`prompt()` request resolved
- * against a discovered agent name, its message normalized to the canonical
- * kind-carrying form. Not part of the public API — the verbs accept an agent
- * definition and resolve the name themselves.
+ * Internal queue wire shape: an {@link AgentDispatchRequest} resolved against
+ * a discovered agent name, its message normalized to the canonical
+ * kind-carrying form (the string shorthand expanded). Not part of the public
+ * API — `dispatch()` accepts an agent definition and resolves the name itself.
  */
 export interface NamedAgentDispatchRequest extends Omit<AgentDispatchRequest, 'message'> {
 	/** Discovered agent module name. Must be a non-empty string. */

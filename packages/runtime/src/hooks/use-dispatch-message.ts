@@ -1,6 +1,7 @@
 import { enqueueDispatch } from '../runtime/dispatch.ts';
 import { getFlueRuntime } from '../runtime/flue-app.ts';
-import type { DeliveredMessage, DispatchReceipt } from '../types.ts';
+import { normalizeMessageInput } from '../runtime/message-input.ts';
+import type { DeliveredMessageInput, DispatchReceipt } from '../types.ts';
 import { isRendering, requireRenderFrame } from './frame.ts';
 
 /**
@@ -45,14 +46,15 @@ import { isRendering, requireRenderFrame } from './frame.ts';
  * - A joined delivery settles when the response that carried it settles,
  *   with the same outcome, under the host response's durability budget.
  * - Both message kinds work: a `signal` annotates the conversation; a `user`
- *   message reads as a real user message.
+ *   message reads as a real user message (a bare string is shorthand for
+ *   `{ kind: 'user', body }`, as everywhere `dispatch` appears).
  * - Each call is a durable delivery with its own receipt. Like any
  *   external side effect in a re-attempted tool, a re-run dispatches again —
  *   design for at-least-once.
  * - The dispatcher throws during render (renders are pure reads) and on bare
  *   tooling/test renders with no runtime behind them.
  */
-export function useDispatchMessage(): (message: DeliveredMessage) => Promise<DispatchReceipt> {
+export function useDispatchMessage(): (message: DeliveredMessageInput) => Promise<DispatchReceipt> {
 	const frame = requireRenderFrame('useDispatchMessage');
 	if (frame.kind === 'subagent') {
 		throw new Error(
@@ -61,7 +63,7 @@ export function useDispatchMessage(): (message: DeliveredMessage) => Promise<Dis
 	}
 	const agentName = frame.state?.agentName;
 	const instanceId = frame.state?.instanceId;
-	return async (message: DeliveredMessage): Promise<DispatchReceipt> => {
+	return async (message: DeliveredMessageInput): Promise<DispatchReceipt> => {
 		if (isRendering()) {
 			throw new Error(
 				'[flue] The useDispatchMessage() dispatcher was called during render. Renders are pure reads — dispatch from tool run functions, effects, and other callbacks.',
@@ -79,7 +81,7 @@ export function useDispatchMessage(): (message: DeliveredMessage) => Promise<Dis
 			);
 		}
 		return enqueueDispatch({
-			request: { agent: agentName, id: instanceId, message },
+			request: { agent: agentName, id: instanceId, message: normalizeMessageInput(message) },
 			dispatchQueue: rt.dispatchQueue,
 			rt,
 		});

@@ -4,11 +4,11 @@ description: Drive agents from plain Node scripts, cron jobs, and tests with sta
 lastReviewedAt: 2026-07-08
 ---
 
-Sometimes you are not answering traffic — you are running a script: a nightly job, a CI step, a one-off migration, a test. For that, Flue gives you a programmatic client for agents. `init(agent)` addresses an agent instance; `await agent.prompt(...)` sends it a message exactly as a dispatch or HTTP prompt would, waits for the run to settle, and returns the reply.
+Sometimes you are not answering traffic — you are running a script: a nightly job, a CI step, a one-off migration, a test. For that, Flue gives you a programmatic client for agents. `init(agent)` addresses an agent instance; `await agent.dispatch(...)` sends it a message exactly as any other delivery would — a bare string is shorthand for a user message — waits for the run to settle, and returns the reply.
 
-There is no separate "workflow" concept: a script is plain code that holds the same agents your server runs, and a prompt from a script is indistinguishable to the agent from any other delivery — `useDelivery` reads the prompted message, lifecycle hooks fire, state persists.
+There is no separate "workflow" concept: a script is plain code that holds the same agents your server runs, and a send from a script is indistinguishable to the agent from any other delivery — `useDelivery` reads the message, lifecycle hooks fire, state persists.
 
-## Prompting an agent from a script
+## Driving an agent from a script
 
 Inside a running Flue app (a cron callback in `app.ts`, a route handler), the runtime is already configured — `init()` works directly, like `dispatch()`:
 
@@ -19,12 +19,12 @@ import reporter from './agents/reporter.ts';
 
 new Cron('7 3 * * *', async () => {
   const agent = init(reporter, { id: `nightly-${new Date().toISOString().slice(0, 10)}` });
-  const reply = await agent.prompt('You have been triggered. Produce the nightly report.');
+  const reply = await agent.dispatch('You have been triggered. Produce the nightly report.');
   console.log(reply.text);
 });
 ```
 
-Use the fire-and-forget verbs when you only need to deliver input and move on — `dispatch(...)` for signals ([Schedules](/docs/guide/schedules/)), `prompt(...)` for user messages; both resolve at durable admission. Use the `init(...)` handle when the script needs the result.
+Use the top-level `dispatch(...)` when you only need to deliver input and move on — it resolves at durable admission ([Schedules](/docs/guide/schedules/)). Use the `init(...)` handle when the script needs the result: same verb, same message shapes, awaited to settlement.
 
 ### On Cloudflare
 
@@ -45,7 +45,7 @@ await using flue = await start({
 });
 
 const agent = init(reporter, { id: `nightly-${new Date().toISOString().slice(0, 10)}` });
-const reply = await agent.prompt('You have been triggered. Produce the nightly report.');
+const reply = await agent.dispatch('You have been triggered. Produce the nightly report.');
 console.log(reply.text);
 ```
 
@@ -61,12 +61,12 @@ Two loader caveats for bare `node`: attributed imports (`with { type: 'markdown'
 
 - `id` — the instance address. Omit it for a fresh unique id (a throwaway instance for this run); pass a stable id to share conversation state across runs.
 - `data` — creation data, validated against the agent's `input:` schema; the seed, consulted only when the handle's first send creates the instance.
-- `uid` — a [send condition](/docs/guide/building-agents/) for the first contact: a string continues only that incarnation, `null` creates only. After a prompt, the handle pins the incarnation it contacted and later prompts continue it.
+- `uid` — a [send condition](/docs/guide/building-agents/) for the first contact: a string continues only that incarnation, `null` creates only. After a send, the handle pins the incarnation it contacted and later sends continue it.
 
-`prompt(message, options?)` accepts a user message — a string (shorthand for `{ body }`) or `{ body, attachments? }`; the verb implies the kind — and resolves with the settled reply:
+`dispatch(message, options?)` accepts exactly what the top-level verb accepts — a `DeliveredMessage` of either kind, or a bare string as shorthand for `{ kind: 'user', body }` — and resolves with the settled reply:
 
 ```ts
-const reply = await agent.prompt('Summarize the failures.', {
+const reply = await agent.dispatch('Summarize the failures.', {
   onEvent: (chunk) => process.stdout.write(chunk.type === 'message-delta' ? chunk.delta : ''),
 });
 reply.text; // final assistant text
@@ -75,15 +75,13 @@ reply.metadata; // useMessageMetadata, when produced
 reply.submissionId; // this run's settled submission
 ```
 
-A failed or aborted run rejects with `AgentRunError` (`error.outcome`, `error.submissionId`, `error.cause`). Concurrent prompts to one instance serialize, or join a live response at a turn boundary — a joined prompt resolves with the coalesced reply that answered it.
-
-`dispatch(message, options?)` on the handle takes a signal — `{ type, body, attributes?, tagName? }`, kind implied — delivers it through the dispatch queue, and awaits the settled reply the same way: the handle is the "control this agent" surface, so both verbs resolve with the reply (a delivery that joined a live response resolves with the coalesced reply that answered it). When you only need to deliver input and move on, use the top-level fire-and-forget verbs instead.
+A failed or aborted run rejects with `AgentRunError` (`error.outcome`, `error.submissionId`, `error.cause`). Concurrent sends to one instance serialize, or join a live response at a turn boundary — a joined delivery resolves with the coalesced reply that answered it.
 
 ## Durability is the store's, not the await's
 
 The records a script produces are exactly as durable as the configured persistence: with `db: sqlite('./run.db')` (or any adapter), conversations survive and a re-run with the same instance id continues them; with the in-memory default, everything is gone at exit.
 
-The `await` itself is deliberately not durable. If the process dies mid-prompt, the in-flight promise is lost — for CI jobs and scripts, re-running is the recovery. If a job requires resumable checkpointed steps, that is a durable-orchestration concern; see [Durable execution](/docs/concepts/durable-execution/).
+The `await` itself is deliberately not durable. If the process dies mid-await, the in-flight promise is lost — for CI jobs and scripts, re-running is the recovery. If a job requires resumable checkpointed steps, that is a durable-orchestration concern; see [Durable execution](/docs/concepts/durable-execution/).
 
 ## Testing agents with the same API
 
@@ -103,7 +101,7 @@ test('produces a report on trigger', async () => {
   ]);
 
   await using flue = await start({ agents: [{ name: 'reporter', agent: reporter }] });
-  const reply = await init(reporter).prompt('You have been triggered.');
+  const reply = await init(reporter).dispatch('You have been triggered.');
   expect(reply.text).toContain('# Nightly Report');
 });
 ```

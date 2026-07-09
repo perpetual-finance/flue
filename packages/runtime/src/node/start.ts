@@ -51,8 +51,8 @@ export interface Flue {
  * without any HTTP surface.
  *
  * After `start()` resolves, the runtime-backed APIs work exactly as they do
- * inside a Flue server: `init()` to prompt agents and await their settled
- * replies, `dispatch()` to fire-and-forget.
+ * inside a Flue server: the `init()` handle to send messages and await their
+ * settled replies, the top-level `dispatch()` to fire-and-forget.
  *
  * ```ts
  * import { init } from '@flue/runtime';
@@ -65,7 +65,7 @@ export interface Flue {
  * });
  *
  * const agent = init(reporter, { id: `nightly-${date}` });
- * const reply = await agent.prompt('You have been triggered. Produce the nightly report.');
+ * const reply = await agent.dispatch('You have been triggered. Produce the nightly report.');
  * console.log(reply.text);
  * ```
  *

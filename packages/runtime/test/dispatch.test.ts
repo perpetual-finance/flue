@@ -6,7 +6,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
 import { InvalidRequestError, OperationFailedError } from '../src/errors.ts';
-import { dispatch, prompt } from '../src/index.ts';
+import { dispatch } from '../src/index.ts';
 import {
 	configureFlueRuntime,
 	createFlueContext,
@@ -146,35 +146,37 @@ describe('dispatch()', () => {
 		});
 	});
 
-	it('accepts a kind-implied signal — the verb supplies the kind', async () => {
+	it('resolves a dispatched user message with attachments through the same validated path', async () => {
 		const admitted: DispatchInput[] = [];
 		const moderator = configureModerator(recordingDispatchQueue(admitted));
 
 		await dispatch(moderator, {
-			id: 'guild:implied-kind',
-			message: { type: 'flagged', body: 'report:implied' },
-		});
-
-		expect(admitted[0]?.message).toEqual({
-			kind: 'signal',
-			type: 'flagged',
-			body: 'report:implied',
-		});
-	});
-
-	it('rejects a user message with a pointer to prompt()', async () => {
-		const moderator = configureModerator();
-
-		const error = await dispatch(moderator, {
-			id: 'guild:user-message',
+			id: 'guild:attachment',
 			message: {
 				kind: 'user',
 				body: 'Here is the screenshot.',
-			} as never,
-		}).catch((caught: unknown) => caught);
+				attachments: [{ type: 'image', data: 'YWJj', mimeType: 'image/png' }],
+			},
+		});
 
-		expect(error).toBeInstanceOf(InvalidRequestError);
-		expect((error as InvalidRequestError).details).toContain('belongs to prompt(...)');
+		expect(admitted[0]?.message).toEqual({
+			kind: 'user',
+			body: 'Here is the screenshot.',
+			attachments: [{ type: 'image', data: 'YWJj', mimeType: 'image/png' }],
+		});
+	});
+
+	it('expands a bare string message to a user message', async () => {
+		const admitted: DispatchInput[] = [];
+		const moderator = configureModerator(recordingDispatchQueue(admitted));
+
+		const receipt = await dispatch(moderator, {
+			id: 'guild:string-sugar',
+			message: 'Produce the report.',
+		});
+
+		expect(receipt).toEqual({ dispatchId: expect.any(String), acceptedAt: expect.any(String) });
+		expect(admitted[0]?.message).toEqual({ kind: 'user', body: 'Produce the report.' });
 	});
 
 	it('rejects a missing message when dispatch() receives no message field', async () => {
@@ -248,9 +250,10 @@ describe('dispatch()', () => {
 	it('rejects a user message attachment above the encoded length limit', async () => {
 		const moderator = configureModerator();
 
-		const error = await prompt(moderator, {
+		const error = await dispatch(moderator, {
 			id: 'guild:oversized-attachment',
 			message: {
+				kind: 'user',
 				body: 'Here is the screenshot.',
 				attachments: [
 					{ type: 'image', data: 'a'.repeat(MAX_IMAGE_DATA_LENGTH + 1), mimeType: 'image/png' },
@@ -291,82 +294,6 @@ describe('dispatch()', () => {
 	});
 });
 
-describe('prompt()', () => {
-	it('admits a string message as a user delivery through the dispatch queue', async () => {
-		const admitted: DispatchInput[] = [];
-		const moderator = configureModerator(recordingDispatchQueue(admitted));
-
-		const receipt = await prompt(moderator, {
-			id: 'guild:string-prompt',
-			message: 'Produce the report.',
-		});
-
-		expect(receipt).toEqual({ dispatchId: expect.any(String), acceptedAt: expect.any(String) });
-		expect(admitted).toMatchObject([
-			{
-				agent: 'moderator',
-				id: 'guild:string-prompt',
-				message: { kind: 'user', body: 'Produce the report.' },
-			},
-		]);
-	});
-
-	it('admits a user message with attachments through the same validated path', async () => {
-		const admitted: DispatchInput[] = [];
-		const moderator = configureModerator(recordingDispatchQueue(admitted));
-
-		await prompt(moderator, {
-			id: 'guild:attachment',
-			message: {
-				body: 'Here is the screenshot.',
-				attachments: [{ type: 'image', data: 'YWJj', mimeType: 'image/png' }],
-			},
-		});
-
-		expect(admitted[0]?.message).toEqual({
-			kind: 'user',
-			body: 'Here is the screenshot.',
-			attachments: [{ type: 'image', data: 'YWJj', mimeType: 'image/png' }],
-		});
-	});
-
-	it('carries creation data and uid conditions like dispatch()', async () => {
-		const admitted: DispatchInput[] = [];
-		const moderator = configureModerator(recordingDispatchQueue(admitted));
-
-		await prompt(moderator, {
-			id: 'guild:seeded',
-			message: 'Hello.',
-			data: { guild: 'g1' },
-			uid: null,
-		});
-
-		expect(admitted[0]).toMatchObject({
-			id: 'guild:seeded',
-			data: { guild: 'g1' },
-			uid: null,
-		});
-	});
-
-	it('rejects a signal message with a pointer to dispatch()', async () => {
-		const moderator = configureModerator();
-
-		const error = await prompt(moderator, {
-			id: 'guild:signal-prompt',
-			message: { kind: 'signal', type: 'flagged', body: 'report' } as never,
-		}).catch((caught: unknown) => caught);
-
-		expect(error).toBeInstanceOf(InvalidRequestError);
-		expect((error as InvalidRequestError).details).toContain('belongs to dispatch(...)');
-	});
-
-	it('rejects calls when the runtime has not been configured', async () => {
-		const moderator = defineAgent(() => 'Moderator agent.', { model: 'anthropic/claude-haiku-4-5' });
-		await expect(
-			prompt(moderator, { id: 'guild:unconfigured', message: 'Hello.' }),
-		).rejects.toThrow('prompt() called before runtime was configured');
-	});
-});
 
 describe('dispatched session processing', () => {
 	it('rejects the operation when a turn ends aborted', async () => {

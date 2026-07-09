@@ -3,19 +3,19 @@
  *
  * The handle is an *address*, not a resource: `init()` creates nothing, and
  * the instance itself is created on first contact exactly as it would be for
- * a dispatch or an HTTP prompt. `prompt()` admits a real direct submission —
- * the prompted message becomes the delivery, and every hook
- * (`useDelivery`, `useAgentStart`, `useAgentFinish`, state, output, joins)
- * fires exactly as it does on the other transports — then waits for the
- * submission to settle and returns the reply. `dispatch()` delivers through
- * the dispatch queue and awaits the same way: the handle is the "control
- * this agent" surface, so both verbs resolve with the settled reply. For
- * fire-and-forget delivery, use the top-level `dispatch()`.
+ * any other delivery. `dispatch()` delivers one message through the dispatch
+ * queue — either kind, exactly like the top-level `dispatch()`, with the same
+ * string shorthand for a user message — and every hook (`useDelivery`,
+ * `useAgentStart`, `useAgentFinish`, state, output, joins) fires exactly as
+ * it does on the other transports. The one difference is the await: the
+ * handle is the "control this agent" surface, so its `dispatch()` waits for
+ * the submission to settle and resolves with the reply. For fire-and-forget
+ * delivery, use the top-level `dispatch()`.
  *
- * Like `dispatch()`, the handle taps the process's one configured Flue
+ * Like the top-level verb, the handle taps the process's one configured Flue
  * runtime: it works inside a Flue server (a cron callback in app.ts), in a
  * standalone script after `start()` from `@flue/runtime/node`, and under
- * `flue run`. Awaiting a prompt holds no durable state — if the process dies
+ * `flue run`. Awaiting holds no durable state — if the process dies
  * mid-await, the submission itself survives exactly as the configured store
  * persists it, but the awaiting promise is gone. That trade is the point:
  * scripts and CI runs get a plain awaitable call and accept the loss.
@@ -31,9 +31,9 @@ import { enqueueDispatch } from './runtime/dispatch.ts';
 import type { FlueRuntime, NodeRuntime } from './runtime/flue-app.ts';
 import { getFlueRuntime } from './runtime/flue-app.ts';
 import { generateInstanceId } from './runtime/ids.ts';
-import { normalizeSignalMessage, normalizeUserMessage } from './runtime/message-input.ts';
+import { normalizeMessageInput } from './runtime/message-input.ts';
 import { agentStreamPath } from './runtime/stream-offsets.ts';
-import type { AgentModuleValue, AgentSignalMessage, AgentUserMessage } from './types.ts';
+import type { AgentModuleValue, DeliveredMessageInput } from './types.ts';
 
 export interface InitOptions {
 	/**
@@ -51,24 +51,24 @@ export interface InitOptions {
 	/**
 	 * Send condition for the handle's first contact (uid ≈ ETag): a string
 	 * continues only that incarnation, `null` creates only when no instance
-	 * exists, omit to send unconditionally. After a prompt receipt, the handle
-	 * pins the incarnation it contacted and later prompts continue it.
+	 * exists, omit to send unconditionally. After a send's receipt, the handle
+	 * pins the incarnation it contacted and later sends continue it.
 	 */
 	uid?: string | null;
 }
 
-export interface AgentPromptOptions {
+export interface AgentDispatchOptions {
 	/** Receives every projected conversation chunk as it is durably recorded. */
 	onEvent?: (chunk: ConversationStreamChunk) => void;
 	/**
 	 * Abort intent. Firing requests a durable abort of the instance's
-	 * in-flight work; the prompt keeps observing and rejects with the
+	 * in-flight work; the call keeps observing and rejects with the
 	 * `aborted` settlement once it lands.
 	 */
 	signal?: AbortSignal;
 }
 
-/** The settled reply an awaited prompt resolves with. */
+/** The settled reply an awaited handle send resolves with. */
 export interface AgentReply {
 	/** Final assistant text produced by the submission ('' when none). */
 	text: string;
@@ -81,7 +81,7 @@ export interface AgentReply {
 	submissionId: string;
 }
 
-/** A prompt whose submission settled `failed` or `aborted`. */
+/** An awaited send whose submission settled `failed` or `aborted`. */
 export class AgentRunError extends Error {
 	readonly outcome: 'failed' | 'aborted';
 	readonly submissionId: string;
@@ -103,24 +103,15 @@ export interface AgentInstanceHandle {
 	/** The instance address this handle targets. */
 	readonly id: string;
 	/**
-	 * Send one user message as a direct submission and await its settled
-	 * reply — the verb implies the kind; a string is shorthand for `{ body }`.
-	 * Concurrent prompts to one instance serialize (or join a live response
-	 * at a turn boundary); a prompt that joined resolves with the coalesced
-	 * reply that answered it. Rejects with {@link AgentRunError} on a failed
-	 * or aborted settlement. Signals belong to {@link dispatch}.
+	 * Deliver one message — either kind; a string is shorthand for
+	 * `{ kind: 'user', body }` — and await its settled reply. Concurrent
+	 * sends to one instance serialize (or join a live response at a turn
+	 * boundary); a delivery that joined resolves with the coalesced reply
+	 * that answered it. Rejects with {@link AgentRunError} on a failed or
+	 * aborted settlement. For fire-and-forget delivery, use the top-level
+	 * `dispatch()` instead.
 	 */
-	prompt(message: AgentUserMessage, options?: AgentPromptOptions): Promise<AgentReply>;
-	/**
-	 * Deliver one signal through the dispatch queue and await its settled
-	 * reply, exactly like {@link prompt} — the handle is the awaited surface,
-	 * the verbs differ only in message kind (implied, so `kind` may be
-	 * omitted). A delivery that joined a live response resolves with the
-	 * coalesced reply that answered it. Rejects with {@link AgentRunError} on
-	 * a failed or aborted settlement. For fire-and-forget delivery, use the
-	 * top-level `dispatch()`; user messages belong to {@link prompt}.
-	 */
-	dispatch(message: AgentSignalMessage, options?: AgentPromptOptions): Promise<AgentReply>;
+	dispatch(message: DeliveredMessageInput, options?: AgentDispatchOptions): Promise<AgentReply>;
 }
 
 /**
@@ -128,7 +119,7 @@ export interface AgentInstanceHandle {
  *
  * ```ts
  * const agent = init(reporter, { id: `nightly-${date}`, data: { date } });
- * const reply = await agent.prompt('You have been triggered. Produce the nightly report.');
+ * const reply = await agent.dispatch('You have been triggered. Produce the nightly report.');
  * console.log(reply.text);
  * ```
  *
@@ -163,15 +154,15 @@ export function init(agent: AgentModuleValue, options: InitOptions = {}): AgentI
 		contacted ? { ...(pinnedUid !== undefined ? { uid: pinnedUid } : {}) } : firstContact();
 
 	/**
-	 * The shared awaited tail of both handle verbs: watch the stream for the
-	 * admitted submission's durable settlement (wiring the caller's abort
-	 * signal as a durable abort intent), then read and return the reply.
+	 * The awaited tail of a handle send: watch the stream for the admitted
+	 * submission's durable settlement (wiring the caller's abort signal as a
+	 * durable abort intent), then read and return the reply.
 	 */
 	const awaitSettledReply = async (
 		node: NodeRuntime,
 		name: string,
 		target: { submissionId: string; offset: string; uid?: string },
-		options: AgentPromptOptions,
+		options: AgentDispatchOptions,
 	): Promise<AgentReply> => {
 		const path = agentStreamPath(name, id);
 		let abortRequested = false;
@@ -220,35 +211,11 @@ export function init(agent: AgentModuleValue, options: InitOptions = {}): AgentI
 	return {
 		id,
 
-		async prompt(message, promptOptions = {}) {
-			const rt = requireRuntime('init');
-			const node = requireNodeRuntime(rt, 'init().prompt()');
-			const name = resolveAgentName(rt, agent, 'init');
-			const delivered = normalizeUserMessage('init().prompt()', message);
-
-			throwIfAborted(promptOptions.signal);
-			const admit = node.createAgentAdmission(name, id);
-			const receipt = await admit(delivered, contactOptions());
-			contacted = true;
-			if (receipt.uid !== undefined) pinnedUid = receipt.uid;
-
-			return awaitSettledReply(
-				node,
-				name,
-				{
-					submissionId: receipt.submissionId,
-					offset: receipt.offset,
-					...(receipt.uid !== undefined ? { uid: receipt.uid } : {}),
-				},
-				promptOptions,
-			);
-		},
-
 		async dispatch(message, dispatchOptions = {}) {
 			const rt = requireRuntime('init');
-			const node = requireNodeRuntime(rt, 'init().dispatch()');
+			const node = requireNodeRuntime(rt);
 			const name = resolveAgentName(rt, agent, 'init');
-			const delivered = normalizeSignalMessage('init().dispatch()', message);
+			const delivered = normalizeMessageInput(message);
 
 			throwIfAborted(dispatchOptions.signal);
 			const receipt = await enqueueDispatch({
@@ -288,16 +255,16 @@ function requireRuntime(api: string): FlueRuntime {
 	return rt;
 }
 
-function requireNodeRuntime(rt: FlueRuntime, api: string): NodeRuntime {
+function requireNodeRuntime(rt: FlueRuntime): NodeRuntime {
 	if (rt.target !== 'node') {
 		throw new Error(
-			`[flue] ${api} awaits the agent's settled reply, which is not supported on ` +
-				'the Cloudflare target. A Worker is a server in front of its agent Durable ' +
-				'Objects, and holding a handler open to await a whole agent run works ' +
-				'against the platform. Deliver input with the top-level dispatch(agent, ' +
-				'{ id, message }) (fire-and-forget, works everywhere including cron ' +
-				'triggers) and let the agent publish its own result, or await a reply ' +
-				'from outside the Worker with the @flue/sdk client.',
+			"[flue] init().dispatch() awaits the agent's settled reply, which is not " +
+				'supported on the Cloudflare target. A Worker is a server in front of its ' +
+				'agent Durable Objects, and holding a handler open to await a whole agent ' +
+				'run works against the platform. Deliver input with the top-level ' +
+				'dispatch(agent, { id, message }) (fire-and-forget, works everywhere ' +
+				'including cron triggers) and let the agent publish its own result, or ' +
+				'await a reply from outside the Worker with the @flue/sdk client.',
 		);
 	}
 	return rt;

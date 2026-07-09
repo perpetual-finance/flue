@@ -32,7 +32,7 @@ import {
 import { sqlite } from '../src/node/agent-execution-store.ts';
 import { resetFlueRuntimeForTests } from '../src/runtime/flue-app.ts';
 import type { CreateAgentContextFn } from '../src/runtime/handle-agent.ts';
-import type { DeliveredMessage, DispatchReceipt } from '../src/types.ts';
+import type { DeliveredMessage, DeliveredMessageInput, DispatchReceipt } from '../src/types.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
 import { agentRecord, nodeRuntime } from './helpers/runtime-config.ts';
 
@@ -476,7 +476,7 @@ describe('useDispatchMessage()', () => {
 			fauxAssistantMessage('Continued.'),
 		]);
 
-		let captured: ((message: DeliveredMessage) => Promise<DispatchReceipt>) | undefined;
+		let captured: ((message: DeliveredMessageInput) => Promise<DispatchReceipt>) | undefined;
 		function assistant() {
 			const dispatchMessage = useDispatchMessage();
 			useTool({
@@ -494,7 +494,8 @@ describe('useDispatchMessage()', () => {
 		await admitAndSettle(coordinator, { kind: 'user', body: 'Go.' });
 
 		expect(captured).toBeDefined();
-		const receipt = await captured?.({ kind: 'user', body: 'Continue please.' });
+		// The string shorthand works on the hook's dispatcher too.
+		const receipt = await captured?.('Continue please.');
 		expect(receipt?.dispatchId).toEqual(expect.any(String));
 		await coordinator.waitForIdle();
 		await coordinator.shutdown();

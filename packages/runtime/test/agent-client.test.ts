@@ -53,7 +53,7 @@ async function startFlue(...agents: Parameters<typeof start>[0]['agents']) {
 }
 
 describe('start() + init(): the scripted client', () => {
-	it('prompts an agent and resolves the settled reply with full hook parity', async () => {
+	it('dispatches a message and resolves the settled reply with full hook parity', async () => {
 		const { provider, model } = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('The nightly report is ready.')]);
 
@@ -77,13 +77,13 @@ describe('start() + init(): the scripted client', () => {
 		const agent = init(reporter);
 		expect(agent.id).toMatch(/^instance_/);
 
-		const reply = await agent.prompt('You have been triggered. Produce the nightly report.');
+		const reply = await agent.dispatch('You have been triggered. Produce the nightly report.');
 		expect(reply.text).toBe('The nightly report is ready.');
 		expect(reply.uid).toEqual(expect.any(String));
 		expect(reply.submissionId).toEqual(expect.any(String));
 
-		// The prompted message IS the delivery, and the lifecycle hooks ran —
-		// exactly as they would for a dispatch or an HTTP prompt.
+		// The dispatched string became the user-message delivery, and the
+		// lifecycle hooks ran — exactly as for any other transport.
 		expect(deliveries).toContain('user:You have been triggered. Produce the nightly report.');
 		expect(startRuns).toBe(1);
 		expect(finishRuns).toBe(1);
@@ -104,27 +104,27 @@ describe('start() + init(): the scripted client', () => {
 		});
 
 		await startFlue({ name: 'seeded', agent: seeded });
-		const reply = await init(seeded, { data: { date: '2026-07-08' } }).prompt('Go.');
+		const reply = await init(seeded, { data: { date: '2026-07-08' } }).dispatch('Go.');
 		expect(reply.text).toBe('Seeded.');
 		expect(seenData).toEqual({ date: '2026-07-08' });
 	});
 
-	it('pins the contacted incarnation: create-only handles continue across prompts', async () => {
+	it('pins the contacted incarnation: create-only handles continue across sends', async () => {
 		const { provider, model } = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('one'), fauxAssistantMessage('two')]);
 		const echo = defineAgent(() => 'Reply.', { model });
 
 		await startFlue({ name: 'echo', agent: echo });
 		const agent = init(echo, { id: 'pin-1', uid: null });
-		const first = await agent.prompt('One.');
-		// The second prompt continues the incarnation the handle contacted; the
+		const first = await agent.dispatch('One.');
+		// The second send continues the incarnation the handle contacted; the
 		// init-time create-only condition applies to first contact only.
-		const second = await agent.prompt('Two.');
+		const second = await agent.dispatch('Two.');
 		expect(second.text).toBe('two');
 		expect(second.uid).toBe(first.uid);
 
 		// A NEW create-only handle against the same id still rejects.
-		await expect(init(echo, { id: 'pin-1', uid: null }).prompt('Three.')).rejects.toThrow();
+		await expect(init(echo, { id: 'pin-1', uid: null }).dispatch('Three.')).rejects.toThrow();
 	});
 
 	it('rejects with AgentRunError when the submission settles failed', async () => {
@@ -140,7 +140,7 @@ describe('start() + init(): the scripted client', () => {
 
 		await startFlue({ name: 'doomed', agent: doomed });
 		const error = await init(doomed)
-			.prompt('Go.')
+			.dispatch('Go.')
 			.then(
 				() => undefined,
 				(thrown: unknown) => thrown,
@@ -150,11 +150,11 @@ describe('start() + init(): the scripted client', () => {
 		expect((error as AgentRunError).submissionId).toEqual(expect.any(String));
 	});
 
-	it('handle.dispatch() awaits the settled reply like prompt()', async () => {
+	it('awaits both message kinds through the one verb', async () => {
 		const { provider, model } = createFauxProvider();
 		provider.setResponses([
 			fauxAssistantMessage('signal ack'),
-			fauxAssistantMessage('prompt reply'),
+			fauxAssistantMessage('question reply'),
 		]);
 
 		const deliveries: string[] = [];
@@ -167,22 +167,22 @@ describe('start() + init(): the scripted client', () => {
 
 		await startFlue({ name: 'listener', agent: listener });
 		const agent = init(listener, { id: 'dispatch-1' });
-		// The handle is the awaited surface for both verbs: the dispatch
-		// resolves with the reply that answered the signal (its durable
-		// settled record, unified with directs, is what the await observes).
-		// The verb implies the kind, so `kind: 'signal'` may be omitted.
+		// The handle is the awaited surface: a signal (explicit kind) resolves
+		// with the reply that answered it — its durable settled record,
+		// unified across submission kinds, is what the await observes.
 		const ack = await agent.dispatch({
+			kind: 'signal',
 			type: 'trigger',
 			body: 'from the script',
 		});
 		expect(ack.text).toBe('signal ack');
 		expect(ack.submissionId).toEqual(expect.any(String));
 		expect(deliveries).toContain('signal:from the script');
-		// A prompt right behind the awaited dispatch settles cleanly (this
+		// A user message right behind the awaited signal settles cleanly (this
 		// interleaving used to fail with "the session advanced past this
 		// input" before joined deliveries classified as continuation input).
-		const reply = await agent.prompt('And a question right behind it.');
-		expect(reply.text).toBe('prompt reply');
+		const reply = await agent.dispatch('And a question right behind it.');
+		expect(reply.text).toBe('question reply');
 		expect(deliveries).toContain('user:And a question right behind it.');
 	});
 
@@ -216,7 +216,7 @@ describe('start() + init(): the scripted client', () => {
 
 		await startFlue({ name: 'echo', agent: echo });
 		const seen: string[] = [];
-		const reply = await init(echo).prompt('Go.', { onEvent: (chunk) => seen.push(chunk.type) });
+		const reply = await init(echo).dispatch('Go.', { onEvent: (chunk) => seen.push(chunk.type) });
 		expect(reply.text).toBe('streamed');
 		expect(seen).toContain('submission-settled');
 	});
@@ -225,7 +225,7 @@ describe('start() + init(): the scripted client', () => {
 		const { model } = createFauxProvider();
 		const echo = defineAgent(() => 'Reply.', { model });
 
-		await expect(init(echo).prompt('Go.')).rejects.toThrow(
+		await expect(init(echo).dispatch('Go.')).rejects.toThrow(
 			/before the Flue runtime was configured/,
 		);
 
