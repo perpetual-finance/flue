@@ -1,5 +1,5 @@
 'use agent';
-import { defineAgent, useInstruction, useState, useTool } from '@flue/runtime';
+import { defineAgent, useInstruction, usePersistentState, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { guarded, useMachine } from '../machine.ts';
 import {
@@ -97,7 +97,7 @@ function Support() {
 		phases: ['gathering', 'drafting', 'committing', 'done'] as const,
 		initial: 'gathering',
 	});
-	const [sentiment, setSentiment] = useState<'neutral' | 'churn-risk'>('sentiment', 'neutral');
+	const [sentiment, setSentiment] = usePersistentState<'neutral' | 'churn-risk'>('sentiment', 'neutral');
 
 	useTool({
 		name: 'update_sentiment',

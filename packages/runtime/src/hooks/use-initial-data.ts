@@ -7,7 +7,7 @@ import { requireRenderFrame } from './frame.ts';
  *
  * This is the third leg of the input model: `useInitialData()` is what the
  * instance is *about*, `useDelivery()` is what *this message* says, and
- * `useState` is what the agent has *learned*. Parse per-instance facts from
+ * `usePersistentState` is what the agent has *learned*. Parse per-instance facts from
  * creation data, never from later deliveries — only the first message is
  * shaped by the code that creates the instance.
  *
@@ -31,7 +31,7 @@ import { requireRenderFrame } from './frame.ts';
  *   recorded and returned untyped; the type parameter is compile-time only.
  * - Constant forever: `data` on messages to an existing instance is ignored,
  *   and nothing can change the recorded value. Evolving facts belong in
- *   `useState`.
+ *   `usePersistentState`.
  * - The return type is exactly the type parameter you assert — with a
  *   required `input:` schema the value is always present, so the common
  *   case needs no `undefined` narrowing (and no `!`). At runtime the value

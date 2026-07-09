@@ -280,7 +280,7 @@ export interface SubmissionSettledRecord extends ConversationRecordEnvelope {
 }
 
 /**
- * One durable write to the agent instance's hook state (`useState`). The
+ * One durable write to the agent instance's hook state (`usePersistentState`). The
  * record log is the source of truth: the current value of a state name is the
  * `value` of its last `state_write` in stream order, reduced across every
  * conversation in the instance's stream. Writes made by tools land in the same

@@ -1,12 +1,12 @@
 import type { ToolDefinition, ToolInputSchema } from '@flue/runtime';
-import { useInstruction, useState } from '@flue/runtime';
+import { useInstruction, usePersistentState } from '@flue/runtime';
 import * as v from 'valibot';
 
 /**
  * A tiny phase machine built entirely from public hooks — proof that authors
  * can layer their own conventions on top of the custom-hooks model without
  * any framework support. There is nothing special here: `useMachine` just
- * calls `useState` and `useInstruction`.
+ * calls `usePersistentState` and `useInstruction`.
  *
  * The machine is advisory, not structural: every phase hook stays mounted
  * for the agent's whole life (see `agents/support.ts` — hook calls are
@@ -19,7 +19,7 @@ export function useMachine<P extends string>(options: {
 	phases: readonly P[];
 	initial: P;
 }) {
-	const [phase, setPhase] = useState<P>(options.name, options.initial);
+	const [phase, setPhase] = usePersistentState<P>(options.name, options.initial);
 	// The core hook is untyped at runtime; a composed hook layers its own
 	// guarantee — a persisted phase from before a rename fails loudly here.
 	v.assert(v.picklist(options.phases), phase);

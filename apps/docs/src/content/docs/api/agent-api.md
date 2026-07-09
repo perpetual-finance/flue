@@ -32,9 +32,9 @@ import {
   useInstruction,
   useMessageData,
   useMessageMetadata,
+  usePersistentState,
   useSandbox,
   useSkill,
-  useState,
   useSubagent,
   useTool,
   type AgentAppendMessage,
@@ -107,10 +107,10 @@ Default-export the returned value from a module whose first statement is the `'u
 
 ```ts title="src/agents/support.ts"
 'use agent';
-import { defineAgent, useState, useTool } from '@flue/runtime';
+import { defineAgent, usePersistentState, useTool } from '@flue/runtime';
 
 function Support() {
-  const [phase, setPhase] = useState('phase', 'gathering');
+  const [phase, setPhase] = usePersistentState('phase', 'gathering');
 
   useTool({
     name: 'begin_draft',
@@ -126,7 +126,7 @@ export default defineAgent(Support, { model: 'anthropic/claude-sonnet-4-6' });
 
 The directive gives the agent its durable identity (the file basename) and registers it with the built application — there is no name-based addressing beyond that identity. To expose the agent over HTTP, mount `agent.route()` in `app.ts`; see the [Routing API](/docs/api/routing-api/). A dispatch-only agent needs no mount. `flue run <path>` and raw `defineAgent()` values in unit tests do not require the directive.
 
-The agent function re-renders every turn as durable state changes — it must return synchronously. Its identity hooks (`useState()`, `useMessageData()`, `useSandbox()`, and the lifecycle hooks) must stay identical across renders; its resources (`useTool()`, `useSkill()`, `useSubagent()`) may be declared conditionally, with changes announced to the model (see [Dynamic resources](#dynamic-resources)). Async work belongs in tools, lifecycle hooks (`useAgentStart()`, `useAgentFinish()`), or resource factories, never in the agent function body itself.
+The agent function re-renders every turn as durable state changes — it must return synchronously. Its identity hooks (`usePersistentState()`, `useMessageData()`, `useSandbox()`, and the lifecycle hooks) must stay identical across renders; its resources (`useTool()`, `useSkill()`, `useSubagent()`) may be declared conditionally, with changes announced to the model (see [Dynamic resources](#dynamic-resources)). Async work belongs in tools, lifecycle hooks (`useAgentStart()`, `useAgentFinish()`), or resource factories, never in the agent function body itself.
 
 The runtime passes the top-level agent function an `AgentProps` object — the agent's route data, the way a web framework passes route params to the page component. Zero-argument agent functions stay assignable unchanged. Only the root receives it: custom hooks get whatever arguments their caller passes, and a subagent's agent function gets nothing (a delegate runs in isolation from the parent).
 
@@ -228,7 +228,7 @@ function Support() {
 }
 ```
 
-Resources are dynamic; identity and lifecycle are static. The resource hooks — `useTool`, `useSkill`, `useSubagent` — may be called conditionally (`if (pro) useSkill(refundsSkill)`): when a render's resource set changes, the runtime announces the delta to the model as a `resources` signal instead of rewriting the system prompt (see [Dynamic resources](#dynamic-resources)). Every other hook — `useState`, `useMessageData`, `useSandbox`, `useAgentStart`, `useAgentFinish` — is part of the agent's durable identity and must be declared identically on every render; a custom hook that mixes both kinds inherits the stricter rule. A custom hook may take arguments and return values to its caller like any other function, and may call other custom hooks.
+Resources are dynamic; identity and lifecycle are static. The resource hooks — `useTool`, `useSkill`, `useSubagent` — may be called conditionally (`if (pro) useSkill(refundsSkill)`): when a render's resource set changes, the runtime announces the delta to the model as a `resources` signal instead of rewriting the system prompt (see [Dynamic resources](#dynamic-resources)). Every other hook — `usePersistentState`, `useMessageData`, `useSandbox`, `useAgentStart`, `useAgentFinish` — is part of the agent's durable identity and must be declared identically on every render; a custom hook that mixes both kinds inherits the stricter rule. A custom hook may take arguments and return values to its caller like any other function, and may call other custom hooks.
 
 #### Dynamic resources
 
@@ -285,18 +285,18 @@ export default function marketing() {
 }
 ```
 
-### `useState(...)`
+### `usePersistentState(...)`
 
 ```ts
-function useState<T>(name: string, defaultValue: T): [T, StateSetter<T>];
-function useState<T = unknown>(name: string): [T | undefined, StateSetter<T>];
+function usePersistentState<T>(name: string, defaultValue: T): [T, StateSetter<T>];
+function usePersistentState<T = unknown>(name: string): [T | undefined, StateSetter<T>];
 ```
 
 Durable agent state: an API over the record log of the agent instance. Reads the value as of this render (reduced from the instance's `state_write` records) and returns a setter that persists a new value.
 
 ```ts
 export default function SupportAgent() {
-  const [phase, setPhase] = useState<'gathering' | 'drafting'>('phase', 'gathering');
+  const [phase, setPhase] = usePersistentState<'gathering' | 'drafting'>('phase', 'gathering');
 
   useTool({
     name: 'begin_draft',
@@ -363,7 +363,7 @@ function ReproducePhase() {
 | `model`         | `string`        | Model specifier override. Inherits the parent's model when omitted.     |
 | `thinkingLevel` | `ThinkingLevel` | Reasoning-effort override. Inherits when omitted.                       |
 
-Inside the delegate's render, custom hooks, `useTool()`, `useInstruction()`, `useSkill()`, and nested `useSubagent()` all compose as usual; `useState()` and `useSandbox()` throw (durable state is instance-scoped and delegates share the parent environment). Duplicate delegate names in one render fail fast. Select a declared subagent from a `harness.task()` call with `options.agent`; see [`harness.task(...)`](#harnesstask).
+Inside the delegate's render, custom hooks, `useTool()`, `useInstruction()`, `useSkill()`, and nested `useSubagent()` all compose as usual; `usePersistentState()` and `useSandbox()` throw (durable state is instance-scoped and delegates share the parent environment). Duplicate delegate names in one render fail fast. Select a declared subagent from a `harness.task()` call with `options.agent`; see [`harness.task(...)`](#harnesstask).
 
 ### `useSandbox(...)`
 
@@ -418,7 +418,7 @@ Runs a callback when the agent starts work on a delivered message — after the 
 ```ts
 export default function IssueTriage() {
   const dispatch = useDispatchMessage();
-  const [issue, setIssue] = useState<Issue | null>('issue', null);
+  const [issue, setIssue] = usePersistentState<Issue | null>('issue', null);
 
   useAgentStart(async ({ harness, log }) => {
     if (issue) return; // durable guard: the intake dispatch fires these hooks itself
@@ -500,7 +500,7 @@ interface AgentAppendMessage {
 function useInitialData<T = unknown>(): T;
 ```
 
-Read the instance's creation data — the `data` a caller sent with this instance's first contact, recorded exactly once at creation and constant for the instance's whole life. This is the third leg of the input model: `useInitialData()` is what the instance is _about_, `useDelivery()` is what _this message_ says, and `useState` is what the agent has _learned_.
+Read the instance's creation data — the `data` a caller sent with this instance's first contact, recorded exactly once at creation and constant for the instance's whole life. This is the third leg of the input model: `useInitialData()` is what the instance is _about_, `useDelivery()` is what _this message_ says, and `usePersistentState` is what the agent has _learned_.
 
 ```ts
 const input = v.object({ issue: v.pipe(v.number(), v.integer()) });
@@ -515,7 +515,7 @@ export default defineAgent(Triage, { model: 'anthropic/claude-opus-4-6', input }
 
 Creation data rides the instance's first contact: `dispatch(triage, { id, data, message })`, a `data` field beside the direct-HTTP message body, `client.send({ message, data })`, or `flue run --data '<json>'`. Declare an `input:` schema on `defineAgent` to validate it at creation — a mismatch (including absence, unless the schema accepts `undefined`) rejects the creating call, so with a required schema the value is always present here, as the schema-parsed output. Without a schema, whatever the creator sent is recorded and returned untyped.
 
-The value is immutable — `data` on messages to an existing instance is ignored, and evolving facts belong in `useState`. The return type is exactly the type parameter you assert: with a required schema the value is always present, so the common case needs no `undefined` narrowing (and no `!`). At runtime the value _is_ `undefined` when creation carried no data, on bare tooling/test renders (back it with `initialData` in the render-state context), and in subagent renders (a delegate has no creation data of its own; close over a value to share it) — when your agent can hit those cases, say so in the type: `useInitialData<Config | undefined>()`. The recorded value is part of the instance's durable record stream but is never served to clients; still, it is not a secrets channel — keys and tokens stay in the environment.
+The value is immutable — `data` on messages to an existing instance is ignored, and evolving facts belong in `usePersistentState`. The return type is exactly the type parameter you assert: with a required schema the value is always present, so the common case needs no `undefined` narrowing (and no `!`). At runtime the value _is_ `undefined` when creation carried no data, on bare tooling/test renders (back it with `initialData` in the render-state context), and in subagent renders (a delegate has no creation data of its own; close over a value to share it) — when your agent can hit those cases, say so in the type: `useInitialData<Config | undefined>()`. The recorded value is part of the instance's durable record stream but is never served to clients; still, it is not a secrets channel — keys and tokens stay in the environment.
 
 ### `useDispatchMessage()`
 

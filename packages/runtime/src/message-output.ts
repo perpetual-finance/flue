@@ -176,7 +176,7 @@ export interface AgentFinishDeclaration {
 
 /**
  * The output channel shared between renders and the session, mirroring the
- * `useState` buffer pattern: created once per harness lifetime, handed to
+ * `usePersistentState` buffer pattern: created once per harness lifetime, handed to
  * both sides. Renders replace `producers` and the lifecycle declarations
  * wholesale each render (fresh closures); `useMessageData` writers call
  * `writeMessageData`; the session connects the sink that reaches the

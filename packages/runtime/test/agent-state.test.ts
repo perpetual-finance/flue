@@ -16,7 +16,7 @@ import {
 	reduceConversationRecords,
 } from '../src/conversation-reducer.ts';
 import { renderAgentFunction } from '../src/hooks/render.ts';
-import { createHookStateBuffer, type StateSetter, useState } from '../src/hooks/state.ts';
+import { createHookStateBuffer, type StateSetter, usePersistentState } from '../src/hooks/use-persistent-state.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { createFlueContext, type DispatchInput } from '../src/internal.ts';
 import { createNodeAgentCoordinator } from '../src/node/agent-coordinator.ts';
@@ -85,12 +85,12 @@ function renderStateContext(entries: [string, unknown][] = []) {
 	return { snapshot, store: createHookStateBuffer(snapshot) };
 }
 
-describe('useState (render)', () => {
+describe('usePersistentState (render)', () => {
 	it('returns the default when nothing is persisted, undefined without one', () => {
 		renderAgentFunction(
 			() => {
-				const [count] = useState('count', 0);
-				const [note] = useState('note');
+				const [count] = usePersistentState('count', 0);
+				const [note] = usePersistentState('note');
 				expect(count).toBe(0);
 				expect(note).toBeUndefined();
 			},
@@ -102,7 +102,7 @@ describe('useState (render)', () => {
 	it('reads the persisted snapshot value over the default', () => {
 		renderAgentFunction(
 			() => {
-				const [count] = useState('count', 0);
+				const [count] = usePersistentState('count', 0);
 				expect(count).toBe(7);
 			},
 			CONFIG,
@@ -115,7 +115,7 @@ describe('useState (render)', () => {
 		state.store.write('count', 2);
 		renderAgentFunction(
 			() => {
-				const [count] = useState('count', 0);
+				const [count] = usePersistentState('count', 0);
 				expect(count).toBe(2);
 			},
 			CONFIG,
@@ -127,23 +127,23 @@ describe('useState (render)', () => {
 		expect(() =>
 			renderAgentFunction(
 				() => {
-					useState('count');
-					useState('count');
+					usePersistentState('count');
+					usePersistentState('count');
 				},
 				CONFIG,
 				renderStateContext(),
 			),
-		).toThrow(/Duplicate useState name "count"/);
+		).toThrow(/Duplicate usePersistentState name "count"/);
 	});
 
 	it('throws outside an agent render', () => {
-		expect(() => useState('count')).toThrow(/outside an agent function/);
+		expect(() => usePersistentState('count')).toThrow(/outside an agent function/);
 	});
 
 	it('throws when written during render', () => {
 		renderAgentFunction(
 			() => {
-				const [, setCount] = useState('count', 0);
+				const [, setCount] = usePersistentState('count', 0);
 				expect(() => setCount(1)).toThrow(/written during render/);
 			},
 			CONFIG,
@@ -154,7 +154,7 @@ describe('useState (render)', () => {
 	it('throws on writes when the render has no durable runtime behind it', () => {
 		let setCount: StateSetter<number> | undefined;
 		renderAgentFunction(() => {
-			[, setCount] = useState('count', 0);
+			[, setCount] = usePersistentState('count', 0);
 		}, CONFIG);
 		expect(() => setCount?.(1)).toThrow(/no durable runtime/);
 	});
@@ -163,7 +163,7 @@ describe('useState (render)', () => {
 		expect(() =>
 			renderAgentFunction(
 				() => {
-					useState('');
+					usePersistentState('');
 				},
 				CONFIG,
 				renderStateContext(),
@@ -172,7 +172,7 @@ describe('useState (render)', () => {
 		expect(() =>
 			renderAgentFunction(
 				() => {
-					useState({ name: 'count' } as never);
+					usePersistentState({ name: 'count' } as never);
 				},
 				CONFIG,
 				renderStateContext(),
@@ -184,7 +184,7 @@ describe('useState (render)', () => {
 		let setAny: StateSetter<unknown> | undefined;
 		renderAgentFunction(
 			() => {
-				[, setAny] = useState('anything');
+				[, setAny] = usePersistentState('anything');
 			},
 			CONFIG,
 			renderStateContext(),
@@ -259,7 +259,7 @@ describe('state_write reduction', () => {
 	});
 });
 
-describe('useState end to end (node coordinator, faux provider)', () => {
+describe('usePersistentState end to end (node coordinator, faux provider)', () => {
 	it('persists tool writes atomically with the tool batch and reads them fresh at the next run', async () => {
 		const dbPath = createTempDbPath();
 		const adapter = sqlite(dbPath);
@@ -281,7 +281,7 @@ describe('useState end to end (node coordinator, faux provider)', () => {
 
 		const renderedCounts: number[] = [];
 		function assistant() {
-			const [count, setCount] = useState('count', 0);
+			const [count, setCount] = usePersistentState('count', 0);
 			renderedCounts.push(count);
 			useTool({
 				name: 'bump',
@@ -377,7 +377,7 @@ describe('useState end to end (node coordinator, faux provider)', () => {
 		]);
 
 		function assistant() {
-			const [count, setCount] = useState('count', 0);
+			const [count, setCount] = usePersistentState('count', 0);
 			useTool({
 				name: 'bump',
 				description: 'Increment the counter.',
@@ -451,7 +451,7 @@ describe('useState end to end (node coordinator, faux provider)', () => {
 			});
 		}
 		function assistant() {
-			const [count, setCount] = useState('count', 0);
+			const [count, setCount] = usePersistentState('count', 0);
 			if (count > 0) useExtra();
 			useTool({
 				name: 'bump',

@@ -11,7 +11,7 @@ import { requireRenderFrame } from './frame.ts';
  * ```ts
  * export default function IssueTriage() {
  *   const dispatch = useDispatchMessage();
- *   const [issue, setIssue] = useState<Issue | null>('issue', null);
+ *   const [issue, setIssue] = usePersistentState<Issue | null>('issue', null);
  *
  *   useAgentStart(async ({ harness, log }) => {
  *     if (issue) return; // durable guard: intake happens once

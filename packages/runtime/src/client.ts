@@ -8,7 +8,7 @@ import {
 	assertRenderStructureInvariance,
 	renderAgentFunctionWithStructure,
 } from './hooks/render.ts';
-import { createHookStateBuffer } from './hooks/state.ts';
+import { createHookStateBuffer } from './hooks/use-persistent-state.ts';
 import { createAgentOutputChannel } from './message-output.ts';
 import { type AttachmentStore, InMemoryAttachmentStore } from './runtime/attachment-store.ts';
 import { InMemoryConversationStreamStore } from './runtime/conversation-stream-store.ts';
@@ -268,7 +268,7 @@ export async function initializeRootHarness(
 	if (!config.conversationWriter || !config.attachmentStore) {
 		throw new Error('[flue] Canonical conversation runtime is not configured.');
 	}
-	// useState reads the instance's reduced state snapshot at render time and
+	// usePersistentState reads the instance's reduced state snapshot at render time and
 	// writes through this buffer, which the session drains into the tool
 	// batch's append. One buffer per harness lifetime (one submission attempt).
 	const reduced = await config.conversationWriter.loadReducedState();

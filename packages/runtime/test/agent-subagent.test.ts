@@ -15,8 +15,8 @@ import {
 	renderAgentFunctionWithStructure,
 	resolveSubagentDefinition,
 } from '../src/hooks/render.ts';
-import { useState } from '../src/hooks/state.ts';
 import { useInstruction } from '../src/hooks/use-instruction.ts';
+import { usePersistentState } from '../src/hooks/use-persistent-state.ts';
 import { useSandbox } from '../src/hooks/use-sandbox.ts';
 import { useSkill } from '../src/hooks/use-skill.ts';
 import { useSubagent } from '../src/hooks/use-subagent.ts';
@@ -213,12 +213,12 @@ describe('resolveSubagentDefinition() (delegation-time render)', () => {
 
 	it('rejects root-scoped hooks in the delegate render', () => {
 		function WithState() {
-			useState('count', 0);
+			usePersistentState('count', 0);
 			return 'Nope.';
 		}
 		expect(() =>
 			resolveSubagentDefinition({ name: 's', description: 'd', agent: WithState }),
-		).toThrow(/useState\(\) is not available in a subagent render/);
+		).toThrow(/usePersistentState\(\) is not available in a subagent render/);
 		function WithSandbox() {
 			useSandbox({ createSessionEnv: async () => createNoopSessionEnv() });
 			return 'Nope.';

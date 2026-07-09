@@ -21,11 +21,11 @@ import {
 	assertRenderStructureInvariance,
 	renderAgentFunctionWithStructure,
 } from '../src/hooks/render.ts';
-import { useState } from '../src/hooks/state.ts';
 import { useAgentFinish } from '../src/hooks/use-agent-finish.ts';
 import { useAgentStart } from '../src/hooks/use-agent-start.ts';
 import { useDelivery } from '../src/hooks/use-delivery.ts';
 import { useDispatchMessage } from '../src/hooks/use-dispatch-message.ts';
+import { usePersistentState } from '../src/hooks/use-persistent-state.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import {
 	configureFlueRuntime,
@@ -264,7 +264,7 @@ describe('useAgentStart()', () => {
 			// delivery that re-fires these hooks, and the joined delivery's
 			// hooks run against a fresh render (the join boundary re-renders),
 			// so the guard reliably observes the write — no duplicate intake.
-			const [intakeDone, setIntakeDone] = useState('intake_done', false);
+			const [intakeDone, setIntakeDone] = usePersistentState('intake_done', false);
 			useAgentStart(async () => {
 				runOrder.push(intakeDone ? 'first:guarded' : 'first');
 				if (intakeDone) return;
@@ -497,7 +497,7 @@ describe('useAgentStart()', () => {
 
 		let startRuns = 0;
 		function assistant() {
-			const [, setSeeded] = useState<boolean>('seeded', false);
+			const [, setSeeded] = usePersistentState<boolean>('seeded', false);
 			useAgentStart(() => {
 				startRuns += 1;
 				setSeeded(true);

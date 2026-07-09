@@ -9,7 +9,7 @@ import {
 } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
-import { useState } from '../src/hooks/state.ts';
+import { usePersistentState } from '../src/hooks/use-persistent-state.ts';
 import { useSkill } from '../src/hooks/use-skill.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { createFlueContext, type DispatchInput } from '../src/internal.ts';
@@ -247,7 +247,7 @@ describe('dynamic resources end to end (node coordinator, faux provider)', () =>
 			instructions: 'Verify the order, then issue the refund.',
 		});
 		function assistant() {
-			const [pro, setPro] = useState('pro', false);
+			const [pro, setPro] = usePersistentState('pro', false);
 			if (pro) useSkill(refundsSkill);
 			useTool({
 				name: 'upgrade',
@@ -370,7 +370,7 @@ describe('dynamic resources end to end (node coordinator, faux provider)', () =>
 			instructions: 'Verify the order, then issue the refund.',
 		});
 		function assistant() {
-			const [pro, setPro] = useState('pro', false);
+			const [pro, setPro] = usePersistentState('pro', false);
 			if (pro) useSkill(refundsSkill);
 			useTool({
 				name: 'upgrade',

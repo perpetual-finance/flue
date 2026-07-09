@@ -92,7 +92,7 @@ import {
 } from './event-redaction.ts';
 import { type FlueExecutionContext, interceptExecution } from './execution-interceptor.ts';
 import { resolveSubagentDefinition } from './hooks/render.ts';
-import type { HookStateBuffer, HookStateWrite } from './hooks/state.ts';
+import type { HookStateBuffer, HookStateWrite } from './hooks/use-persistent-state.ts';
 import {
 	type AgentFinishContext,
 	type AgentFinishDeclaration,
@@ -392,7 +392,7 @@ interface SessionInitOptions {
 	attachmentStore: AttachmentStore;
 	executionContext?: FlueExecutionContext;
 	/**
-	 * `useState` write buffer from the harness's render (function agents
+	 * `usePersistentState` write buffer from the harness's render (function agents
 	 * only). Buffered writes drain into the same append batch as each tool
 	 * batch's `tool_results_committed` record, so a state write shares the
 	 * durability of the tool batch that made it.
@@ -904,7 +904,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	}
 
 	/**
-	 * Sink for `useMessageData` writers. Unlike `useState` writes (buffered,
+	 * Sink for `useMessageData` writers. Unlike `usePersistentState` writes (buffered,
 	 * batch-atomic), data writes append immediately — live client progress is
 	 * their whole point. The writer API is synchronous, so appends chain on an
 	 * ordered queue; the queue is awaited before the response settles, and an
@@ -1594,7 +1594,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		]);
 	}
 
-	/** Turn buffered `useState` writes into canonical records, in write order. */
+	/** Turn buffered `usePersistentState` writes into canonical records, in write order. */
 	private drainHookStateRecords(): ConversationRecord[] {
 		if (!this.hookState) return [];
 		return this.hookState.drain().map((write: HookStateWrite) => ({
@@ -2168,7 +2168,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 								reason: 'A committed canonical tool-result batch must contain at least one result.',
 							});
 						}
-						// Buffered useState writes land in the same append batch as the
+						// Buffered usePersistentState writes land in the same append batch as the
 						// commit marker — one store.append, one durability point. If
 						// recovery settles this batch as interrupted, the writes never
 						// happened, exactly like the tool side effects they rode with.

@@ -31,7 +31,7 @@ interface AttachScope {
  * Durable hook state made available to one render: the reduced snapshot to
  * read values from, and the store setters write through. Absent when there is
  * no durable runtime behind the render (direct `renderAgentFunction` calls in
- * tests/tooling) — `useState` then reads defaults and its setters throw.
+ * tests/tooling) — `usePersistentState` then reads defaults and its setters throw.
  */
 export interface RenderStateContext {
 	snapshot: ReadonlyMap<string, unknown>;
@@ -71,7 +71,7 @@ export interface RenderStateContext {
 	initialData?: unknown;
 }
 
-/** The write channel `useState` setters push into; drained by the session. */
+/** The write channel `usePersistentState` setters push into; drained by the session. */
 export interface HookStateStore {
 	write(name: string, value: unknown): void;
 	current(name: string): { value: unknown } | undefined;
@@ -81,12 +81,12 @@ export interface RenderFrame {
 	/**
 	 * What is being rendered: a root agent, or a delegate's agent function rendered
 	 * at delegation time. Subagent frames reject the hooks whose contracts are
-	 * root-scoped (`useState` — durable state is instance-scoped; `useSandbox`
+	 * root-scoped (`usePersistentState` — durable state is instance-scoped; `useSandbox`
 	 * — delegates share the parent environment).
 	 */
 	kind: 'agent' | 'subagent';
 	root: AttachScope;
-	/** `useState` names declared this render; duplicates throw. */
+	/** `usePersistentState` names declared this render; duplicates throw. */
 	stateNames: Set<string>;
 	/** `useMessageData` names declared this render; duplicates throw. */
 	messageDataNames: Set<string>;

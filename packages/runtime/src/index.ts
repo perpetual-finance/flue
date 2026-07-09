@@ -48,7 +48,6 @@ export type {
 	FlueExecutionInterceptor,
 	FlueExecutionOperation,
 } from './execution-interceptor.ts';
-export { type StateSetter, useState } from './hooks/state.ts';
 export { useAgentFinish } from './hooks/use-agent-finish.ts';
 export { useAgentStart } from './hooks/use-agent-start.ts';
 export { useDelivery } from './hooks/use-delivery.ts';
@@ -57,6 +56,7 @@ export { useInitialData } from './hooks/use-initial-data.ts';
 export { useInstruction } from './hooks/use-instruction.ts';
 export { useMessageData } from './hooks/use-message-data.ts';
 export { useMessageMetadata } from './hooks/use-message-metadata.ts';
+export { type StateSetter, usePersistentState } from './hooks/use-persistent-state.ts';
 export { useSandbox } from './hooks/use-sandbox.ts';
 export { useSkill } from './hooks/use-skill.ts';
 export { useSubagent } from './hooks/use-subagent.ts';

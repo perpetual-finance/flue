@@ -149,7 +149,7 @@ function toolResourceEntry(tool: ToolDefinition): ToolResourceEntry {
  * the task machinery consumes. Runs at delegation time, in its own frame,
  * fresh per task — closures read current values, and two delegations to the
  * same subagent render independently. Subagent frames reject root-scoped
- * hooks (`useState`, `useSandbox`); nested `useSubagent` declarations pass
+ * hooks (`usePersistentState`, `useSandbox`); nested `useSubagent` declarations pass
  * through for the delegate's own task tool, governed by the delegation
  * depth cap.
  *

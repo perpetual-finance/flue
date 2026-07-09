@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
 import type { Harness } from '../src/harness.ts';
 import { renderAgentFunctionWithStructure } from '../src/hooks/render.ts';
-import { useState } from '../src/hooks/state.ts';
+import { usePersistentState } from '../src/hooks/use-persistent-state.ts';
 import { useSandbox } from '../src/hooks/use-sandbox.ts';
 import { useSubagent } from '../src/hooks/use-subagent.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
@@ -409,7 +409,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 
 		let renderedNote: string | undefined;
 		function assistant() {
-			const [note, setNote] = useState('note', 'unset');
+			const [note, setNote] = usePersistentState('note', 'unset');
 			renderedNote = note;
 			useTool({
 				name: 'record_note',

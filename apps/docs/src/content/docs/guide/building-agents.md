@@ -50,7 +50,7 @@ See [Routing](/docs/guide/routing/) for the routes `.route()` serves and [Models
 
 ## The agent function
 
-The agent function is where an agent's behavior lives. Flue Hooks called in its body — `useTool`, `useInstruction`, `useState`, and others — attach what the agent can do; the string it returns is the instruction text the model sees. A tools-only agent function can return nothing at all.
+The agent function is where an agent's behavior lives. Flue Hooks called in its body — `useTool`, `useInstruction`, `usePersistentState`, and others — attach what the agent can do; the string it returns is the instruction text the model sees. A tools-only agent function can return nothing at all.
 
 ```ts title="src/agents/order-assistant.ts"
 'use agent';
@@ -65,7 +65,7 @@ function OrderAssistant() {
 export default defineAgent(OrderAssistant, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
-The function runs again before every model turn, so guards and interpolated text always reflect current state. Resources — tools, skills, and subagents — may even be declared conditionally (`if (pro) useSkill(refundsSkill)`): when a render's resource set changes, the runtime announces the change to the model in the conversation instead of rewriting the system prompt (see [Dynamic resources](/docs/api/agent-api/#dynamic-resources)). The agent's _identity_ stays static: `useState`, `useMessageData`, `useSandbox`, and the lifecycle hooks must be declared identically on every render. See [Tools](/docs/guide/tools/), [Skills](/docs/guide/skills/), [Sandboxes](/docs/guide/sandboxes/), and [Subagents](/docs/guide/subagents/) for what an agent's body can compose, and [Durable Agents](/docs/concepts/durable-execution/) for how that state persists.
+The function runs again before every model turn, so guards and interpolated text always reflect current state. Resources — tools, skills, and subagents — may even be declared conditionally (`if (pro) useSkill(refundsSkill)`): when a render's resource set changes, the runtime announces the change to the model in the conversation instead of rewriting the system prompt (see [Dynamic resources](/docs/api/agent-api/#dynamic-resources)). The agent's _identity_ stays static: `usePersistentState`, `useMessageData`, `useSandbox`, and the lifecycle hooks must be declared identically on every render. See [Tools](/docs/guide/tools/), [Skills](/docs/guide/skills/), [Sandboxes](/docs/guide/sandboxes/), and [Subagents](/docs/guide/subagents/) for what an agent's body can compose, and [Durable Agents](/docs/concepts/durable-execution/) for how that state persists.
 
 `defineAgent(Agent, config)`'s second argument is the agent's static identity — the fields that never render:
 
@@ -188,7 +188,7 @@ await dispatch(triage, {
 
 The `input:` schema validates the data once, at instance creation — a creating call that omits or malforms it is rejected, so the value is guaranteed present and shaped from the first render on. Data sent to an existing instance is ignored; the recorded value never changes. Direct HTTP carries it the same way (`{ "data": {…}, "kind": "user", "body": "…" }`), as do `client.send({ message, data })` and `flue run --data '<json>'`.
 
-The three input channels each have one job: **`useInitialData()` is what the instance is about, `useDelivery()` is what this message says, and `useState` is what the agent has learned.**
+The three input channels each have one job: **`useInitialData()` is what the instance is about, `useDelivery()` is what this message says, and `usePersistentState` is what the agent has learned.**
 
 Authorize access to an `id` in the [`route`](#interacting-with-your-agent) handler. For work that arrives as a dispatched or signal-kind message — a webhook, a chat platform event — carry the identifier your application already validated in the message's `attributes` and read it inside the agent with `useDelivery()`; see [Tools](/docs/guide/tools/#protect-access) for the pattern.
 

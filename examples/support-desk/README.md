@@ -2,7 +2,7 @@
 
 This is the flagship example for Flue's **custom hooks** authoring model: an
 agent as a plain function, composed from smaller hook functions, with a
-durable phase recorded in `useState` — no workflow engine, no conditional
+durable phase recorded in `usePersistentState` — no workflow engine, no conditional
 tool mounting.
 
 ## What it demonstrates
@@ -32,14 +32,14 @@ tool mounting.
   `You are now in the "drafting" phase.` as the tool's own result — the model
   reads its new phase from the tool outcome it just received, with zero
   framework support (this is pydantic's instructions-as-tool-result trick).
-- **Durable phase and sentiment state via `useState`.** The current phase
+- **Durable phase and sentiment state via `usePersistentState`.** The current phase
   (`gathering` / `drafting` / `committing` / `done`) and the customer's
-  sentiment (`neutral` / `churn-risk`) are both `useState` values: written by
+  sentiment (`neutral` / `churn-risk`) are both `usePersistentState` values: written by
   tool `run()` functions, persisted atomically with the tool call that wrote
   them, and read fresh — through freshly re-rendered closures — on every
   subsequent turn, including mid-run after a transition.
 - **`useMachine` is userland, not framework.** `src/machine.ts` is a small
-  hook built entirely out of public hooks (`useState`, `useInstruction`) —
+  hook built entirely out of public hooks (`usePersistentState`, `useInstruction`) —
   proof that authors can build their own conventions on top of custom hooks
   without needing anything from Flue itself. It stays out of `@flue/runtime`
   on purpose.

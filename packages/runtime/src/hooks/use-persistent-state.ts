@@ -3,7 +3,7 @@ import { type HookStateStore, isRendering, requireRenderFrame } from './frame.ts
 /**
  * Durable agent state: an API over the record log of the agent instance.
  *
- * `useState` reads the value as of this render (reduced from the instance's
+ * `usePersistentState` reads the value as of this render (reduced from the instance's
  * `state_write` records) and returns a setter that persists a new value.
  * Reads are render-time snapshots; writes are silent — they never post a
  * message, never wake the agent, and never re-render mid-run. The next
@@ -11,7 +11,7 @@ import { type HookStateStore, isRendering, requireRenderFrame } from './frame.ts
  *
  * ```ts
  * export default function SupportAgent() {
- *   const [phase, setPhase] = useState<Phase>('phase', 'gathering');
+ *   const [phase, setPhase] = usePersistentState<Phase>('phase', 'gathering');
  *
  *   useTool({
  *     name: 'begin_draft',
@@ -39,26 +39,29 @@ import { type HookStateStore, isRendering, requireRenderFrame } from './frame.ts
  * - The type parameter is a compile-time convenience only — nothing parses
  *   persisted values. For runtime enforcement, assert at the call site
  *   (`v.assert(schema, value)`) or compose your own hook over this one
- *   (e.g. a `useStateWithSchema(name, schema, defaultValue)` that parses
+ *   (e.g. a `usePersistentStateWithSchema(name, schema, defaultValue)` that parses
  *   reads and validates writes).
  */
-export function useState<T>(name: string, defaultValue: T): [T, StateSetter<T>];
-export function useState<T = unknown>(name: string): [T | undefined, StateSetter<T>];
-export function useState(name: string, defaultValue?: unknown): [unknown, StateSetter<unknown>] {
-	const frame = requireRenderFrame('useState');
+export function usePersistentState<T>(name: string, defaultValue: T): [T, StateSetter<T>];
+export function usePersistentState<T = unknown>(name: string): [T | undefined, StateSetter<T>];
+export function usePersistentState(
+	name: string,
+	defaultValue?: unknown,
+): [unknown, StateSetter<unknown>] {
+	const frame = requireRenderFrame('usePersistentState');
 	if (frame.kind === 'subagent') {
 		throw new Error(
-			'[flue] useState() is not available in a subagent render. Durable state is scoped to the agent instance; delegates run detached tasks with no state channel. Pass what the delegate needs through the task prompt instead.',
+			'[flue] usePersistentState() is not available in a subagent render. Durable state is scoped to the agent instance; delegates run detached tasks with no state channel. Pass what the delegate needs through the task prompt instead.',
 		);
 	}
 	if (typeof name !== 'string' || name.length === 0) {
 		throw new Error(
-			'[flue] useState(name, defaultValue?) takes the state name as its first argument — a non-empty string.',
+			'[flue] usePersistentState(name, defaultValue?) takes the state name as its first argument — a non-empty string.',
 		);
 	}
 	if (frame.stateNames.has(name)) {
 		throw new Error(
-			`[flue] Duplicate useState name "${name}" in one render. State names identify a value across renders and must be unique.`,
+			`[flue] Duplicate usePersistentState name "${name}" in one render. State names identify a value across renders and must be unique.`,
 		);
 	}
 	frame.stateNames.add(name);

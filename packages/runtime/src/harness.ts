@@ -4,7 +4,7 @@ import { discoverSessionContext } from './context.ts';
 import type { ConversationRecordWriter } from './conversation-writer.ts';
 import { SessionAlreadyExistsError, SessionNotFoundError } from './errors.ts';
 import type { FlueExecutionContext } from './execution-interceptor.ts';
-import type { HookStateBuffer } from './hooks/state.ts';
+import type { HookStateBuffer } from './hooks/use-persistent-state.ts';
 import type { AgentOutputChannel } from './message-output.ts';
 import type { AttachmentStore } from './runtime/attachment-store.ts';
 import { generateConversationId, generateSessionAffinityKey } from './runtime/ids.ts';
@@ -92,7 +92,7 @@ export class Harness implements FlueHarness {
 		) => Promise<void>,
 		scopeSignal?: AbortSignal,
 		/**
-		 * `useState` write buffer from this harness's render, when the agent was
+		 * `usePersistentState` write buffer from this harness's render, when the agent was
 		 * authored as a function. Handed to the sessions this harness opens
 		 * directly (never task/action children) so their tool batches drain it.
 		 */

@@ -11,8 +11,8 @@ import {
 	renderAgentFunction,
 	renderAgentFunctionWithStructure,
 } from '../src/hooks/render.ts';
-import { useState } from '../src/hooks/state.ts';
 import { useInstruction } from '../src/hooks/use-instruction.ts';
+import { usePersistentState } from '../src/hooks/use-persistent-state.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { dispatch } from '../src/index.ts';
 import { configureFlueRuntime, createFlueContext, type DispatchInput } from '../src/internal.ts';
@@ -385,10 +385,10 @@ describe('assertRenderStructureInvariance()', () => {
 
 	it('lets resources flip while a mixed custom hook still trips on its identity part', () => {
 		// Resources are dynamic; identity is static. A custom hook that
-		// declares BOTH inherits the stricter rule through its useState.
+		// declares BOTH inherits the stricter rule through its usePersistentState.
 		function useDelegated(mounted: boolean) {
 			if (!mounted) return;
-			useState('delegated', null);
+			usePersistentState('delegated', null);
 			useTool({ name: 'record_step', description: 'Record.', run: async () => 'ok' });
 		}
 		const withIt = () => {

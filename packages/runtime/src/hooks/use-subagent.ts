@@ -30,7 +30,7 @@ import { requireRenderFrame } from './frame.ts';
  * tool — the description is how the model decides when to delegate. Inside
  * the delegate's render, `useTool()`, `useInstruction()`, `useSkill()`,
  * custom hooks, and nested `useSubagent()` all compose as usual;
- * `useState()` and `useSandbox()` throw (durable state is instance-scoped
+ * `usePersistentState()` and `useSandbox()` throw (durable state is instance-scoped
  * and delegates share the parent environment). Duplicate delegate names in
  * one render fail fast.
  */

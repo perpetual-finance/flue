@@ -40,7 +40,7 @@ In this example, `support-assistant` can delegate work to `issue_classifier`. `a
 
 An agent with a declared subagent can decide to delegate while answering a prompt. Flue gives the agent a built-in `task` capability that renders the selected delegate's `agent` function, runs it in a child session, and returns that child's answer to the parent agent.
 
-The delegate's render composes its own custom hooks, `useTool()`, `useInstruction()`, and `useSkill()` calls exactly like a root agent function, and it may declare further `useSubagent()` delegates of its own, up to the delegation depth cap. `useState()` and `useSandbox()` throw inside a delegate's render: durable state is scoped to the agent instance, and a delegate shares its parent's environment rather than attaching its own.
+The delegate's render composes its own custom hooks, `useTool()`, `useInstruction()`, and `useSkill()` calls exactly like a root agent function, and it may declare further `useSubagent()` delegates of its own, up to the delegation depth cap. `usePersistentState()` and `useSandbox()` throw inside a delegate's render: durable state is scoped to the agent instance, and a delegate shares its parent's environment rather than attaching its own.
 
 ## Configuration inheritance
 

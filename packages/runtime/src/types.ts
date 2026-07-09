@@ -572,7 +572,7 @@ export interface FunctionAgentConfig {
  * ```ts
  * 'use agent';
  * function Support() {
- *   const [phase] = useState('phase', 'gathering');
+ *   const [phase] = usePersistentState('phase', 'gathering');
  *   useGatheringPhase({ ... });
  *   return 'Operator-facing support agent. Work only from verified evidence.';
  * }

@@ -182,7 +182,7 @@ export interface ReducedInstanceState {
 	conversationScopes: Map<string, string>;
 	recordsById: Map<string, ConversationRecord>;
 	/**
-	 * Hook state (`useState`) snapshot: last-write-wins per name across every
+	 * Hook state (`usePersistentState`) snapshot: last-write-wins per name across every
 	 * `state_write` record in the instance's stream, in stream order. Scoped to
 	 * the agent instance (its whole stream), not to one conversation — this is
 	 * the agent's durable memory, readable by any render of the instance.
