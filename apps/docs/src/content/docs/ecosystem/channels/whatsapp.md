@@ -54,7 +54,7 @@ export const channel = createWhatsAppChannel({
           await dispatch(assistant, {
             id: channel.instanceId(ref),
             // Recorded once when this event creates the instance; ignored after.
-            data: {
+            initialData: {
               phoneNumberId: ref.phoneNumberId,
               destination: ref.type === 'individual' ? ref.destination : undefined,
               groupId: ref.type === 'group' ? ref.groupId : undefined,
@@ -173,7 +173,7 @@ export const channel = createWhatsAppChannel({
           await dispatch(assistant, {
             id: channel.instanceId(ref),
             // Recorded once when this event creates the instance; ignored after.
-            data: {
+            initialData: {
               phoneNumberId: ref.phoneNumberId,
               destination: ref.type === 'individual' ? ref.destination : undefined,
               groupId: ref.type === 'group' ? ref.groupId : undefined,
@@ -265,7 +265,7 @@ export function postMessage(ref: WhatsAppSendRef) {
 }
 ```
 
-`data` is the instance's creation data: recorded once when the event creates
+`initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
 dispatch. It carries the conversation's destination facts — the agent reads
 them with `useInitialData()` instead of parsing the instance id — plus small
@@ -311,7 +311,7 @@ function Assistant() {
 export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-The `input:` schema validates the dispatched `data` when the instance is
+The `input:` schema validates the dispatched `initialData` when the instance is
 created; `useInitialData()` returns the parsed value on every render. Trusted
 application code selects the destination; the model selects only message
 text. `parseInstanceId()` remains available as an escape hatch for recovering

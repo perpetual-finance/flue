@@ -42,7 +42,7 @@ export const channel = createTwilioChannel({
     await dispatch(assistant, {
       id: channel.instanceId(conversation),
       // Recorded once when this event creates the instance; ignored after.
-      data:
+      initialData:
         conversation.type === 'messaging-service'
           ? {
               type: conversation.type,
@@ -171,7 +171,7 @@ export const channel = createTwilioChannel({
     await dispatch(assistant, {
       id: channel.instanceId(conversation),
       // Recorded once when this event creates the instance; ignored after.
-      data:
+      initialData:
         conversation.type === 'messaging-service'
           ? {
               type: conversation.type,
@@ -217,7 +217,7 @@ export function postMessage(
 ```
 
 The blueprint creates `src/twilio-client.ts` with the Fetch client used above.
-`data` is the instance's creation data: recorded once when the event creates
+`initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every dispatch.
 It carries the conversation ref fields the reply tool needs.
 
@@ -248,7 +248,7 @@ function Assistant() {
 export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-The `input:` schema validates the dispatched `data` when the instance is
+The `input:` schema validates the dispatched `initialData` when the instance is
 created; `useInitialData()` returns the parsed value on every render — the
 agent reads the conversation ref this way instead of parsing it from the
 instance id.

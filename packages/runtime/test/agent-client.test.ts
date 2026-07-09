@@ -104,7 +104,7 @@ describe('start() + init(): the scripted client', () => {
 		});
 
 		await startFlue({ name: 'seeded', agent: seeded });
-		const reply = await init(seeded, { data: { date: '2026-07-08' } }).dispatch('Go.');
+		const reply = await init(seeded, { initialData: { date: '2026-07-08' } }).dispatch('Go.');
 		expect(reply.text).toBe('Seeded.');
 		expect(seenData).toEqual({ date: '2026-07-08' });
 	});

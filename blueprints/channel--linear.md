@@ -71,7 +71,7 @@ export const channel = createLinearChannel({
           ...(comment.parentId ? { threadCommentId: comment.parentId } : {}),
         }),
         // Recorded once when this event creates the instance; ignored after.
-        data: {
+        initialData: {
           type: 'issue',
           issueId: comment.issueId,
           ...(comment.parentId ? { threadCommentId: comment.parentId } : {}),
@@ -99,7 +99,7 @@ export const channel = createLinearChannel({
           agentSessionId: payload.agentSession.id,
         }),
         // Recorded once when this event creates the instance; ignored after.
-        data: {
+        initialData: {
           type: 'agent-session',
           agentSessionId: payload.agentSession.id,
           ...(payload.agentSession.issue?.title
@@ -198,7 +198,7 @@ The optional organization and webhook ids pin one endpoint to a fixed
 integration. Omit them only when the application intentionally accepts every
 organization or webhook authorized by the signing secret.
 
-`data` is the instance's creation data: recorded once when the event creates
+`initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
 dispatch. It carries the issue or agent-session fields the tool needs — the
 agent reads them with `useInitialData()` instead of parsing the instance id —
@@ -238,7 +238,7 @@ function Assistant() {
 export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-The `input:` schema validates the dispatched `data` when the instance is
+The `input:` schema validates the dispatched `initialData` when the instance is
 created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers

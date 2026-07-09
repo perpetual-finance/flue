@@ -37,7 +37,7 @@ export const channel = createTelegramChannel({
     await dispatch(assistant, {
       id: channel.instanceId(conversation),
       // Recorded once when this event creates the instance; ignored after.
-      data: conversationData(conversation, incoming),
+      initialData: conversationData(conversation, incoming),
       message: {
         kind: 'signal',
         type: 'telegram.message',
@@ -137,7 +137,7 @@ export const channel = createTelegramChannel({
       await dispatch(assistant, {
         id: channel.instanceId(conversation),
         // Recorded once when this event creates the instance; ignored after.
-        data: conversationData(conversation, incoming),
+        initialData: conversationData(conversation, incoming),
         message: {
           kind: 'signal',
           type: 'telegram.message',
@@ -156,7 +156,7 @@ export const channel = createTelegramChannel({
       await dispatch(assistant, {
         id: channel.instanceId(conversation),
         // Recorded once when this event creates the instance; ignored after.
-        data: conversationData(conversation, query.message),
+        initialData: conversationData(conversation, query.message),
         message: {
           kind: 'signal',
           type: 'telegram.callback_query',
@@ -246,7 +246,7 @@ export function postMessage(ref: TelegramConversationRef) {
 
 ## Bind the tool
 
-`data` is the instance's creation data: recorded once when the event creates the
+`initialData` is the instance's creation data: recorded once when the event creates the
 instance and ignored afterward, so the channel passes it on every dispatch. Bind
 the tool from the agent with `useInitialData()` instead of parsing the instance
 id:

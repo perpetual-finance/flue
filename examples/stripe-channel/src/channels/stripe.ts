@@ -33,7 +33,7 @@ export const channel = createStripeChannel({
 				await dispatch(assistant, {
 					id: stripeCustomerInstanceId(customer),
 					// Recorded once when this event creates the instance; ignored after.
-					data: customer,
+					initialData: customer,
 					message: {
 						kind: 'signal',
 						type: `stripe.${event.type}`,

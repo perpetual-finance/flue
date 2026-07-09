@@ -92,7 +92,7 @@ export const channel = createShopifyChannel({
         await dispatch(orders, {
           id: orderInstanceId(shopDomain, order.id),
           // Recorded once when this event creates the instance; ignored after.
-          data: {
+          initialData: {
             shopDomain,
             orderId: order.id,
             orderName: order.name,
@@ -233,7 +233,7 @@ client from trusted configuration and uses the header only to reject an
 unexpected route context. A multi-shop application must resolve installations
 through its own authenticated state and authorization policy.
 
-`data` is the instance's creation data: recorded once when the event creates
+`initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
 dispatch. It carries the shop and order identity — the agent reads them with
 `useInitialData()` instead of parsing the instance id — plus the order name
@@ -269,7 +269,7 @@ function Orders() {
 export default defineAgent(Orders, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-The `input:` schema validates the dispatched `data` when the instance is
+The `input:` schema validates the dispatched `initialData` when the instance is
 created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers

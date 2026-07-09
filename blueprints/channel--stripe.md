@@ -65,7 +65,7 @@ export const channel = createStripeChannel({
         await dispatch(billing, {
           id: customerId,
           // Recorded once when this event creates the instance; ignored after.
-          data: { customerId },
+          initialData: { customerId },
           message: {
             kind: 'signal',
             type: `stripe.${event.type}`,
@@ -135,7 +135,7 @@ example tool. Never let the model choose arbitrary Stripe accounts,
 credentials, customer ids, API paths, or request options unless the
 application has explicitly authorized that access.
 
-`data` is the instance's creation data: recorded once when the event creates
+`initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
 dispatch. It carries the customer identity the bound tool needs — the agent
 reads it with `useInitialData()` instead of parsing the instance id. Per-message
@@ -165,7 +165,7 @@ function Billing() {
 export default defineAgent(Billing, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-The `input:` schema validates the dispatched `data` when the instance is
+The `input:` schema validates the dispatched `initialData` when the instance is
 created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers

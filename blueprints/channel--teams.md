@@ -82,7 +82,7 @@ export const channel = createTeamsChannel({
     await dispatch(assistant, {
       id: channel.instanceId(destination),
       // Recorded once when this event creates the instance; ignored after.
-      data: {
+      initialData: {
         serviceUrl: destination.serviceUrl,
         conversationId: destination.conversationId,
         botId: destination.botId,
@@ -148,7 +148,7 @@ and other Bot Framework types) using Microsoft's documented field names.
 Returning nothing produces an empty `200`; return JSON for an invoke response
 body or use the Hono context for explicit status and response control.
 
-`data` is the instance's creation data: recorded once when the event creates
+`initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
 dispatch. It carries the destination facts the outbound tool needs to reach
 the conversation — the agent reads them with `useInitialData()` instead of
@@ -183,7 +183,7 @@ function Assistant() {
 export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-The `input:` schema validates the dispatched `data` when the instance is
+The `input:` schema validates the dispatched `initialData` when the instance is
 created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers

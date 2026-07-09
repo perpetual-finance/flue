@@ -6,7 +6,7 @@ export interface DispatchInput {
 	id: string;
 	message: DeliveredMessage;
 	/** Instance-creation data; the seed, consulted only when this send creates. */
-	data?: unknown;
+	initialData?: unknown;
 	/**
 	 * Send condition, consumed at admission and never stored durably: a
 	 * string continues only the incarnation with that uid (else 404); `null`

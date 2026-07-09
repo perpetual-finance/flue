@@ -60,7 +60,7 @@ export const channel = createGitHubChannel({
       await dispatch(assistant, {
         id: channel.instanceId(issueRef),
         // Recorded once when this event creates the instance; ignored after.
-        data: {
+        initialData: {
           owner: issueRef.owner,
           repo: issueRef.repo,
           issueNumber: issueRef.issueNumber,
@@ -96,7 +96,7 @@ export const channel = createGitHubChannel({
       await dispatch(assistant, {
         id: channel.instanceId(issueRef),
         // Recorded once when this event creates the instance; ignored after.
-        data: {
+        initialData: {
           owner: issueRef.owner,
           repo: issueRef.repo,
           issueNumber: issueRef.issueNumber,
@@ -181,7 +181,7 @@ If the user did not ask for issue comments, replace or omit the example tool.
 Never let the model choose arbitrary owners, repositories, issue numbers, API
 paths, or credentials unless the application has explicitly authorized that.
 
-`data` is the instance's creation data: recorded once when the event creates
+`initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
 dispatch. It carries the structured issue reference — the agent reads it with
 `useInitialData()` instead of parsing the instance id — plus small
@@ -216,7 +216,7 @@ function Assistant() {
 export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-The `input:` schema validates the dispatched `data` when the instance is
+The `input:` schema validates the dispatched `initialData` when the instance is
 created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers

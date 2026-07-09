@@ -100,7 +100,7 @@ export const channel = createMessengerChannel({
         await dispatch(assistant, {
           id: channel.instanceId(conversation),
           // Recorded once when this event creates the instance; ignored after.
-          data: {
+          initialData: {
             pageId: conversation.pageId,
             participant: conversation.participant,
           },
@@ -190,7 +190,7 @@ function Assistant() {
 export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-The `input:` schema validates the dispatched `data` when the instance is
+The `input:` schema validates the dispatched `initialData` when the instance is
 created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
@@ -253,7 +253,7 @@ native messaging event. Page-scoped ids and `user_ref` values are distinct
 canonical participant types. Bind the derived conversation to a tool in trusted
 code; do not let the model choose a recipient id.
 
-`data` is the instance's creation data: recorded once when the event creates
+`initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
 dispatch. It carries the conversation's `pageId` and `participant` — the agent
 reads them with `useInitialData()` instead of parsing the instance id. The

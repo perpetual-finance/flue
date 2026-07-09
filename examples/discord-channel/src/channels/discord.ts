@@ -40,7 +40,7 @@ export const channel = createDiscordChannel({
 		await dispatch(assistant, {
 			id: channel.instanceId(destination),
 			// Recorded once when this event creates the instance; ignored after.
-			data: {
+			initialData: {
 				channelId: destination.channelId,
 				...(channelName === undefined ? {} : { channelName }),
 			},

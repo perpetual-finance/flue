@@ -100,17 +100,18 @@ export async function handleAgentRequest(opts: HandleAgentOptions): Promise<Resp
 					"Await completion with the SDK client's `wait()`, or read the conversation stream (GET this URL).",
 			});
 		}
-		// The wire body IS a DeliveredMessage (plus optional reserved `data` and
-		// `uid` siblings for instance creation / send conditions) — the same
+		// The wire body IS a DeliveredMessage (plus optional reserved
+		// `initialData` and `uid` siblings for instance creation / send
+		// conditions) — the same
 		// validated shape a `dispatch()` call admits, so both transports share
 		// one schema and produce the same structured InvalidRequestError on bad
 		// input.
-		const { message, data, uid } = parseDeliveredInput(await parseJsonBody(request));
+		const { message, initialData, uid } = parseDeliveredInput(await parseJsonBody(request));
 		const traceCarrier = extractTraceCarrier(request.headers);
 		const streamUrl = invocationStreamUrl(request);
 		const receipt = await opts.admitAttachedSubmission(message, {
 			...(traceCarrier !== undefined ? { traceCarrier } : {}),
-			...(data !== undefined ? { data } : {}),
+			...(initialData !== undefined ? { initialData } : {}),
 			...(uid !== undefined ? { uid } : {}),
 		});
 		return admissionResponse(

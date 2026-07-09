@@ -40,7 +40,7 @@ export const channel = createIntercomChannel({
     await dispatch(assistant, {
       id: channel.instanceId(conversation),
       // Recorded once when this event creates the instance; ignored after.
-      data: {
+      initialData: {
         workspaceId: conversation.workspaceId,
         conversationId: conversation.conversationId,
       },
@@ -133,7 +133,7 @@ export const channel = createIntercomChannel({
         await dispatch(assistant, {
           id: channel.instanceId(conversation),
           // Recorded once when this event creates the instance; ignored after.
-          data: {
+          initialData: {
             workspaceId: conversation.workspaceId,
             conversationId: conversation.conversationId,
           },
@@ -206,7 +206,7 @@ conversation id into an instance id. An app that serves multiple workspaces
 filters on `notification.app_id` itself, or uses application-owned
 installation state to select credentials.
 
-`data` is the instance's creation data: recorded once when the event creates
+`initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
 dispatch. It carries the workspace and conversation identifiers the tool
 needs — the agent reads them with `useInitialData()` instead of parsing the

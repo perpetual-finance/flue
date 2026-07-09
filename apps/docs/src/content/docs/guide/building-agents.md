@@ -181,12 +181,12 @@ export default defineAgent(Triage, { model: 'anthropic/claude-opus-4-6', input }
 ```ts
 await dispatch(triage, {
   id: 'issue-17307',
-  data: { issue: 17307 },
+  initialData: { issue: 17307 },
   message: { kind: 'signal', type: 'github.issue', body: '…' },
 });
 ```
 
-The `input:` schema validates the data once, at instance creation — a creating call that omits or malforms it is rejected, so the value is guaranteed present and shaped from the first render on. Data sent to an existing instance is ignored; the recorded value never changes. Direct HTTP carries it the same way (`{ "data": {…}, "kind": "user", "body": "…" }`), as do `client.send({ message, data })` and `flue run --data '<json>'`.
+The `input:` schema validates the data once, at instance creation — a creating call that omits or malforms it is rejected, so the value is guaranteed present and shaped from the first render on. Data sent to an existing instance is ignored; the recorded value never changes. Direct HTTP carries it the same way (`{ "initialData": {…}, "kind": "user", "body": "…" }`), as do `client.send({ message, initialData })` and `flue run --initial-data '<json>'`.
 
 The three input channels each have one job: **`useInitialData()` is what the instance is about, `useDelivery()` is what this message says, and `usePersistentState` is what the agent has learned.**
 
@@ -201,21 +201,21 @@ Every send is a request against that address, and it can carry the uid as a cond
 | You pass         | You're saying                    | Instance exists                            | Instance missing                     |
 | ---------------- | -------------------------------- | ------------------------------------------ | ------------------------------------ |
 | neither          | "deliver to this address"        | continues                                  | creates                              |
-| `data` (no uid)  | "seed if this creates"           | continues, seed ignored                    | creates, seed validated and recorded |
+| `initialData` (no uid) | "seed if this creates"     | continues, seed ignored                    | creates, seed validated and recorded |
 | `uid: '<value>'` | "continue only that incarnation" | continues if the uid matches, else rejects | rejects                              |
 | `uid: null`      | "create only when fresh"         | rejects (naming the existing uid)          | creates                              |
 
 Every successful send's receipt carries the uid — fresh on a creating send, echoed back on a continuing one — so the common case needs no separate lookup:
 
 ```ts
-const receipt = await dispatch(triage, { id: 'issue-17307', data: { issue: 17307 }, message });
+const receipt = await dispatch(triage, { id: 'issue-17307', initialData: { issue: 17307 }, message });
 receipt.uid; // 'inst_01KW…'
 
 await dispatch(triage, { id: 'issue-17307', uid: receipt.uid, message }); // continue only this incarnation
-await dispatch(triage, { id: 'issue-17307', uid: null, data: { issue: 17307 }, message }); // create only, fresh
+await dispatch(triage, { id: 'issue-17307', uid: null, initialData: { issue: 17307 }, message }); // create only, fresh
 ```
 
-Reach for a uid condition in programmatic callers that mint their own ids and want to guard against a typo'd id silently continuing the wrong conversation, or against a stale reference reaching an instance that was deleted and re-created under the same id. Most callers don't need this: quick starts and a first prototype send unconditionally, and so do channels — a channel's derived instance id can't be typo'd, and "already exists" is its normal case for every message after the first (see [Channels](/docs/guide/channels/)). `uid: '<string>'` combined with `data` is a contradiction Flue rejects: the condition forbids creation, so the seed could never apply. See the [Agent API](/docs/api/agent-api/#conditional-sends) for the full condition semantics and error shapes, including `getAgentInstance()` for code that wants to condition a send it did not originate.
+Reach for a uid condition in programmatic callers that mint their own ids and want to guard against a typo'd id silently continuing the wrong conversation, or against a stale reference reaching an instance that was deleted and re-created under the same id. Most callers don't need this: quick starts and a first prototype send unconditionally, and so do channels — a channel's derived instance id can't be typo'd, and "already exists" is its normal case for every message after the first (see [Channels](/docs/guide/channels/)). `uid: '<string>'` combined with `initialData` is a contradiction Flue rejects: the condition forbids creation, so the seed could never apply. See the [Agent API](/docs/api/agent-api/#conditional-sends) for the full condition semantics and error shapes, including `getAgentInstance()` for code that wants to condition a send it did not originate.
 
 Instances created before this feature shipped have no uid: uid-conditioned sends against them are rejected, bare sends work as before, and their receipts omit `uid`.
 

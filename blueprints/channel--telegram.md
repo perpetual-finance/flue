@@ -65,7 +65,7 @@ export const channel = createTelegramChannel({
       await dispatch(assistant, {
         id: channel.instanceId(conversation),
         // Recorded once when this event creates the instance; ignored after.
-        data: conversationData(conversation, incoming),
+        initialData: conversationData(conversation, incoming),
         message: {
           kind: 'signal',
           type: 'telegram.message',
@@ -84,7 +84,7 @@ export const channel = createTelegramChannel({
       await dispatch(assistant, {
         id: channel.instanceId(conversation),
         // Recorded once when this event creates the instance; ignored after.
-        data: conversationData(conversation, query.message),
+        initialData: conversationData(conversation, query.message),
         message: {
           kind: 'signal',
           type: 'telegram.callback_query',
@@ -232,7 +232,7 @@ function Assistant() {
 export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-The `input:` schema validates the dispatched `data` when the instance is
+The `input:` schema validates the dispatched `initialData` when the instance is
 created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers
@@ -293,7 +293,7 @@ instance id from a native `Message`, preserve `business_connection_id`,
 `message_thread_id`, and `direct_messages_topic.topic_id` so replies reach the
 same destination.
 
-`data` is the instance's creation data: recorded once when the event creates
+`initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
 dispatch. It carries the structured conversation facts — the agent reads them
 with `useInitialData()` instead of parsing the instance id — plus small

@@ -46,7 +46,7 @@ export const channel = createMessengerChannel({
         await dispatch(assistant, {
           id: channel.instanceId(conversation),
           // Recorded once when this event creates the instance; ignored after.
-          data: {
+          initialData: {
             pageId: conversation.pageId,
             participant: conversation.participant,
           },
@@ -156,7 +156,7 @@ export const channel = createMessengerChannel({
         await dispatch(assistant, {
           id: channel.instanceId(conversation),
           // Recorded once when this event creates the instance; ignored after.
-          data: {
+          initialData: {
             pageId: conversation.pageId,
             participant: conversation.participant,
           },
@@ -197,7 +197,7 @@ export function postMessage(ref: MessengerConversationRef) {
 ```
 
 The blueprint creates `src/messenger-client.ts` with the Fetch client used above.
-`data` is the instance's creation data: recorded once when the event creates the
+`initialData` is the instance's creation data: recorded once when the event creates the
 instance and ignored afterward, so the channel passes it on every dispatch. Bind
 the tool from the agent with `useInitialData()` instead of parsing the instance
 id:

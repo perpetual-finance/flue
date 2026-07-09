@@ -38,7 +38,7 @@ export const channel = createTwilioChannel({
 		await dispatch(assistant, {
 			id: channel.instanceId(conversation),
 			// Recorded once when this event creates the instance; ignored after.
-			data:
+			initialData:
 				conversation.type === 'messaging-service'
 					? {
 							type: conversation.type,

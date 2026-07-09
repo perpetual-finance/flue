@@ -18,7 +18,7 @@ export const channel = createResendChannel({
 				await dispatch(assistant, {
 					id: emailInstanceId(event.data.email_id),
 					// Recorded once when this event creates the instance; ignored after.
-					data: {
+					initialData: {
 						emailId: event.data.email_id,
 						from: event.data.from,
 						subject: event.data.subject,

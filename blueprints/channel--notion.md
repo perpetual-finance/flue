@@ -84,7 +84,7 @@ export const channel = createNotionChannel({
         await dispatch(assistant, {
           id: pageInstanceId(event.entity.id),
           // Recorded once when this event creates the instance; ignored after.
-          data: {
+          initialData: {
             pageId: event.entity.id,
           },
           message: {
@@ -170,7 +170,7 @@ when they matter. Comment events expose `event.data.page_id`; group the selected
 comment cases into the same local page identity only when that matches the
 application's agent policy.
 
-`data` is the instance's creation data: recorded once when the event creates
+`initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
 dispatch. It carries the page id the agent's tool binds to — the agent reads
 it with `useInitialData()` instead of parsing the instance id. Per-message
@@ -198,7 +198,7 @@ function Assistant() {
 export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-The `input:` schema validates the dispatched `data` when the instance is
+The `input:` schema validates the dispatched `initialData` when the instance is
 created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers

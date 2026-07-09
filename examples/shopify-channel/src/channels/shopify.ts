@@ -46,7 +46,7 @@ export const channel = createShopifyChannel({
 				await dispatch(assistant, {
 					id: shopifyOrderInstanceId(ref),
 					// Recorded once when this event creates the instance; ignored after.
-					data: {
+					initialData: {
 						shopDomain: deliveredShopDomain,
 						orderId: order.id,
 						orderName: order.name,

@@ -51,7 +51,7 @@ export interface LocalAgentRunOptions {
 	modulePath: string;
 	message: string;
 	/** Instance-creation data; the seed, consulted only when this send creates. */
-	data?: unknown;
+	initialData?: unknown;
 	/**
 	 * Send condition: a string continues only the incarnation with that uid;
 	 * `null` creates only when no instance exists; omit for unconditional.
@@ -190,7 +190,7 @@ export function createLocalAgentRun(options: LocalAgentRunOptions): LocalAgentRu
 				{ kind: 'user', body: options.message },
 				{
 					signal: controller.signal,
-					data: options.data,
+					initialData: options.initialData,
 					uid: options.uid,
 					onEvent: (chunk) => options.onEvent?.(chunk),
 				},

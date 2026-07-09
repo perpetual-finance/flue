@@ -64,7 +64,7 @@ export interface FlueRunSubmitOptions {
 	/** Receives every conversation stream chunk as it is durably recorded. */
 	onEvent?: (chunk: ConversationStreamChunk) => void;
 	/** Instance-creation data; the seed, consulted only when this send creates. */
-	data?: unknown;
+	initialData?: unknown;
 	/**
 	 * Send condition: a string continues only the incarnation with that uid
 	 * (else the run rejects); `null` creates only when no instance exists.
@@ -222,7 +222,7 @@ async function submitAndSettle(options: SubmitAndSettleOptions): Promise<FlueRun
 
 	const admit = coordinator.createAdmission(identity, conversationId);
 	const receipt = await admit(message, {
-		...(options.data !== undefined ? { data: options.data } : {}),
+		...(options.initialData !== undefined ? { initialData: options.initialData } : {}),
 		...(options.uid !== undefined ? { uid: options.uid } : {}),
 	});
 	const streamPath = agentStreamPath(identity, conversationId);

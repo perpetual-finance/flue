@@ -30,7 +30,7 @@ export const channel = createTeamsChannel({
 		await dispatch(assistant, {
 			id: channel.instanceId(destination),
 			// Recorded once when this event creates the instance; ignored after.
-			data: {
+			initialData: {
 				serviceUrl: destination.serviceUrl,
 				conversationId: destination.conversationId,
 				botId: destination.botId,

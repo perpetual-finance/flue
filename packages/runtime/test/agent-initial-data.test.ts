@@ -160,7 +160,7 @@ describe('useInitialData()', () => {
 		const { coordinator } = await createRig(provider, [{ name: 'assistant', definition: agent }]);
 
 		await coordinator.admitDispatch(
-			dispatchInput({ dispatchId: 'dispatch:create-1', data: { issue: 17307 } }),
+			dispatchInput({ dispatchId: 'dispatch:create-1', initialData: { issue: 17307 } }),
 		);
 		await coordinator.waitForIdle();
 		// Second submission carries no data — the recorded value serves it.
@@ -203,7 +203,7 @@ describe('useInitialData()', () => {
 		// The rejected attempt created nothing: the same instance can be created
 		// properly afterwards.
 		await coordinator.admitDispatch(
-			dispatchInput({ dispatchId: 'dispatch:create-2', data: { issue: 7 } }),
+			dispatchInput({ dispatchId: 'dispatch:create-2', initialData: { issue: 7 } }),
 		);
 		await coordinator.waitForIdle();
 		await coordinator.shutdown();
@@ -229,7 +229,7 @@ describe('useInitialData()', () => {
 		await coordinator.waitForIdle();
 		// Data on an existing instance is ignored, not adopted.
 		await coordinator.admitDispatch(
-			dispatchInput({ dispatchId: 'dispatch:late-2', data: { issue: 99 } }),
+			dispatchInput({ dispatchId: 'dispatch:late-2', initialData: { issue: 99 } }),
 		);
 		await coordinator.waitForIdle();
 		await coordinator.shutdown();
@@ -255,7 +255,7 @@ describe('useInitialData()', () => {
 
 		const marker = 'INITIAL-DATA-MARKER-9c41';
 		await coordinator.admitDispatch(
-			dispatchInput({ dispatchId: 'dispatch:untyped-1', data: { note: marker } }),
+			dispatchInput({ dispatchId: 'dispatch:untyped-1', initialData: { note: marker } }),
 		);
 		await coordinator.waitForIdle();
 		await coordinator.shutdown();

@@ -56,7 +56,7 @@ export interface InitOptions {
 	 * The seed, consulted only when the handle's first send creates the
 	 * instance; ignored after.
 	 */
-	data?: unknown;
+	initialData?: unknown;
 	/**
 	 * Send condition for the handle's first contact (uid ≈ ETag): a string
 	 * continues only that incarnation, `null` creates only when no instance
@@ -127,7 +127,7 @@ export interface AgentInstanceHandle {
  * Address an agent instance for programmatic control.
  *
  * ```ts
- * const agent = init(reporter, { id: `nightly-${date}`, data: { date } });
+ * const agent = init(reporter, { id: `nightly-${date}`, initialData: { date } });
  * const reply = await agent.dispatch('You have been triggered. Produce the nightly report.');
  * console.log(reply.text);
  * ```
@@ -155,7 +155,7 @@ export function init(agent: AgentModuleValue, options: InitOptions = {}): AgentI
 	let contacted = false;
 	let pinnedUid: string | undefined;
 	const firstContact = () => ({
-		...(options.data !== undefined ? { data: options.data } : {}),
+		...(options.initialData !== undefined ? { initialData: options.initialData } : {}),
 		...('uid' in options && options.uid !== undefined ? { uid: options.uid } : {}),
 	});
 

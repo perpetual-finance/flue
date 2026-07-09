@@ -219,7 +219,7 @@ export const channel = createZendeskChannel({
         await dispatch(assistant, {
           id: channel.instanceId(ticket),
           // Recorded once when this event creates the instance; ignored after.
-          data: {
+          initialData: {
             accountId: ticket.accountId,
             ticketId: ticket.ticketId,
           },
@@ -333,7 +333,7 @@ headers. The package requires those headers and checks payload `account_id`
 against the account header, but they remain provider routing metadata rather
 than independent authorization capabilities.
 
-`data` is the instance's creation data: recorded once when the event creates
+`initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
 dispatch. It carries the ticket identity — the agent reads it with
 `useInitialData()` instead of parsing the instance id. Per-message facts stay
@@ -364,7 +364,7 @@ function Assistant() {
 export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-The `input:` schema validates the dispatched `data` when the instance is
+The `input:` schema validates the dispatched `initialData` when the instance is
 created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers

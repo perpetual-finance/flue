@@ -116,7 +116,7 @@ export const channel = createSlackChannel({
         await dispatch(assistant, {
           id: channel.instanceId(thread),
           // Recorded once when this event creates the instance; ignored after.
-          data: {
+          initialData: {
             channelId: thread.channelId,
             threadTs: thread.threadTs,
             startedBy: event.user,

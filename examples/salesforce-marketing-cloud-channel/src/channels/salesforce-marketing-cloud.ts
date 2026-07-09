@@ -56,7 +56,7 @@ export const channel = createSalesforceMarketingCloudChannel({
 			await dispatch(assistant, {
 				id: emailEventInstanceId(ref),
 				// Recorded once when this event creates the instance; ignored after.
-				data: {
+				initialData: {
 					callbackId: ref.callbackId,
 					mid: ref.mid,
 					eid: ref.eid,

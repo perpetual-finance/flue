@@ -33,7 +33,7 @@ export const channel = createZendeskChannel({
 				await dispatch(assistant, {
 					id: channel.instanceId(ticket),
 					// Recorded once when this event creates the instance; ignored after.
-					data: {
+					initialData: {
 						accountId: ticket.accountId,
 						ticketId: ticket.ticketId,
 					},

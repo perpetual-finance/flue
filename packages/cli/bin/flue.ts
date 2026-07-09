@@ -23,7 +23,7 @@ import { BLUEPRINTS, KIND_ROOTS } from './_blueprints.generated.ts';
 function printUsage(log: (message: string) => void = console.error) {
 	log(
 		'Usage:\n' +
-			'  flue run    <path> --message <text> [--id <conversation-id>] [--data <json>] [--uid <uid> | --new] [--env <path>] [--json]\n' +
+			'  flue run    <path> --message <text> [--id <conversation-id>] [--initial-data <json>] [--uid <uid> | --new] [--env <path>] [--json]\n' +
 			'  flue init   --target <node|cloudflare> [--root <path>] [--force]\n' +
 			'  flue add    [<kind> <name|url>] [--print]\n' +
 			'  flue update <kind> <name|url> [--print]\n' +
@@ -42,7 +42,7 @@ function printUsage(log: (message: string) => void = console.error) {
 			'Flags:\n' +
 			'  --message <text>     (flue run) The user message submitted to the agent. Required.\n' +
 			'  --id <id>            (flue run) Conversation id to create or continue. Default: a fresh id, printed.\n' +
-			'  --data <json>        (flue run) Instance-creation data (JSON). The seed, used only when this run creates the conversation; read with useInitialData().\n' +
+			'  --initial-data <json> (flue run) Instance-creation data (JSON). The seed, used only when this run creates the conversation; read with useInitialData().\n' +
 			'  --uid <uid>          (flue run) Continue only the conversation incarnation with this uid (printed by the creating run); rejects when it no longer exists.\n' +
 			'  --new                (flue run) Create only: rejects when the conversation id already exists (the error names its uid).\n' +
 			'  --json               (flue run) Print a JSON result envelope to stdout instead of the message text.\n' +
@@ -79,7 +79,7 @@ interface RunArgs {
 	modulePath: string;
 	message: string;
 	id: string | undefined;
-	data: unknown;
+	initialData: unknown;
 	/** Send condition: a string (--uid, continue-only) or null (--new, create-only). */
 	uid: string | null | undefined;
 	json: boolean;
@@ -357,13 +357,13 @@ function parseRunArgs(rest: string[]): RunArgs {
 		{
 			message: { type: 'string' },
 			id: { type: 'string' },
-			data: { type: 'string' },
+			'initial-data': { type: 'string' },
 			uid: { type: 'string' },
 			new: { type: 'boolean' },
 			json: { type: 'boolean' },
 			env: { type: 'string', multiple: true },
 		},
-		new Set(['--message', '--id', '--data', '--uid', '--new', '--json', '--env']),
+		new Set(['--message', '--id', '--initial-data', '--uid', '--new', '--json', '--env']),
 	);
 
 	const [modulePath, ...extra] = positionals;
@@ -389,13 +389,13 @@ function parseRunArgs(rest: string[]): RunArgs {
 		fail('`--env` accepts one file. Combine values into one file or provide shell overrides.');
 	}
 
-	const rawData = stringFlag(values, 'data', 'Missing value for --data');
-	let data: unknown;
+	const rawData = stringFlag(values, 'initial-data', 'Missing value for --initial-data');
+	let initialData: unknown;
 	if (rawData !== undefined) {
 		try {
-			data = JSON.parse(rawData);
+			initialData = JSON.parse(rawData);
 		} catch {
-			fail('`--data` must be valid JSON, e.g. --data \'{"issue": 17307}\'.');
+			fail('`--initial-data` must be valid JSON, e.g. --initial-data \'{"issue": 17307}\'.');
 		}
 	}
 
@@ -404,8 +404,8 @@ function parseRunArgs(rest: string[]): RunArgs {
 	if (uidFlag !== undefined && createOnly) {
 		fail('`--uid` continues an existing instance and `--new` creates a fresh one — pass one or the other.');
 	}
-	if (uidFlag !== undefined && data !== undefined) {
-		fail('`--uid` continues an existing instance, so `--data` (creation data) could never apply. Pass one or the other.');
+	if (uidFlag !== undefined && initialData !== undefined) {
+		fail('`--uid` continues an existing instance, so `--initial-data` could never apply. Pass one or the other.');
 	}
 
 	return {
@@ -413,7 +413,7 @@ function parseRunArgs(rest: string[]): RunArgs {
 		modulePath,
 		message,
 		id: stringFlag(values, 'id', 'Missing value for --id'),
-		data,
+		initialData,
 		// The send condition: --uid <value> = continue-only, --new = create-only.
 		uid: createOnly ? null : uidFlag,
 		json: booleanFlag(values, 'json', '--json'),
@@ -525,7 +525,7 @@ async function run(args: RunArgs) {
 	const execution = createLocalAgentRun({
 		modulePath: args.modulePath,
 		message: args.message,
-		data: args.data,
+		initialData: args.initialData,
 		uid: args.uid,
 		conversationId: args.id,
 		onEvent: (chunk) => presenter.present(chunk as ConversationStreamChunk),

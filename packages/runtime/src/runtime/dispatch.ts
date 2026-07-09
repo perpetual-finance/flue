@@ -14,9 +14,9 @@ export async function enqueueDispatch(options: {
 }): Promise<DispatchReceipt> {
 	const agent = options.request.agent;
 	const message = validateDispatchRequest(options.request, agent, options.rt);
-	if (typeof options.request.uid === 'string' && options.request.data !== undefined) {
+	if (typeof options.request.uid === 'string' && options.request.initialData !== undefined) {
 		throw new Error(
-			'[flue] dispatch() cannot combine a continue condition (`uid`) with creation `data` — the condition forbids creation, so the seed could never apply.',
+			'[flue] dispatch() cannot combine a continue condition (`uid`) with `initialData` — the condition forbids creation, so the seed could never apply.',
 		);
 	}
 	return options.dispatchQueue.enqueue({
@@ -24,7 +24,7 @@ export async function enqueueDispatch(options: {
 		agent,
 		id: options.request.id,
 		message,
-		...(options.request.data !== undefined ? { data: options.request.data } : {}),
+		...(options.request.initialData !== undefined ? { initialData: options.request.initialData } : {}),
 		...(options.request.uid !== undefined ? { uid: options.request.uid } : {}),
 		acceptedAt: new Date().toISOString(),
 	});

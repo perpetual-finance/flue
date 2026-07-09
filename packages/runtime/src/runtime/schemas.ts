@@ -78,23 +78,23 @@ export function parseDeliveredMessage(value: unknown): DeliveredMessage {
  * Validate a raw direct-HTTP body as a delivered input: a
  * {@link DeliveredMessage} with optional reserved top-level siblings, peeled
  * off before message validation —
- * - `data`: instance-creation data (the seed, used only when the send
+ * - `initialData`: instance-creation data (the seed, used only when the send
  *   creates the instance);
  * - `uid`: the send condition (a string continues only that incarnation;
  *   `null` creates only when fresh; omitted sends unconditionally).
  */
 export function parseDeliveredInput(value: unknown): {
 	message: DeliveredMessage;
-	data?: unknown;
+	initialData?: unknown;
 	uid?: string | null;
 } {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) {
 		return { message: parseDeliveredMessage(value) };
 	}
-	if (!('data' in value) && !('uid' in value)) {
+	if (!('initialData' in value) && !('uid' in value)) {
 		return { message: parseDeliveredMessage(value) };
 	}
-	const { data, uid, ...rest } = value as Record<string, unknown>;
+	const { initialData, uid, ...rest } = value as Record<string, unknown>;
 	if ('uid' in value && uid !== null && typeof uid !== 'string') {
 		throw new InvalidRequestError({
 			reason:
@@ -103,7 +103,7 @@ export function parseDeliveredInput(value: unknown): {
 	}
 	return {
 		message: parseDeliveredMessage(rest),
-		...(data !== undefined ? { data } : {}),
+		...(initialData !== undefined ? { initialData } : {}),
 		...('uid' in value ? { uid: uid as string | null } : {}),
 	};
 }

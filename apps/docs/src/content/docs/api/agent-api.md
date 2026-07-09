@@ -560,7 +560,7 @@ function Triage() {
 export default defineAgent(Triage, { model: 'anthropic/claude-opus-4-6', input });
 ```
 
-Creation data rides the instance's first contact: `dispatch(triage, { id, data, message })`, a `data` field beside the direct-HTTP message body, `client.send({ message, data })`, or `flue run --data '<json>'`. Declare an `input:` schema on `defineAgent` to validate it at creation — a mismatch (including absence, unless the schema accepts `undefined`) rejects the creating call, so with a required schema the value is always present here, as the schema-parsed output. Without a schema, whatever the creator sent is recorded and returned untyped.
+Creation data rides the instance's first contact: `dispatch(triage, { id, initialData, message })`, an `initialData` field beside the direct-HTTP message body, `client.send({ message, initialData })`, or `flue run --initial-data '<json>'`. Declare an `input:` schema on `defineAgent` to validate it at creation — a mismatch (including absence, unless the schema accepts `undefined`) rejects the creating call, so with a required schema the value is always present here, as the schema-parsed output. Without a schema, whatever the creator sent is recorded and returned untyped.
 
 The value is immutable — `data` on messages to an existing instance is ignored, and evolving facts belong in `usePersistentState`. The return type is exactly the type parameter you assert: with a required schema the value is always present, so the common case needs no `undefined` narrowing (and no `!`). At runtime the value _is_ `undefined` when creation carried no data, on bare tooling/test renders (back it with `initialData` in the render-state context), and in subagent renders (a delegate has no creation data of its own; close over a value to share it) — when your agent can hit those cases, say so in the type: `useInitialData<Config | undefined>()`. The recorded value is part of the instance's durable record stream but is never served to clients; still, it is not a secrets channel — keys and tokens stay in the environment.
 
@@ -570,7 +570,7 @@ The value is immutable — `data` on messages to an existing instance is ignored
 function useDispatchMessage(): (message: DeliveredMessage) => Promise<DispatchReceipt>;
 ```
 
-Gets a dispatcher bound to this agent instance — the agent-scoped form of [`dispatch()`](#dispatch), the way a router hook overloads a browser primitive with the router-scoped version. The returned function takes just the message: the instance already exists, so there is no creation `data` and no `uid` condition to pass.
+Gets a dispatcher bound to this agent instance — the agent-scoped form of [`dispatch()`](#dispatch), the way a router hook overloads a browser primitive with the router-scoped version. The returned function takes just the message: the instance already exists, so there is no `initialData` and no `uid` condition to pass.
 
 ```ts
 export default function IssueTriage() {
@@ -868,7 +868,7 @@ THE delivery verb: dispatches a message — either kind, with its explicit `kind
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `id`            | Target agent instance id.                                                                                                                                                                                                                                                                      |
 | `message`       | The message delivered to the conversation. Flue snapshots it when accepted.                                                                                                                                                                                                                    |
-| `data`          | Instance-creation data — the seed, consulted only when this send creates the instance: validated against the agent's `input:` schema (when declared) and recorded once. Ignored when the send continues an existing instance. See [Creation data](/docs/guide/building-agents/#creation-data). |
+| `initialData`   | Instance-creation data — the seed, consulted only when this send creates the instance: validated against the agent's `input:` schema (when declared) and recorded once. Ignored when the send continues an existing instance. See [Creation data](/docs/guide/building-agents/#creation-data). |
 | `uid`           | Send condition — see [Conditional sends](#conditional-sends).                                                                                                                                                                                                                                  |
 | `dispatchId`    | Generated delivery identifier returned in the receipt.                                                                                                                                                                                                                                         |
 | `acceptedAt`    | ISO timestamp assigned when dispatch admission begins.                                                                                                                                                                                                                                         |
@@ -883,11 +883,11 @@ Every send — `dispatch(...)`, a direct HTTP prompt, or the SDK's `client.send(
 | `uid`                   | Meaning                         | Instance exists                                                                     | Instance missing                        |
 | ----------------------- | ------------------------------- | ----------------------------------------------------------------------------------- | --------------------------------------- |
 | omitted                 | Deliver to this address.        | Continues.                                                                          | Creates.                                |
-| omitted, `data` present | Seed if this creates.           | Continues; `data` ignored.                                                          | Creates; `data` validated and recorded. |
+| omitted, `initialData` present | Seed if this creates.    | Continues; `initialData` ignored.                                                   | Creates; `initialData` validated and recorded. |
 | `'<value>'`             | Continue only that incarnation. | Continues if the uid matches, else `AgentInstanceNotFoundError` (`404`).            | `AgentInstanceNotFoundError` (`404`).   |
 | `null`                  | Create only when fresh.         | `AgentInstanceExistsError` (`409`); its `.uid` and `details` name the existing uid. | Creates.                                |
 
-`uid: '<value>'` combined with `data` throws `InvalidRequestError` — the condition forbids creation, so the seed could never apply. Every condition is checked synchronously at admission: a failed condition creates nothing durable and runs no model turn.
+`uid: '<value>'` combined with `initialData` throws `InvalidRequestError` — the condition forbids creation, so the seed could never apply. Every condition is checked synchronously at admission: a failed condition creates nothing durable and runs no model turn.
 
 `AgentInstanceExistsError`'s `.uid` (and its error `details`) name the existing instance's uid on purpose: the uid is accident prevention for the caller, not a security mechanism — access control belongs in the [`route`](/docs/api/routing-api/#the-modules-named-exports) handler — so a caller can recover from a `409` and continue the existing instance without a separate lookup.
 
@@ -943,7 +943,7 @@ function init(agent: AgentModuleValue, options?: InitOptions): AgentInstanceHand
 
 interface InitOptions {
   id?: string; // instance address; omitted -> a fresh unique id
-  data?: unknown; // creation data (input: schema), seed iff the first send creates
+  initialData?: unknown; // creation data (input: schema), seed iff the first send creates
   uid?: string | null; // send condition for the handle's first contact
 }
 
@@ -963,7 +963,7 @@ interface AgentReply {
 
 The programmatic client for one agent instance — the "control this agent" surface. Its `dispatch(...)` takes exactly what the top-level verb takes (either message kind; a string is shorthand for `{ kind: 'user', body }`) and delivers through the same queue, with one difference: it waits for the submission to settle and resolves with the reply. Every hook fires exactly as it does on any other transport, and a delivery that joined a live response resolves with the coalesced reply that answered it. A `failed`/`aborted` settlement rejects with `AgentRunError` (`outcome`, `submissionId`, `cause`). `AgentDispatchOptions` carries `onEvent` (every projected `ConversationStreamChunk` as it is durably recorded) and `signal` (durable abort intent; the call rejects once the aborted settlement lands). For fire-and-forget delivery, use the top-level [`dispatch()`](#dispatch).
 
-The handle is an address: nothing is created until first contact, `data`/`uid` gate that first send, and after a send the handle pins the incarnation it contacted. Like `dispatch()`, `init()` taps the process's configured runtime — inside a Flue server it works directly; in a standalone script call `start()` from `@flue/runtime/node` first. On Cloudflare the awaited send admits to the agent's Durable Object and observes its settlement over bounded reads; its natural home there is a Cloudflare Workflow step, where the reply becomes the step's durable result (see [Scripts › On Cloudflare](/docs/guide/scripts/#on-cloudflare)).
+The handle is an address: nothing is created until first contact, `initialData`/`uid` gate that first send, and after a send the handle pins the incarnation it contacted. Like `dispatch()`, `init()` taps the process's configured runtime — inside a Flue server it works directly; in a standalone script call `start()` from `@flue/runtime/node` first. On Cloudflare the awaited send admits to the agent's Durable Object and observes its settlement over bounded reads; its natural home there is a Cloudflare Workflow step, where the reply becomes the step's durable result (see [Scripts › On Cloudflare](/docs/guide/scripts/#on-cloudflare)).
 
 Inside a tool, an awaited send to the agent that is currently running you deadlocks by design — the delivery joins your own live response, which cannot settle while the tool is still executing. A tool never needs it: the `harness` prop is the tool's own model surface, with its own scratch session. Handles inside tools are for *other* instances.
 

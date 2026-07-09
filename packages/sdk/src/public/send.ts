@@ -35,14 +35,14 @@ export interface AgentPromptOptions {
 	 * `useInitialData()`. Ignored when the send continues an existing
 	 * conversation (pair with `uid: null` to error instead).
 	 */
-	data?: unknown;
+	initialData?: unknown;
 	/**
 	 * Send condition — sends are conditional requests, with the instance uid
 	 * playing the ETag:
 	 * - omitted: unconditional; continues the instance or creates it.
 	 * - a string (from a previous send's `uid`): continue only that
 	 *   incarnation; a missing instance or mismatched uid rejects with 404
-	 *   and nothing is delivered. Cannot be combined with `data`.
+	 *   and nothing is delivered. Cannot be combined with `initialData`.
 	 * - `null`: create only when no instance exists; an existing instance
 	 *   rejects with 409 carrying its uid in the error details.
 	 */
@@ -75,11 +75,11 @@ export async function sendConversationMessage(
 	http: HttpClient,
 	options: AgentPromptOptions,
 ): Promise<AgentSendResult> {
-	// `data` and `uid` are reserved top-level siblings beside the message
-	// fields; `uid: null` is meaningful (create-only), so presence keys on
-	// the option, not on undefined.
+	// `initialData` and `uid` are reserved top-level siblings beside the
+	// message fields; `uid: null` is meaningful (create-only), so presence
+	// keys on the option, not on undefined.
 	const siblings = {
-		...(options.data !== undefined ? { data: options.data } : {}),
+		...(options.initialData !== undefined ? { initialData: options.initialData } : {}),
 		...(options.uid !== undefined ? { uid: options.uid } : {}),
 	};
 	return http.json<AgentSendResult>({

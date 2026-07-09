@@ -43,7 +43,7 @@ export interface AgentSubmissionInput {
 	 * submission turns out to be the instance's first contact; ignored on
 	 * existing instances.
 	 */
-	readonly data?: unknown;
+	readonly initialData?: unknown;
 	readonly acceptedAt: string;
 	readonly traceCarrier?: FlueTraceCarrier;
 }
@@ -144,7 +144,7 @@ export interface AttachedAgentSubmissionOptions {
 	/** Distributed-trace continuation extracted from the caller's context. */
 	readonly traceCarrier?: FlueTraceCarrier;
 	/** Instance-creation data; the seed, consulted only when this send creates. */
-	readonly data?: unknown;
+	readonly initialData?: unknown;
 	/**
 	 * Send condition (uid ≈ ETag): a string continues only the incarnation
 	 * with that uid; `null` creates only when no instance exists; omit to
@@ -176,15 +176,15 @@ export interface InstanceContactAdmission {
  * CONDITIONAL requests (the uid plays the ETag):
  *
  * - no condition: unconditional deliver — continues an existing instance or
- *   creates a fresh one; `data` is the seed, consulted only when creating.
+ *   creates a fresh one; `initialData` is the seed, consulted only when creating.
  * - `uid: '<value>'`: continue only the incarnation the caller knows —
  *   absent instance or mismatched uid throws {@link AgentInstanceNotFoundError}.
- *   Combining with `data` is a contradiction (the condition forbids
+ *   Combining with `initialData` is a contradiction (the condition forbids
  *   creation, so a seed is dead weight) and throws.
  * - `uid: null`: create only when fresh — an existing instance throws
  *   {@link AgentInstanceExistsError} with the existing uid in its details.
  *
- * Creating sends additionally validate `data` against the agent's `input:`
+ * Creating sends additionally validate `initialData` against the agent's `input:`
  * schema (when declared). Everything here runs synchronously BEFORE anything
  * durable is admitted, so a failed condition or invalid creation leaves no
  * queued submission behind. The uid itself is minted at birth (inside
@@ -195,17 +195,17 @@ export interface InstanceContactAdmission {
 export async function admitInstanceContact(options: {
 	agent: AgentModuleValue;
 	id: string;
-	data: unknown;
+	initialData: unknown;
 	uid: string | null | undefined;
 	loadReducedState: () => Promise<
 		{ initialData?: { value: unknown }; uid?: string } | undefined
 	>;
 }): Promise<InstanceContactAdmission> {
 	const condition = options.uid;
-	if (typeof condition === 'string' && options.data !== undefined) {
+	if (typeof condition === 'string' && options.initialData !== undefined) {
 		throw new InvalidRequestError({
 			reason:
-				'A send conditioned on an existing instance (`uid`) cannot carry creation `data` — the condition forbids creation, so the seed could never apply.',
+				'A send conditioned on an existing instance (`uid`) cannot carry `initialData` — the condition forbids creation, so the seed could never apply.',
 		});
 	}
 	const reduced = await options.loadReducedState();
@@ -234,14 +234,14 @@ export async function admitInstanceContact(options: {
 
 	const schema = options.agent.config?.input;
 	if (schema !== undefined) {
-		const parsed = v.safeParse(schema, options.data);
+		const parsed = v.safeParse(schema, options.initialData);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
 				reason:
 					`The agent requires creation data matching its input schema: ${parsed.issues
 						.map((issue) => issue.message)
 						.join('; ')}. ` +
-					'Creation data rides the instance\'s first message ({ data, ... } beside the message).',
+					'Creation data rides the instance\'s first message ({ initialData, ... } beside the message).',
 			});
 		}
 	}
@@ -255,7 +255,7 @@ export function createDispatchAgentSubmissionInput(input: DispatchInput): AgentS
 		agent: input.agent,
 		id: input.id,
 		message: input.message,
-		...(input.data !== undefined ? { data: input.data } : {}),
+		...(input.initialData !== undefined ? { initialData: input.initialData } : {}),
 		acceptedAt: input.acceptedAt,
 	};
 }
@@ -264,7 +264,7 @@ export function createDirectAgentSubmissionInput(options: {
 	agent: string;
 	id: string;
 	message: DeliveredMessage;
-	data?: unknown;
+	initialData?: unknown;
 	traceCarrier?: FlueTraceCarrier;
 }): AgentSubmissionInput {
 	return {
@@ -273,7 +273,7 @@ export function createDirectAgentSubmissionInput(options: {
 		agent: options.agent,
 		id: options.id,
 		message: options.message,
-		...(options.data !== undefined ? { data: options.data } : {}),
+		...(options.initialData !== undefined ? { initialData: options.initialData } : {}),
 		acceptedAt: new Date().toISOString(),
 		...(options.traceCarrier ? { traceCarrier: options.traceCarrier } : {}),
 	};
@@ -1079,7 +1079,7 @@ async function openAgentSubmissionSession(
 	// read it via `useDelivery()` — the durable input, so re-attempts see the
 	// same value. The same goes for creation data: on the instance's first
 	// contact it validates and records; on existing instances it is ignored.
-	const harness = await ctx.initializeRootHarness(agent, input.message, input.data);
+	const harness = await ctx.initializeRootHarness(agent, input.message, input.initialData);
 	// External submissions always target the default session of the default
 	// harness. `harness.session()` hands out the public FlueSession facade;
 	// unwrap it to reach the internal durable submission executor surface.

@@ -31,7 +31,7 @@ export const channel = createLinearChannel({
 					...(comment.parentId ? { threadCommentId: comment.parentId } : {}),
 				}),
 				// Recorded once when this event creates the instance; ignored after.
-				data: {
+				initialData: {
 					type: 'issue',
 					issueId: comment.issueId,
 					...(comment.parentId ? { threadCommentId: comment.parentId } : {}),
@@ -59,7 +59,7 @@ export const channel = createLinearChannel({
 					agentSessionId: payload.agentSession.id,
 				}),
 				// Recorded once when this event creates the instance; ignored after.
-				data: {
+				initialData: {
 					type: 'agent-session',
 					agentSessionId: payload.agentSession.id,
 					...(payload.agentSession.issue?.title

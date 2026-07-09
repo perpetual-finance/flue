@@ -90,7 +90,7 @@ export const channel = createGoogleChatChannel({
           await dispatch(assistant, {
             id: channel.instanceId(ref),
             // Recorded once when this event creates the instance; ignored after.
-            data: {
+            initialData: {
               space: ref.space,
               ...(ref.thread === undefined ? {} : { thread: ref.thread }),
             },
@@ -209,7 +209,7 @@ within 30 seconds. The package deliberately does not race the callback against
 a non-cancelling timeout, so keep admission short and move durable work behind
 the dispatch boundary.
 
-`data` is the instance's creation data: recorded once when the event creates
+`initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
 dispatch. It carries the space and thread resource names — the agent reads
 them with `useInitialData()` instead of parsing the instance id. Per-message
@@ -238,7 +238,7 @@ function Assistant() {
 export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-The `input:` schema validates the dispatched `data` when the instance is
+The `input:` schema validates the dispatched `initialData` when the instance is
 created; `useInitialData()` returns the parsed value on every render.
 
 The `'use agent'` directive (the module's first statement) is what registers

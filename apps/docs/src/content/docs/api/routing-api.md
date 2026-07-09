@@ -104,13 +104,13 @@ app.route('/agents/triage', triage.route());
 
 `POST /:id` accepts a [`DeliveredMessage`](/docs/api/agent-api/#deliveredmessage) as its JSON body — the same unified shape `dispatch()` admits. A chat turn is `{ "kind": "user", "body": string, "attachments"?: attachment[] }` with optional `{ type: 'image', data, mimeType, filename? }` attachments, where `data` is base64-encoded image content (capped at 14 MiB of base64 characters per image) for vision-capable models. A structured event is `{ "kind": "signal", "type": string, "body": string, "attributes"?, "tagName"? }`.
 
-`data` and `uid` are reserved top-level siblings beside the message fields — not part of `DeliveredMessage` itself:
+`initialData` and `uid` are reserved top-level siblings beside the message fields — not part of `DeliveredMessage` itself:
 
 ```json
-{ "kind": "user", "body": "Triage this.", "data": { "issue": 17307 }, "uid": null }
+{ "kind": "user", "body": "Triage this.", "initialData": { "issue": 17307 }, "uid": null }
 ```
 
-`data` is instance-creation data, consulted only when this send creates the instance (see [Creation data](/docs/guide/building-agents/#creation-data)). `uid` is the send condition — the instance uid played as an ETag: omitted continues-or-creates unconditionally, a string continues only that incarnation, `null` creates only when no instance exists yet; see [Conditional sends](/docs/api/agent-api/#conditional-sends) for the full model. A condition failure is rejected synchronously, before anything is durably admitted: `404 agent_instance_not_found` for a missing instance or a mismatched uid, `409 agent_instance_exists` for a `uid: null` send against an instance that already exists (`details` names the existing uid).
+`initialData` is instance-creation data, consulted only when this send creates the instance (see [Creation data](/docs/guide/building-agents/#creation-data)). `uid` is the send condition — the instance uid played as an ETag: omitted continues-or-creates unconditionally, a string continues only that incarnation, `null` creates only when no instance exists yet; see [Conditional sends](/docs/api/agent-api/#conditional-sends) for the full model. A condition failure is rejected synchronously, before anything is durably admitted: `404 agent_instance_not_found` for a missing instance or a mismatched uid, `409 agent_instance_exists` for a `uid: null` send against an instance that already exists (`details` names the existing uid).
 
 ```bash
 # Deliver a message. The mount path is whatever app.ts chose;

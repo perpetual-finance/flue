@@ -134,7 +134,7 @@ export const channel = createLinearChannel({
           ...(comment.parentId ? { threadCommentId: comment.parentId } : {}),
         }),
         // Recorded once when this event creates the instance; ignored after.
-        data: {
+        initialData: {
           type: 'issue',
           issueId: comment.issueId,
           ...(comment.parentId ? { threadCommentId: comment.parentId } : {}),
@@ -162,7 +162,7 @@ export const channel = createLinearChannel({
           agentSessionId: payload.agentSession.id,
         }),
         // Recorded once when this event creates the instance; ignored after.
-        data: {
+        initialData: {
           type: 'agent-session',
           agentSessionId: payload.agentSession.id,
           ...(payload.agentSession.issue?.title
@@ -236,7 +236,7 @@ Use `accessToken` instead of `apiKey` for an installed OAuth application.
 OAuth installation storage and organization-specific token selection remain
 application concerns.
 
-`data` is the instance's creation data: recorded once when the event creates
+`initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
 dispatch. It carries the issue or agent-session fields the tool needs — the
 agent reads them with `useInitialData()` instead of parsing the instance id —
@@ -276,7 +276,7 @@ function Assistant() {
 export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-The `input:` schema validates the dispatched `data` when the instance is
+The `input:` schema validates the dispatched `initialData` when the instance is
 created; `useInitialData()` returns the parsed value on every render.
 
 ## Resource webhooks

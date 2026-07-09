@@ -44,7 +44,7 @@ export const channel = createGitHubChannel({
     await dispatch(assistant, {
       id: channel.instanceId(issueRef),
       // Recorded once when this event creates the instance; ignored after.
-      data: {
+      initialData: {
         owner: issueRef.owner,
         repo: issueRef.repo,
         issueNumber: issueRef.issueNumber,
@@ -145,7 +145,7 @@ export const channel = createGitHubChannel({
       await dispatch(assistant, {
         id: channel.instanceId(issueRef),
         // Recorded once when this event creates the instance; ignored after.
-        data: {
+        initialData: {
           owner: issueRef.owner,
           repo: issueRef.repo,
           issueNumber: issueRef.issueNumber,
@@ -181,7 +181,7 @@ export const channel = createGitHubChannel({
       await dispatch(assistant, {
         id: channel.instanceId(issueRef),
         // Recorded once when this event creates the instance; ignored after.
-        data: {
+        initialData: {
           owner: issueRef.owner,
           repo: issueRef.repo,
           issueNumber: issueRef.issueNumber,
@@ -271,9 +271,9 @@ function Assistant() {
 export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-`data` is the instance's creation data: recorded once when the event creates
+`initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
-dispatch. The `input:` schema validates the dispatched `data` when the
+dispatch. The `input:` schema validates the dispatched `initialData` when the
 instance is created; `useInitialData()` returns the parsed value on every
 render. Pull requests use their issue number for issue comments. The model
 selects the comment body; trusted code binds the repository and issue. The

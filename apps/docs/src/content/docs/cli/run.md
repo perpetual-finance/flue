@@ -7,7 +7,7 @@ lastReviewedAt: 2026-07-07
 ## Synopsis
 
 ```bash
-flue run <path> --message <text> [--id <conversation-id>] [--data <json>] [--uid <uid> | --new] [--env <path>] [--json]
+flue run <path> --message <text> [--id <conversation-id>] [--initial-data <json>] [--uid <uid> | --new] [--env <path>] [--json]
 ```
 
 ## Description
@@ -26,8 +26,8 @@ The run drives the same durable submission path as a deployed server: the messag
 | ------------------ | ------------------------------ | --------------------------------------------------------------------------------- |
 | `--message <text>` | Required                       | The user message submitted to the agent.                                          |
 | `--id <id>`        | A fresh ULID, printed          | Conversation id to create or continue. Reuse an id to continue that conversation. |
-| `--data <json>`    | —                               | Instance-creation data (JSON). The seed, used only when this run creates the conversation; read it with `useInitialData()`. Rejected together with `--uid` (the condition forbids creation, so the seed could never apply). |
-| `--uid <uid>`      | —                               | Continue only the conversation incarnation with this uid (printed by the creating run, in the meta rows and the `--json` envelope). Rejects when that incarnation no longer exists. Rejected together with `--new` or `--data`. |
+| `--initial-data <json>` | —                               | Instance-creation data (JSON). The seed, used only when this run creates the conversation; read it with `useInitialData()`. Rejected together with `--uid` (the condition forbids creation, so the seed could never apply). |
+| `--uid <uid>`      | —                               | Continue only the conversation incarnation with this uid (printed by the creating run, in the meta rows and the `--json` envelope). Rejects when that incarnation no longer exists. Rejected together with `--new` or `--initial-data`. |
 | `--new`            | `false`                        | Create only: rejects when the conversation id already exists (the error names its uid). Rejected together with `--uid`.                                                                                              |
 | `--json`           | `false`                        | Print a JSON result envelope to stdout instead of the reply text.                 |
 | `--env <path>`     | `<project>/.env`, when present | Select one alternate `.env`-format file, loaded before the run. Shell values win. |
@@ -101,7 +101,7 @@ Passing a bare name instead of a path (`flue run assistant`) also fails with a p
 flue run src/agents/hello.ts --message "Hi there"
 flue run src/agents/hello.ts --message "And then?" --id support-4821 --env .env.staging
 flue run src/agents/hello.ts --message "Run the demo." --json | jq -r .message
-flue run src/agents/triage.ts --id issue-17307 --data '{"issue": 17307}' --message "Triage."
+flue run src/agents/triage.ts --id issue-17307 --initial-data '{"issue": 17307}' --message "Triage."
 flue run src/agents/triage.ts --id issue-17307 --uid inst_01KW8Z3F9G6QK8P8V7YV5RJXWQ --message "Re-check."
 flue run src/agents/triage.ts --id issue-17307 --new --message "Triage."
 ```

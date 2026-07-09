@@ -587,7 +587,7 @@ export function createNodeAgentCoordinator(options: {
 				const contact = await admitInstanceContact({
 					agent,
 					id: input.id,
-					data: input.data,
+					initialData: input.initialData,
 					uid: input.uid,
 					loadReducedState,
 				});
@@ -652,7 +652,7 @@ export function createNodeAgentCoordinator(options: {
 
 		createAdmission(agentName: string, instanceId: string): AttachedAgentSubmissionAdmission {
 			return async (message: DeliveredMessage, options = {}) => {
-				const { traceCarrier, data, uid } = options;
+				const { traceCarrier, initialData, uid } = options;
 				if (stopping) throw new Error('[flue] Coordinator is shutting down.');
 				const activityLease = activityGate?.enter();
 				const agent = agents.find((record) => record.name === agentName)?.definition;
@@ -665,7 +665,7 @@ export function createNodeAgentCoordinator(options: {
 					agent: agentName,
 					id: instanceId,
 					message,
-					data,
+					initialData,
 					traceCarrier,
 				});
 
@@ -677,7 +677,7 @@ export function createNodeAgentCoordinator(options: {
 					const contact = await admitInstanceContact({
 						agent,
 						id: instanceId,
-						data,
+						initialData,
 						uid,
 						loadReducedState,
 					});

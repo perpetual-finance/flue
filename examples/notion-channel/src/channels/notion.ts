@@ -35,7 +35,7 @@ export const channel = createNotionChannel({
 				await dispatch(assistant, {
 					id: pageInstanceId(event.entity.id),
 					// Recorded once when this event creates the instance; ignored after.
-					data: {
+					initialData: {
 						pageId: event.entity.id,
 					},
 					message: {

@@ -23,7 +23,7 @@ export const channel = createGitHubChannel({
 			await dispatch(assistant, {
 				id: channel.instanceId(issueRef),
 				// Recorded once when this event creates the instance; ignored after.
-				data: {
+				initialData: {
 					owner: issueRef.owner,
 					repo: issueRef.repo,
 					issueNumber: issueRef.issueNumber,
@@ -59,7 +59,7 @@ export const channel = createGitHubChannel({
 			await dispatch(assistant, {
 				id: channel.instanceId(issueRef),
 				// Recorded once when this event creates the instance; ignored after.
-				data: {
+				initialData: {
 					owner: issueRef.owner,
 					repo: issueRef.repo,
 					issueNumber: issueRef.issueNumber,

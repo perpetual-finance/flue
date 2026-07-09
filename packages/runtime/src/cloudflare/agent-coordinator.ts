@@ -711,12 +711,12 @@ class CloudflareAgentCoordinator {
 		message: DeliveredMessage,
 		options: AttachedAgentSubmissionOptions = {},
 	) {
-		const { traceCarrier, data, uid } = options;
+		const { traceCarrier, initialData, uid } = options;
 		const input = createDirectAgentSubmissionInput({
 			agent: this.agentName,
 			id: this.instance.name,
 			message,
-			data,
+			initialData,
 			traceCarrier,
 		});
 		const agent = this.options.agents.find((record) => record.name === this.agentName)?.definition;
@@ -724,7 +724,7 @@ class CloudflareAgentCoordinator {
 		const contact = await admitInstanceContact({
 			agent,
 			id: this.instance.name,
-			data,
+			initialData,
 			uid,
 			loadReducedState: async () => (await this.ensureConversationWriter()).loadReducedState(),
 		});
@@ -773,7 +773,7 @@ class CloudflareAgentCoordinator {
 			contact = await admitInstanceContact({
 				agent,
 				id: this.instance.name,
-				data: input.data,
+				initialData: input.initialData,
 				uid: input.uid,
 				loadReducedState: async () => (await this.ensureConversationWriter()).loadReducedState(),
 			});

@@ -147,7 +147,7 @@ export const channel = createZendeskChannel({
         await dispatch(assistant, {
           id: channel.instanceId(ticket),
           // Recorded once when this event creates the instance; ignored after.
-          data: {
+          initialData: {
             accountId: ticket.accountId,
             ticketId: ticket.ticketId,
           },
@@ -347,7 +347,7 @@ function Assistant() {
 export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
 ```
 
-`data` is the instance's creation data: recorded once when the event creates
+`initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
 dispatch. The agent reads it with `useInitialData()`, validated against the
 `input:` schema, instead of parsing the instance id.

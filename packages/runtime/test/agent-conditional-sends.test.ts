@@ -222,11 +222,11 @@ describe('conditional sends (uid)', () => {
 
 		await expect(
 			coordinator.admitDispatch(
-				dispatchInput({ dispatchId: 'dispatch:both-1', uid: 'inst_x', data: { seed: 1 } }),
+				dispatchInput({ dispatchId: 'dispatch:both-1', uid: 'inst_x', initialData: { seed: 1 } }),
 			),
 		).rejects.toMatchObject({
 			status: 400,
-			details: expect.stringContaining('cannot carry creation `data`'),
+			details: expect.stringContaining('cannot carry `initialData`'),
 		});
 		expect(await executionStore.submissions.getSubmission('dispatch:both-1')).toBeNull();
 		await coordinator.shutdown();
@@ -247,13 +247,13 @@ describe('conditional sends (uid)', () => {
 		const { coordinator } = await createRig(provider, [{ name: 'assistant', definition: agent }]);
 
 		const created = await coordinator.admitDispatch(
-			dispatchInput({ dispatchId: 'dispatch:create-1', data: { issue: 7 } }),
+			dispatchInput({ dispatchId: 'dispatch:create-1', initialData: { issue: 7 } }),
 		);
 		await coordinator.waitForIdle();
 		// Unconditional send with data to the EXISTING instance: delivered, seed
 		// ignored — the channel row of the conditional-send model.
 		const followed = await coordinator.admitDispatch(
-			dispatchInput({ dispatchId: 'dispatch:follow-2', data: { issue: 99 } }),
+			dispatchInput({ dispatchId: 'dispatch:follow-2', initialData: { issue: 99 } }),
 		);
 		expect(followed.kind).toBe('submission');
 		expect(followed.uid).toBe(created.uid);

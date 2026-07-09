@@ -95,14 +95,14 @@ export interface AgentDispatchRequest {
 	 * `useInitialData()`. Ignored when the send continues an existing
 	 * instance (pair with `uid: null` to error instead).
 	 */
-	data?: unknown;
+	initialData?: unknown;
 	/**
 	 * Send condition — sends are conditional requests, with the instance uid
 	 * playing the ETag:
 	 * - omitted: unconditional; continues the instance or creates it.
 	 * - a string: continue only the incarnation with this uid; a missing
 	 *   instance or mismatched uid rejects at admission (404, nothing
-	 *   durable). Cannot be combined with `data`.
+	 *   durable). Cannot be combined with `initialData`.
 	 * - `null`: create only when no instance exists; an existing instance
 	 *   rejects at admission (409, its uid in the error details).
 	 */
