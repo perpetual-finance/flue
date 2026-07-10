@@ -22,6 +22,7 @@
 
 import type { DeliveredMessage, FunctionAgentDefinition } from '@flue/runtime';
 import {
+	AGENT_IDENTITY_PATTERN,
 	type AssembledNodeAgentRuntime,
 	agentStreamPath,
 	assembleNodeAgentRuntime,
@@ -106,13 +107,6 @@ export interface FlueRunSession {
 }
 
 /**
- * Matches `@flue/vite`'s AGENT_IDENTITY_PATTERN (agent-scan.ts) — duplicated
- * here because the run bootstrap must not pull the vite package into the
- * single-runtime execution graph.
- */
-const RUN_IDENTITY_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
-
-/**
  * The module's `export const name` wins over the basename-derived fallback —
  * `flue run` skips the build scan, so the override is read off the evaluated
  * namespace instead (same precedence, different mechanism).
@@ -120,7 +114,7 @@ const RUN_IDENTITY_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 function resolveRunIdentity(agentModule: Record<string, unknown>, fallback: string): string {
 	const nameExport = agentModule.name;
 	if (nameExport === undefined) return fallback;
-	if (typeof nameExport !== 'string' || !RUN_IDENTITY_PATTERN.test(nameExport)) {
+	if (typeof nameExport !== 'string' || !AGENT_IDENTITY_PATTERN.test(nameExport)) {
 		throw new Error(
 			`[flue] The agent module's \`name\` export is its durable identity and must be a ` +
 				`lower-kebab-case string; got ${JSON.stringify(nameExport)}.`,

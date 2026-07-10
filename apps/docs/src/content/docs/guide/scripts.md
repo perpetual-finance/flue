@@ -63,19 +63,27 @@ Outside a Flue server — `node ./scripts/nightly.ts` — boot the runtime first
 ```ts title="scripts/nightly.ts"
 import { init } from '@flue/runtime';
 import { sqlite, start } from '@flue/runtime/node';
-import reporter from '../src/agents/reporter.ts';
+import * as reporter from '../src/agents/reporter.ts';
 
 await using flue = await start({
-  agents: [{ name: 'reporter', agent: reporter }],
+  agents: [reporter], // the whole agent module is the registration
   db: sqlite('./nightly.db'), // omit for in-memory (nothing survives exit)
 });
 
-const agent = init(reporter, { id: `nightly-${new Date().toISOString().slice(0, 10)}` });
+const agent = init(reporter.default, { id: `nightly-${new Date().toISOString().slice(0, 10)}` });
 const reply = await agent.dispatch('You have been triggered. Produce the nightly report.');
 console.log(reply.text);
 ```
 
 Run it with `node --env-file=.env scripts/nightly.ts` (provider API keys come from the environment; a bare script loads `.env` itself). Without `await using`, call `await flue.stop()` when done.
+
+An `import * as` module entry reads the same optional exports a `'use agent'` build does — `description`, `initialDataSchema`, `durability` — with one difference: **`export const name` is required**, because a namespace object cannot know its own filename, so there is no basename to fall back on (and `start()` never invents names — the identity keys durable storage, and a positional `agent-1` would silently reassign conversations when the array is edited). Agents defined inline (tests, one-off scripts) use `{ name, agent, initialDataSchema?, durability? }` entries instead:
+
+```ts
+await using flue = await start({
+  agents: [{ name: 'reporter', agent: defineAgent(Reporter) }],
+});
+```
 
 `start()` refuses to run inside an already-configured Flue process — there, `init()` needs no bootstrap. One process holds one Flue runtime.
 

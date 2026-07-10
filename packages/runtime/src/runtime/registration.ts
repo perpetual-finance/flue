@@ -92,6 +92,14 @@ export interface FlueAgentRegistration extends AgentModuleBinding {
 	definition: AgentModuleValue;
 }
 
+/**
+ * Agent identities are lower-kebab-case so the generated durable identifiers
+ * (Durable Object class + binding names on Cloudflare, conversation storage
+ * slugs on Node) remain predictable. Canonical copy — `@flue/vite`'s
+ * agent-scan mirrors it for build-time enforcement.
+ */
+export const AGENT_IDENTITY_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+
 let moduleBindings = new WeakMap<AgentModuleValue, AgentModuleBinding>();
 let registeredAgents = new Map<string, FlueAgentRegistration>();
 

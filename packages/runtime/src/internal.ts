@@ -102,6 +102,7 @@ export { hasRegisteredProvider, resetProviderRuntime, resolveModel } from './run
 // `'use agent'` set) and by unit tests mounting `AgentDefinition.route()`.
 export type { FlueAgentRegistration } from './runtime/registration.ts';
 export {
+	AGENT_IDENTITY_PATTERN,
 	getRegisteredFlueAgents,
 	registerFlueAgents,
 	resetFlueAgentRegistrationForTests,

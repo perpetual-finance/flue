@@ -54,6 +54,54 @@ async function startFlue(...agents: Parameters<typeof start>[0]['agents']) {
 }
 
 describe('start() + init(): the scripted client', () => {
+	it('accepts a whole agent-module namespace as an entry, reading the policy exports', async () => {
+		const { provider, model } = createFauxProvider();
+		provider.setResponses([fauxAssistantMessage('Seeded.')]);
+
+		let seenData: unknown;
+		const agentModule = {
+			default: defineAgent(() => {
+				useModel(model);
+				seenData = useInitialData<{ date: string }>();
+				return 'Reply.';
+			}),
+			name: 'module-seeded',
+			description: 'Module-entry agent.',
+			initialDataSchema: v.object({ date: v.string() }),
+			durability: { maxAttempts: 2 },
+		};
+
+		await startFlue(agentModule);
+		const reply = await init(agentModule.default, {
+			initialData: { date: '2026-07-09' },
+		}).dispatch('Go.');
+		expect(reply.text).toBe('Seeded.');
+		expect(seenData).toEqual({ date: '2026-07-09' });
+	});
+
+	it('rejects a module entry without a name export', async () => {
+		const anonymous = {
+			default: defineAgent(() => {
+				useModel('faux/faux-model');
+			}),
+		};
+		await expect(start({ agents: [anonymous as never] })).rejects.toThrow(
+			'add `export const name =',
+		);
+	});
+
+	it('rejects a module entry whose name export is not lower-kebab-case', async () => {
+		const badName = {
+			default: defineAgent(() => {
+				useModel('faux/faux-model');
+			}),
+			name: 'Not_Kebab',
+		};
+		await expect(start({ agents: [badName as never] })).rejects.toThrow(
+			'add `export const name =',
+		);
+	});
+
 	it('dispatches a message and resolves the settled reply with full hook parity', async () => {
 		const { provider, model } = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('The nightly report is ready.')]);
