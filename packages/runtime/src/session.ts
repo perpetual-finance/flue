@@ -85,6 +85,7 @@ import {
 	ConversationRecordInvariantError,
 	DelegationDepthExceededError,
 	OperationFailedError,
+	serializeEventError,
 	SessionBusyError,
 	SkillNotRegisteredError,
 	SubagentNotDeclaredError,
@@ -3969,7 +3970,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 						operationKind: operation,
 						durationMs: durationSince(startedAt),
 						isError: true,
-						error: serializeError(surfaced),
+						error: serializeEventError(surfaced),
 					},
 					operation === 'prompt' || operation === 'skill'
 						? { agentInput: this.activeAgentInput, errorInfo: classifyError(surfaced) }
@@ -4515,7 +4516,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					messagesAfter: this.agentLoop.state.messages.length,
 					durationMs: durationSince(compactionStartMs),
 					isError: true,
-					error: serializeError(abortError),
+					error: serializeEventError(abortError),
 				});
 				terminalPending = false;
 				if (reason === 'manual') throw abortError;
@@ -4572,7 +4573,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					messagesAfter: this.agentLoop.state.messages.length,
 					durationMs: durationSince(compactionStartMs),
 					isError: true,
-					error: serializeError(error),
+					error: serializeEventError(error),
 				});
 			}
 			// Explicit `session.compact()` calls must surface their own failure;
@@ -5226,19 +5227,12 @@ export function getInternalSession(session: FlueSession): Session | undefined {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function serializeError(error: unknown): unknown {
-	if (error instanceof Error) {
-		return { name: error.name, message: error.message };
-	}
-	return error;
-}
-
 function normalizeLogAttributes(
 	attributes: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined {
 	if (!attributes) return undefined;
 	if (!(attributes.error instanceof Error)) return attributes;
-	return { ...attributes, error: serializeError(attributes.error) };
+	return { ...attributes, error: serializeEventError(attributes.error) };
 }
 
 function zeroProviderUsage(): AssistantMessage['usage'] {

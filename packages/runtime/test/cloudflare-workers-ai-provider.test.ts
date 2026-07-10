@@ -168,7 +168,8 @@ describe('Cloudflare AI binding provider', () => {
 				reason: 'error',
 				error: expect.objectContaining({
 					stopReason: 'error',
-					errorMessage: 'Cloudflare AI binding request failed with 401 Unauthorized.',
+					errorMessage:
+						'Cloudflare AI binding request failed with 401 Unauthorized: {"error":"invalid gateway token"}',
 				}),
 			}),
 		]);
@@ -655,7 +656,7 @@ describe('Cloudflare AI binding provider', () => {
 				reason: 'error',
 				error: expect.objectContaining({
 					stopReason: 'error',
-					errorMessage: 'Cloudflare AI binding request failed with 429 Too Many Requests.',
+					errorMessage: 'Cloudflare AI binding request failed with 429 Too Many Requests: quota exceeded',
 				}),
 			}),
 		]);
@@ -686,7 +687,8 @@ describe('Cloudflare AI binding provider', () => {
 				reason: 'error',
 				error: expect.objectContaining({
 					stopReason: 'error',
-					errorMessage: 'Cloudflare AI binding request failed with 502 Bad Gateway.',
+					errorMessage:
+						'Cloudflare AI binding request failed with 502 Bad Gateway: request aborted by upstream',
 				}),
 			}),
 		]);

@@ -652,9 +652,20 @@ export class CloudflareAIBindingError extends FlueError {
 		body?: string;
 	}) {
 		const statusLabel = status === undefined ? undefined : `${status}${statusText ? ` ${statusText}` : ''}`;
+		// The provider body and the 413 marker ride in the MESSAGE, not just
+		// `details`: only the message reaches the assistant `errorMessage`
+		// that overflow classification reads, so a 413/overflow body kept out
+		// of it would leave context-overflow recovery (compaction + retry)
+		// unable to fire.
+		const boundedBody = body ? truncateProviderBody(body) : undefined;
+		const overflowMarker = status === 413 ? ' (request_too_large)' : '';
 		super({
 			type: 'cloudflare_ai_binding_error',
-			message: message ?? `Cloudflare AI binding request failed${statusLabel ? ` with ${statusLabel}` : ''}.`,
+			message:
+				message ??
+				`Cloudflare AI binding request failed${statusLabel ? ` with ${statusLabel}` : ''}${overflowMarker}${
+					boundedBody ? `: ${boundedBody}` : '.'
+				}`,
 			details: body ? `Provider response: ${body}` : '',
 			dev: '',
 			meta: {
@@ -663,6 +674,35 @@ export class CloudflareAIBindingError extends FlueError {
 			},
 		});
 	}
+}
+
+/** Bound a provider response body for embedding in an error message. */
+function truncateProviderBody(body: string): string {
+	const MAX = 2000;
+	return body.length <= MAX ? body : `${body.slice(0, MAX)}… [truncated]`;
+}
+
+/**
+ * Serialize an error for embedding in observable events (`operation`, `log`).
+ * FlueErrors keep their structured identity (`type`) and diagnostic payload
+ * (`details`, `meta`) — dropping them to bare name/message makes typed
+ * failures (e.g. a record-invariant error's recordId/recordType/reason)
+ * undiagnosable from telemetry.
+ */
+export function serializeEventError(error: unknown): unknown {
+	if (error instanceof FlueError) {
+		return {
+			name: error.name,
+			message: error.message,
+			type: error.type,
+			...(error.details ? { details: error.details } : {}),
+			...(error.meta ? { meta: error.meta } : {}),
+		};
+	}
+	if (error instanceof Error) {
+		return { name: error.name, message: error.message };
+	}
+	return error;
 }
 
 export class DelegationDepthExceededError extends FlueError {
@@ -815,6 +855,8 @@ export class ToolOutputSerializationError extends FlueError {
  * model call errored, or a durable input could not be persisted or recovered.
  * `reason` carries the underlying failure text; it is part of the message so
  * logs and serialized events stay informative, but it is prose, not API.
+ * `meta` carries the unwrapped `operation` and `reason` so telemetry can
+ * classify and title from the underlying failure without parsing the prose.
  */
 export class OperationFailedError extends FlueError {
 	constructor({ operation, reason }: { operation: string; reason: string }) {
@@ -823,6 +865,7 @@ export class OperationFailedError extends FlueError {
 			message: `${operation} failed: ${reason}`,
 			details: '',
 			dev: '',
+			meta: { operation, reason },
 		});
 	}
 }
