@@ -25,13 +25,9 @@ function markdownImportsFixture(): Fixture {
 		'src/guide.md': '# Fixture guide\n',
 		'src/skills/explore/SKILL.md':
 			'---\nname: explore\ndescription: Explore a repository.\n---\nExplore carefully.\n',
-		// Odd-named single-file skill: the parent directory ("prompts") does NOT
-		// match the frontmatter name — frontmatter is authoritative for ?skill —
-		// and the sensitive sibling proves only the file itself gets packaged
-		// (directory packaging would throw on the .pem).
-		'src/prompts/playbook.md':
-			'---\nname: notes\ndescription: Odd-named skill file.\n---\nTake notes.\n',
-		'src/prompts/private.pem': 'NOT A REAL KEY\n',
+		// An odd-named markdown file is NOT a skill import: it loads as markdown
+		// text, and userland builds the skill from it with defineSkill().
+		'src/prompts/playbook.md': 'Take notes.\n',
 		'src/agents/echo.ts': `'use agent';
 import { defineAgent, useInstruction, useModel, useSkill } from '@flue/runtime';
 import explore from '../skills/explore/SKILL.md';
@@ -44,12 +40,14 @@ function echo() {
 export default defineAgent(echo);
 `,
 		'src/app.ts': `import { Hono } from 'hono';
+import { defineSkill } from '@flue/runtime';
 import './test-model.ts';
 import echo from './agents/echo.ts';
 import explore from './skills/explore/SKILL.md';
-import notes from './prompts/playbook.md?skill';
+import playbook from './prompts/playbook.md';
 import guide from './guide.md';
 
+const notes = defineSkill({ name: 'notes', description: 'Note-taking playbook.', instructions: playbook });
 const app = new Hono();
 app.get('/api/guide', (c) => c.text(guide));
 app.get('/api/skill', (c) => c.json({ name: explore.name, notes: notes.name }));
@@ -62,7 +60,7 @@ export default app;
 }
 
 describe('markdown and skill imports through the outer Vite graph', () => {
-	it('serves markdown, packaged-skill, and ?skill imports in dev and admits prompts on the importing agent', async () => {
+	it('serves markdown, packaged-skill, and defineSkill-from-markdown imports in dev and admits prompts on the importing agent', async () => {
 		const fixture = markdownImportsFixture();
 		const port = await getAvailablePort();
 		const server = await createServer({

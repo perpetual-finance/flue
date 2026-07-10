@@ -11,12 +11,7 @@ export interface ParsedSkillMarkdown {
 }
 
 export interface ParseSkillMarkdownOptions {
-	/**
-	 * The skill directory's name, for the Agent Skills name↔directory rule.
-	 * Omit for a single-file skill (an odd-named `?skill` import), where no
-	 * spec-shaped directory exists and the frontmatter name is authoritative.
-	 */
-	directoryName?: string;
+	directoryName: string;
 	path: string;
 }
 
@@ -91,7 +86,7 @@ function validateSkillName(name: string, options: ParseSkillMarkdownOptions): vo
 			`[flue] Skill ${options.path} frontmatter name "${name}" must not start or end with a hyphen or contain consecutive hyphens. Use a spec-compliant value such as "review-pr".`,
 		);
 	}
-	if (options.directoryName !== undefined && name !== options.directoryName) {
+	if (name !== options.directoryName) {
 		throw new Error(
 			`[flue] Skill ${options.path} declares frontmatter name "${name}", but Agent Skills requires it to match directory "${options.directoryName}"; names must match. Rename the directory or change "name" so they match.`,
 		);

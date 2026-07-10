@@ -87,7 +87,7 @@ await using flue = await start({
 
 `start()` refuses to run inside an already-configured Flue process — there, `init()` needs no bootstrap. One process holds one Flue runtime.
 
-Two loader caveats for bare `node`: markdown and skill imports (`.md` / `SKILL.md` / `?skill`) and `cloudflare:workers` imports do not load outside the Vite pipeline. Agents that use them run under `flue dev`/`flue run` instead.
+Two loader caveats for bare `node`: markdown and skill imports (`.md` / `SKILL.md`) and `cloudflare:workers` imports do not load outside the Vite pipeline. Agents that use them run under `flue dev`/`flue run` instead.
 
 ## The handle
 

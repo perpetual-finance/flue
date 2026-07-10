@@ -359,7 +359,7 @@ function ReproducePhase() {
 }
 ```
 
-Accepts a `SkillReference` (a `SKILL.md` import — packaged automatically by the build; `?skill` opts an odd-named `.md` file in — or [`defineSkill(...)`](#defineskill)) or a bare `{ name, description }` catalog entry for content the model reads from the workspace itself. Duplicate names across the render fail fast. See [Skills](/docs/guide/skills/).
+Accepts a `SkillReference` (a `SKILL.md` import — packaged automatically by the build — or [`defineSkill(...)`](#defineskill), which also turns an imported `.md` string into a skill) or a bare `{ name, description }` catalog entry for content the model reads from the workspace itself. Duplicate names across the render fail fast. See [Skills](/docs/guide/skills/).
 
 #### `SkillReference`
 

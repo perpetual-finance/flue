@@ -2,18 +2,20 @@
  * Flue's markdown/skill import transform.
  *
  * Detection is by SPECIFIER, not by import attribute — TypeScript already
- * types these imports purely by suffix (the ambient `*.md`, `SKILL.md`, and
- * `*?skill` module declarations), so the specifier carries all the
- * information and an attribute would duplicate it:
+ * types these imports purely by suffix (the ambient `*.md` and `SKILL.md`
+ * module declarations), so the specifier carries all the information and an
+ * attribute would duplicate it:
  *
  *   - an import that resolves to a file named `SKILL.md` packages the whole
  *     skill directory (bundle, metadata, reference);
- *   - a `?skill` query opts any other `.md` file in explicitly;
  *   - every other bare `.md` import loads as a markdown text module;
  *   - Vite-native queries (`?raw`, `?url`, ...) are left to Vite.
  *
- * The legacy `with { type: 'skill' | 'markdown' }` attributes are rejected
- * with a pointer at the new forms.
+ * Those are the only two Flue forms. An odd-named markdown file becomes a
+ * skill in userland, not here: import it as markdown text and pass it to
+ * `defineSkill({ name, description, instructions })`. The legacy
+ * `with { type: 'skill' | 'markdown' }` attributes are rejected with a
+ * pointer at that pattern.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -62,9 +64,9 @@ export function markdownImportPlugin(): Plugin {
 			trackedSkillDirectories.clear();
 		},
 		transform: {
-			// Only modules that could carry a `.md` import (including `?skill`
-			// forms and legacy attributes) reach the handler, which type-strips
-			// and parses — by far this plugin's hottest path.
+			// Only modules that could carry a `.md` import (including legacy
+			// attribute forms) reach the handler, which type-strips and parses
+			// — by far this plugin's hottest path.
 			filter: {
 				id: { include: /\.[cm]?[jt]sx?(?:\?|$)/i },
 				code: { include: [/\.md/] },
@@ -82,7 +84,7 @@ export function markdownImportPlugin(): Plugin {
 			const replacements: Array<MarkdownImport & { moduleId: string }> = [];
 			for (const declaration of markdownImports) {
 				const query = importQuery(declaration.specifier);
-				if (query !== undefined && query !== 'skill') continue; // ?raw, ?url, ... — Vite's
+				if (query !== undefined) continue; // ?raw, ?url, ... — Vite's
 				const bareSpecifier = stripQueryAndHash(declaration.specifier);
 				const rootRelativePath = bareSpecifier.startsWith('/')
 					? path.resolve(viteRoot, bareSpecifier.slice(1))
@@ -100,9 +102,9 @@ export function markdownImportPlugin(): Plugin {
 					);
 				}
 				const resolvedPath = canonicalPath(filesystemPath);
-				// A skill: the explicit `?skill` opt-in, or any import that
-				// RESOLVES to a file named SKILL.md (aliases included).
-				if (query === 'skill' || isSkillMarkdownPath(resolvedPath)) {
+				// A skill: any import that RESOLVES to a file named SKILL.md
+				// (aliases included).
+				if (isSkillMarkdownPath(resolvedPath)) {
 					replacements.push({
 						...declaration,
 						moduleId: `${internalSkillModulePrefix}${resolvedPath}`,
@@ -133,7 +135,7 @@ export function markdownImportPlugin(): Plugin {
 				);
 			}
 			if (!importer) return null;
-			if (isSkillMarkdownPath(source) || importQuery(source) === 'skill') {
+			if (isSkillMarkdownPath(source)) {
 				// The transform packages these automatically; reaching raw
 				// resolution means the importer was outside the transform's
 				// module filter (a non-JS/TS importer, say).
@@ -145,16 +147,6 @@ export function markdownImportPlugin(): Plugin {
 		},
 		hotUpdate(options) {
 			const changedPath = canonicalPath(options.file);
-
-			// A single-file (`?skill`) skill module's id is the file itself.
-			const fileModule = this.environment.moduleGraph.getModuleById(
-				`${internalSkillModulePrefix}${changedPath}`,
-			);
-			if (fileModule) {
-				this.environment.moduleGraph.invalidateModule(fileModule);
-				return [fileModule];
-			}
-
 			const directory = [...trackedSkillDirectories].find((trackedDirectory) =>
 				isWithinDirectory(changedPath, trackedDirectory),
 			);
@@ -177,10 +169,8 @@ export function markdownImportPlugin(): Plugin {
 			const skillPath = id.slice(internalSkillModulePrefix.length);
 			// Dev invalidation needs no addWatchFile: the dev watcher covers the
 			// source root, and hotUpdate maps changed files back to skill modules
-			// (single-file skills by module id, SKILL.md layouts by directory).
-			if (isSkillMarkdownPath(skillPath)) {
-				trackedSkillDirectories.add(canonicalPath(path.dirname(skillPath)));
-			}
+			// by directory.
+			trackedSkillDirectories.add(canonicalPath(path.dirname(skillPath)));
 			const packagedSkill = await packageSkill(skillPath);
 			return [
 				`import { createSkillReference } from '@flue/runtime/internal';`,
@@ -192,7 +182,6 @@ export function markdownImportPlugin(): Plugin {
 }
 
 async function packageSkill(skillPath: string): Promise<PackagedSkillDirectory> {
-	if (!isSkillMarkdownPath(skillPath)) return packageSingleFileSkill(skillPath);
 	const directory = path.dirname(skillPath);
 	const parsed = parseSkillMarkdown(await fs.promises.readFile(skillPath, 'utf8'), {
 		directoryName: path.basename(directory),
@@ -212,26 +201,6 @@ async function packageSkill(skillPath: string): Promise<PackagedSkillDirectory> 
 		});
 	}
 	return buildPackagedSkill({ name: parsed.name, description: parsed.description, files });
-}
-
-/**
- * An odd-named `?skill` file is a SINGLE-FILE skill: the frontmatter name is
- * authoritative (no directory exists to match against — the Agent Skills
- * name↔directory rule presumes the SKILL.md layout), and only the file itself
- * is packaged. Packaging its containing directory would sweep in unrelated
- * siblings — a free-floating skill file makes no claim over its neighbors.
- * Inside the package the file becomes `SKILL.md`, so the packaged output is
- * spec-shaped like every other skill. Supporting files want the real
- * `<name>/SKILL.md` layout.
- */
-async function packageSingleFileSkill(skillPath: string): Promise<PackagedSkillDirectory> {
-	const content = await fs.promises.readFile(skillPath);
-	const parsed = parseSkillMarkdown(content.toString('utf8'), { path: skillPath });
-	return buildPackagedSkill({
-		name: parsed.name,
-		description: parsed.description,
-		files: [{ path: 'SKILL.md', content: new Uint8Array(content) }],
-	});
 }
 
 function canonicalPath(filePath: string): string {
@@ -349,7 +318,7 @@ interface MarkdownImport {
 	end: number;
 }
 
-/** The query string of an import specifier (`'./a.md?skill'` → `'skill'`), if any. */
+/** The query string of an import specifier (`'./a.md?raw'` → `'raw'`), if any. */
 function importQuery(specifier: string): string | undefined {
 	const index = specifier.indexOf('?');
 	if (index === -1) return undefined;
@@ -381,8 +350,8 @@ function collectMarkdownImports(ast: ModuleAst): MarkdownImport[] {
 		if (legacyAttribute) {
 			throw new Error(
 				`[flue] Import attributes are no longer used for "${specifier}". ` +
-					'SKILL.md imports are packaged automatically, any other .md import loads as markdown text, ' +
-					"and `?skill` opts an odd-named skill file in (`import s from './notes.md?skill'`). " +
+					'SKILL.md imports are packaged automatically, and any other .md import loads as markdown text — ' +
+					'pass it to `defineSkill({ name, description, instructions })` to build a skill from it. ' +
 					'Remove the `with { type: ... }` clause.',
 			);
 		}
@@ -401,10 +370,7 @@ function assertNoDynamicSkillImports(ast: ModuleAst): void {
 	visitAst(ast, (node) => {
 		if (node.type !== 'ImportExpression') return;
 		const specifier = node.source?.value;
-		if (
-			typeof specifier === 'string' &&
-			(isSkillMarkdownPath(specifier) || importQuery(specifier) === 'skill')
-		) {
+		if (typeof specifier === 'string' && isSkillMarkdownPath(specifier)) {
 			throw new Error(
 				`[flue] Dynamic skill import "${specifier}" is unsupported. Use a static SKILL.md import.`,
 			);
