@@ -105,6 +105,8 @@ guide/database -- Database
   Configure database-backed state for Flue agent conversations.
 guide/evals -- Evals
   Evaluate Flue agents with repeatable Vitest suites using vitest-evals.
+guide/migrate-from-beta -- Migrating from 1.0 Beta
+  Upgrade an application from Flue 1.0.0-beta.x to the current release — build, routing, agents, tools, workflows, SDK,…
 guide/models -- LLM (Models & Providers)
   Select models, configure providers, and tune reasoning behavior in Flue agents.
 guide/observability -- Observability
