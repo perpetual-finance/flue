@@ -41,10 +41,13 @@ describe('generateCloudflareEntry()', () => {
 		);
 
 		// One exported DO class per scanned agent, built by the shared factory
-		// with the module's cloudflare extension export.
+		// with the module's cloudflare extension export. Reflect.get, not a
+		// static member access: the export is optional, and a direct
+		// `__flue_agent_0__.cloudflare` makes bundlers warn (IMPORT_IS_UNDEFINED)
+		// for every agent module without it.
 		expect(entry).toContain('export const FlueEchoAgent = createFlueAgentClass({');
 		expect(entry).toContain('export const FlueTriageBotAgent = createFlueAgentClass({');
-		expect(entry).toContain('extension: __flue_agent_0__.cloudflare,');
+		expect(entry).toContain("extension: Reflect.get(__flue_agent_0__, 'cloudflare'),");
 
 		// Runtime seed carries only the conversation-era config shape.
 		expect(entry).toContain(`target: 'cloudflare',`);

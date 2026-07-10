@@ -60,7 +60,11 @@ export function generateCloudflareEntry(options: GenerateCloudflareEntryOptions)
 				`\truntime: cloudflareAgents,`,
 				`\tclassName: ${JSON.stringify(agent.className)},`,
 				`\tagentName: ${JSON.stringify(agent.identity)},`,
-				`\textension: ${agentVar(index)}.cloudflare,`,
+				// The `cloudflare` extension export is optional. Reflect.get keeps
+				// identical semantics (undefined when absent) without the static
+				// namespace member access bundlers flag as IMPORT_IS_UNDEFINED on
+				// every agent module that does not declare the export.
+				`\textension: Reflect.get(${agentVar(index)}, 'cloudflare'),`,
 				`});`,
 			].join('\n'),
 		)
