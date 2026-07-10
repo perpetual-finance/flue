@@ -122,7 +122,7 @@ function Support() {
 export default defineAgent(Support, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
-The directive gives the agent its durable identity (the file basename) and registers it with the built application — there is no name-based addressing beyond that identity. To expose the agent over HTTP, mount `agent.route()` in `app.ts`; see the [Routing API](/docs/api/routing-api/). A dispatch-only agent needs no mount. `flue run <path>` and raw `defineAgent()` values in unit tests do not require the directive.
+The directive gives the agent its durable identity (the file basename, or an `export const name` literal override) and registers it with the built application — there is no name-based addressing beyond that identity. To expose the agent over HTTP, mount `agent.route()` in `app.ts`; see the [Routing API](/docs/api/routing-api/). A dispatch-only agent needs no mount. `flue run <path>` and raw `defineAgent()` values in unit tests do not require the directive.
 
 The agent function re-renders every turn as durable state changes — it must return synchronously. Its identity hooks (`usePersistentState()`, `useDataWriter()`, `useSandbox()`, and the lifecycle hooks) must stay identical across renders; its resources (`useTool()`, `useSkill()`, `useSubagent()`) may be declared conditionally, with changes announced to the model (see [Dynamic resources](#dynamic-resources)). Async work belongs in tools, lifecycle hooks (`useAgentStart()`, `useAgentFinish()`), or resource factories, never in the agent function body itself.
 

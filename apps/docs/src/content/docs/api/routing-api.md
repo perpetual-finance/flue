@@ -45,7 +45,7 @@ An agent joins the application through the `'use agent'` directive, not through 
 - Mounting an unmarked agent module fails: `.route()` throws with guidance to add the `'use agent'` directive.
 - Mounting the same definition twice is allowed: both mounts address the same identity and the same conversations at two URLs.
 
-The agent's durable identity is the module's file basename (`src/agents/triage.ts` → `triage`), injected by the build transform. Identity — not the mount path — keys durable storage: conversation streams on Node and the Durable Object class on Cloudflare. Re-mounting an agent at a different URL preserves its conversations; renaming the file is the storage-identity change. Duplicate basenames among an app's agents are a build error.
+The agent's durable identity is the module's file basename (`src/agents/triage.ts` → `triage`), or its `export const name` literal override, injected by the build transform. Identity — not the mount path — keys durable storage: conversation streams on Node and the Durable Object class on Cloudflare. Re-mounting an agent at a different URL preserves its conversations; changing the identity (a file rename with no name pin, or an edit to the pin) is the storage-identity change. Duplicate identities among an app's agents are a build error.
 
 ## `agent.route()`
 

@@ -23,7 +23,16 @@ The directive does three jobs.
 
 ## 1. Identity
 
-The directive assigns the module an **identity**: its file basename. `src/agents/triage.ts` is the agent `triage`, wherever it lives under the source root and whatever URL it is mounted at.
+The directive assigns the module an **identity**: its file basename, unless the module declares an explicit override with `export const name`. `src/agents/triage.ts` is the agent `triage`, wherever it lives under the source root and whatever URL it is mounted at.
+
+```ts title="src/agents/triage-v2.ts"
+'use agent';
+
+// Optional: pin the identity so it no longer follows the filename.
+export const name = 'triage';
+```
+
+The override must be a plain string literal — build targets derive Durable Object class and binding names from the identity before any code runs, so a computed or re-exported `name` is a build error.
 
 Identity — not the mount path — keys durable storage:
 
@@ -35,9 +44,9 @@ That split gives renames precise semantics:
 | Change                         | Effect                                                                                                                                                                          |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Re-mounting at a different URL | Nothing durable changes. The same conversations are reachable at the new path. Mounting at two URLs serves the same conversations.                                              |
-| Renaming the **file**          | A storage-identity change. On Cloudflare, express it with wrangler-native `renamed_classes` to keep existing conversations; on Node, the storage key changes with the identity. |
+| Renaming the **file**          | A storage-identity change — unless `export const name` pins the identity, in which case the file can move and rename freely. Without the pin: on Cloudflare, express the change with wrangler-native `renamed_classes` to keep existing conversations; on Node, the storage key changes with the identity. |
 
-Because the identity is the file basename, basenames must be **unique among an application's agents** (a duplicate is a build error) and **lower-kebab-case** (`support-assistant.ts`), so generated durable identifiers stay predictable.
+Identities must be **unique among an application's agents** (a duplicate is a build error) and **lower-kebab-case** (`support-assistant.ts`, or `export const name = 'support-assistant'`), so generated durable identifiers stay predictable. With an override in place, the filename itself is unconstrained.
 
 ## 2. Module metadata
 

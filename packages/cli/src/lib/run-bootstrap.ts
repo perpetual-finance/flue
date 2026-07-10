@@ -38,7 +38,11 @@ import { sqlite } from '@flue/runtime/node';
 export interface FlueRunSessionOptions {
 	/** Absolute path of the agent module; imported via {@link loadModule}. */
 	agentModulePath: string;
-	/** Agent identity (file basename); keys durable conversation storage. */
+	/**
+	 * Fallback agent identity (the file basename). The module's own
+	 * `export const name` wins when declared; the resolved identity keys
+	 * durable conversation storage and is exposed on {@link FlueRunSession}.
+	 */
 	identity: string;
 	/** Absolute path of the project's db entry, when one resolved. */
 	dbModulePath?: string;
@@ -89,6 +93,8 @@ export interface FlueRunOutcome {
 }
 
 export interface FlueRunSession {
+	/** The resolved agent identity: the module's `name` export, else the file basename. */
+	readonly identity: string;
 	/** Submit one message to a conversation and wait for settlement. */
 	submit(
 		conversationId: string,
@@ -97,6 +103,30 @@ export interface FlueRunSession {
 	): Promise<FlueRunOutcome>;
 	/** Coordinator shutdown, instrumentation dispose, adapter close. */
 	close(): Promise<void>;
+}
+
+/**
+ * Matches `@flue/vite`'s AGENT_IDENTITY_PATTERN (agent-scan.ts) — duplicated
+ * here because the run bootstrap must not pull the vite package into the
+ * single-runtime execution graph.
+ */
+const RUN_IDENTITY_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+
+/**
+ * The module's `export const name` wins over the basename-derived fallback —
+ * `flue run` skips the build scan, so the override is read off the evaluated
+ * namespace instead (same precedence, different mechanism).
+ */
+function resolveRunIdentity(agentModule: Record<string, unknown>, fallback: string): string {
+	const nameExport = agentModule.name;
+	if (nameExport === undefined) return fallback;
+	if (typeof nameExport !== 'string' || !RUN_IDENTITY_PATTERN.test(nameExport)) {
+		throw new Error(
+			`[flue] The agent module's \`name\` export is its durable identity and must be a ` +
+				`lower-kebab-case string; got ${JSON.stringify(nameExport)}.`,
+		);
+	}
+	return nameExport;
 }
 
 export async function createFlueRunSession(
@@ -114,6 +144,7 @@ export async function createFlueRunSession(
 		return await runWithInstrumentationOwner(instrumentationOwner, async () => {
 			const agentModule = await options.loadModule(options.agentModulePath);
 			const definition = agentModule.default as FunctionAgentDefinition;
+			const identity = resolveRunIdentity(agentModule, options.identity);
 
 			const dbSource = options.dbSource ?? 'db.ts';
 			let adapter: PersistenceAdapter;
@@ -137,7 +168,7 @@ export async function createFlueRunSession(
 			// use: registration, coordinator, dispatch queue, runtime seed, and
 			// startup reconciliation (the run.db persists across invocations).
 			const runtime = await assembleNodeAgentRuntime({
-				agents: [{ identity: options.identity, definition }],
+				agents: [{ identity, definition }],
 				adapter,
 				stores,
 				env: runtimeEnv,
@@ -146,11 +177,12 @@ export async function createFlueRunSession(
 
 			let closing: Promise<void> | undefined;
 			return {
+				identity,
 				submit: (conversationId, message, submitOptions = {}) =>
 					submitAndSettle({
 						coordinator: runtime.coordinator,
 						conversationStreamStore: runtime.conversationStreamStore,
-						identity: options.identity,
+						identity,
 						conversationId,
 						message,
 						...submitOptions,

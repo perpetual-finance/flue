@@ -10,14 +10,14 @@ The build is owned by Vite: `flue()` plus the official `@cloudflare/vite-plugin`
 
 ## Generated Durable Objects
 
-Flue generates a Durable Object class and a Wrangler binding for each [`'use agent'`](/docs/guide/use-agent/) module found by the scan. Both derive from the file basename — the agent's identity:
+Flue generates a Durable Object class and a Wrangler binding for each [`'use agent'`](/docs/guide/use-agent/) module found by the scan. Both derive from the agent's identity — the file basename, or its [`export const name` override](/docs/guide/use-agent/#1-identity):
 
 ```txt
 src/agents/support-chat.ts   ->  FlueSupportChatAgent
                                  env.FLUE_SUPPORT_CHAT_AGENT
 ```
 
-The class name is how Cloudflare identifies the Durable Object in migrations. The binding is how your application code accesses the Durable Object namespace at runtime through `env`. Because both come from the file basename, renaming an agent file is a storage-identity change — see [Managing migrations](#managing-migrations).
+The class name is how Cloudflare identifies the Durable Object in migrations. The binding is how your application code accesses the Durable Object namespace at runtime through `env`. Because both come from the identity, renaming an agent file is a storage-identity change unless `export const name` pins the identity — see [Managing migrations](#managing-migrations).
 
 Canonical agent conversation streams, immutable attachments, and accepted submissions are stored in the owning Durable Object's SQLite storage automatically. The Cloudflare target does not use `db.ts`; a source-root `db.ts` is rejected at build time.
 

@@ -163,6 +163,8 @@ export function createLocalAgentRun(options: LocalAgentRunOptions): LocalAgentRu
 			throwIfAborted(controller.signal);
 			session = await bootstrap.createFlueRunSession({
 				agentModulePath: agentPath,
+				// Fallback only: the bootstrap prefers the module's own
+				// `export const name` and reports the winner back.
 				identity,
 				...(project.db !== undefined
 					? {
@@ -175,9 +177,10 @@ export function createLocalAgentRun(options: LocalAgentRunOptions): LocalAgentRu
 				loadModule: (modulePath) => loadRunModule(server, modulePath, loadContext),
 			});
 			throwIfAborted(controller.signal);
+			const resolvedIdentity = session.identity;
 
 			options.onReady?.({
-				identity,
+				identity: resolvedIdentity,
 				conversationId,
 				root: project.root,
 				configPath,
@@ -195,7 +198,7 @@ export function createLocalAgentRun(options: LocalAgentRunOptions): LocalAgentRu
 					onEvent: (chunk) => options.onEvent?.(chunk),
 				},
 			);
-			return { ...outcome, identity, conversationId };
+			return { ...outcome, identity: resolvedIdentity, conversationId };
 		} finally {
 			restoreConsole();
 		}

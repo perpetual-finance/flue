@@ -51,7 +51,7 @@ export default defineConfig({
 
 ### 2. Create your first agent
 
-An agent module is an ordinary TypeScript file plus one line: the `'use agent'` directive. The directive is how an agent joins the application — the build scans your source root for marked modules, emits one Durable Object class per marked file, and the file basename becomes the agent's durable identity.
+An agent module is an ordinary TypeScript file plus one line: the `'use agent'` directive. The directive is how an agent joins the application — the build scans your source root for marked modules, emits one Durable Object class per marked file, and the file basename becomes the agent's durable identity (an `export const name` literal overrides it).
 
 ```typescript title="src/agents/translator.ts"
 'use agent';
@@ -100,11 +100,11 @@ Cloudflare requires an explicit migration whenever a Worker adds a Durable Objec
 }
 ```
 
-Class names derive from agent file basenames: `src/agents/translator.ts` produces the class `FlueTranslatorAgent` and the binding `FLUE_TRANSLATOR_AGENT`. Flue requires `nodejs_compat` and a `compatibility_date` of `2026-04-01` or newer, and validates both at build time.
+Class names derive from agent identities (the file basename, or its `export const name` override): `src/agents/translator.ts` produces the class `FlueTranslatorAgent` and the binding `FLUE_TRANSLATOR_AGENT`. Flue requires `nodejs_compat` and a `compatibility_date` of `2026-04-01` or newer, and validates both at build time.
 
 **Adding an agent is a triple**: the `'use agent'` file, the `app.route(...)` mount, and a uniquely tagged migration for its new class. Keep deployed migration entries in order and append, never rewrite. Generated Flue agent classes require Durable Object SQLite: introduce them through `new_sqlite_classes`, not legacy `new_classes`.
 
-Renaming an agent **file** is a storage-identity change — the class name follows the basename. Express it with wrangler-native `renamed_classes` (`{ "from": "FlueOldNameAgent", "to": "FlueNewNameAgent" }`) to keep the deployed Durable Objects. Re-mounting an agent at a different URL is not an identity change and needs no migration.
+Renaming an agent **file** is a storage-identity change — the class name follows the identity, which follows the basename unless `export const name` pins it. Express an identity change with wrangler-native `renamed_classes` (`{ "from": "FlueOldNameAgent", "to": "FlueNewNameAgent" }`) to keep the deployed Durable Objects. Re-mounting an agent at a different URL is not an identity change and needs no migration.
 
 ### 5. Add your API key
 

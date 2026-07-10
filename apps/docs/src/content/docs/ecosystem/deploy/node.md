@@ -47,7 +47,7 @@ And the scripts:
 
 ### 2. Create your first agent
 
-An agent module is an ordinary TypeScript file plus one line: the `'use agent'` directive. The directive is how an agent joins the application — the build scans your source root for marked modules, and the file basename becomes the agent's durable identity.
+An agent module is an ordinary TypeScript file plus one line: the `'use agent'` directive. The directive is how an agent joins the application — the build scans your source root for marked modules, and the file basename becomes the agent's durable identity (an `export const name` literal overrides it).
 
 ```typescript title="src/agents/translator.ts"
 'use agent';

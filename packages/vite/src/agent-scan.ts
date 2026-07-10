@@ -13,6 +13,11 @@
  * uses the oxc parser that ships with Vite (`parseAstAsync`), so shebangs,
  * comments, `'use strict'` ordering, and ASI all follow real ECMAScript
  * semantics — no regex-over-the-file heuristics.
+ *
+ * Identity: the file basename, unless the module declares
+ * `export const name = '<literal>'` — the same parse extracts the override.
+ * The literal-only rule is load-bearing: build targets derive Durable Object
+ * class/binding names from the identity before any user code runs.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -23,12 +28,12 @@ import { parseAstAsync } from 'vite';
 export const AGENT_DIRECTIVE = 'use agent';
 
 /**
- * Agent identities (file basenames) must be lower-kebab-case so the generated
- * durable identifiers (Durable Object class + binding names on Cloudflare,
- * conversation storage slugs on Node) remain predictable. Ported from the
- * CLI's Cloudflare build plugin (`CLOUDFLARE_AGENT_NAME_PATTERN`), now
- * enforced uniformly on both targets because the identity keys storage
- * everywhere.
+ * Agent identities (file basenames, or their `export const name` override)
+ * must be lower-kebab-case so the generated durable identifiers (Durable
+ * Object class + binding names on Cloudflare, conversation storage slugs on
+ * Node) remain predictable. Ported from the CLI's Cloudflare build plugin
+ * (`CLOUDFLARE_AGENT_NAME_PATTERN`), now enforced uniformly on both targets
+ * because the identity keys storage everywhere.
  */
 export const AGENT_IDENTITY_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 
@@ -68,7 +73,11 @@ export interface ScanAgentsOptions {
 export interface AgentScanResult {
 	/** Absolute path of the agent module. */
 	readonly filePath: string;
-	/** File basename without extension; keys durable storage on both targets. */
+	/**
+	 * The agent's durable identity: the module's `export const name` override
+	 * when present, else the file basename without extension. Keys durable
+	 * storage on both targets.
+	 */
 	readonly identity: string;
 	/** Generated Durable Object class name, e.g. `FlueTriageAgent`. */
 	readonly className: string;
@@ -87,7 +96,7 @@ export class AgentScanError extends Error {
 	}
 }
 
-/** Two or more scanned agent modules share a file basename. */
+/** Two or more scanned agent modules resolve to the same identity. */
 export class DuplicateAgentIdentityError extends AgentScanError {
 	readonly duplicates: ReadonlyArray<{
 		readonly identity: string;
@@ -102,13 +111,14 @@ export class DuplicateAgentIdentityError extends AgentScanError {
 			.join('; ');
 		super(
 			`[flue] Duplicate agent identit${duplicates.length === 1 ? 'y' : 'ies'} among 'use agent' modules: ${list}. ` +
-				`The file basename is the agent's durable identity, so it must be unique across the app. Rename the conflicting file(s).`,
+				`The identity (the file basename, or its \`export const name\` override) is the agent's durable identity, ` +
+				`so it must be unique across the app. Rename the conflicting file(s) or set distinct name overrides.`,
 		);
 		this.duplicates = duplicates;
 	}
 }
 
-/** A scanned agent module's file basename is not lower-kebab-case. */
+/** A scanned agent module's identity (basename or name override) is not lower-kebab-case. */
 export class InvalidAgentIdentityError extends AgentScanError {
 	readonly invalidAgents: ReadonlyArray<{
 		readonly identity: string;
@@ -122,10 +132,26 @@ export class InvalidAgentIdentityError extends AgentScanError {
 			.map(({ identity, filePath }) => `${filePath} (agent: ${identity})`)
 			.join(', ');
 		super(
-			`[flue] Agent filenames must use lower-kebab-case so generated durable identifiers ` +
-				`remain predictable. Invalid file(s): ${list}. Rename them to match ${AGENT_IDENTITY_PATTERN}.`,
+			`[flue] Agent identities (the file basename, or its \`export const name\` override) must use ` +
+				`lower-kebab-case so generated durable identifiers remain predictable. Invalid file(s): ${list}. ` +
+				`Rename them to match ${AGENT_IDENTITY_PATTERN}.`,
 		);
 		this.invalidAgents = invalidAgents;
+	}
+}
+
+/** A `'use agent'` module exports `name` in a form the build cannot read statically. */
+export class InvalidAgentNameExportError extends AgentScanError {
+	readonly filePath: string;
+
+	constructor(filePath: string, position: { line: number; column: number }) {
+		super(
+			`[flue] ${filePath}:${position.line}:${position.column} — a 'use agent' module's \`name\` export is its ` +
+				`durable identity and must be statically readable: \`export const name = '<lower-kebab-case literal>'\`. ` +
+				`Build targets derive Durable Object class and binding names from it before any code runs, ` +
+				`so a computed, re-exported, or mutable \`name\` cannot be supported.`,
+		);
+		this.filePath = filePath;
 	}
 }
 
@@ -169,8 +195,9 @@ export async function scanAgents(options: ScanAgentsOptions): Promise<AgentScanR
 	const results: AgentScanResult[] = [];
 	await Promise.all(
 		filePaths.map(async (filePath) => {
-			if (await hasAgentDirective(filePath)) {
-				const identity = agentIdentity(filePath);
+			const scan = await scanAgentModuleFile(filePath);
+			if (scan.hasDirective) {
+				const identity = scan.nameOverride ?? agentIdentity(filePath);
 				results.push({
 					filePath,
 					identity,
@@ -270,16 +297,50 @@ export function sourcePosition(code: string, offset: number): { line: number; co
 	return { line, column: bounded - lineStart + 1 };
 }
 
+/** One candidate module's scan: directive membership plus the identity override. */
+export interface AgentModuleScan {
+	readonly hasDirective: boolean;
+	/** The `export const name = '<literal>'` override, when declared. */
+	readonly nameOverride: string | undefined;
+}
+
 /**
- * Whether `code` (an on-disk module's source) declares the `'use agent'`
- * directive. Parse failures throw {@link AgentModuleParseError}: silently
+ * Scan `code` (an on-disk module's source) for the `'use agent'` directive
+ * and, when marked, its `export const name` identity override — one parse
+ * serves both. Parse failures throw {@link AgentModuleParseError}: silently
  * skipping a broken candidate would let a build succeed without the agent the
- * file declares.
+ * file declares. A `name` export in any statically unreadable form throws
+ * {@link InvalidAgentNameExportError}.
  */
-export async function codeHasAgentDirective(code: string, filePath: string): Promise<boolean> {
+export async function scanAgentModuleCode(
+	code: string,
+	filePath: string,
+): Promise<AgentModuleScan> {
 	// Cheap candidate pre-filter: the raw directive text must appear somewhere
 	// in the file for the prologue to contain it (raw-text matching, so this
 	// can never produce a false negative). Only candidates are parsed.
+	if (!code.includes(AGENT_DIRECTIVE)) return { hasDirective: false, nameOverride: undefined };
+	let body: readonly unknown[];
+	try {
+		const program = await parseAstAsync(code, { lang: parserLangForFile(filePath) }, filePath);
+		body = program.body as readonly unknown[];
+	} catch (error) {
+		throw new AgentModuleParseError(filePath, error);
+	}
+	if (!programBodyHasAgentDirective(body)) {
+		return { hasDirective: false, nameOverride: undefined };
+	}
+	return { hasDirective: true, nameOverride: extractAgentNameOverride(body, code, filePath) };
+}
+
+/**
+ * Whether `code` (an on-disk module's source) declares the `'use agent'`
+ * directive.
+ */
+export async function codeHasAgentDirective(code: string, filePath: string): Promise<boolean> {
+	// Tolerates a malformed `name` export on purpose: membership questions
+	// (the transform's guard) should not fail on an identity problem the scan
+	// reports with its own diagnostic.
 	if (!code.includes(AGENT_DIRECTIVE)) return false;
 	let body: readonly unknown[];
 	try {
@@ -291,6 +352,83 @@ export async function codeHasAgentDirective(code: string, filePath: string): Pro
 	return programBodyHasAgentDirective(body);
 }
 
+// ─── `export const name` extraction ─────────────────────────────────────────
+
+interface NameExportNode {
+	readonly type?: string;
+	readonly start?: number;
+	readonly declaration?: {
+		readonly type?: string;
+		readonly kind?: string;
+		readonly declarations?: ReadonlyArray<{
+			readonly id?: { readonly type?: string; readonly name?: string };
+			readonly init?: unknown;
+		}>;
+	} | null;
+	readonly specifiers?: ReadonlyArray<{
+		readonly exported?: { readonly name?: unknown; readonly value?: unknown };
+	}>;
+}
+
+/**
+ * The module's `export const name = '<string literal>'` value, if declared.
+ * Any other top-level export of `name` (computed initializer, `let`/`var`,
+ * `export { x as name }` specifiers) throws: the export would take effect at
+ * runtime while the build derived identifiers from the basename, and the two
+ * must never disagree. `export * from` re-exports are not followed — a
+ * name smuggled through one simply never counts as an override.
+ */
+function extractAgentNameOverride(
+	body: readonly unknown[],
+	code: string,
+	filePath: string,
+): string | undefined {
+	for (const entry of body) {
+		const node = entry as NameExportNode;
+		if (node.type !== 'ExportNamedDeclaration') continue;
+		const invalid = () =>
+			new InvalidAgentNameExportError(filePath, sourcePosition(code, node.start ?? 0));
+		for (const specifier of node.specifiers ?? []) {
+			const exported = specifier.exported;
+			const exportedName =
+				typeof exported?.name === 'string'
+					? exported.name
+					: typeof exported?.value === 'string'
+						? exported.value
+						: undefined;
+			if (exportedName === 'name') throw invalid();
+		}
+		const declaration = node.declaration;
+		if (!declaration || declaration.type !== 'VariableDeclaration') continue;
+		for (const declarator of declaration.declarations ?? []) {
+			if (declarator.id?.type !== 'Identifier' || declarator.id.name !== 'name') continue;
+			if (declaration.kind !== 'const') throw invalid();
+			const literal = unwrapExpression(declarator.init) as {
+				readonly type?: string;
+				readonly value?: unknown;
+			};
+			if (literal?.type !== 'Literal' || typeof literal.value !== 'string') throw invalid();
+			return literal.value;
+		}
+	}
+	return undefined;
+}
+
+/** Strip TS type-position wrappers (`as`, `satisfies`, `!`, parentheses). */
+function unwrapExpression(node: unknown): unknown {
+	let current = node as { readonly type?: string; readonly expression?: unknown } | undefined;
+	while (
+		current &&
+		(current.type === 'TSAsExpression' ||
+			current.type === 'TSSatisfiesExpression' ||
+			current.type === 'TSNonNullExpression' ||
+			current.type === 'ParenthesizedExpression')
+	) {
+		current = current.expression as typeof current;
+	}
+	return current;
+}
+
 /**
  * The dialect must be selected explicitly: `parseAstAsync` does not derive it
  * from the filename argument and otherwise parses in JS mode, rejecting
@@ -300,9 +438,9 @@ export function parserLangForFile(filePath: string): 'ts' | 'js' {
 	return /\.(?:ts|mts|cts)$/.test(filePath) ? 'ts' : 'js';
 }
 
-async function hasAgentDirective(filePath: string): Promise<boolean> {
+async function scanAgentModuleFile(filePath: string): Promise<AgentModuleScan> {
 	const code = await fs.promises.readFile(filePath, 'utf8');
-	return codeHasAgentDirective(code, filePath);
+	return scanAgentModuleCode(code, filePath);
 }
 
 function assertValidIdentities(results: readonly AgentScanResult[]): void {

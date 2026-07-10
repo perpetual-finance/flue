@@ -12,7 +12,7 @@
  * Node (`flue()` alone) and Cloudflare (`flue()` before a sibling
  * `cloudflare()` from `@cloudflare/vite-plugin`).
  */
-export type { AgentScanResult, ScanAgentsOptions } from './agent-scan.ts';
+export type { AgentModuleScan, AgentScanResult, ScanAgentsOptions } from './agent-scan.ts';
 export {
 	AGENT_DIRECTIVE,
 	AGENT_IDENTITY_PATTERN,
@@ -23,8 +23,10 @@ export {
 	codeHasAgentDirective,
 	DuplicateAgentIdentityError,
 	InvalidAgentIdentityError,
+	InvalidAgentNameExportError,
 	isAgentModulePath,
 	programBodyHasAgentDirective,
+	scanAgentModuleCode,
 	scanAgents,
 } from './agent-scan.ts';
 export type { FlueResolvedProjectInfo, FlueVitePluginApi } from './flue-plugin.ts';

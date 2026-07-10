@@ -6,6 +6,7 @@ import {
 	AgentModuleParseError,
 	DuplicateAgentIdentityError,
 	InvalidAgentIdentityError,
+	InvalidAgentNameExportError,
 	scanAgents,
 } from '../src/agent-scan.ts';
 
@@ -294,5 +295,112 @@ describe('scanAgents()', () => {
 		});
 
 		await expect(scanAgents({ sourceRoot: root })).resolves.toEqual([]);
+	});
+
+	describe('`export const name` identity override', () => {
+		it('prefers the name export over the file basename for all derived identifiers', async () => {
+			const root = await makeFixture({
+				'agents/foo.ts': `'use agent';\nexport const name = 'issue-triage';\n${AGENT_BODY}`,
+			});
+
+			const results = await scanAgents({ sourceRoot: root });
+
+			expect(results).toEqual([
+				{
+					filePath: path.join(root, 'agents/foo.ts'),
+					identity: 'issue-triage',
+					className: 'FlueIssueTriageAgent',
+					bindingName: 'FLUE_ISSUE_TRIAGE_AGENT',
+				},
+			]);
+		});
+
+		it('overrides free the file basename from the identity pattern', async () => {
+			const root = await makeFixture({
+				'agents/Draft_Agent.ts': `'use agent';\nexport const name = 'drafts';\n${AGENT_BODY}`,
+			});
+
+			const results = await scanAgents({ sourceRoot: root });
+
+			expect(results.map((result) => result.identity)).toEqual(['drafts']);
+		});
+
+		it('accepts TS type-position wrappers around the literal', async () => {
+			const root = await makeFixture({
+				'agents/foo.ts': `'use agent';\nexport const name = 'wrapped' as const;\n${AGENT_BODY}`,
+			});
+
+			const results = await scanAgents({ sourceRoot: root });
+
+			expect(results.map((result) => result.identity)).toEqual(['wrapped']);
+		});
+
+		it('rejects a computed name export', async () => {
+			const root = await makeFixture({
+				'agents/foo.ts': `'use agent';\nconst n = 'x';\nexport const name = n + '-agent';\n${AGENT_BODY}`,
+			});
+
+			const error = await expectRejection(
+				scanAgents({ sourceRoot: root }),
+				InvalidAgentNameExportError,
+			);
+			expect(error.filePath).toBe(path.join(root, 'agents/foo.ts'));
+			expect(error.message).toContain('statically readable');
+		});
+
+		it('rejects mutable and specifier-form name exports', async () => {
+			const mutable = await makeFixture({
+				'agents/foo.ts': `'use agent';\nexport let name = 'triage';\n${AGENT_BODY}`,
+			});
+			await expectRejection(scanAgents({ sourceRoot: mutable }), InvalidAgentNameExportError);
+
+			const specifier = await makeFixture({
+				'agents/bar.ts': `'use agent';\nconst n = 'triage';\nexport { n as name };\n${AGENT_BODY}`,
+			});
+			await expectRejection(scanAgents({ sourceRoot: specifier }), InvalidAgentNameExportError);
+		});
+
+		it('applies the lower-kebab-case rule to the override', async () => {
+			const root = await makeFixture({
+				'agents/foo.ts': `'use agent';\nexport const name = 'Not_Kebab';\n${AGENT_BODY}`,
+			});
+
+			const error = await expectRejection(
+				scanAgents({ sourceRoot: root }),
+				InvalidAgentIdentityError,
+			);
+			expect(error.invalidAgents).toEqual([
+				{ identity: 'Not_Kebab', filePath: path.join(root, 'agents/foo.ts') },
+			]);
+		});
+
+		it('detects duplicates between an override and a basename', async () => {
+			const root = await makeFixture({
+				'agents/foo.ts': `'use agent';\nexport const name = 'triage';\n${AGENT_BODY}`,
+				'agents/triage.ts': `'use agent';\n${AGENT_BODY}`,
+			});
+
+			const error = await expectRejection(
+				scanAgents({ sourceRoot: root }),
+				DuplicateAgentIdentityError,
+			);
+			expect(error.duplicates).toEqual([
+				{
+					identity: 'triage',
+					filePaths: [path.join(root, 'agents/foo.ts'), path.join(root, 'agents/triage.ts')],
+				},
+			]);
+		});
+
+		it('ignores name exports in modules without the directive', async () => {
+			const root = await makeFixture({
+				'lib/helper.ts': `export const name = n() + '!';\nfunction n() { return 'x'; }`,
+				'agents/kept.ts': `'use agent';\n${AGENT_BODY}`,
+			});
+
+			const results = await scanAgents({ sourceRoot: root });
+
+			expect(results.map((result) => result.identity)).toEqual(['kept']);
+		});
 	});
 });

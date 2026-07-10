@@ -59,7 +59,7 @@ For more information, see [Cloudflare](/docs/guide/targets/cloudflare/#extending
 
 ### Agent modules
 
-An agent is any module under the source directory whose first statement is the `'use agent'` directive and whose default export is `defineAgent(...)`. The file basename is the agent's durable identity, so basenames must be unique among an application's agents and use lower-kebab-case (`support-assistant.ts`). Nesting is fine — `src/agents/` is just a tidy convention.
+An agent is any module under the source directory whose first statement is the `'use agent'` directive and whose default export is `defineAgent(...)`. The file basename is the agent's durable identity (an `export const name` literal overrides it), so identities must be unique among an application's agents and use lower-kebab-case (`support-assistant.ts`). Nesting is fine — `src/agents/` is just a tidy convention.
 
 The build scans the source directory for marked modules and registers all of them; mounting in `app.ts` is a separate, explicit step (and optional for dispatch-only agents). To narrow the scan, set the `agents` glob in `flue.config.ts`.
 

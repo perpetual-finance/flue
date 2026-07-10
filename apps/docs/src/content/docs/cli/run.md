@@ -14,7 +14,7 @@ flue run <path> --message <text> [--id <conversation-id>] [--initial-data <json>
 
 `flue run` executes one agent module locally under Node.js, delivers one `kind: 'user'` message into a conversation, streams the agent's activity to stderr, prints the final assistant reply to stdout, and exits. Execution is transport-free: the command compiles the module from disk itself, binds no port, and never starts an HTTP listener. It does not load `app.ts`, channels, or any HTTP composition — only the agent module (and whatever it imports).
 
-`<path>` is the path of an agent module whose default export is `defineAgent(...)`, resolved from the current working directory. The agent's identity is the file basename (`src/agents/triage.ts` runs as `triage`), the same identity a `'use agent'` build would assign, so `flue run` shares conversation storage keys with the deployed application when both use the same database. The module does not need the `'use agent'` directive to be runnable here.
+`<path>` is the path of an agent module whose default export is `defineAgent(...)`, resolved from the current working directory. The agent's identity is the module's `export const name` when declared, else the file basename (`src/agents/triage.ts` runs as `triage`) — the same identity a `'use agent'` build would assign, so `flue run` shares conversation storage keys with the deployed application when both use the same database. The module does not need the `'use agent'` directive to be runnable here.
 
 The run drives the same durable submission path as a deployed server: the message is durably admitted, processed, and settled, so `--id` continuations and recovery semantics match production behavior.
 

@@ -107,7 +107,7 @@ Durable Object **migration history stays user-authored** in your `wrangler.jsonc
 }
 ```
 
-Class names derive from file basenames (`triage.ts` → `FlueTriageAgent`), so renaming the file is a storage-identity change expressed with wrangler-native `renamed_classes`, and removing an agent needs a `deleted_classes` entry. See [Cloudflare](/docs/guide/targets/cloudflare/) for the full migration reference.
+Class names derive from agent identities (`triage.ts` → `FlueTriageAgent`; an `export const name` literal overrides the basename), so an identity change — renaming a file with no name pin, or editing the pin itself — is a storage-identity change expressed with wrangler-native `renamed_classes`, and removing an agent needs a `deleted_classes` entry. See [Cloudflare](/docs/guide/targets/cloudflare/) for the full migration reference.
 
 ### Development
 
