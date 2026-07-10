@@ -9,12 +9,12 @@ import { requireRenderFrame } from './frame.ts';
  * briefing arrives as the tool result, so the prompt prefix never changes.
  * Supporting files stay lazy until explicitly read.
  *
- * Accepts a `SkillReference` (a `SKILL.md` import `with { type: 'skill' }`,
- * or `defineSkill(...)`) or a bare `{ name, description }` catalog entry for
+ * Accepts a `SkillReference` (a `SKILL.md` import — packaged automatically
+ * by the build — or `defineSkill(...)`) or a bare `{ name, description }` catalog entry for
  * content the model reads from the workspace itself:
  *
  * ```ts
- * import triageSkill from '../skills/triage/SKILL.md' with { type: 'skill' };
+ * import triageSkill from '../skills/triage/SKILL.md';
  *
  * function ReproducePhase({ check, onComplete }: PhaseProps) {
  *   useSkill(triageSkill);
@@ -22,8 +22,8 @@ import { requireRenderFrame } from './frame.ts';
  * }
  * ```
  *
- * Always-on skill content needs no hook — import the markdown
- * `with { type: 'markdown' }` and pass it to `useInstruction()`. Mounts are
+ * Always-on skill content needs no hook — import the markdown file (any
+ * `.md` import loads as a string) and pass it to `useInstruction()`. Mounts are
  * static like everything else: a skill mounted by a phase hook is
  * cataloged on every turn; the hook's instruction says when to
  * activate it. Duplicate names across the render fail fast.
@@ -32,7 +32,7 @@ export function useSkill(skill: Skill): void {
 	const frame = requireRenderFrame('useSkill');
 	if (!skill || typeof skill !== 'object' || Array.isArray(skill)) {
 		throw new Error(
-			"[flue] useSkill() requires a skill: a SKILL.md import with { type: 'skill' }, a defineSkill(...) value, or a { name, description } catalog entry.",
+			"[flue] useSkill() requires a skill: a SKILL.md import, a defineSkill(...) value, or a { name, description } catalog entry.",
 		);
 	}
 	const { name, description } = skill as Partial<Skill>;

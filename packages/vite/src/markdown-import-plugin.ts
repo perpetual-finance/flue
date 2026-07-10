@@ -1,6 +1,19 @@
 /**
- * Flue's attributed-import transform, moved from the CLI's legacy build
- * pipeline. Behavior is intentionally unchanged.
+ * Flue's markdown/skill import transform.
+ *
+ * Detection is by SPECIFIER, not by import attribute — TypeScript already
+ * types these imports purely by suffix (the ambient `*.md`, `SKILL.md`, and
+ * `*?skill` module declarations), so the specifier carries all the
+ * information and an attribute would duplicate it:
+ *
+ *   - an import that resolves to a file named `SKILL.md` packages the whole
+ *     skill directory (bundle, metadata, reference);
+ *   - a `?skill` query opts any other `.md` file in explicitly;
+ *   - every other bare `.md` import loads as a markdown text module;
+ *   - Vite-native queries (`?raw`, `?url`, ...) are left to Vite.
+ *
+ * The legacy `with { type: 'skill' | 'markdown' }` attributes are rejected
+ * with a pointer at the new forms.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -26,12 +39,11 @@ const EXCLUDED_FILES = new Set(['.netrc', '.npmrc', '.pypirc', '_netrc', 'creden
 const SENSITIVE_FILE_PATTERNS = [/\.key$/i, /\.pem$/i, /\.p12$/i, /\.pfx$/i, /^secrets?(?:\.|$)/i];
 
 /**
- * Handles Flue's attributed imports — `with { type: 'markdown' }` and
- * `with { type: 'skill' }` — in one plugin so each module in the graph is
- * type-stripped and parsed once per (re)build, and so the two attribute
- * types cannot drift apart.
+ * Handles Flue's markdown and skill imports in one plugin so each module in
+ * the graph is type-stripped and parsed once per (re)build, and so the two
+ * module kinds cannot drift apart.
  */
-export function importAttributePlugin(): Plugin {
+export function markdownImportPlugin(): Plugin {
 	let viteRoot = '';
 	const internalModuleToken = ulid();
 	const internalSkillModulePrefix = `${SKILL_MODULE_PREFIX}${internalModuleToken}:`;
@@ -39,7 +51,7 @@ export function importAttributePlugin(): Plugin {
 	const trackedSkillDirectories = new Set<string>();
 
 	return {
-		name: 'flue-import-attributes',
+		name: 'flue-markdown-imports',
 		enforce: 'pre',
 		configResolved(config) {
 			viteRoot = config.root;
@@ -50,12 +62,12 @@ export function importAttributePlugin(): Plugin {
 			trackedSkillDirectories.clear();
 		},
 		transform: {
-			// Only modules that could carry an attributed import (`with { … }`)
-			// or a dynamic SKILL.md import reach the handler, which type-strips
+			// Only modules that could carry a `.md` import (including `?skill`
+			// forms and legacy attributes) reach the handler, which type-strips
 			// and parses — by far this plugin's hottest path.
 			filter: {
 				id: { include: /\.[cm]?[jt]sx?(?:\?|$)/i },
-				code: { include: [/with\s*\{/, /SKILL\.md/] },
+				code: { include: [/\.md/] },
 			},
 			async handler(code, id) {
 				if (!/\.[cm]?[jt]sx?(?:\?|$)/i.test(id)) return null;
@@ -65,66 +77,41 @@ export function importAttributePlugin(): Plugin {
 				: code;
 			const ast = this.parse(parseableCode) as unknown as ModuleAst;
 			assertNoDynamicSkillImports(ast);
-			const markdownImports = collectAttributedImports(ast, 'markdown');
-			const skillImports = collectAttributedImports(ast, 'skill');
-			if (markdownImports.length === 0 && skillImports.length === 0) return null;
-			const replacements: Array<AttributedImport & { moduleId: string }> = [];
+			const markdownImports = collectMarkdownImports(ast);
+			if (markdownImports.length === 0) return null;
+			const replacements: Array<MarkdownImport & { moduleId: string }> = [];
 			for (const declaration of markdownImports) {
-				if (isSkillMarkdownPath(declaration.specifier)) {
-					throw new Error(
-						`[flue] SKILL.md imports must use an import attribute: with { type: 'skill' }.`,
-					);
-				}
-				if (!/\.md$/i.test(declaration.specifier)) {
-					throw new Error(
-						`[flue] Markdown imports must target a .md file: ${declaration.specifier}`,
-					);
-				}
-				const rootRelativePath = declaration.specifier.startsWith('/')
-					? path.resolve(viteRoot, declaration.specifier.slice(1))
+				const query = importQuery(declaration.specifier);
+				if (query !== undefined && query !== 'skill') continue; // ?raw, ?url, ... — Vite's
+				const bareSpecifier = stripQueryAndHash(declaration.specifier);
+				const rootRelativePath = bareSpecifier.startsWith('/')
+					? path.resolve(viteRoot, bareSpecifier.slice(1))
 					: undefined;
 				const resolved = rootRelativePath
 					? { id: rootRelativePath, external: false }
-					: await this.resolve(declaration.specifier, importerPath, { skipSelf: true });
+					: await this.resolve(bareSpecifier, importerPath, { skipSelf: true });
 				if (!resolved || resolved.external) {
 					throw new Error(`[flue] Unable to resolve markdown import: ${declaration.specifier}`);
-				}
-				if (isSkillMarkdownPath(resolved.id)) {
-					throw new Error(
-						`[flue] SKILL.md imports must use an import attribute: with { type: 'skill' }.`,
-					);
-				}
-				replacements.push({ ...declaration, moduleId: `${MARKDOWN_MODULE_PREFIX}${resolved.id}` });
-			}
-			for (const declaration of skillImports) {
-				if (!isSkillMarkdownPath(declaration.specifier)) {
-					throw new Error(
-						`[flue] Skill imports must target a SKILL.md file: ${declaration.specifier}`,
-					);
-				}
-				const resolved = await this.resolve(declaration.specifier, importerPath, {
-					skipSelf: true,
-				});
-				if (!resolved || resolved.external) {
-					throw new Error(`[flue] Unable to resolve skill import: ${declaration.specifier}`);
 				}
 				const filesystemPath = stripQueryAndHash(resolved.id);
 				if (!path.isAbsolute(filesystemPath)) {
 					throw new Error(
-						`[flue] Skill imports must resolve to a filesystem path: ${declaration.specifier}`,
+						`[flue] Markdown imports must resolve to a filesystem path: ${declaration.specifier}`,
 					);
 				}
 				const resolvedPath = canonicalPath(filesystemPath);
-				if (!isSkillMarkdownPath(resolvedPath)) {
-					throw new Error(
-						`[flue] Skill imports must resolve to a SKILL.md file: ${declaration.specifier}`,
-					);
+				// A skill: the explicit `?skill` opt-in, or any import that
+				// RESOLVES to a file named SKILL.md (aliases included).
+				if (query === 'skill' || isSkillMarkdownPath(resolvedPath)) {
+					replacements.push({
+						...declaration,
+						moduleId: `${internalSkillModulePrefix}${resolvedPath}`,
+					});
+					continue;
 				}
-				replacements.push({
-					...declaration,
-					moduleId: `${internalSkillModulePrefix}${resolvedPath}`,
-				});
+				replacements.push({ ...declaration, moduleId: `${MARKDOWN_MODULE_PREFIX}${resolvedPath}` });
 			}
+			if (replacements.length === 0) return null;
 			let transformed = parseableCode;
 			for (const replacement of replacements.sort((a, b) => b.start - a.start)) {
 				transformed = `${transformed.slice(0, replacement.start)}${JSON.stringify(replacement.moduleId)}${transformed.slice(replacement.end)}`;
@@ -142,13 +129,16 @@ export function importAttributePlugin(): Plugin {
 			if (internalModuleId) return internalModuleId;
 			if (source.startsWith(SKILL_MODULE_PREFIX) || source.includes(ENCODED_SKILL_MODULE_PREFIX)) {
 				throw new Error(
-					"[flue] Internal packaged-skill module IDs cannot be imported directly. Use a static SKILL.md import with { type: 'skill' }.",
+					'[flue] Internal packaged-skill module IDs cannot be imported directly. Use a static SKILL.md import.',
 				);
 			}
 			if (!importer) return null;
-			if (isSkillMarkdownPath(source)) {
+			if (isSkillMarkdownPath(source) || importQuery(source) === 'skill') {
+				// The transform packages these automatically; reaching raw
+				// resolution means the importer was outside the transform's
+				// module filter (a non-JS/TS importer, say).
 				throw new Error(
-					`[flue] Markdown import "${source}" must use an import attribute: with { type: 'skill' }.`,
+					`[flue] Skill import "${source}" reached resolution untransformed. Skill imports are packaged automatically from .ts/.js importers; import it from a module the Flue transform processes.`,
 				);
 			}
 			return null;
@@ -319,17 +309,26 @@ interface AstNode {
 	attributes?: Array<{ key?: { name?: unknown; value?: unknown }; value?: { value?: unknown } }>;
 }
 
-interface AttributedImport {
+interface MarkdownImport {
 	specifier: string;
 	start: number;
 	end: number;
 }
 
-function collectAttributedImports(
-	ast: ModuleAst,
-	attributeValue: 'markdown' | 'skill',
-): AttributedImport[] {
-	const imports: AttributedImport[] = [];
+/** The query string of an import specifier (`'./a.md?skill'` → `'skill'`), if any. */
+function importQuery(specifier: string): string | undefined {
+	const index = specifier.indexOf('?');
+	if (index === -1) return undefined;
+	return specifier.slice(index + 1).split('#', 1)[0];
+}
+
+/**
+ * Every static import whose specifier targets a `.md` file (queries included).
+ * A legacy `with { type: 'markdown' | 'skill' }` attribute throws with the
+ * replacement forms; other attribute types (`json`, ...) are none of ours.
+ */
+function collectMarkdownImports(ast: ModuleAst): MarkdownImport[] {
+	const imports: MarkdownImport[] = [];
 	for (const entry of ast.body) {
 		const declaration = entry as AstNode;
 		if (
@@ -340,15 +339,24 @@ function collectAttributedImports(
 			continue;
 		const specifier = declaration.source?.value;
 		if (typeof specifier !== 'string') continue;
-		const matchesAttribute = declaration.attributes?.some((attribute) => {
+		const legacyAttribute = declaration.attributes?.find((attribute) => {
 			const key = attribute.key?.name ?? attribute.key?.value;
-			return key === 'type' && attribute.value?.value === attributeValue;
+			const value = attribute.value?.value;
+			return key === 'type' && (value === 'markdown' || value === 'skill');
 		});
-		if (!matchesAttribute) continue;
+		if (legacyAttribute) {
+			throw new Error(
+				`[flue] Import attributes are no longer used for "${specifier}". ` +
+					'SKILL.md imports are packaged automatically, any other .md import loads as markdown text, ' +
+					"and `?skill` opts an odd-named skill file in (`import s from './notes.md?skill'`). " +
+					'Remove the `with { type: ... }` clause.',
+			);
+		}
+		if (!/\.md$/i.test(stripQueryAndHash(specifier))) continue;
 		const start = declaration.source?.start;
 		const end = declaration.source?.end;
 		if (typeof start !== 'number' || typeof end !== 'number') {
-			throw new Error(`[flue] Unable to transform ${attributeValue} import: ${specifier}`);
+			throw new Error(`[flue] Unable to transform markdown import: ${specifier}`);
 		}
 		imports.push({ specifier, start, end });
 	}
@@ -359,9 +367,12 @@ function assertNoDynamicSkillImports(ast: ModuleAst): void {
 	visitAst(ast, (node) => {
 		if (node.type !== 'ImportExpression') return;
 		const specifier = node.source?.value;
-		if (typeof specifier === 'string' && isSkillMarkdownPath(specifier)) {
+		if (
+			typeof specifier === 'string' &&
+			(isSkillMarkdownPath(specifier) || importQuery(specifier) === 'skill')
+		) {
 			throw new Error(
-				`[flue] Dynamic SKILL.md import "${specifier}" is unsupported. Use a static import with { type: 'skill' }.`,
+				`[flue] Dynamic skill import "${specifier}" is unsupported. Use a static SKILL.md import.`,
 			);
 		}
 	});

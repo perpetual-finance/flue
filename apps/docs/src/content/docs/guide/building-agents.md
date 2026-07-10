@@ -75,7 +75,7 @@ The function runs again before every model turn, so guards and interpolated text
 'use agent';
 import { defineAgent, useModel, useSandbox, useSkill } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
-import reviewChecklist from '../skills/review-checklist/SKILL.md' with { type: 'skill' };
+import reviewChecklist from '../skills/review-checklist/SKILL.md';
 
 function RepositoryReviewer() {
   useModel('anthropic/claude-sonnet-4-6');
@@ -116,12 +116,12 @@ A custom hook that only declares resources (tools, skills, subagents) may be cal
 
 ### Markdown instructions
 
-Long instructions can live in their own markdown file. Import a `.md` file with the `with { type: 'markdown' }` import attribute and Flue inlines its contents as a string at build time — then return it as the agent function's instruction:
+Long instructions can live in their own markdown file. Import any `.md` file and Flue inlines its contents as a string at build time — then return it as the agent function's instruction:
 
 ```ts title="src/agents/repository-reviewer.ts"
 'use agent';
 import { defineAgent, useModel } from '@flue/runtime';
-import instructions from './repository-reviewer.md' with { type: 'markdown' };
+import instructions from './repository-reviewer.md';
 
 function RepositoryReviewer() {
   useModel('anthropic/claude-sonnet-4-6');
@@ -131,7 +131,7 @@ function RepositoryReviewer() {
 export default defineAgent(RepositoryReviewer);
 ```
 
-The attribute is required — a `.md` import without it fails the build. `SKILL.md` files are not plain markdown and must use `with { type: 'skill' }` instead; see [Skills](/docs/guide/skills/).
+`SKILL.md` files are not plain markdown — an import that resolves to one packages the whole skill directory instead; see [Skills](/docs/guide/skills/). To package an odd-named markdown file as a skill, opt in with a `?skill` query (`import s from './notes.md?skill'`). Vite-native queries (`?raw`, `?url`) keep their usual meanings.
 
 ## Conversation ID
 

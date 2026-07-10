@@ -1,6 +1,6 @@
 'use agent';
 import { defineAgent, useModel, useSkill, useTool } from '@flue/runtime';
-import review from '../skills/review/SKILL.md' with { type: 'skill' };
+import review from '../skills/review/SKILL.md';
 
 function WithImportedSkill() {
 	useModel('anthropic/claude-haiku-4-5');

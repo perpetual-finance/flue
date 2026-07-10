@@ -351,7 +351,7 @@ function useSkill(skill: Skill): void;
 Mounts a skill in the agent's catalog. Skills are progressive disclosure: every mounted skill costs one always-present catalog line (name + description) in the system prompt, and the model pulls the full instructions on demand with the framework's `activate_skill` tool.
 
 ```ts
-import triageSkill from '../skills/triage/SKILL.md' with { type: 'skill' };
+import triageSkill from '../skills/triage/SKILL.md';
 
 function ReproducePhase() {
   useSkill(triageSkill);
@@ -359,7 +359,7 @@ function ReproducePhase() {
 }
 ```
 
-Accepts a `SkillReference` (a `SKILL.md` import `with { type: 'skill' }`, or [`defineSkill(...)`](#defineskill)) or a bare `{ name, description }` catalog entry for content the model reads from the workspace itself. Duplicate names across the render fail fast. See [Skills](/docs/guide/skills/).
+Accepts a `SkillReference` (a `SKILL.md` import — packaged automatically by the build; `?skill` opts an odd-named `.md` file in — or [`defineSkill(...)`](#defineskill)) or a bare `{ name, description }` catalog entry for content the model reads from the workspace itself. Duplicate names across the render fail fast. See [Skills](/docs/guide/skills/).
 
 #### `SkillReference`
 

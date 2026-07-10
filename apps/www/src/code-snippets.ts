@@ -4,8 +4,8 @@ export const COPY_PROMPT = `Read https://flueframework.com/start.md then help cr
 export const HERO = `'use agent';
 import { defineAgent, useModel, useSandbox, useSkill, useTool } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
-import triage from '../skills/triage/SKILL.md' with { type: 'skill' };
-import verify from '../skills/verify/SKILL.md' with { type: 'skill' };
+import triage from '../skills/triage/SKILL.md';
+import verify from '../skills/verify/SKILL.md';
 import { replyToIssue } from '../tools/github.ts';
 
 // Expose (and protect) your agents to the world:

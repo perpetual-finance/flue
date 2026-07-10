@@ -19,16 +19,18 @@ afterEach(async () => {
 	for (const fixture of fixtures.splice(0)) fixture.cleanup();
 });
 
-function attributedImportsFixture(): Fixture {
+function markdownImportsFixture(): Fixture {
 	const fixture = createFixture({
 		'src/test-model.ts': TEST_MODEL_MODULE,
 		'src/guide.md': '# Fixture guide\n',
 		'src/skills/explore/SKILL.md':
 			'---\nname: explore\ndescription: Explore a repository.\n---\nExplore carefully.\n',
+		'src/skills/notes/playbook.md':
+			'---\nname: notes\ndescription: Odd-named skill file.\n---\nTake notes.\n',
 		'src/agents/echo.ts': `'use agent';
 import { defineAgent, useInstruction, useModel, useSkill } from '@flue/runtime';
-import explore from '../skills/explore/SKILL.md' with { type: 'skill' };
-import guide from '../guide.md' with { type: 'markdown' };
+import explore from '../skills/explore/SKILL.md';
+import guide from '../guide.md';
 function echo() {
 	useModel('flue-test/fake-model');
 	useSkill(explore);
@@ -39,12 +41,13 @@ export default defineAgent(echo);
 		'src/app.ts': `import { Hono } from 'hono';
 import './test-model.ts';
 import echo from './agents/echo.ts';
-import explore from './skills/explore/SKILL.md' with { type: 'skill' };
-import guide from './guide.md' with { type: 'markdown' };
+import explore from './skills/explore/SKILL.md';
+import notes from './skills/notes/playbook.md?skill';
+import guide from './guide.md';
 
 const app = new Hono();
 app.get('/api/guide', (c) => c.text(guide));
-app.get('/api/skill', (c) => c.json({ name: explore.name }));
+app.get('/api/skill', (c) => c.json({ name: explore.name, notes: notes.name }));
 app.route('/agents/echo', echo.route());
 export default app;
 `,
@@ -53,9 +56,9 @@ export default app;
 	return fixture;
 }
 
-describe('import attributes through the outer Vite graph', () => {
-	it('serves markdown and packaged-skill imports in dev and admits prompts on the importing agent', async () => {
-		const fixture = attributedImportsFixture();
+describe('markdown and skill imports through the outer Vite graph', () => {
+	it('serves markdown, packaged-skill, and ?skill imports in dev and admits prompts on the importing agent', async () => {
+		const fixture = markdownImportsFixture();
 		const port = await getAvailablePort();
 		const server = await createServer({
 			root: fixture.root,
@@ -78,7 +81,7 @@ describe('import attributes through the outer Vite graph', () => {
 		expect(guide).toBe('# Fixture guide\n');
 
 		const skill = await fetch(`${baseUrl}/api/skill`);
-		expect(await skill.json()).toEqual({ name: 'explore' });
+		expect(await skill.json()).toEqual({ name: 'explore', notes: 'notes' });
 
 		const admitted = await fetch(`${baseUrl}/agents/echo/attr-1`, {
 			method: 'POST',
@@ -89,8 +92,38 @@ describe('import attributes through the outer Vite graph', () => {
 	}, 60_000);
 
 	it('packages markdown and skill imports into the production build', async () => {
-		const fixture = attributedImportsFixture();
+		const fixture = markdownImportsFixture();
 		await build({ root: fixture.root, configFile: false, logLevel: 'error', plugins: flue() });
+	}, 120_000);
+
+	it('rejects the legacy import attribute with a pointer at the new forms', async () => {
+		const fixture = createFixture({
+			'src/test-model.ts': TEST_MODEL_MODULE,
+			'src/skills/explore/SKILL.md':
+				'---\nname: explore\ndescription: Explore a repository.\n---\nExplore carefully.\n',
+			'src/agents/echo.ts': `'use agent';
+import { defineAgent, useModel, useSkill } from '@flue/runtime';
+import explore from '../skills/explore/SKILL.md' with { type: 'skill' };
+function echo() {
+	useModel('flue-test/fake-model');
+	useSkill(explore);
+}
+export default defineAgent(echo);
+`,
+			'src/app.ts': `import { Hono } from 'hono';
+import './test-model.ts';
+import echo from './agents/echo.ts';
+
+const app = new Hono();
+app.route('/agents/echo', echo.route());
+export default app;
+`,
+		});
+		fixtures.push(fixture);
+
+		await expect(
+			build({ root: fixture.root, configFile: false, logLevel: 'error', plugins: flue() }),
+		).rejects.toThrow(/Import attributes are no longer used/);
 	}, 120_000);
 });
 

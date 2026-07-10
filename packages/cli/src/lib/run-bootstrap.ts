@@ -59,7 +59,7 @@ export interface FlueRunSessionOptions {
 	/**
 	 * Module loader used for the agent and db entries. Supplied by the CLI as
 	 * `viteServer.ssrLoadModule` so user modules get the full transform
-	 * pipeline (TS, import attributes) inside the single-runtime graph.
+	 * pipeline (TS, markdown/skill imports) inside the single-runtime graph.
 	 */
 	loadModule: (path: string) => Promise<Record<string, unknown>>;
 }

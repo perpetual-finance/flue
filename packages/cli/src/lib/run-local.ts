@@ -27,7 +27,7 @@ import {
 	findCloudflareSpecifier,
 	flueDependencyResolverPlugin,
 	type ImportTrace,
-	importAttributePlugin,
+	markdownImportPlugin,
 } from '@flue/vite/internal';
 import { ulid } from 'ulidx';
 import type {
@@ -310,7 +310,7 @@ async function createRunModuleServer(
 			watch: null,
 		},
 		plugins: [
-			importAttributePlugin(),
+			markdownImportPlugin(),
 			importTrace.plugin,
 			flueDependencyResolverPlugin({ root, external: true, importers: [] }),
 		],

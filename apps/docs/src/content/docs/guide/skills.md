@@ -29,14 +29,14 @@ The example stores the skill in `src/skills/` alongside other authored source, b
 
 ## Import a skill
 
-Import your skills with the `skill` import attribute (a new feature in modern JavaScript). Once imported, pass the imported reference to `useSkill(...)` inside the agent function:
+Import your skills directly — any import that resolves to a file named `SKILL.md` is packaged automatically by the build (bundle, metadata, reference). Pass the imported reference to `useSkill(...)` inside the agent function:
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
 import { defineAgent, useModel, useSkill } from '@flue/runtime';
-import review from '../skills/review/SKILL.md' with { type: 'skill' };
-import triage from '../skills/triage/SKILL.md' with { type: 'skill' };
-import investigate from '../skills/investigate/SKILL.md' with { type: 'skill' };
+import review from '../skills/review/SKILL.md';
+import triage from '../skills/triage/SKILL.md';
+import investigate from '../skills/investigate/SKILL.md';
 
 function Assistant() {
   useModel('anthropic/claude-sonnet-4-6');
@@ -54,7 +54,7 @@ Each import produces a skill reference and includes that skill directory in the 
 Skills can also be imported from installed packages:
 
 ```ts
-import review from '@acme/review-skills/review/SKILL.md' with { type: 'skill' };
+import review from '@acme/review-skills/review/SKILL.md';
 ```
 
 The package must publish `SKILL.md` and its supporting files. If it defines package exports, it must export the imported `SKILL.md` subpath.

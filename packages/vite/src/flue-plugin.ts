@@ -65,8 +65,8 @@ import {
 } from './dependency-resolver.ts';
 import { applyDevEnv } from './dev-env.ts';
 import { stackless } from './diagnostics.ts';
-import { importAttributePlugin } from './import-attribute-plugin.ts';
 import { createImportTrace, explainCloudflareImport } from './import-trace.ts';
+import { markdownImportPlugin } from './markdown-import-plugin.ts';
 import { createNodeDevController } from './node-dev.ts';
 import { configureNodePreview } from './node-preview.ts';
 import { transformUseAgentModule } from './use-agent-transform.ts';
@@ -650,7 +650,7 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 
 	return [
 		corePlugin,
-		importAttributePlugin(),
+		markdownImportPlugin(),
 		importTrace.plugin,
 		flueDependencyResolverPlugin(resolverState),
 	];

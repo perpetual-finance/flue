@@ -618,7 +618,7 @@ export class SkillNotRegisteredError extends FlueError {
 				`session's sandbox. If you expected "${skill}" to be there, make sure the SKILL.md file ` +
 				`exists at that path before calling init() — the default empty sandbox starts with no ` +
 				`files, so it has no skills unless you put them there.\n` +
-				`Packaged skills can be imported from SKILL.md with { type: 'skill' } and passed ` +
+				`Packaged skills can be imported from SKILL.md and passed ` +
 				`directly to session.skill(skillReference).`,
 		});
 	}
