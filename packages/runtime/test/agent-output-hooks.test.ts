@@ -23,6 +23,7 @@ import {
 	renderAgentFunctionWithStructure,
 } from '../src/hooks/render.ts';
 import { useDataWriter } from '../src/hooks/use-data-writer.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { useResponseFinish } from '../src/hooks/use-response-finish.ts';
 import { useResponseStart } from '../src/hooks/use-response-start.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
@@ -107,10 +108,11 @@ describe('useDataWriter()', () => {
 	it('rejects duplicate names in one render', () => {
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
+				useModel(CONFIG.model);
 				useDataWriter({ name: 'caseCard' });
 				useDataWriter({ name: 'caseCard' });
 				return 'Base.';
-			}, CONFIG),
+			}),
 		).toThrow(/Duplicate useDataWriter name "caseCard"/);
 	});
 
@@ -129,19 +131,21 @@ describe('useDataWriter()', () => {
 	it('rejects writes made during render', () => {
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
+				useModel(CONFIG.model);
 				const writeCaseCardData = useDataWriter({ name: 'caseCard' });
 				writeCaseCardData({ status: 'loading' });
 				return 'Base.';
-			}, CONFIG),
+			}),
 		).toThrow(/written during render/);
 	});
 
 	it('throws on write when no durable runtime backs the render', () => {
 		let writeCaseCardData: ((data: unknown) => void) | undefined;
 		renderAgentFunctionWithStructure(() => {
+			useModel(CONFIG.model);
 			writeCaseCardData = useDataWriter({ name: 'caseCard' });
 			return 'Base.';
-		}, CONFIG);
+		});
 		expect(() => writeCaseCardData?.({ status: 'loading' })).toThrow(/no durable runtime/);
 	});
 
@@ -152,6 +156,7 @@ describe('useDataWriter()', () => {
 		let writeCaseCardData: ((data: unknown) => void) | undefined;
 		renderAgentFunctionWithStructure(
 			() => {
+				useModel(CONFIG.model);
 				// Widened on purpose: the test feeds schema-invalid values through.
 				writeCaseCardData = useDataWriter({
 					name: 'caseCard',
@@ -159,7 +164,6 @@ describe('useDataWriter()', () => {
 				}) as (data: unknown) => void;
 				return 'Base.';
 			},
-			CONFIG,
 			{ snapshot: new Map(), store: undefined, output: channel },
 		);
 
@@ -172,9 +176,10 @@ describe('useDataWriter()', () => {
 	it('joins the render structure, so conditional mounts violate invariance', () => {
 		const render = (mount: boolean) =>
 			renderAgentFunctionWithStructure(() => {
+				useModel(CONFIG.model);
 				if (mount) useDataWriter({ name: 'caseCard' });
 				return 'Base.';
-			}, CONFIG).structure;
+			}).structure;
 		expect(() => assertRenderStructureInvariance(render(true), render(false))).toThrow(
 			/message data removed caseCard/,
 		);
@@ -185,17 +190,19 @@ describe('useResponseStart() / useResponseFinish()', () => {
 	it('rejects a non-function argument', () => {
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
+				useModel(CONFIG.model);
 				// @ts-expect-error the hook takes a callback
 				useResponseStart({ startedAt: 1 });
 				return 'Base.';
-			}, CONFIG),
+			}),
 		).toThrow(/takes a callback as its only argument/);
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
+				useModel(CONFIG.model);
 				// @ts-expect-error the hook takes a callback
 				useResponseFinish({ finishedAt: 1 });
 				return 'Base.';
-			}, CONFIG),
+			}),
 		).toThrow(/takes a callback as its only argument/);
 	});
 
@@ -224,12 +231,12 @@ describe('useResponseStart() / useResponseFinish()', () => {
 		const channel = createAgentOutputChannel();
 		renderAgentFunctionWithStructure(
 			() => {
+				useModel(CONFIG.model);
 				useResponseStart(() => ({ a: 1 }));
 				useResponseFinish(() => ({ b: 2 }));
 				useResponseFinish(() => ({ c: 3 }));
 				return 'Base.';
 			},
-			CONFIG,
 			{ snapshot: new Map(), store: undefined, output: channel },
 		);
 		expect(channel.responseStarts).toHaveLength(1);
@@ -239,10 +246,11 @@ describe('useResponseStart() / useResponseFinish()', () => {
 	it('joins the render structure, so conditional mounts violate invariance', () => {
 		const render = (mount: boolean) =>
 			renderAgentFunctionWithStructure(() => {
+				useModel(CONFIG.model);
 				if (mount) useResponseStart(() => ({}));
 				useResponseFinish(() => ({}));
 				return 'Base.';
-			}, CONFIG).structure;
+			}).structure;
 		expect(() => assertRenderStructureInvariance(render(true), render(false))).toThrow(
 			/useResponseStart count changed \(1 → 0\)/,
 		);
@@ -349,6 +357,7 @@ describe('output hooks end to end (node coordinator, faux provider)', () => {
 		]);
 
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			const writeCaseCardData = useDataWriter({
 				name: 'caseCard',
 				schema: v.object({ status: v.picklist(['loading', 'loaded']) }),
@@ -379,9 +388,7 @@ describe('output hooks end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -434,6 +441,7 @@ describe('output hooks end to end (node coordinator, faux provider)', () => {
 		provider.setResponses([fauxAssistantMessage('Fine.')]);
 
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			useResponseFinish(() => {
 				throw new Error('finish boom');
 			});
@@ -445,9 +453,7 @@ describe('output hooks end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -485,6 +491,7 @@ describe('output hooks end to end (node coordinator, faux provider)', () => {
 		provider.setResponses([fauxAssistantMessage('Fine.')]);
 
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			// @ts-expect-error response boundary hooks are synchronous observers
 			useResponseStart(async () => ({ startedAt: Date.now() }));
 			return 'Case agent.';
@@ -495,9 +502,7 @@ describe('output hooks end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext: makeFauxCreateContext(provider),

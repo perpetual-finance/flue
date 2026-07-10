@@ -16,6 +16,7 @@ import {
 	resolveSubagentDefinition,
 } from '../src/hooks/render.ts';
 import { useInstruction } from '../src/hooks/use-instruction.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { usePersistentState } from '../src/hooks/use-persistent-state.ts';
 import { useSandbox } from '../src/hooks/use-sandbox.ts';
 import { useSkill } from '../src/hooks/use-skill.ts';
@@ -81,7 +82,7 @@ function makeDispatchInput(overrides: Partial<DispatchInput> = {}): DispatchInpu
 	};
 }
 
-const CONFIG = { model: 'faux/agent-subagent' };
+const MODEL = 'faux/agent-subagent';
 
 function Helper() {
 	return 'You are the helper.';
@@ -90,6 +91,7 @@ function Helper() {
 describe('useSubagent() (render)', () => {
 	it('declares delegates on the rendered config, in call order', () => {
 		const rendered = renderAgentFunctionWithStructure(() => {
+			useModel(MODEL);
 			useSubagent({ name: 'helper', description: 'Handles focused work.', agent: Helper });
 			useSubagent({
 				name: 'checker',
@@ -98,7 +100,7 @@ describe('useSubagent() (render)', () => {
 				model: 'anthropic/claude-haiku-4-5',
 			});
 			return 'Base.';
-		}, CONFIG);
+		});
 		expect(rendered.structure.resources.subagents.map((agent) => agent.name)).toEqual([
 			'helper',
 			'checker',
@@ -116,31 +118,35 @@ describe('useSubagent() (render)', () => {
 			useInstruction('Phase.');
 		}
 		const rendered = renderAgentFunctionWithStructure(() => {
+			useModel(MODEL);
 			usePhase();
 			return 'Base.';
-		}, CONFIG);
+		});
 		expect(rendered.structure.resources.subagents.map((agent) => agent.name)).toEqual(['helper']);
 	});
 
 	it('throws on duplicate delegate names, missing agent function, and bad shapes', () => {
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
+				useModel(MODEL);
 				useSubagent({ name: 'twin', description: 'One.', agent: Helper });
 				useSubagent({ name: 'twin', description: 'Two.', agent: Helper });
 				return 'Base.';
-			}, CONFIG),
+			}),
 		).toThrow(/declared the subagent name "twin" twice/);
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
+				useModel(MODEL);
 				useSubagent({ name: 'broken', description: 'No fn.' } as SubagentDefinition);
 				return 'Base.';
-			}, CONFIG),
+			}),
 		).toThrow(/needs `agent`/);
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
+				useModel(MODEL);
 				useSubagent({ name: 'mute', description: '', agent: Helper });
 				return 'Base.';
-			}, CONFIG),
+			}),
 		).toThrow(/needs a non-empty description/);
 	});
 
@@ -153,12 +159,13 @@ describe('useSubagent() (render)', () => {
 	it('allows conditional declaration — the delta surfaces in the resources snapshot', () => {
 		let declare = false;
 		const agent = () => {
+			useModel(MODEL);
 			if (declare) {
 				useSubagent({ name: 'flaky', description: 'Sometimes.', agent: Helper });
 			}
 			return 'Base.';
 		};
-		const render = () => renderAgentFunctionWithStructure(agent, CONFIG).structure;
+		const render = () => renderAgentFunctionWithStructure(agent).structure;
 		const without = render();
 		declare = true;
 		const withIt = render();
@@ -277,6 +284,7 @@ describe('useSubagent end to end (node coordinator, faux provider)', () => {
 			return 'You summarize support cases in three sentences.';
 		}
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			useSubagent({
 				name: 'summarizer',
 				description: 'Summarizes one support case.',
@@ -290,9 +298,7 @@ describe('useSubagent end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext: makeFauxCreateContext(provider),

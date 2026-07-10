@@ -14,6 +14,7 @@ import {
 	renderAgentFunctionWithStructure,
 } from '../src/hooks/render.ts';
 import { useInstruction } from '../src/hooks/use-instruction.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { useSkill } from '../src/hooks/use-skill.ts';
 import { createFlueContext, type DispatchInput } from '../src/internal.ts';
 import { createNodeAgentCoordinator } from '../src/node/agent-coordinator.ts';
@@ -76,7 +77,7 @@ function makeDispatchInput(overrides: Partial<DispatchInput> = {}): DispatchInpu
 	};
 }
 
-const CONFIG = { model: 'faux/agent-skill' };
+const MODEL = 'faux/agent-skill';
 
 describe('useSkill() (render)', () => {
 	it('attaches packaged and bare catalog skills to the rendered config, in call order', () => {
@@ -87,10 +88,11 @@ describe('useSkill() (render)', () => {
 		});
 		const bare: Skill = { name: 'release-notes', description: 'Workspace release-notes rules.' };
 		const rendered = renderAgentFunctionWithStructure(() => {
+			useModel(MODEL);
 			useSkill(packaged);
 			useSkill(bare);
 			return 'Base.';
-		}, CONFIG);
+		});
 		expect(rendered.config.skills).toEqual([packaged, bare]);
 		expect(rendered.structure.resources.skills.map((skill) => skill.name)).toEqual([
 			'triage-reproduce',
@@ -109,9 +111,10 @@ describe('useSkill() (render)', () => {
 			useInstruction('Verify phase.');
 		}
 		const rendered = renderAgentFunctionWithStructure(() => {
+			useModel(MODEL);
 			useVerifyPhase();
 			return 'Base.';
-		}, CONFIG);
+		});
 		expect(rendered.config.skills).toEqual([skill]);
 	});
 
@@ -119,25 +122,28 @@ describe('useSkill() (render)', () => {
 		const entry: Skill = { name: 'twice', description: 'Mounted twice.' };
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
+				useModel(MODEL);
 				useSkill(entry);
 				useSkill({ name: 'twice', description: 'Different object, same name.' });
 				return 'Base.';
-			}, CONFIG),
+			}),
 		).toThrow(/mounted the skill name "twice" twice/);
 	});
 
 	it('rejects values that are not skills', () => {
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
+				useModel(MODEL);
 				useSkill('triage' as unknown as Skill);
 				return 'Base.';
-			}, CONFIG),
+			}),
 		).toThrow(/requires a skill/);
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
+				useModel(MODEL);
 				useSkill({ name: 'no-description', description: '' });
 				return 'Base.';
-			}, CONFIG),
+			}),
 		).toThrow(/needs a non-empty description/);
 	});
 
@@ -152,10 +158,11 @@ describe('useSkill() dynamic declaration', () => {
 	it('allows conditional mounting — the delta surfaces in the resources snapshot', () => {
 		let mount = false;
 		const agent = () => {
+			useModel(MODEL);
 			if (mount) useSkill({ name: 'flaky', description: 'Sometimes mounted.' });
 			return 'Base.';
 		};
-		const render = () => renderAgentFunctionWithStructure(agent, CONFIG).structure;
+		const render = () => renderAgentFunctionWithStructure(agent).structure;
 		const without = render();
 		mount = true;
 		const withIt = render();
@@ -204,6 +211,7 @@ describe('useSkill end to end (node coordinator, faux provider)', () => {
 			useInstruction('Activate the `triage-reproduce` skill before starting this phase.');
 		}
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			useReproducePhase();
 			return 'Issue triage agent.';
 		}
@@ -213,9 +221,7 @@ describe('useSkill end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext: makeFauxCreateContext(provider),

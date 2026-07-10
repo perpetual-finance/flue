@@ -15,6 +15,7 @@ import { type AttachmentStore, InMemoryAttachmentStore } from './runtime/attachm
 import { InMemoryConversationStreamStore } from './runtime/conversation-stream-store.ts';
 import { dispatchGlobalEvent } from './runtime/events.ts';
 import { generateInstanceUid } from './runtime/ids.ts';
+import { resolveAgentModuleBinding } from './runtime/registration.ts';
 import { agentStreamPath } from './runtime/stream-offsets.ts';
 import { createCwdSessionEnv } from './sandbox.ts';
 import type { RenderedResources, SessionRerender, SessionResourceRuntime } from './session.ts';
@@ -273,13 +274,18 @@ export async function initializeRootHarness(
 	// writes through this buffer, which the session drains into the tool
 	// batch's append. One buffer per harness lifetime (one submission attempt).
 	const reduced = await config.conversationWriter.loadReducedState();
+	// Supervisor-facing module exports (initialDataSchema, durability) ride
+	// the identity binding — populated by the build transform at module
+	// evaluation and by registerFlueAgents. Absent on raw defineAgent values
+	// in unit tests, where no schema/policy applies unless the test registers.
+	const moduleBinding = resolveAgentModuleBinding(agent);
 	// Instance-creation data. Once the root conversation exists, the recorded
 	// value wins forever (data on later messages is deliberately ignored, and
 	// nothing re-validates). On first contact — including re-attempts of the
 	// creating submission, which run before the birth record lands — the
-	// incoming value is validated against the agent's `input:` schema; the
-	// schema-parsed output is what renders see and what the birth record
-	// stores.
+	// incoming value is validated against the module's `initialDataSchema`
+	// export; the schema-parsed output is what renders see and what the birth
+	// record stores.
 	let initialData: unknown;
 	let creationData: unknown;
 	let creationUid: string | undefined;
@@ -287,13 +293,13 @@ export async function initializeRootHarness(
 		initialData = reduced.initialData.value;
 	} else {
 		initialData = data;
-		if (agent.config.input !== undefined) {
-			const parsedData = v.safeParse(agent.config.input, data);
+		if (moduleBinding?.initialDataSchema !== undefined) {
+			const parsedData = v.safeParse(moduleBinding.initialDataSchema, data);
 			if (!parsedData.success) {
 				throw new Error(
-					`[flue] ${label} requires creation data matching its input schema: ${parsedData.issues
+					`[flue] ${label} requires creation data matching its initialDataSchema: ${parsedData.issues
 						.map((issue) => issue.message)
-						.join('; ')}. Creation data rides the instance's first message ({ data, ... }).`,
+						.join('; ')}. Creation data rides the instance's first message ({ initialData, ... }).`,
 				);
 			}
 			initialData = parsedData.output;
@@ -320,15 +326,17 @@ export async function initializeRootHarness(
 		...(config.agentName === undefined ? {} : { agentName: config.agentName }),
 		initialData,
 	};
-	const first = renderAgentFunctionWithStructure(agent.agent, agent.config, renderState);
+	const first = renderAgentFunctionWithStructure(agent.agent, renderState);
 	const resolvedOptions: AgentRuntimeConfig = first.config;
 	let lastStructure: AgentRenderStructure = first.structure;
-	// The render composes the config: hooks validated every attachment when it
-	// was declared, and defineAgent validated the static fields at module load.
+	// The render composes the whole config: hooks validated every value when
+	// it was declared. Values are submission-scoped — read HERE, once per
+	// initialized harness; a later render's different value takes effect on
+	// the next submission.
 	const definition = resolvedOptions;
 	if (typeof definition.model !== 'string') {
 		throw new Error(
-			`[flue] ${label} requires a model. Pass { model: "provider-id/model-id" } to defineAgent(Agent, config).`,
+			`[flue] ${label} requires a model. Call useModel('provider-id/model-id') in the agent function.`,
 		);
 	}
 	const resolvedModel = config.agentConfig.resolveModel(definition.model);
@@ -384,7 +392,9 @@ export async function initializeRootHarness(
 		model: resolvedModel,
 		thinkingLevel: definition.thinkingLevel ?? config.agentConfig.thinkingLevel,
 		compaction: definition.compaction ?? config.agentConfig.compaction,
-		durability: definition.durability,
+		// Submission retry policy: a module export (not a hook) because the
+		// policy must be readable even when the render itself crashes.
+		durability: moduleBinding?.durability,
 	};
 	// Per-turn re-render: fresh closures over the latest state values, the
 	// identity-invariance guard, and a recomposed system prompt. The session
@@ -393,7 +403,7 @@ export async function initializeRootHarness(
 	// stays live). Resources (tools, skills, subagents) may change between
 	// renders — the session narrates the delta to the model.
 	const rerender: SessionRerender = () => {
-		const next = renderAgentFunctionWithStructure(agent.agent, agent.config, renderState);
+		const next = renderAgentFunctionWithStructure(agent.agent, renderState);
 		assertRenderStructureInvariance(lastStructure, next.structure);
 		lastStructure = next.structure;
 		return {

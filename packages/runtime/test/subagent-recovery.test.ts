@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ConversationRecordWriter } from '../src/conversation-writer.ts';
 import { useSubagent } from '../src/hooks/use-subagent.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
-import { defineAgent, defineTool } from '../src/index.ts';
+import { defineAgent, defineTool, useModel } from '../src/index.ts';
 import {
 	createFlueContext,
 	InMemoryAttachmentStore,
@@ -139,9 +139,10 @@ describe('subagent task recovery', () => {
 			return 'You review the delegated work.';
 		}
 		const agent = defineAgent(() => {
+			useModel(model);
 			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', agent: Reviewer });
 			return 'Case agent.';
-		}, { model });
+		});
 
 		const store = new InMemoryConversationStreamStore();
 		const attachments = new InMemoryAttachmentStore();
@@ -204,9 +205,10 @@ describe('subagent task recovery', () => {
 			return 'You review the delegated work.';
 		}
 		const agent = defineAgent(() => {
+			useModel(model);
 			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', agent: Reviewer });
 			return 'Case agent.';
-		}, { model });
+		});
 
 		const store = new InMemoryConversationStreamStore();
 		const attachments = new InMemoryAttachmentStore();
@@ -260,9 +262,10 @@ describe('subagent task recovery', () => {
 			return 'You review delegated work by delegating deeper.';
 		}
 		const agent = defineAgent(() => {
+			useModel(model);
 			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', agent: Reviewer });
 			return 'Case agent.';
-		}, { model });
+		});
 
 		const store = new InMemoryConversationStreamStore();
 		const attachments = new InMemoryAttachmentStore();
@@ -302,11 +305,15 @@ describe('subagent task recovery', () => {
 			return 'You review the delegated work.';
 		}
 		const withSubagent = defineAgent(() => {
+			useModel(model);
 			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', agent: Reviewer });
 			return 'Case agent.';
-		}, { model });
+		});
 		// Restart deploys a config where `reviewer` no longer exists.
-		const withoutSubagent = defineAgent(() => 'Case agent.', { model });
+		const withoutSubagent = defineAgent(() => {
+			useModel(model);
+			return 'Case agent.';
+		});
 
 		const store = new InMemoryConversationStreamStore();
 		const attachments = new InMemoryAttachmentStore();
@@ -358,9 +365,10 @@ describe('subagent task recovery', () => {
 			return 'You review the delegated work.';
 		}
 		const agent = defineAgent(() => {
+			useModel(model);
 			useSubagent({ name: 'reviewer', description: 'Reviews delegated work.', agent: Reviewer });
 			return 'Case agent.';
-		}, { model });
+		});
 
 		const store = new InMemoryConversationStreamStore();
 		const attachments = new InMemoryAttachmentStore();
@@ -487,7 +495,10 @@ describe('subagent task recovery', () => {
 			attachmentStore: new InMemoryAttachmentStore(),
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => 'Case agent.', { model: `${provider.getModel().provider}/reviewer` }),
+			defineAgent(() => {
+				useModel(`${provider.getModel().provider}/reviewer`);
+				return 'Case agent.';
+			}),
 		);
 		const internal = getInternalSession(await harness.session());
 		if (!internal) throw new Error('Expected internal session.');

@@ -30,6 +30,7 @@ import {
   useDelivery,
   useDispatchMessage,
   useInstruction,
+  useModel,
   useDataWriter,
   usePersistentState,
   useResponseFinish,
@@ -59,7 +60,6 @@ import {
   type FileStat,
   type FlueHarness,
   type FlueLogger,
-  type FunctionAgentConfig,
   type FunctionAgentDefinition,
   type McpServerConnection,
   type McpServerOptions,
@@ -87,27 +87,27 @@ import {
   type ToolOutputSchema,
   type ToolStep,
   type ToolValidationIssue,
+  type UseModelOptions,
+  type UseSandboxOptions,
 } from '@flue/runtime';
 ```
 
 ## `defineAgent(...)`
 
 ```ts
-function defineAgent(
-  agent: AgentFunction<AgentProps>,
-  config: FunctionAgentConfig,
-): FunctionAgentDefinition;
+function defineAgent(agent: AgentFunction<AgentProps>): FunctionAgentDefinition;
 ```
 
-Defines an addressable agent. An agent is an [agent function](#agentfunction) given a model: it composes the agent's behavior with Flue Hooks — attaching tools, instructions, skills, subagents, and durable state — and returns the agent's instruction string; `config` is the static identity (model, tuning) that never renders.
+Defines an addressable agent. An agent is an [agent function](#agentfunction): it composes the agent's whole behavior with Flue Hooks — [`useModel()`](#usemodel) declares the model (required), the other hooks attach tools, instructions, skills, subagents, and durable state — and it returns the agent's instruction string. Supervisor-facing configuration lives beside the default export as optional module exports (see below).
 
 Default-export the returned value from a module whose first statement is the `'use agent'` directive to make the agent part of the application:
 
 ```ts title="src/agents/support.ts"
 'use agent';
-import { defineAgent, usePersistentState, useTool } from '@flue/runtime';
+import { defineAgent, useModel, usePersistentState, useTool } from '@flue/runtime';
 
 function Support() {
+  useModel('anthropic/claude-sonnet-4-6');
   const [phase, setPhase] = usePersistentState('phase', 'gathering');
 
   useTool({
@@ -119,7 +119,7 @@ function Support() {
   return `Operator-facing support agent. Current phase: ${phase}.`;
 }
 
-export default defineAgent(Support, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(Support);
 ```
 
 The directive gives the agent its durable identity (the file basename, or an `export const name` literal override) and registers it with the built application — there is no name-based addressing beyond that identity. To expose the agent over HTTP, mount `agent.route()` in `app.ts`; see the [Routing API](/docs/api/routing-api/). A dispatch-only agent needs no mount. `flue run <path>` and raw `defineAgent()` values in unit tests do not require the directive.
@@ -148,28 +148,42 @@ from creation data with [`useInitialData()`](#useinitialdata) rather than
 parsed from `id`. Channel packages still expose a `parseInstanceId(id)` escape
 hatch for the rare caller that must recover them from the id itself.
 
-#### `FunctionAgentConfig`
+#### Module exports
 
-| Field           | Type                        | Description                                                                                                                                                                                                                                           |
-| --------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `model`         | `string`                    | Model specifier (`'<provider-id>/<model-id>'`). Required.                                                                                                                                                                                             |
-| `thinkingLevel` | `ThinkingLevel`             | Default reasoning effort. Individual operations may override this value.                                                                                                                                                                              |
-| `compaction`    | `false \| CompactionConfig` | Automatic conversation-compaction configuration. `false` disables threshold compaction; overflow recovery and explicit `harness.compact()` calls still compact when needed.                                                                           |
-| `durability`    | `DurabilityConfig`          | Durability configuration for durable agent submissions. Controls recovery attempt limits and submission timeouts.                                                                                                                                     |
-| `cwd`           | `string`                    | Working directory inside the initialized environment.                                                                                                                                                                                                 |
-| `input`         | Valibot schema              | Schema for the instance's creation data, validated once at instance creation (a mismatch — including absence, unless the schema accepts `undefined` — rejects the creating call). Read the recorded value with [`useInitialData()`](#useinitialdata). |
+Everything the agent *does* is composed inside the agent function with Flue Hooks. Everything about how the runtime *treats* the agent from the outside is an optional module export beside the default export:
 
-Everything dynamic — instructions, tools, skills, subagents, sandbox — is composed inside the agent function with Flue Hooks; `FunctionAgentConfig` holds only what's fixed for the agent's whole lifetime.
+| Export              | Type               | Meaning                                                                                                                                                                                                                                                       |
+| ------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`              | `string` literal   | Identity override — replaces the file basename as the durable identity. Must be a plain lower-kebab-case string literal (build targets derive Durable Object class and binding names from it before any code runs). See ['use agent'](/docs/guide/use-agent/). |
+| `description`       | `string`           | Static human-facing metadata.                                                                                                                                                                                                                                   |
+| `route`             | Hono middleware    | Wraps every route `agent.route()` serves, attachment downloads included. See the [Routing API](/docs/api/routing-api/).                                                                                                                                        |
+| `initialDataSchema` | Valibot schema     | Schema for the instance's creation data, validated once at instance creation (a mismatch — including absence, unless the schema accepts `undefined` — rejects the creating call). Read the recorded value with [`useInitialData()`](#useinitialdata).          |
+| `durability`        | `DurabilityConfig` | Submission retry policy (`maxAttempts`, `timeoutMs`). A module export rather than a hook because the policy must be readable even when the render itself crashes.                                                                                              |
+
+```ts title="src/agents/triage.ts"
+'use agent';
+import { defineAgent, useModel } from '@flue/runtime';
+import * as v from 'valibot';
+
+export const name = 'issue-triage'; // identity override (optional)
+export const description = 'Triages one GitHub issue end-to-end.';
+export const initialDataSchema = v.object({ issue: v.pipe(v.number(), v.integer()) });
+export const durability = { maxAttempts: 5, timeoutMs: 7_200_000 };
+
+export default defineAgent(() => {
+  useModel('anthropic/claude-opus-4-6');
+  return 'Triage the bound issue.';
+});
+```
 
 #### `FunctionAgentDefinition`
 
-The opaque value `defineAgent(Agent, config)` returns:
+The opaque value `defineAgent(Agent)` returns:
 
 ```ts
 interface FunctionAgentDefinition {
   __flueFunctionAgent: true;
   agent: AgentFunction;
-  config: FunctionAgentConfig;
   route(): Hono;
 }
 ```
@@ -409,17 +423,49 @@ function ReproducePhase() {
 
 Inside the delegate's render, custom hooks, `useTool()`, `useInstruction()`, `useSkill()`, and nested `useSubagent()` all compose as usual; `usePersistentState()` and `useSandbox()` throw (durable state is instance-scoped and delegates share the parent environment). Duplicate delegate names in one render fail fast.
 
+### `useModel(...)`
+
+```ts
+function useModel(model: string, options?: UseModelOptions): void;
+
+interface UseModelOptions {
+  thinkingLevel?: ThinkingLevel;
+  compaction?: false | CompactionConfig;
+}
+```
+
+Declares the agent's model — `useModel('anthropic/claude-sonnet-4-6')`. Required: an agent render without a `useModel` call cannot start. Call it exactly once per render, in the agent body or a custom hook it calls; the *argument* may vary render to render (pick a model from durable state), but the call may not disappear.
+
+`options` carries model-call tuning: `thinkingLevel` sets the default reasoning effort (individual operations may override it), and `compaction` configures threshold compaction (`false` disables it; overflow recovery and explicit `harness.compact()` calls still compact when needed — see [`CompactionConfig`](#compactionconfig)).
+
+```ts
+function Reviewer() {
+  const [round] = usePersistentState('round', 1);
+  useModel(round > 3 ? 'anthropic/claude-opus-4-6' : 'anthropic/claude-haiku-4-5', {
+    thinkingLevel: 'high',
+  });
+  return 'Review the change.';
+}
+```
+
+Values are **submission-scoped**: the runtime reads them once, when a submission starts. A different value computed by a mid-submission re-render latches and takes effect on the next submission, not mid-run. Not available in a subagent render — a delegate declares its model on its [`useSubagent()`](#usesubagent) definition.
+
 ### `useSandbox(...)`
 
 ```ts
-function useSandbox(sandbox: SandboxFactory): void;
+function useSandbox(sandbox: SandboxFactory, options?: UseSandboxOptions): void;
+
+interface UseSandboxOptions {
+  /** Working directory inside the initialized environment. */
+  cwd?: string;
+}
 ```
 
-Attaches the environment this agent instance runs in: the sandbox adapter's `createSessionEnv()` builds the filesystem/exec surface at initialization (once per initialized harness), and its `tools()` — when present — replaces the framework's default model-facing tool set. Re-renders never rebuild the environment.
+Attaches the environment this agent instance runs in: the sandbox adapter's `createSessionEnv()` builds the filesystem/exec surface at initialization (once per initialized harness), and its `tools()` — when present — replaces the framework's default model-facing tool set. Re-renders never rebuild the environment. `options.cwd` scopes the agent's working directory inside that environment; like the factory, it is read once when a submission starts.
 
 ```ts
 function IssueTriage() {
-  useSandbox(local({ env: { GH_TOKEN: process.env.GH_TOKEN } }));
+  useSandbox(local({ env: { GH_TOKEN: process.env.GH_TOKEN } }), { cwd: '/srv/checkouts' });
   // ...
 }
 ```
@@ -550,17 +596,18 @@ function useInitialData<T = unknown>(): T;
 Read the instance's creation data — the `data` a caller sent with this instance's first contact, recorded exactly once at creation and constant for the instance's whole life. This is the third leg of the input model: `useInitialData()` is what the instance is _about_, `useDelivery()` is what _this message_ says, and `usePersistentState` is what the agent has _learned_.
 
 ```ts
-const input = v.object({ issue: v.pipe(v.number(), v.integer()) });
+export const initialDataSchema = v.object({ issue: v.pipe(v.number(), v.integer()) });
 
 function Triage() {
-  const data = useInitialData<v.InferOutput<typeof input>>();
+  useModel('anthropic/claude-opus-4-6');
+  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
   return `Triage GitHub issue #${data.issue} end-to-end.`;
 }
 
-export default defineAgent(Triage, { model: 'anthropic/claude-opus-4-6', input });
+export default defineAgent(Triage);
 ```
 
-Creation data rides the instance's first contact: `dispatch(triage, { id, initialData, message })`, an `initialData` field beside the direct-HTTP message body, `client.send({ message, initialData })`, or `flue run --initial-data '<json>'`. Declare an `input:` schema on `defineAgent` to validate it at creation — a mismatch (including absence, unless the schema accepts `undefined`) rejects the creating call, so with a required schema the value is always present here, as the schema-parsed output. Without a schema, whatever the creator sent is recorded and returned untyped.
+Creation data rides the instance's first contact: `dispatch(triage, { id, initialData, message })`, an `initialData` field beside the direct-HTTP message body, `client.send({ message, initialData })`, or `flue run --initial-data '<json>'`. Declare an `initialDataSchema` module export to validate it at creation — a mismatch (including absence, unless the schema accepts `undefined`) rejects the creating call, so with a required schema the value is always present here, as the schema-parsed output. Without a schema, whatever the creator sent is recorded and returned untyped.
 
 The value is immutable — `data` on messages to an existing instance is ignored, and evolving facts belong in `usePersistentState`. The return type is exactly the type parameter you assert: with a required schema the value is always present, so the common case needs no `undefined` narrowing (and no `!`). At runtime the value _is_ `undefined` when creation carried no data, on bare tooling/test renders (back it with `initialData` in the render-state context), and in subagent renders (a delegate has no creation data of its own; close over a value to share it) — when your agent can hit those cases, say so in the type: `useInitialData<Config | undefined>()`. The recorded value is part of the instance's durable record stream but is never served to clients; still, it is not a secrets channel — keys and tokens stay in the environment.
 
@@ -705,7 +752,7 @@ Validates a custom model-callable tool and returns a frozen definition. Pass the
 | `run`         | `(context) => value \| Promise` | Receives a [`ToolContext`](#toolcontext). Returns JSON-compatible structured data.                                                                                                                                                                                  |
 
 ```ts
-import { defineTool } from '@flue/runtime';
+import { defineTool, useModel } from '@flue/runtime';
 import * as v from 'valibot';
 
 const lookupPolicy = defineTool({
@@ -781,7 +828,7 @@ function defineSkill(options: DefineSkillOptions): SkillReference;
 Defines a packaged skill and returns a `SkillReference` ready to pass to [`useSkill(...)`](#useskill). Use this when a skill's instructions are authored inline in code rather than in a `SKILL.md` file.
 
 ```ts
-import { defineSkill } from '@flue/runtime';
+import { defineSkill, useModel } from '@flue/runtime';
 
 const triageSkill = defineSkill({
   name: 'triage',
@@ -868,7 +915,7 @@ THE delivery verb: dispatches a message — either kind, with its explicit `kind
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `id`            | Target agent instance id.                                                                                                                                                                                                                                                                      |
 | `message`       | The message delivered to the conversation. Flue snapshots it when accepted.                                                                                                                                                                                                                    |
-| `initialData`   | Instance-creation data — the seed, consulted only when this send creates the instance: validated against the agent's `input:` schema (when declared) and recorded once. Ignored when the send continues an existing instance. See [Creation data](/docs/guide/building-agents/#creation-data). |
+| `initialData`   | Instance-creation data — the seed, consulted only when this send creates the instance: validated against the module's `initialDataSchema` export (when declared) and recorded once. Ignored when the send continues an existing instance. See [Creation data](/docs/guide/building-agents/#creation-data). |
 | `uid`           | Send condition — see [Conditional sends](#conditional-sends).                                                                                                                                                                                                                                  |
 | `dispatchId`    | Generated delivery identifier returned in the receipt.                                                                                                                                                                                                                                         |
 | `acceptedAt`    | ISO timestamp assigned when dispatch admission begins.                                                                                                                                                                                                                                         |
@@ -943,7 +990,7 @@ function init(agent: AgentModuleValue, options?: InitOptions): AgentInstanceHand
 
 interface InitOptions {
   id?: string; // instance address; omitted -> a fresh unique id
-  initialData?: unknown; // creation data (input: schema), seed iff the first send creates
+  initialData?: unknown; // creation data (initialDataSchema export), seed iff the first send creates
   uid?: string | null; // send condition for the handle's first contact
 }
 

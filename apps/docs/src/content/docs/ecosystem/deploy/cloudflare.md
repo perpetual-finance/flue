@@ -55,13 +55,14 @@ An agent module is an ordinary TypeScript file plus one line: the `'use agent'` 
 
 ```typescript title="src/agents/translator.ts"
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useModel } from '@flue/runtime';
 
 function Translator() {
+  useModel('anthropic/claude-sonnet-4-6');
   return 'Translate the user message into the requested language. Reply with the translation only.';
 }
 
-export default defineAgent(Translator, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(Translator);
 ```
 
 By default, the agent receives a virtual sandbox powered by [just-bash](https://github.com/vercel-labs/just-bash). No container needed.
@@ -191,12 +192,14 @@ Flue normally owns each generated agent Durable Object class. When an agent need
 
 ```ts title="src/agents/heartbeat.ts"
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useModel } from '@flue/runtime';
 import { extend } from '@flue/runtime/cloudflare';
 
-function Heartbeat() {}
+function Heartbeat() {
+  useModel('anthropic/claude-sonnet-4-6');
+}
 
-export default defineAgent(Heartbeat, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(Heartbeat);
 
 export const cloudflare = extend({
   base: (Base) =>
@@ -272,13 +275,14 @@ Use `app.ts` for custom HTTP routes and middleware. `cloudflare.ts` must not exp
 
 ```typescript title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useSubagent } from '@flue/runtime';
+import { defineAgent, useModel, useSubagent } from '@flue/runtime';
 
 function Triager() {
   return 'Search thoroughly, cite sources, and stay concise.';
 }
 
 function Assistant() {
+  useModel('anthropic/claude-sonnet-4-6');
   useSubagent({
     name: 'triager',
     description: 'Researches a topic thoroughly and reports back with cited sources.',
@@ -287,7 +291,7 @@ function Assistant() {
   return 'Delegate research to the `triager` subagent via a task.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(Assistant);
 ```
 
 ## Using the sandbox
@@ -298,10 +302,11 @@ Because the agent has shell access, it can set up its own workspace on the fly, 
 
 ```typescript title="src/agents/support.ts"
 'use agent';
-import { defineAgent, useTool } from '@flue/runtime';
+import { defineAgent, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 
 function Support() {
+  useModel('anthropic/claude-sonnet-4-6');
   useTool({
     name: 'answer',
     description: 'Answer one support request using the workspace articles.',
@@ -322,7 +327,7 @@ function Support() {
   return 'For each support request, call the `answer` tool with the customer message.';
 }
 
-export default defineAgent(Support, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(Support);
 ```
 
 The agent can use its built-in tools — grep, glob, read — to search and read these files. This is still running on a virtual sandbox (no container), so it's fast and cheap. If an application needs durable external storage or a full Linux environment, choose and own a sandbox adapter appropriate to that requirement.
@@ -382,7 +387,7 @@ The base image is published by Cloudflare and bundles the control-plane HTTP ser
 ```typescript title="src/agents/assistant.ts"
 'use agent';
 import { env } from 'cloudflare:workers';
-import { type AgentProps, defineAgent, useSandbox } from '@flue/runtime';
+import { type AgentProps, defineAgent, useModel, useSandbox } from '@flue/runtime';
 import { cloudflareSandbox } from '@flue/runtime/cloudflare';
 import { getSandbox } from '@cloudflare/sandbox';
 
@@ -391,12 +396,13 @@ interface Env {
 }
 
 function Assistant({ id }: AgentProps) {
+  useModel('anthropic/claude-opus-4-7');
   const { Sandbox } = env as unknown as Env;
   useSandbox(cloudflareSandbox(getSandbox(Sandbox, id)));
   return 'You have a full Linux sandbox. Use it to complete whatever the user asks.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-opus-4-7' });
+export default defineAgent(Assistant);
 ```
 
 ### Multiple sandboxes
@@ -555,7 +561,7 @@ Read the conversation with `GET .../agents/translator/customer-123` (history), o
 
 Here's the progression of sandbox types available on Cloudflare, from simplest to most powerful:
 
-1. **Empty virtual sandbox** — `defineAgent(() => {}, { model: 'anthropic/claude-sonnet-4-6' })`. Fast, cheap, stateless. Good for prompt-and-response agents.
+1. **Empty virtual sandbox** — an agent function with just `useModel(...)`. Fast, cheap, stateless. Good for prompt-and-response agents.
 2. **Virtual sandbox with shell setup** — Use `harness.sandbox` to write files and configure the workspace. Still fast and cheap, good for agents that need small amounts of static context.
 3. **Container sandbox** — Full Linux environment via `@cloudflare/sandbox`. For coding agents, complex dev environments, and anything that needs real system tools.
 

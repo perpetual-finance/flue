@@ -20,7 +20,7 @@ The blueprint installs `e2b` when needed and creates `sandboxes/e2b.ts` in your 
 
 ```ts title="<source-root>/sandboxes/e2b.ts (abridged)"
 // flue-blueprint: sandbox/e2b@1
-import { createSandboxSessionEnv } from '@flue/runtime';
+import { createSandboxSessionEnv, useModel } from '@flue/runtime';
 import type { SandboxApi, SandboxFactory, SessionEnv, FileStat } from '@flue/runtime';
 import type { Sandbox as E2BSandbox } from 'e2b';
 
@@ -63,10 +63,11 @@ Pass an initialized E2B `Sandbox` to `e2b(...)`, then assign the returned factor
 
 ```ts
 import { Sandbox } from 'e2b';
-import { defineAgent, useSandbox } from '@flue/runtime';
+import { defineAgent, useModel, useSandbox } from '@flue/runtime';
 import { e2b } from '../sandboxes/e2b';
 
 function Assistant() {
+  useModel('anthropic/claude-sonnet-4-6');
   useSandbox({
     // Lazy, per the SandboxFactory contract: constructing this object is
     // cheap; the expensive E2B sandbox creation happens once, inside
@@ -78,7 +79,7 @@ function Assistant() {
   });
 }
 
-const agent = defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
+const agent = defineAgent(Assistant);
 ```
 
 Select templates, timeouts, network access, secret exposure, and resource reuse through your application and provider policy. Flue adapts the active environment; it does not choose provider retention for you.

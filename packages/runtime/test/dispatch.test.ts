@@ -6,6 +6,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
 import { InvalidRequestError, OperationFailedError } from '../src/errors.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { dispatch } from '../src/index.ts';
 import {
 	configureFlueRuntime,
@@ -38,7 +39,10 @@ function noopDispatchQueue(): DispatchQueue {
  * returns its definition — the value dispatch() resolves back to that name.
  */
 function configureModerator(dispatchQueue: DispatchQueue = noopDispatchQueue()) {
-	const moderator = defineAgent(() => 'Moderator agent.', { model: 'anthropic/claude-haiku-4-5' });
+	const moderator = defineAgent(() => {
+		useModel('anthropic/claude-haiku-4-5');
+		return 'Moderator agent.';
+	});
 	configureFlueRuntime({
 		...nodeRuntime(),
 		dispatchQueue,
@@ -70,7 +74,10 @@ function createProvider(): FauxProviderRegistration {
 
 describe('dispatch()', () => {
 	it('rejects calls when the runtime has not been configured', async () => {
-		const moderator = defineAgent(() => 'Moderator agent.', { model: 'anthropic/claude-haiku-4-5' });
+		const moderator = defineAgent(() => {
+			useModel('anthropic/claude-haiku-4-5');
+			return 'Moderator agent.';
+		});
 		await expect(
 			dispatch(moderator, {
 				id: 'guild:unconfigured',
@@ -112,7 +119,10 @@ describe('dispatch()', () => {
 	});
 
 	it('rejects an agent definition target when the built application cannot resolve its identity', async () => {
-		const localModerator = defineAgent(() => 'Moderator agent.', { model: 'anthropic/claude-haiku-4-5' });
+		const localModerator = defineAgent(() => {
+			useModel('anthropic/claude-haiku-4-5');
+			return 'Moderator agent.';
+		});
 		configureFlueRuntime({
 			...nodeRuntime(),
 			dispatchQueue: noopDispatchQueue(),
@@ -304,8 +314,9 @@ describe('dispatched session processing', () => {
 				errorMessage: 'Request was aborted',
 			}),
 		]);
-		const agent = defineAgent(() => 'Moderator agent.', {
-			model: `${provider.getModel().provider}/${provider.getModel().id}`,
+		const agent = defineAgent(() => {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+			return 'Moderator agent.';
 		});
 		const input: AgentSubmissionInput = {
 			kind: 'direct',
@@ -342,8 +353,9 @@ describe('dispatched session processing', () => {
 		provider.setResponses([
 			fauxAssistantMessage('', { stopReason: 'error', errorMessage: 'invalid_api_key' }),
 		]);
-		const agent = defineAgent(() => 'Moderator agent.', {
-			model: `${provider.getModel().provider}/${provider.getModel().id}`,
+		const agent = defineAgent(() => {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+			return 'Moderator agent.';
 		});
 		const input: AgentSubmissionInput = {
 			kind: 'direct',

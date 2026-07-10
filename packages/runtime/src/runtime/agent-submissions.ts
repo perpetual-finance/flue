@@ -24,6 +24,7 @@ import type { AgentModuleValue, CallHandle, DeliveredMessage } from '../types.ts
 import { type AttachmentStore, createAttachmentRef } from './attachment-store.ts';
 import type { DispatchInput } from './dispatch-queue.ts';
 import { generateAttemptId, generateSubmissionId } from './ids.ts';
+import { resolveAgentModuleBinding } from './registration.ts';
 import { agentStreamPath } from './stream-offsets.ts';
 
 /**
@@ -184,8 +185,8 @@ export interface InstanceContactAdmission {
  * - `uid: null`: create only when fresh — an existing instance throws
  *   {@link AgentInstanceExistsError} with the existing uid in its details.
  *
- * Creating sends additionally validate `initialData` against the agent's `input:`
- * schema (when declared). Everything here runs synchronously BEFORE anything
+ * Creating sends additionally validate `initialData` against the module's
+ * `initialDataSchema` export (when declared). Everything here runs synchronously BEFORE anything
  * durable is admitted, so a failed condition or invalid creation leaves no
  * queued submission behind. The uid itself is minted at birth (inside
  * `initializeRootHarness`) — never here — so the durable submission payload
@@ -232,13 +233,13 @@ export async function admitInstanceContact(options: {
 	}
 	if (exists) return { uid: reduced.uid, creating: false };
 
-	const schema = options.agent.config?.input;
+	const schema = resolveAgentModuleBinding(options.agent)?.initialDataSchema;
 	if (schema !== undefined) {
 		const parsed = v.safeParse(schema, options.initialData);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
 				reason:
-					`The agent requires creation data matching its input schema: ${parsed.issues
+					`The agent requires creation data matching its initialDataSchema: ${parsed.issues
 						.map((issue) => issue.message)
 						.join('; ')}. ` +
 					'Creation data rides the instance\'s first message ({ initialData, ... } beside the message).',

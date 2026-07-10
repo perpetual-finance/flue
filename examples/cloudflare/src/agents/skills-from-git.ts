@@ -17,7 +17,7 @@
 import { env } from 'cloudflare:workers';
 import { WorkspaceFileSystem } from '@cloudflare/shell';
 import { createGit } from '@cloudflare/shell/git';
-import { defineAgent, useSandbox } from '@flue/runtime';
+import { defineAgent, useModel, useSandbox } from '@flue/runtime';
 import { getDefaultWorkspace, getShellSandbox } from '../sandboxes/cloudflare-shell';
 
 interface Env {
@@ -29,6 +29,7 @@ const TARGET_REPO = 'https://github.com/FredKSchott/vinext-starter';
 const CLONE_DIR = '/repo';
 
 function SkillsFromGit() {
+	useModel('cloudflare/@cf/moonshotai/kimi-k2.6');
 	// Lazy, per the SandboxFactory contract: constructing this object (and the
 	// inner `getShellSandbox()` factory it wraps) is cheap; the expensive git
 	// clone happens once, inside createSessionEnv(), at initialization — never
@@ -38,17 +39,20 @@ function SkillsFromGit() {
 	const { LOADER } = env as unknown as Env;
 	const workspace = getDefaultWorkspace();
 	const shell = getShellSandbox({ workspace, loader: LOADER });
-	useSandbox({
-		tools: shell.tools,
-		async createSessionEnv(options) {
-			if (!(await workspace.exists(HYDRATION_SENTINEL))) {
-				const git = createGit(new WorkspaceFileSystem(workspace));
-				await git.clone({ url: TARGET_REPO, dir: CLONE_DIR, singleBranch: true, depth: 1 });
-				await workspace.writeFile(HYDRATION_SENTINEL, new Date().toISOString());
-			}
-			return shell.createSessionEnv(options);
+	useSandbox(
+		{
+			tools: shell.tools,
+			async createSessionEnv(options) {
+				if (!(await workspace.exists(HYDRATION_SENTINEL))) {
+					const git = createGit(new WorkspaceFileSystem(workspace));
+					await git.clone({ url: TARGET_REPO, dir: CLONE_DIR, singleBranch: true, depth: 1 });
+					await workspace.writeFile(HYDRATION_SENTINEL, new Date().toISOString());
+				}
+				return shell.createSessionEnv(options);
+			},
 		},
-	});
+		{ cwd: CLONE_DIR },
+	);
 	return (
 		`You operate inside a clone of ${TARGET_REPO} at ${CLONE_DIR}. ` +
 		'When asked about the repository, use the code tool to actually inspect the files ' +
@@ -56,7 +60,4 @@ function SkillsFromGit() {
 	);
 }
 
-export default defineAgent(SkillsFromGit, {
-	model: 'cloudflare/@cf/moonshotai/kimi-k2.6',
-	cwd: CLONE_DIR,
-});
+export default defineAgent(SkillsFromGit);

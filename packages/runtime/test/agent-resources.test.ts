@@ -9,6 +9,7 @@ import {
 } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { usePersistentState } from '../src/hooks/use-persistent-state.ts';
 import { useSkill } from '../src/hooks/use-skill.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
@@ -254,6 +255,7 @@ describe('dynamic resources end to end (node coordinator, faux provider)', () =>
 		]);
 
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			const [phase, setPhase] = usePersistentState('phase', 'gathering');
 			useTool({
 				name: 'begin_draft',
@@ -272,9 +274,7 @@ describe('dynamic resources end to end (node coordinator, faux provider)', () =>
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -344,6 +344,7 @@ describe('dynamic resources end to end (node coordinator, faux provider)', () =>
 			instructions: 'Verify the order, then issue the refund.',
 		});
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			const [pro, setPro] = usePersistentState('pro', false);
 			if (pro) useSkill(refundsSkill);
 			useTool({
@@ -362,9 +363,7 @@ describe('dynamic resources end to end (node coordinator, faux provider)', () =>
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -403,6 +402,7 @@ describe('dynamic resources end to end (node coordinator, faux provider)', () =>
 
 		let deployed = false;
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			if (deployed) {
 				useTool({ name: 'beta', description: 'The new tool.', run: () => 'ok' });
 			} else {
@@ -410,9 +410,7 @@ describe('dynamic resources end to end (node coordinator, faux provider)', () =>
 			}
 			return 'Deploy test agent.';
 		}
-		const definition = defineAgent(assistant, {
-			model: `${provider.getModel().provider}/${provider.getModel().id}`,
-		});
+		const definition = defineAgent(assistant);
 		const makeCoordinator = () =>
 			createNodeAgentCoordinator({
 				submissions: executionStore.submissions,
@@ -467,6 +465,11 @@ describe('dynamic resources end to end (node coordinator, faux provider)', () =>
 			instructions: 'Verify the order, then issue the refund.',
 		});
 		function assistant() {
+			useModel(`${model.provider}/${model.id}`, {
+				// Without a tiny keep-window the default swallows this short
+				// history and manual compaction finds nothing to cut.
+				compaction: { keepRecentTokens: 3 },
+			});
 			const [pro, setPro] = usePersistentState('pro', false);
 			if (pro) useSkill(refundsSkill);
 			useTool({
@@ -492,14 +495,7 @@ describe('dynamic resources end to end (node coordinator, faux provider)', () =>
 		ctx.subscribeEvent((event) => {
 			events.push(event);
 		});
-		const harness = await ctx.initializeRootHarness(
-			defineAgent(assistant, {
-				model: `${model.provider}/${model.id}`,
-				// Without a tiny keep-window the default swallows this short
-				// history and manual compaction finds nothing to cut.
-				compaction: { keepRecentTokens: 3 },
-			}),
-		);
+		const harness = await ctx.initializeRootHarness(defineAgent(assistant));
 		const session = await harness.session();
 
 		await session.prompt('Upgrade me.');

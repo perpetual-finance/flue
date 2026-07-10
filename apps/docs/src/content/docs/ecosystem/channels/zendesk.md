@@ -328,29 +328,30 @@ instead of being rounded.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { retrieveTicket } from '../channels/zendesk.ts';
 
-const input = v.object({
+export const initialDataSchema = v.object({
   accountId: v.string(),
   ticketId: v.string(),
 });
 
 function Assistant() {
-  const data = useInitialData<v.InferOutput<typeof input>>();
+  useModel('anthropic/claude-haiku-4-5');
+  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
   if (!data) throw new Error('This agent is created by the Zendesk channel dispatch.');
   useTool(retrieveTicket(data));
   return 'Review the inbound Zendesk ticket event. Retrieve the current ticket when more context is needed.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
+export default defineAgent(Assistant);
 ```
 
 `initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
 dispatch. The agent reads it with `useInitialData()`, validated against the
-`input:` schema, instead of parsing the instance id.
+`initialDataSchema` export, instead of parsing the instance id.
 
 The tool accepts no account, ticket id, API host, or credential from the model.
 `instanceId()` includes account and ticket identity because Zendesk resource

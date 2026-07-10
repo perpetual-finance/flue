@@ -246,18 +246,19 @@ Bind the trusted shop and order selected by application code:
 
 ```ts
 'use agent';
-import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { retrieveOrder } from '../channels/shopify.ts';
 
-const input = v.object({
+export const initialDataSchema = v.object({
   shopDomain: v.string(),
   orderId: v.string(),
   orderName: v.string(),
 });
 
 function Orders() {
-	const data = useInitialData<v.InferOutput<typeof input>>();
+	useModel('anthropic/claude-haiku-4-5');
+	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the Shopify channel dispatch.');
 	if (data.shopDomain !== process.env.SHOPIFY_SHOP_DOMAIN) {
 		throw new TypeError('Unexpected Shopify shop.');
@@ -266,11 +267,12 @@ function Orders() {
 	return `Review the newly created Shopify order ${data.orderName} and summarize any fulfillment or payment follow-up.`;
 }
 
-export default defineAgent(Orders, { model: 'anthropic/claude-haiku-4-5', input });
+export default defineAgent(Orders);
 ```
 
-The `input:` schema validates the dispatched `initialData` when the instance is
-created; `useInitialData()` returns the parsed value on every render.
+The `initialDataSchema` export validates the dispatched `initialData` when the
+instance is created; `useInitialData()` returns the parsed value on every
+render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

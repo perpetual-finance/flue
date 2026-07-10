@@ -256,20 +256,21 @@ the instance id:
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { postMessage } from '../channels/discord.ts';
 
-const input = v.object({ channelId: v.string() });
+export const initialDataSchema = v.object({ channelId: v.string() });
 
 function Assistant() {
-  const data = useInitialData<v.InferOutput<typeof input>>();
+  useModel('anthropic/claude-haiku-4-5');
+  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
   if (!data) throw new Error('This agent is created by the Discord channel dispatch.');
   useTool(postMessage(data));
   return 'Post a concise answer to the bound Discord destination.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
+export default defineAgent(Assistant);
 ```
 
 The model selects message content. It does not select arbitrary Discord

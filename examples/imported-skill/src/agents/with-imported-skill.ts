@@ -1,8 +1,9 @@
 'use agent';
-import { defineAgent, useSkill, useTool } from '@flue/runtime';
+import { defineAgent, useModel, useSkill, useTool } from '@flue/runtime';
 import review from '../skills/review/SKILL.md' with { type: 'skill' };
 
 function WithImportedSkill() {
+	useModel('anthropic/claude-haiku-4-5');
 	// Registering the reference packages the skill's files with the build and
 	// exposes it to every model turn — including the tool's scratch prompt
 	// below, whose session carries the same skill catalog.
@@ -21,4 +22,4 @@ function WithImportedSkill() {
 	return 'When asked to run the demo, call the `run-review-skill` action and report its result.';
 }
 
-export default defineAgent(WithImportedSkill, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(WithImportedSkill);

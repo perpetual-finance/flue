@@ -147,26 +147,28 @@ Bind the trusted customer id inside the agent component:
 
 ```ts
 'use agent';
-import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { retrieveCustomer } from '../channels/stripe.ts';
 
-const input = v.object({
+export const initialDataSchema = v.object({
 	customerId: v.string(),
 });
 
 function Billing() {
-	const data = useInitialData<v.InferOutput<typeof input>>();
+	useModel('anthropic/claude-haiku-4-5');
+	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the Stripe channel dispatch.');
 	useTool(retrieveCustomer(data.customerId));
 	return 'Review the completed Checkout event and summarize any billing follow-up that is needed.';
 }
 
-export default defineAgent(Billing, { model: 'anthropic/claude-haiku-4-5', input });
+export default defineAgent(Billing);
 ```
 
-The `input:` schema validates the dispatched `initialData` when the instance is
-created; `useInitialData()` returns the parsed value on every render.
+The `initialDataSchema` export validates the dispatched `initialData` when the
+instance is created; `useInitialData()` returns the parsed value on every
+render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

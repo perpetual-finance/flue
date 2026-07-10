@@ -26,7 +26,7 @@ selected orders agent to bind a generated Admin GraphQL tool. It also adds
 ```ts title="src/channels/shopify.ts (abridged)"
 import { createAdminApiClient } from '@shopify/admin-api-client';
 import { createShopifyChannel } from '@flue/shopify';
-import { dispatch } from '@flue/runtime';
+import { dispatch, useModel } from '@flue/runtime';
 import orders from '../agents/orders.ts';
 
 const SHOP_DOMAIN = process.env.SHOPIFY_SHOP_DOMAIN!;
@@ -113,7 +113,7 @@ requirement and does not add Node runtime code to a Worker.
 ```ts title="src/channels/shopify.ts"
 import { type ClientResponse, createAdminApiClient } from '@shopify/admin-api-client';
 import { createShopifyChannel, type JsonValue } from '@flue/shopify';
-import { defineTool, dispatch } from '@flue/runtime';
+import { defineTool, dispatch, useModel } from '@flue/runtime';
 import orders from '../agents/orders.ts';
 
 const SHOP_DOMAIN = process.env.SHOPIFY_SHOP_DOMAIN!;
@@ -293,10 +293,11 @@ string through `Number`.
 
 ```ts title="src/agents/orders.ts"
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
+import { type AgentProps, defineAgent, useModel, useTool } from '@flue/runtime';
 import { orderRefFromInstanceId, retrieveOrder } from '../channels/shopify.ts';
 
 function Orders({ id }: AgentProps) {
+  useModel('anthropic/claude-haiku-4-5');
   const { shopDomain, orderId } = orderRefFromInstanceId(id);
   if (shopDomain !== process.env.SHOPIFY_SHOP_DOMAIN) {
     throw new TypeError('Unexpected Shopify shop.');
@@ -305,7 +306,7 @@ function Orders({ id }: AgentProps) {
   return 'Review the newly created Shopify order and summarize any fulfillment or payment follow-up.';
 }
 
-export default defineAgent(Orders, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Orders);
 ```
 
 The local `shopify-order:` id includes shop and order identity because Shopify

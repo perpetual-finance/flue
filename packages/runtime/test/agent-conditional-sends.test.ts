@@ -11,11 +11,16 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
 import type { ConversationRecord } from '../src/conversation-records.ts';
 import { useInitialData } from '../src/hooks/use-initial-data.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { createFlueContext, type DispatchInput } from '../src/internal.ts';
 import { createNodeAgentCoordinator } from '../src/node/agent-coordinator.ts';
 import { sqlite } from '../src/node/agent-execution-store.ts';
 import { readInstanceInfoFromStream } from '../src/runtime/flue-app.ts';
 import type { CreateAgentContextFn } from '../src/runtime/handle-agent.ts';
+import {
+	__flueBindAgentModule,
+	resetFlueAgentRegistrationForTests,
+} from '../src/runtime/registration.ts';
 import type { DeliveredMessage } from '../src/types.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
 
@@ -23,6 +28,7 @@ const providers: FauxProviderRegistration[] = [];
 const tempDirs: string[] = [];
 
 afterEach(() => {
+	resetFlueAgentRegistrationForTests();
 	for (const provider of providers.splice(0)) provider.unregister();
 	for (const dir of tempDirs.splice(0)) {
 		try {
@@ -90,13 +96,11 @@ function dispatchInput(overrides: Partial<DispatchInput> & { dispatchId: string 
 }
 
 function makeAgent(provider: FauxProviderRegistration, onRender?: () => void) {
-	return defineAgent(
-		() => {
-			onRender?.();
-			return 'Base.';
-		},
-		{ model: `${provider.getModel().provider}/${provider.getModel().id}` },
-	);
+	return defineAgent(() => {
+		useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+		onRender?.();
+		return 'Base.';
+	});
 }
 
 describe('conditional sends (uid)', () => {
@@ -237,13 +241,12 @@ describe('conditional sends (uid)', () => {
 		provider.setResponses([fauxAssistantMessage('one'), fauxAssistantMessage('two')]);
 		const input = v.optional(v.object({ issue: v.number() }));
 		const seen: unknown[] = [];
-		const agent = defineAgent(
-			() => {
-				seen.push(useInitialData<v.InferOutput<typeof input>>());
-				return 'Base.';
-			},
-			{ model: `${provider.getModel().provider}/${provider.getModel().id}`, input },
-		);
+		const agent = defineAgent(() => {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+			seen.push(useInitialData<v.InferOutput<typeof input>>());
+			return 'Base.';
+		});
+		__flueBindAgentModule(agent, { identity: 'assistant', initialDataSchema: input });
 		const { coordinator } = await createRig(provider, [{ name: 'assistant', definition: agent }]);
 
 		const created = await coordinator.admitDispatch(

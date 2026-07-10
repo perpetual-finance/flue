@@ -2,6 +2,7 @@ import type { MiddlewareHandler } from 'hono';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { defineAgent } from '../src/agent-definition.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import {
 	__flueBindAgentModule,
 	getRegisteredFlueAgents,
@@ -16,7 +17,10 @@ afterEach(() => {
 });
 
 function testAgent(): FunctionAgentDefinition {
-	return defineAgent(() => 'Test agent.', { model: 'anthropic/claude-haiku-4-5' });
+	return defineAgent(() => {
+		useModel('anthropic/claude-haiku-4-5');
+		return 'Test agent.';
+	});
 }
 
 describe('registerFlueAgents()', () => {
@@ -56,7 +60,7 @@ describe('registerFlueAgents()', () => {
 			registerFlueAgents([
 				{ definition: { initialize: () => ({}) } as unknown as FunctionAgentDefinition, identity: 'bogus' },
 			]),
-		).toThrow('Agent "bogus" must default-export defineAgent(Agent, { model })');
+		).toThrow('Agent "bogus" must default-export defineAgent(Agent)');
 	});
 
 	it('rejects duplicate identities', () => {

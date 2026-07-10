@@ -1,5 +1,5 @@
 'use agent';
-import { type AgentRouteHandler, defineAgent, useTool } from '@flue/runtime';
+import { type AgentRouteHandler, defineAgent, useModel, useTool } from '@flue/runtime';
 
 /**
  * The `route` named export keeps its meaning on the new surface: middleware
@@ -20,6 +20,7 @@ export const route: AgentRouteHandler = async (c, next) => {
 };
 
 function WithRequest() {
+	useModel('anthropic/claude-haiku-4-5');
 	useTool({
 		name: 'greet',
 		description: 'Ask the harness conversation for a five-word hello.',
@@ -32,4 +33,4 @@ function WithRequest() {
 	return 'When asked to run a demo, call the `greet` tool and report its result.';
 }
 
-export default defineAgent(WithRequest, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(WithRequest);

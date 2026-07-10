@@ -219,11 +219,11 @@ stay on the signal's `attributes`.
 
 ```ts
 'use agent';
-import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { postMessage, type WhatsAppSendRef } from '../channels/whatsapp.ts';
 
-const input = v.object({
+export const initialDataSchema = v.object({
 	phoneNumberId: v.string(),
 	destination: v.optional(
 		v.union([
@@ -236,7 +236,8 @@ const input = v.object({
 });
 
 function Assistant() {
-	const data = useInitialData<v.InferOutput<typeof input>>();
+	useModel('anthropic/claude-haiku-4-5');
+	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the WhatsApp channel dispatch.');
 	let ref: WhatsAppSendRef;
 	if (data.groupId !== undefined) {
@@ -251,11 +252,12 @@ function Assistant() {
 	return `Reply concisely in the bound WhatsApp conversation${contactName}.`;
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
+export default defineAgent(Assistant);
 ```
 
-The `input:` schema validates the dispatched `initialData` when the instance is
-created; `useInitialData()` returns the parsed value on every render.
+The `initialDataSchema` export validates the dispatched `initialData` when the
+instance is created; `useInitialData()` returns the parsed value on every
+render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

@@ -13,7 +13,7 @@ A [skill](/docs/guide/skills/) provides reusable instructions; a tool executes a
 Use `defineTool(...)` to create a new tool:
 
 ```ts title="src/shared/order-tools.ts"
-import { defineTool } from '@flue/runtime';
+import { defineTool, useModel } from '@flue/runtime';
 import * as v from 'valibot';
 
 const orderStatuses = new Map([
@@ -53,15 +53,16 @@ Mount a tool with `useTool(...)` inside the agent function:
 
 ```ts title="src/agents/order-assistant.ts"
 'use agent';
-import { defineAgent, useTool } from '@flue/runtime';
+import { defineAgent, useModel, useTool } from '@flue/runtime';
 import { lookupOrderStatus } from '../shared/order-tools.ts';
 
 function OrderAssistant() {
+  useModel('anthropic/claude-haiku-4-5');
   useTool(lookupOrderStatus);
   return 'Help customers check the status of their orders.';
 }
 
-export default defineAgent(OrderAssistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(OrderAssistant);
 ```
 
 When this agent receives a request, the model can call `lookup_order_status` if it needs the current status before composing its answer. The call and returned text become part of the conversation context so the agent can continue working with the result.
@@ -73,7 +74,7 @@ When this agent receives a request, the model can call `lookup_order_status` if 
 A tool needs `harness: true` when it must drive the agent's own runtime — start a scoped model call, run a shell command, or read and write the sandbox filesystem — rather than being a pure function of its input. `run` then receives `harness`: the same surface the agent's own conversation uses (`harness.prompt()`, `harness.sandbox`).
 
 ```ts title="src/shared/review-tools.ts"
-import { defineTool } from '@flue/runtime';
+import { defineTool, useModel } from '@flue/runtime';
 import * as v from 'valibot';
 
 export const reviewChange = defineTool({
@@ -97,7 +98,7 @@ Ordinary tool code is never re-executed after an interruption: if the process di
 `durable: true` opts a tool into checkpointed execution. `run` receives `step`, and every side effect goes through `step.do(name, fn)`: the step's return value is durably recorded the moment it completes, and if the call is interrupted, recovery **re-executes the whole `run`** — completed steps return their recorded values without running again, and execution continues from the first step that never finished.
 
 ```ts title="src/shared/sync-tools.ts"
-import { defineTool } from '@flue/runtime';
+import { defineTool, useModel } from '@flue/runtime';
 import * as v from 'valibot';
 import { crm, db } from './clients.ts';
 
@@ -136,11 +137,12 @@ For an agent that receives dispatched, per-customer events — a support-system 
 
 ```ts title="src/agents/customer-orders.ts"
 'use agent';
-import { defineAgent, useDelivery, useTool } from '@flue/runtime';
+import { defineAgent, useDelivery, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { orders } from '../shared/orders.ts';
 
 function CustomerOrders() {
+  useModel('anthropic/claude-haiku-4-5');
   const delivery = useDelivery();
   const customerId = delivery.kind === 'signal' ? delivery.attributes?.customerId : undefined;
 
@@ -157,7 +159,7 @@ function CustomerOrders() {
   return 'Help this customer check the status of their orders.';
 }
 
-export default defineAgent(CustomerOrders, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(CustomerOrders);
 ```
 
 In this example, the model may choose an order ID to look up, but it cannot choose the customer used in the query — `customerId` comes from the delivered signal's `attributes`, set by the trusted code that called `dispatch(...)`. Your route or dispatching code must still verify the caller before attaching that identifier; see [Agents](/docs/guide/building-agents/) and [Routing](/docs/guide/routing/).
@@ -171,7 +173,7 @@ events, while your application uses the provider SDK and defines only the
 outbound tools its agents need:
 
 ```ts title="src/channels/github.ts"
-import { defineTool } from '@flue/runtime';
+import { defineTool, useModel } from '@flue/runtime';
 import { Octokit } from '@octokit/rest';
 import * as v from 'valibot';
 
@@ -212,7 +214,7 @@ An MCP server supplies remotely implemented tools. `connectMcpServer(...)` lists
 
 ```ts title="src/agents/inventory-assistant.ts"
 'use agent';
-import { connectMcpServer, defineAgent, useTool } from '@flue/runtime';
+import { connectMcpServer, defineAgent, useModel, useTool } from '@flue/runtime';
 
 const inventory = await connectMcpServer('inventory', {
   url: process.env.INVENTORY_MCP_URL!,
@@ -220,11 +222,12 @@ const inventory = await connectMcpServer('inventory', {
 });
 
 function InventoryAssistant() {
+  useModel('anthropic/claude-haiku-4-5');
   for (const tool of inventory.tools) useTool(tool);
   return 'Answer inventory questions using the inventory tools.';
 }
 
-export default defineAgent(InventoryAssistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(InventoryAssistant);
 ```
 
 `inventory.tools` is a fixed array resolved once when the module loads, so looping over it mounts the same tools in the same order on every render — the same structural guarantee any other hook call needs. Flue prefixes each MCP tool's model-facing name with its connection name; for example, `lookup_item` from this server becomes `mcp__inventory__lookup_item`.

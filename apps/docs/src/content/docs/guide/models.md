@@ -20,14 +20,16 @@ A model specifier is the unique string Flue uses to refer to a specific model ac
 | `cloudflare/@cf/moonshotai/kimi-k2.6` | `cloudflare` | `@cf/moonshotai/kimi-k2.6` |
 | `cloudflare/openai/gpt-5.5`           | `cloudflare` | `openai/gpt-5.5`           |
 
-Use a model specifier to choose an agent's default model:
+Use a model specifier to choose an agent's model with `useModel()`:
 
 ```ts title="src/agents/assistant.ts"
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useModel } from '@flue/runtime';
 
-function Assistant() {}
+function Assistant() {
+  useModel('anthropic/claude-sonnet-4-6');
+}
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(Assistant);
 ```
 
 Model specifiers can also be supplied by reusable profiles and subagents, or used to override the default model for an individual prompt, skill, or task operation. Responses report the selected model as `{ provider, id }`, preserving the provider ID and model ID from this specifier. See [Agents](/docs/guide/building-agents/), [Subagents](/docs/guide/subagents/), and the [Agent API](/docs/api/agent-api/) for those API-specific behaviors.
@@ -45,17 +47,16 @@ Reasoning effort controls how much additional reasoning Flue requests from a mod
 | `'high'`    | Favor more careful reasoning.                              |
 | `'xhigh'`   | Request the highest exposed effort tier.                   |
 
-Set the ordinary reasoning effort for an agent alongside its model:
+Set the ordinary reasoning effort for an agent alongside its model, in `useModel()`'s options:
 
 ```ts title="src/agents/reviewer.ts"
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useModel } from '@flue/runtime';
 
-function Reviewer() {}
+function Reviewer() {
+  useModel('anthropic/claude-sonnet-4-6', { thinkingLevel: 'high' });
+}
 
-export default defineAgent(Reviewer, {
-  model: 'anthropic/claude-sonnet-4-6',
-  thinkingLevel: 'high',
-});
+export default defineAgent(Reviewer);
 ```
 
 Like a model specifier, `thinkingLevel` can be supplied by a reusable profile or overridden for an individual prompt, skill, or task operation. If no level is configured, Flue uses `'medium'`.
@@ -143,11 +144,13 @@ export default app;
 The registered provider ID is now available anywhere you select a model:
 
 ```ts title="src/agents/local-assistant.ts"
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useModel } from '@flue/runtime';
 
-function LocalAssistant() {}
+function LocalAssistant() {
+  useModel('ollama/llama3.1:8b');
+}
 
-export default defineAgent(LocalAssistant, { model: 'ollama/llama3.1:8b' });
+export default defineAgent(LocalAssistant);
 ```
 
 A provider registration can also supply authentication, headers, and model metadata when your endpoint requires them. Most OpenAI-compatible services can use the built-in `openai-completions` protocol shown above. For an endpoint with a different wire protocol, advanced integrations can import `registerApiProvider(...)` from `@flue/runtime` and use it to register that protocol before registering a provider ID for it.
@@ -161,11 +164,13 @@ For applications built for the Cloudflare target, Flue provides the `cloudflare/
 Everything after `cloudflare/` is passed as the model ID to `env.AI.run(...)`. Use Workers AI model IDs such as `@cf/moonshotai/kimi-k2.6`, or a binding-supported AI Gateway model ID such as `openai/gpt-5.5` when your Worker should reach that model through Cloudflare's binding and gateway path. Use `openai/gpt-5.5` without the `cloudflare/` prefix only when you intend to use Flue's direct OpenAI provider and its credentials.
 
 ```ts title="src/agents/assistant.ts"
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useModel } from '@flue/runtime';
 
-function Assistant() {}
+function Assistant() {
+  useModel('cloudflare/@cf/moonshotai/kimi-k2.6');
+}
 
-export default defineAgent(Assistant, { model: 'cloudflare/@cf/moonshotai/kimi-k2.6' });
+export default defineAgent(Assistant);
 ```
 
 Declare an `AI` binding in your project's Wrangler configuration:

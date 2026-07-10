@@ -25,6 +25,7 @@ import { useAgentFinish } from '../src/hooks/use-agent-finish.ts';
 import { useAgentStart } from '../src/hooks/use-agent-start.ts';
 import { useDelivery } from '../src/hooks/use-delivery.ts';
 import { useDispatchMessage } from '../src/hooks/use-dispatch-message.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { usePersistentState } from '../src/hooks/use-persistent-state.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import {
@@ -122,8 +123,9 @@ function makeCoordinator(
 		agents: [
 			{
 				name: 'assistant',
-				definition: defineAgent(assistant, {
-					model: `${provider.getModel().provider}/${provider.getModel().id}`,
+				definition: defineAgent(() => {
+					useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+					return assistant();
 				}),
 			},
 		],
@@ -158,8 +160,9 @@ async function dispatchAndSettle(
 
 /** Run one direct submission through the session handler, outside the coordinator. */
 function makeDirectProcess(provider: FauxProviderRegistration, assistant: () => string) {
-	const agent = defineAgent(assistant, {
-		model: `${provider.getModel().provider}/${provider.getModel().id}`,
+	const agent = defineAgent(() => {
+		useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+		return assistant();
 	});
 	const input: AgentSubmissionInput = {
 		kind: 'direct',
@@ -192,9 +195,10 @@ describe('useAgentStart()', () => {
 	it('requires a callback', () => {
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
+				useModel(CONFIG.model);
 				(useAgentStart as unknown as (run: unknown) => void)('nope');
 				return 'Base.';
-			}, CONFIG),
+			}),
 		).toThrow(/takes a callback as its only argument/);
 	});
 
@@ -212,27 +216,31 @@ describe('useAgentStart()', () => {
 
 	it('declaration counts join the structural invariance fingerprint', () => {
 		const one = renderAgentFunctionWithStructure(() => {
+			useModel(CONFIG.model);
 			useAgentStart(() => {});
 			return 'Base.';
-		}, CONFIG).structure;
+		}).structure;
 		const two = renderAgentFunctionWithStructure(() => {
+			useModel(CONFIG.model);
 			useAgentStart(() => {});
 			useAgentStart(() => {});
 			return 'Base.';
-		}, CONFIG).structure;
+		}).structure;
 		expect(() => assertRenderStructureInvariance(one, two)).toThrow(
 			/useAgentStart count changed \(1 → 2\)/,
 		);
 
 		const finishOne = renderAgentFunctionWithStructure(() => {
+			useModel(CONFIG.model);
 			useAgentFinish(() => {});
 			return 'Base.';
-		}, CONFIG).structure;
+		}).structure;
 		const finishTwo = renderAgentFunctionWithStructure(() => {
+			useModel(CONFIG.model);
 			useAgentFinish(() => {});
 			useAgentFinish(() => {});
 			return 'Base.';
-		}, CONFIG).structure;
+		}).structure;
 		expect(() => assertRenderStructureInvariance(finishOne, finishTwo)).toThrow(
 			/useAgentFinish count changed \(1 → 2\)/,
 		);
@@ -519,9 +527,10 @@ describe('useAgentFinish()', () => {
 	it('requires a callback and is unavailable in subagent renders', () => {
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
+				useModel(CONFIG.model);
 				(useAgentFinish as unknown as (run: unknown) => void)('nope');
 				return 'Base.';
-			}, CONFIG),
+			}),
 		).toThrow(/takes a callback as its only argument/);
 		expect(() =>
 			renderWithFrame(

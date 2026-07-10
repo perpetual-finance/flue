@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { useModel } from '../src/hooks/use-model.ts';
 import { useSandbox } from '../src/hooks/use-sandbox.ts';
 import { defineAgent } from '../src/index.ts';
 import { createFlueContext, resolveModel } from '../src/internal.ts';
@@ -29,9 +30,9 @@ describe('local()', () => {
 			const harness = await createContext().initializeRootHarness(
 				defineAgent(
 					() => {
+						useModel('anthropic/claude-haiku-4-5');
 						useSandbox(local());
 					},
-					{ model: 'anthropic/claude-haiku-4-5' },
 				),
 			);
 
@@ -53,12 +54,10 @@ describe('local()', () => {
 		try {
 			process.chdir(directory);
 			const harness = await createContext().initializeRootHarness(
-				defineAgent(
-					() => {
-						useSandbox(local());
-					},
-					{ model: 'anthropic/claude-haiku-4-5', cwd: 'workspace' },
-				),
+				defineAgent(() => {
+					useModel('anthropic/claude-haiku-4-5');
+					useSandbox(local(), { cwd: 'workspace' });
+				}),
 			);
 
 			await expect(
@@ -80,12 +79,10 @@ describe('local()', () => {
 		const directory = await mkdtemp(join(tmpdir(), 'flue-local-base-cwd-'));
 		await mkdir(join(directory, 'workspace'));
 		const harness = await createContext().initializeRootHarness(
-			defineAgent(
-				() => {
-					useSandbox(local({ cwd: directory }));
-				},
-				{ model: 'anthropic/claude-haiku-4-5', cwd: 'workspace' },
-			),
+			defineAgent(() => {
+				useModel('anthropic/claude-haiku-4-5');
+				useSandbox(local({ cwd: directory }), { cwd: 'workspace' });
+			}),
 		);
 
 		await expect(
@@ -102,9 +99,9 @@ describe('local()', () => {
 		const harness = await createContext().initializeRootHarness(
 			defineAgent(
 				() => {
+					useModel('anthropic/claude-haiku-4-5');
 					useSandbox(local());
 				},
-				{ model: 'anthropic/claude-haiku-4-5' },
 			),
 		);
 
@@ -126,9 +123,9 @@ describe('local()', () => {
 			const harness = await createContext().initializeRootHarness(
 				defineAgent(
 					() => {
+						useModel('anthropic/claude-haiku-4-5');
 						useSandbox(local());
 					},
-					{ model: 'anthropic/claude-haiku-4-5' },
 				),
 			);
 
@@ -153,9 +150,9 @@ describe('local()', () => {
 		const harness = await createContext().initializeRootHarness(
 			defineAgent(
 				() => {
+					useModel('anthropic/claude-haiku-4-5');
 					useSandbox(local({ env: { FLUE_LOCAL_TEST_EXPLICIT: 'available' } }));
 				},
-				{ model: 'anthropic/claude-haiku-4-5' },
 			),
 		);
 
@@ -173,9 +170,9 @@ describe('local()', () => {
 			const harness = await createContext().initializeRootHarness(
 				defineAgent(
 					() => {
+						useModel('anthropic/claude-haiku-4-5');
 						useSandbox(local({ env: { HOME: undefined } }));
 					},
-					{ model: 'anthropic/claude-haiku-4-5' },
 				),
 			);
 
@@ -197,9 +194,9 @@ describe('local()', () => {
 			const harness = await createContext().initializeRootHarness(
 				defineAgent(
 					() => {
+						useModel('anthropic/claude-haiku-4-5');
 						useSandbox(local());
 					},
-					{ model: 'anthropic/claude-haiku-4-5' },
 				),
 			);
 			process.env.HOME = '/flue-test-home-after-init';
@@ -219,13 +216,13 @@ describe('local()', () => {
 		const harness = await createContext().initializeRootHarness(
 			defineAgent(
 				() => {
+					useModel('anthropic/claude-haiku-4-5');
 					useSandbox(
 						local({
 							env: { FLUE_LOCAL_TEST_LAYER: 'sandbox', FLUE_LOCAL_TEST_BASE: 'base' },
 						}),
 					);
 				},
-				{ model: 'anthropic/claude-haiku-4-5' },
 			),
 		);
 
@@ -245,9 +242,9 @@ describe('local()', () => {
 		const harness = await createContext().initializeRootHarness(
 			defineAgent(
 				() => {
+					useModel('anthropic/claude-haiku-4-5');
 					useSandbox(local());
 				},
-				{ model: 'anthropic/claude-haiku-4-5' },
 			),
 		);
 
@@ -263,9 +260,9 @@ describe('local()', () => {
 		const harness = await createContext().initializeRootHarness(
 			defineAgent(
 				() => {
+					useModel('anthropic/claude-haiku-4-5');
 					useSandbox(local({ cwd: directory }));
 				},
-				{ model: 'anthropic/claude-haiku-4-5' },
 			),
 		);
 
@@ -283,9 +280,9 @@ describe('local()', () => {
 		const harness = await createContext().initializeRootHarness(
 			defineAgent(
 				() => {
+					useModel('anthropic/claude-haiku-4-5');
 					useSandbox(local({ cwd: directory }));
 				},
-				{ model: 'anthropic/claude-haiku-4-5' },
 			),
 		);
 
@@ -308,9 +305,9 @@ describe('local()', () => {
 			const harness = await createContext().initializeRootHarness(
 				defineAgent(
 					() => {
+						useModel('anthropic/claude-haiku-4-5');
 						useSandbox(local({ cwd: directory }));
 					},
-					{ model: 'anthropic/claude-haiku-4-5' },
 				),
 			);
 			const controller = new AbortController();
@@ -348,9 +345,9 @@ describe('local()', () => {
 			createContext().initializeRootHarness(
 				defineAgent(
 					() => {
+						useModel('anthropic/claude-haiku-4-5');
 						useSandbox(local({ env: true as never }));
 					},
-					{ model: 'anthropic/claude-haiku-4-5' },
 				),
 			),
 		).rejects.toThrow('[flue] local() `env` must be a Record<string, string | undefined>.');

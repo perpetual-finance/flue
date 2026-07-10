@@ -194,11 +194,11 @@ Bind the trusted conversation destination inside the agent component:
 
 ```ts
 'use agent';
-import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { commentOnIssue } from '../channels/github.ts';
 
-const input = v.object({
+export const initialDataSchema = v.object({
 	owner: v.string(),
 	repo: v.string(),
 	issueNumber: v.number(),
@@ -207,17 +207,19 @@ const input = v.object({
 });
 
 function Assistant() {
-	const data = useInitialData<v.InferOutput<typeof input>>();
+	useModel('anthropic/claude-haiku-4-5');
+	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the GitHub channel dispatch.');
 	useTool(commentOnIssue(data));
 	return `Review the issue and post a concise triage comment when appropriate. "${data.title}" was opened by ${data.openedBy}.`;
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
+export default defineAgent(Assistant);
 ```
 
-The `input:` schema validates the dispatched `initialData` when the instance is
-created; `useInitialData()` returns the parsed value on every render.
+The `initialDataSchema` export validates the dispatched `initialData` when the
+instance is created; `useInitialData()` returns the parsed value on every
+render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

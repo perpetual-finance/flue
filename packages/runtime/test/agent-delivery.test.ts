@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
 import { renderAgentFunctionWithStructure } from '../src/hooks/render.ts';
 import { useDelivery } from '../src/hooks/use-delivery.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { useSubagent } from '../src/hooks/use-subagent.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { createFlueContext, type DispatchInput } from '../src/internal.ts';
@@ -66,7 +67,7 @@ function makeFauxCreateContext(provider: FauxProviderRegistration): CreateAgentC
 		});
 }
 
-const CONFIG = { model: 'faux/agent-delivery' };
+const MODEL = 'faux/agent-delivery';
 
 describe('useDelivery()', () => {
 	it('throws when no delivery backs the render, and reads one supplied to a direct render', () => {
@@ -74,9 +75,10 @@ describe('useDelivery()', () => {
 		// absence is an error, not undefined.
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
+				useModel(MODEL);
 				useDelivery();
 				return 'Base.';
-			}, CONFIG),
+			}),
 		).toThrow(/no delivered message behind this render/);
 
 		// Direct render harnesses (tests, tooling) supply one via render state.
@@ -84,10 +86,10 @@ describe('useDelivery()', () => {
 		let seen: DeliveredMessage | undefined;
 		renderAgentFunctionWithStructure(
 			() => {
+				useModel(MODEL);
 				seen = useDelivery();
 				return 'Base.';
 			},
-			CONFIG,
 			{ snapshot: new Map(), store: undefined, delivery: message },
 		);
 		expect(seen).toEqual(message);
@@ -116,6 +118,7 @@ describe('useDelivery()', () => {
 		let toolSaw: DeliveredMessage | undefined;
 
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			const delivery = useDelivery();
 			rendersSaw.push(delivery);
 			useTool({
@@ -135,9 +138,7 @@ describe('useDelivery()', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -191,6 +192,7 @@ describe('useDelivery()', () => {
 			return 'You summarize support cases.';
 		}
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			useSubagent({
 				name: 'summarizer',
 				description: 'Summarizes one support case.',
@@ -204,9 +206,7 @@ describe('useDelivery()', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -242,12 +242,11 @@ describe('useDelivery()', () => {
 		let seen: DeliveredMessage | undefined;
 
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			seen = useDelivery();
 			return 'Triage agent.';
 		}
-		const agent = defineAgent(assistant, {
-			model: `${provider.getModel().provider}/${provider.getModel().id}`,
-		});
+		const agent = defineAgent(assistant);
 
 		const input: AgentSubmissionInput = {
 			kind: 'direct',

@@ -8,13 +8,14 @@ An agent joins a Flue application with one line — the `'use agent'` directive 
 
 ```ts title="src/agents/triage.ts"
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useModel } from '@flue/runtime';
 
 function Triage() {
+  useModel('anthropic/claude-sonnet-4-6');
   return 'Triage the incoming issue and propose next steps.';
 }
 
-export default defineAgent(Triage, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(Triage);
 ```
 
 Like `'use strict'`, it is an ECMAScript module directive: a string literal in the directive prologue, before any imports or statements. The [Vite plugin](/docs/guide/vite-plugin/) detects it by parsing, not by pattern-matching, so comments and string contents elsewhere in the file can never trigger it.
@@ -54,20 +55,21 @@ The build transform binds the module's optional named exports onto the definitio
 
 ```ts title="src/agents/triage.ts"
 'use agent';
-import { defineAgent, type AgentRouteHandler } from '@flue/runtime';
+import { type AgentRouteHandler, defineAgent, useModel } from '@flue/runtime';
 import { requireUser } from '../auth.ts';
 
 export const route: AgentRouteHandler = requireUser; // middleware on all agent routes
 export const description = 'Triages incoming issues.'; // static metadata
 
 function Triage() {
+  useModel('anthropic/claude-sonnet-4-6');
   return 'Triage the incoming issue and propose next steps.';
 }
 
-export default defineAgent(Triage, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(Triage);
 ```
 
-These exports keep exactly the meanings described in [Routing](/docs/guide/routing/#per-agent-middleware-the-route-export). The module is the single source of per-agent configuration — `.route()` takes no options.
+These exports keep exactly the meanings described in [Routing](/docs/guide/routing/#per-agent-middleware-the-route-export). Two more supervisor-facing exports join them: `initialDataSchema` (a Valibot schema validating instance-creation data at first contact) and `durability` (the submission retry policy — a module export rather than a hook because the policy must be readable even when a render crashes); see the [Agent API](/docs/api/agent-api/#module-exports). The module is the single source of per-agent configuration — `.route()` takes no options.
 
 ## 3. Registration: the scan is the registry
 

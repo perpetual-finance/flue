@@ -14,13 +14,14 @@ Declare `useSubagent(...)` inside the agent function that should be able to dele
 
 ```ts title="src/agents/support-assistant.ts"
 'use agent';
-import { defineAgent, useSubagent } from '@flue/runtime';
+import { defineAgent, useModel, useSubagent } from '@flue/runtime';
 
 function IssueClassifier() {
   return 'Return the likely product area and urgency for the reported issue.';
 }
 
 function SupportAssistant() {
+  useModel('anthropic/claude-sonnet-4-6');
   useSubagent({
     name: 'issue_classifier',
     description: 'Classifies support issues for routing.',
@@ -29,7 +30,7 @@ function SupportAssistant() {
   return 'Help resolve support requests. Delegate classification when it helps your answer.';
 }
 
-export default defineAgent(SupportAssistant, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(SupportAssistant);
 ```
 
 In this example, `support-assistant` can delegate work to `issue_classifier`. `agent` is the function that defines the delegate's whole world — Flue renders it fresh, in its own frame, at the moment the model delegates to it. It does not define another agent at `/agents/issue_classifier/:id`.
@@ -60,7 +61,7 @@ A `task()` call without an `agent` name is not a subagent delegation: the child 
 A [harness tool](/docs/guide/tools/#harness-tools) can direct delegation to a particular subagent when application logic requires its work. Call `harness.prompt(...)` naming the subagent: it runs in the same conversation as the agent's own turns, so the built-in `task` tool and this tool's declared subagent are both already available to it. Provide `result` when the tool needs validated data:
 
 ```ts title="src/shared/review-tools.ts"
-import { defineTool } from '@flue/runtime';
+import { defineTool, useModel } from '@flue/runtime';
 import * as v from 'valibot';
 
 const Review = v.object({

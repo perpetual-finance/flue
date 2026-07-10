@@ -16,13 +16,14 @@ The scheduled agent is an ordinary agent module. It needs no mount in `app.ts` �
 
 ```ts title="src/agents/daily-summary.ts"
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useModel } from '@flue/runtime';
 
 function DailySummary() {
+  useModel('anthropic/claude-haiku-4-5');
   return 'When triggered, review recent activity and report a concise daily summary.';
 }
 
-export default defineAgent(DailySummary, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(DailySummary);
 ```
 
 Reach for a [harness tool](/docs/guide/tools/#harness-tools) instead of plain instructions when the scheduled work needs application-controlled steps — reading a data source, writing a report, calling an external API — that should behave the same way on every occurrence.
@@ -42,7 +43,7 @@ Add a [Cron Trigger](https://developers.cloudflare.com/workers/configuration/cro
 Then import the agent's default export and dispatch to it from `src/cloudflare.ts`:
 
 ```ts title="src/cloudflare.ts"
-import { dispatch } from '@flue/runtime';
+import { dispatch, useModel } from '@flue/runtime';
 import dailySummary from './agents/daily-summary.ts';
 
 export default {
@@ -70,7 +71,7 @@ For scheduled behavior that belongs to one specific agent's Durable Object, the 
 Node.js does not include a built-in cron scheduler, so choose an ecosystem option that fits how your application is deployed. This example uses [Croner](https://croner.56k.guru/), a lightweight scheduler with async callbacks, overlap protection, and timezone support, started from `app.ts` so it runs for the server's lifetime:
 
 ```ts title="src/app.ts"
-import { dispatch } from '@flue/runtime';
+import { dispatch, useModel } from '@flue/runtime';
 import { Cron } from 'croner';
 import { Hono } from 'hono';
 import dailySummary from './agents/daily-summary.ts';

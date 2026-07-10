@@ -48,7 +48,7 @@ function createFixtureRoot() {
 function writeEchoAgent(root, name = 'hello') {
 	fs.writeFileSync(
 		path.join(root, 'src', 'agents', `${name}.mjs`),
-		`import { defineAgent, registerProvider } from '@flue/runtime';
+		`import { defineAgent, registerProvider, useModel } from '@flue/runtime';
 import { fauxAssistantMessage, registerFauxProvider } from '@earendil-works/pi-ai/compat';
 
 const faux = registerFauxProvider({ provider: 'faux', models: [{ id: 'faux-model' }] });
@@ -57,8 +57,10 @@ faux.setResponses([
 ]);
 registerProvider('faux', { api: faux.api, baseUrl: 'https://faux.invalid' });
 
-function ${name}() {}
-export default defineAgent(${name}, { model: 'faux/faux-model' });
+function ${name}() {
+	useModel('faux/faux-model');
+}
+export default defineAgent(${name});
 `,
 	);
 	return path.join('src', 'agents', `${name}.mjs`);
@@ -71,7 +73,7 @@ export default defineAgent(${name}, { model: 'faux/faux-model' });
 function writeFunctionAgent(root, name = 'hooked') {
 	fs.writeFileSync(
 		path.join(root, 'src', 'agents', `${name}.mjs`),
-		`import { defineAgent, useInstruction, registerProvider } from '@flue/runtime';
+		`import { defineAgent, registerProvider, useInstruction, useModel } from '@flue/runtime';
 import { fauxAssistantMessage, registerFauxProvider } from '@earendil-works/pi-ai/compat';
 
 const faux = registerFauxProvider({ provider: 'faux', models: [{ id: 'faux-model' }] });
@@ -84,10 +86,11 @@ faux.setResponses([
 registerProvider('faux', { api: faux.api, baseUrl: 'https://faux.invalid' });
 
 function ${name}() {
+	useModel('faux/faux-model');
 	useInstruction('Speak only in haiku.');
 	return 'You are the ${name} agent.';
 }
-export default defineAgent(${name}, { model: 'faux/faux-model' });
+export default defineAgent(${name});
 `,
 	);
 	return path.join('src', 'agents', `${name}.mjs`);
@@ -97,7 +100,7 @@ export default defineAgent(${name}, { model: 'faux/faux-model' });
 function writeSlowAgent(root) {
 	fs.writeFileSync(
 		path.join(root, 'src', 'agents', 'slow.mjs'),
-		`import { defineAgent, registerProvider } from '@flue/runtime';
+		`import { defineAgent, registerProvider, useModel } from '@flue/runtime';
 import { fauxAssistantMessage, registerFauxProvider } from '@earendil-works/pi-ai/compat';
 
 const faux = registerFauxProvider({
@@ -110,8 +113,10 @@ faux.setResponses([
 ]);
 registerProvider('faux', { api: faux.api, baseUrl: 'https://faux.invalid' });
 
-function slow() {}
-export default defineAgent(slow, { model: 'faux/faux-model' });
+function slow() {
+	useModel('faux/faux-model');
+}
+export default defineAgent(slow);
 `,
 	);
 	return path.join('src', 'agents', 'slow.mjs');
@@ -412,10 +417,7 @@ test('a module without an agent default export fails clearly', async () => {
 
 	const result = await runCli(root, ['src/agents/bad.mjs', '--message', 'hi']);
 	assert.equal(result.code, 1);
-	assert.match(
-		result.stderr,
-		/Agent "bad" must default-export defineAgent\(Agent, \{ model \}\)/,
-	);
+	assert.match(result.stderr, /Agent "bad" must default-export defineAgent\(Agent\)/);
 });
 
 test('a module importing cloudflare:* APIs points at vite dev with the import chain', async () => {
@@ -433,7 +435,7 @@ export const onCloudflare = true;
 		path.join(root, 'src', 'agents', 'cf.mjs'),
 		`import '../lib/platform.mjs';
 import { defineAgent } from '@flue/runtime';
-export default defineAgent(() => ({ model: 'faux/faux-model' }));
+export default defineAgent(() => undefined);
 `,
 	);
 

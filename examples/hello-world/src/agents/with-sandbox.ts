@@ -1,9 +1,10 @@
 'use agent';
 import { Daytona } from '@daytona/sdk';
-import { defineAgent, useSandbox, useTool } from '@flue/runtime';
+import { defineAgent, useModel, useSandbox, useTool } from '@flue/runtime';
 import { daytona } from '../sandboxes/daytona';
 
 function WithSandbox() {
+	useModel('anthropic/claude-sonnet-4-6');
 	useSandbox({
 		// Lazy, per the SandboxFactory contract: constructing this object is
 		// cheap; the expensive Daytona sandbox creation happens once, inside
@@ -50,4 +51,4 @@ function WithSandbox() {
 	return 'When asked to run a demo, call the `sandbox-test` tool and report its result.';
 }
 
-export default defineAgent(WithSandbox, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(WithSandbox);

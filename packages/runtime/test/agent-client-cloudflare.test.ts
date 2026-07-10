@@ -13,12 +13,17 @@ import { createCloudflareAgentRuntime } from '../src/cloudflare/agent-coordinato
 import { createCloudflareWorkerConfig } from '../src/cloudflare/worker-config.ts';
 import { AgentInstanceExistsError } from '../src/errors.ts';
 import { useDelivery } from '../src/hooks/use-delivery.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { configureFlueRuntime, resetFlueRuntimeForTests } from '../src/runtime/flue-app.ts';
 import {
 	registerProvider,
 	resetProviderRuntime,
 	resolveModel,
 } from '../src/runtime/providers.ts';
+import {
+	__flueBindAgentModule,
+	resetFlueAgentRegistrationForTests,
+} from '../src/runtime/registration.ts';
 import { bashFactoryToSessionEnv } from '../src/sandbox.ts';
 import type { AgentModuleValue } from '../src/types.ts';
 
@@ -39,6 +44,7 @@ import type { AgentModuleValue } from '../src/types.ts';
 const providers: FauxProviderRegistration[] = [];
 
 afterEach(() => {
+	resetFlueAgentRegistrationForTests();
 	resetFlueRuntimeForTests();
 	resetProviderRuntime();
 	for (const provider of providers.splice(0)) provider.unregister();
@@ -168,11 +174,12 @@ describe('init() on the Cloudflare target', () => {
 
 		const deliveries: string[] = [];
 		function Reporter() {
+			useModel(model);
 			const delivery = useDelivery();
 			deliveries.push(`${delivery.kind}:${delivery.body}`);
 			return 'Produce the report when triggered.';
 		}
-		const reporter = defineAgent(Reporter, { model });
+		const reporter = defineAgent(Reporter);
 		seedCloudflareRuntime('reporter', reporter);
 
 		const agent = init(reporter, { id: 'nightly-1' });
@@ -186,7 +193,10 @@ describe('init() on the Cloudflare target', () => {
 	it('pins the contacted incarnation and rehydrates the 409 as a typed error', async () => {
 		const { provider, model } = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('one'), fauxAssistantMessage('two')]);
-		const echo = defineAgent(() => 'Reply.', { model });
+		const echo = defineAgent(() => {
+			useModel(model);
+			return 'Reply.';
+		});
 		seedCloudflareRuntime('echo', echo);
 
 		const agent = init(echo, { id: 'pin-1', uid: null });
@@ -217,7 +227,11 @@ describe('init() on the Cloudflare target', () => {
 				throw new Error('provider exploded');
 			},
 		]);
-		const doomed = defineAgent(() => 'Reply.', { model, durability: { maxAttempts: 1 } });
+		const doomed = defineAgent(() => {
+			useModel(model);
+			return 'Reply.';
+		});
+		__flueBindAgentModule(doomed, { identity: 'doomed', durability: { maxAttempts: 1 } });
 		seedCloudflareRuntime('doomed', doomed);
 
 		const error = await init(doomed, { id: 'fail-1' })
@@ -235,7 +249,10 @@ describe('init() on the Cloudflare target', () => {
 	it('streams projected chunks to onEvent while awaiting', async () => {
 		const { provider, model } = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('streamed')]);
-		const echo = defineAgent(() => 'Reply.', { model });
+		const echo = defineAgent(() => {
+			useModel(model);
+			return 'Reply.';
+		});
 		seedCloudflareRuntime('echo', echo);
 
 		const seen: string[] = [];
@@ -265,7 +282,10 @@ describe('init() on the Cloudflare target', () => {
 				return fauxAssistantMessage('unreachable');
 			},
 		]);
-		const sleeper = defineAgent(() => 'Reply.', { model });
+		const sleeper = defineAgent(() => {
+			useModel(model);
+			return 'Reply.';
+		});
 		seedCloudflareRuntime('sleeper', sleeper);
 
 		const controller = new AbortController();

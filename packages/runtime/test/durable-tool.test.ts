@@ -16,6 +16,7 @@ import * as v from 'valibot';
 import { afterEach, describe, expect, it } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
 import { toolStepRecordId } from '../src/conversation-records.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { createFlueContext, type DispatchInput } from '../src/internal.ts';
 import { createNodeAgentCoordinator } from '../src/node/agent-coordinator.ts';
@@ -114,8 +115,9 @@ async function createCoordinatorWithAgent(
 		agents: [
 			{
 				name: 'assistant',
-				definition: defineAgent(agentFn, {
-					model: `${provider.getModel().provider}/${provider.getModel().id}`,
+				definition: defineAgent(() => {
+					useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+					return agentFn();
 				}),
 			},
 		],

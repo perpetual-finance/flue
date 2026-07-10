@@ -356,7 +356,7 @@ belongs outside this adapter.
 ```ts
 'use agent';
 import { env } from 'cloudflare:workers';
-import { defineAgent, useSandbox } from '@flue/runtime';
+import { defineAgent, useModel, useSandbox } from '@flue/runtime';
 import { getDefaultWorkspace, getShellSandbox } from '../sandboxes/cloudflare-shell';
 
 interface Env {
@@ -366,11 +366,12 @@ interface Env {
 const { LOADER } = env as unknown as Env;
 
 function Assistant() {
+  useModel('cloudflare/@cf/moonshotai/kimi-k2.6');
   useSandbox(getShellSandbox({ workspace: getDefaultWorkspace(), loader: LOADER }));
   return 'You explore and edit the mounted workspace with the file tools and the `code` tool.';
 }
 
-export default defineAgent(Assistant, { model: 'cloudflare/@cf/moonshotai/kimi-k2.6' });
+export default defineAgent(Assistant);
 ```
 
 The `'use agent'` directive at the top is what registers the module with

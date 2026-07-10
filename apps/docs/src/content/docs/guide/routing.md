@@ -54,7 +54,7 @@ An agent module configures its own routes through optional named exports. The bu
 
 ```ts title="src/agents/triage.ts"
 'use agent';
-import { defineAgent, type AgentProps, type AgentRouteHandler } from '@flue/runtime';
+import { type AgentProps, type AgentRouteHandler, defineAgent, useModel } from '@flue/runtime';
 import { authenticate } from '../auth.ts';
 
 // Middleware applied to every route `.route()` serves for this agent.
@@ -66,10 +66,11 @@ export const route: AgentRouteHandler = async (c, next) => {
 };
 
 function Triage({ id }: AgentProps) {
+  useModel('anthropic/claude-haiku-4-5');
   return `Help with support ticket ${id}.`;
 }
 
-export default defineAgent(Triage, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Triage);
 ```
 
 | Named export  | Meaning                                                                                                             |
@@ -128,7 +129,7 @@ The channel package declares its route suffixes (`/events`, `/webhook`, `/intera
 Anything else your service needs is an ordinary Hono route. A common pattern accepts an external event, verifies it in application code, and delivers it to an agent without exposing a prompt route for that event source:
 
 ```ts title="src/app.ts"
-import { dispatch } from '@flue/runtime';
+import { dispatch, useModel } from '@flue/runtime';
 import { Hono } from 'hono';
 import supportAssistant from './agents/support-assistant.ts';
 import { parseVerifiedSupportComment } from './support-webhooks.ts';

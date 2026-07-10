@@ -167,8 +167,20 @@ export async function createFlueRunSession(
 			// The shared runtime assembly the generated Node entry and `start()`
 			// use: registration, coordinator, dispatch queue, runtime seed, and
 			// startup reconciliation (the run.db persists across invocations).
+			const agentRegistration = {
+				identity,
+				definition,
+				...(agentModule.route !== undefined ? { route: agentModule.route } : {}),
+				...(agentModule.description !== undefined
+					? { description: agentModule.description }
+					: {}),
+				...(agentModule.initialDataSchema !== undefined
+					? { initialDataSchema: agentModule.initialDataSchema }
+					: {}),
+				...(agentModule.durability !== undefined ? { durability: agentModule.durability } : {}),
+			} as Parameters<typeof assembleNodeAgentRuntime>[0]['agents'][number];
 			const runtime = await assembleNodeAgentRuntime({
-				agents: [{ identity, definition }],
+				agents: [agentRegistration],
 				adapter,
 				stores,
 				env: runtimeEnv,

@@ -7,7 +7,14 @@
  * `useDataWriter` (the weather tool streams a live card the demo renders).
  * Requires `ANTHROPIC_API_KEY` in the environment.
  */
-import { defineAgent, useDataWriter, useResponseStart, useSubagent, useTool } from '@flue/runtime';
+import {
+	defineAgent,
+	useDataWriter,
+	useModel,
+	useResponseStart,
+	useSubagent,
+	useTool,
+} from '@flue/runtime';
 import * as v from 'valibot';
 
 const MODEL = 'anthropic/claude-haiku-4-5';
@@ -21,6 +28,7 @@ function pretendForecast(city: string): { tempC: number; condition: string } {
 }
 
 function Helper() {
+	useModel(MODEL, { thinkingLevel: 'low' });
 	// Message metadata is agent-authored: the demo UI reads `timestamp` for its
 	// relative "time ago" label and `model` for the footer.
 	useResponseStart(() => ({ timestamp: new Date().toISOString(), model: MODEL }));
@@ -72,4 +80,4 @@ function Helper() {
 	return 'You are a helpful assistant. When a question involves arithmetic, use the calculator tool rather than computing it yourself. When asked about the weather, use the get_weather tool. When asked for a poem, delegate to the "poet" subagent via the task tool. Keep answers concise.';
 }
 
-export default defineAgent(Helper, { model: MODEL, thinkingLevel: 'low' });
+export default defineAgent(Helper);

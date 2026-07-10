@@ -68,7 +68,7 @@ function printUsage(log: (message: string) => void = console.error) {
 			'  flue docs read guide/sandboxes\n' +
 			'  flue docs search "durable execution"\n' +
 			'\n' +
-			'Note: set the model in `defineAgent(() => ({ model: "provider-id/model-id" }))` ' +
+			"Note: set the model with `useModel('provider-id/model-id')` in the agent function " +
 			'or per-call `{ model: ... }` on prompt/skill/task.',
 	);
 }

@@ -1,9 +1,9 @@
 'use agent';
-import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { postMessage } from '../channels/messenger.ts';
 
-const input = v.object({
+export const initialDataSchema = v.object({
 	pageId: v.string(),
 	participant: v.variant('type', [
 		v.object({ type: v.literal('page-scoped-id'), id: v.string() }),
@@ -12,10 +12,11 @@ const input = v.object({
 });
 
 function Assistant() {
-	const data = useInitialData<v.InferOutput<typeof input>>();
+	useModel('anthropic/claude-haiku-4-5');
+	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the Messenger channel dispatch.');
 	useTool(postMessage(data));
 	return 'Reply concisely in the bound Facebook Messenger conversation.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
+export default defineAgent(Assistant);

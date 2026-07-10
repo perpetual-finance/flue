@@ -1,8 +1,9 @@
 'use agent';
-import { defineAgent, useTool } from '@flue/runtime';
+import { defineAgent, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 
 function WithThinking() {
+	useModel('anthropic/claude-haiku-4-5', { thinkingLevel: 'low' });
 	useTool({
 		name: 'thinking-test',
 		description: 'Compare per-call thinking-level overrides in the harness conversation.',
@@ -24,4 +25,4 @@ function WithThinking() {
 	return 'When asked to run a demo, call the `thinking-test` tool and report its result.';
 }
 
-export default defineAgent(WithThinking, { model: 'anthropic/claude-haiku-4-5', thinkingLevel: 'low' });
+export default defineAgent(WithThinking);

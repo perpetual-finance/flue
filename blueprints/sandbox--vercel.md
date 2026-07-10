@@ -47,10 +47,11 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  * ```typescript
  * 'use agent';
  * import { Sandbox } from '@vercel/sandbox';
- * import { defineAgent, useSandbox } from '@flue/runtime';
+ * import { defineAgent, useModel, useSandbox } from '@flue/runtime';
  * import { vercel } from './sandboxes/vercel';
  *
  * function Assistant() {
+ *   useModel('anthropic/claude-sonnet-4-6');
  *   useSandbox({
  *     // Lazy, per the SandboxFactory contract: constructing this object is
  *     // cheap; the expensive Vercel sandbox creation happens once, inside
@@ -62,7 +63,7 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  *   });
  *   return 'You are a helpful assistant with a full sandbox.';
  * }
- * export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
+ * export default defineAgent(Assistant);
  * ```
  */
 import { createSandboxSessionEnv } from '@flue/runtime';
@@ -242,10 +243,11 @@ share this snippet so they can wire it up themselves.
 ```ts
 'use agent';
 import { Sandbox } from '@vercel/sandbox';
-import { defineAgent, useSandbox } from '@flue/runtime';
+import { defineAgent, useModel, useSandbox } from '@flue/runtime';
 import { vercel } from '../sandboxes/vercel'; // adjust path to match the user's layout
 
 function Assistant() {
+	useModel('anthropic/claude-sonnet-4-6');
 	useSandbox({
 		// Lazy, per the SandboxFactory contract: constructing this object is
 		// cheap; the expensive Vercel sandbox creation happens once, inside
@@ -258,7 +260,7 @@ function Assistant() {
 	return 'You are a helpful assistant with a full sandbox.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(Assistant);
 ```
 
 The `'use agent'` directive at the top is what registers the module with

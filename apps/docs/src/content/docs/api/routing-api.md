@@ -72,13 +72,14 @@ Builds the agent's mountable Hono sub-app. Routes, relative to wherever the call
 
 ```ts title="src/agents/triage.ts"
 'use agent';
-import { defineAgent, type AgentRouteHandler } from '@flue/runtime';
+import { type AgentRouteHandler, defineAgent, useModel } from '@flue/runtime';
 
 function Triage() {
+  useModel('...');
   return '...';
 }
 
-export default defineAgent(Triage, { model: '...' });
+export default defineAgent(Triage);
 
 export const route: AgentRouteHandler = async (c, next) => next(); // middleware on all routes
 export const description = 'Triage incoming bug reports.'; // static metadata
@@ -146,7 +147,7 @@ Unknown paths beneath the mount and the bare mount root render the canonical `ro
 Channel packages implement `.route()` through a shared runtime helper. A channel is structurally an object exposing a declarative `routes` array:
 
 ```ts
-import { createChannelRouter, type MountableChannel } from '@flue/runtime';
+import { createChannelRouter, type MountableChannel, useModel } from '@flue/runtime';
 
 interface ChannelRouteDefinition {
   readonly method: string; // uppercase, e.g. 'POST'

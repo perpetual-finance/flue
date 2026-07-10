@@ -1,10 +1,11 @@
 'use agent';
-import { defineAgent, useResponseFinish, useTool } from '@flue/runtime';
+import { defineAgent, useModel, useResponseFinish, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 
 const MODEL = 'anthropic/claude-haiku-4-5';
 
 function ServiceStatus() {
+	useModel(MODEL);
 	// Message metadata is agent-authored: attach the usage/model the eval
 	// harness reads off the reply (see src/evals/harness.ts).
 	useResponseFinish(({ response }) => ({ usage: response.usage, model: MODEL }));
@@ -17,4 +18,4 @@ function ServiceStatus() {
 	return 'Use the service status tool before answering questions about system health.';
 }
 
-export default defineAgent(ServiceStatus, { model: MODEL });
+export default defineAgent(ServiceStatus);

@@ -12,6 +12,7 @@ import {
 	renderAgentFunctionWithStructure,
 } from '../src/hooks/render.ts';
 import { useInstruction } from '../src/hooks/use-instruction.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { usePersistentState } from '../src/hooks/use-persistent-state.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { dispatch } from '../src/index.ts';
@@ -89,15 +90,13 @@ describe('function agents (Flue Hooks)', () => {
 		const provider = createProvider();
 		const model = `${provider.getModel().provider}/${provider.getModel().id}`;
 		function Writer() {
+			useModel(model);
 			useInstruction('First contribution.');
 			useInstruction('Second contribution.');
 			return 'Base identity instruction.';
 		}
 
-		const systemPrompt = await processPromptCapturingSystemPrompt(
-			defineAgent(Writer, { model }),
-			provider,
-		);
+		const systemPrompt = await processPromptCapturingSystemPrompt(defineAgent(Writer), provider);
 
 		const base = systemPrompt.indexOf('Base identity instruction.');
 		const first = systemPrompt.indexOf('First contribution.');
@@ -114,21 +113,21 @@ describe('function agents (Flue Hooks)', () => {
 			useInstruction('Write in the house voice.');
 		}
 		function Writer() {
+			useModel(model);
 			useHouseVoice();
 			return 'Base.';
 		}
 
-		const systemPrompt = await processPromptCapturingSystemPrompt(
-			defineAgent(Writer, { model }),
-			provider,
-		);
+		const systemPrompt = await processPromptCapturingSystemPrompt(defineAgent(Writer), provider);
 
 		expect(systemPrompt).toContain('Write in the house voice.');
 	});
 
 	it('resolves a registered function agent through dispatch()', async () => {
 		const admitted: DispatchInput[] = [];
-		const moderator = defineAgent(() => undefined, { model: MODEL });
+		const moderator = defineAgent(() => {
+			useModel(MODEL);
+		});
 		configureFlueRuntime({
 			...nodeRuntime(),
 			dispatchQueue: {
@@ -160,10 +159,10 @@ describe('function agents (Flue Hooks)', () => {
 	});
 
 	it('registers function agents and rejects invalid module values', () => {
-		const writer = defineAgent(() => 'Writer.', { model: MODEL });
+		const writer = defineAgent(() => 'Writer.');
 		expect(() => registerFlueAgents([{ identity: 'writer', definition: writer }])).not.toThrow();
 		expect(() => registerFlueAgents([{ identity: 'broken', definition: {} as never }])).toThrow(
-			'must default-export defineAgent(Agent, { model })',
+			'must default-export defineAgent(Agent)',
 		);
 	});
 
@@ -173,23 +172,17 @@ describe('function agents (Flue Hooks)', () => {
 		}
 		expect(() =>
 			registerFlueAgents([{ identity: 'support', definition: Support as never }]),
-		).toThrow("defineAgent(Support, { model: 'provider-id/model-id' })");
+		).toThrow('defineAgent(Support)');
 	});
 });
 
-describe('defineAgent(Capability, config)', () => {
-	it('validates the config shape', () => {
-		expect(() => defineAgent(() => 'x', {} as never)).toThrow('defineAgent() config is invalid');
-		expect(() => defineAgent(() => 'x', { model: MODEL, nope: true } as never)).toThrow(
-			'unknown agent config field',
-		);
-		expect(() => defineAgent('not a function' as never, { model: MODEL })).toThrow(
-			'requires a function',
-		);
+describe('defineAgent(Capability)', () => {
+	it('requires a function', () => {
+		expect(() => defineAgent('not a function' as never)).toThrow('requires a function');
 	});
 
 	it('produces a frozen, marked value with a route factory', () => {
-		const agent = defineAgent(() => 'x', { model: MODEL });
+		const agent = defineAgent(() => 'x');
 		expect(agent.__flueFunctionAgent).toBe(true);
 		expect(Object.isFrozen(agent)).toBe(true);
 		expect(typeof agent.route).toBe('function');
@@ -197,12 +190,10 @@ describe('defineAgent(Capability, config)', () => {
 });
 
 describe('renderAgentFunction()', () => {
-	it('maps config + returned instruction onto the runtime config shape', () => {
-		const config = renderAgentFunction(() => 'Base.', {
-			model: MODEL,
-			thinkingLevel: 'low',
-			compaction: false,
-			cwd: '/workspace',
+	it('maps useModel + returned instruction onto the runtime config shape', () => {
+		const config = renderAgentFunction(() => {
+			useModel(MODEL, { thinkingLevel: 'low', compaction: false });
+			return 'Base.';
 		});
 
 		expect(config).toEqual({
@@ -210,45 +201,40 @@ describe('renderAgentFunction()', () => {
 			instructions: 'Base.',
 			thinkingLevel: 'low',
 			compaction: false,
-			cwd: '/workspace',
 		});
 	});
 
 	it('omits instructions entirely when neither return nor contributions exist', () => {
-		expect(renderAgentFunction(() => undefined, { model: MODEL })).toEqual({ model: MODEL });
+		expect(
+			renderAgentFunction(() => {
+				useModel(MODEL);
+			}),
+		).toEqual({ model: MODEL });
 	});
 
 	it('appends contributions without a returned instruction', () => {
-		const config = renderAgentFunction(
-			() => {
-				useInstruction('Only contribution.');
-			},
-			{ model: MODEL },
-		);
+		const config = renderAgentFunction(() => {
+			useInstruction('Only contribution.');
+		});
 		expect(config.instructions).toBe('Only contribution.');
 	});
 
 	it('rejects an object return', () => {
 		expect(() =>
-			renderAgentFunction(() => ({ model: MODEL, instruction: 'Base.' }) as never, {
-				model: MODEL,
-			}),
+			renderAgentFunction(() => ({ model: MODEL, instruction: 'Base.' }) as never),
 		).toThrow('An agent returns its instruction string');
 	});
 
 	it('rejects an async agent capability', () => {
 		const asyncAgent = (async () => 'Base.') as never;
-		expect(() => renderAgentFunction(asyncAgent, { model: MODEL })).toThrow('must be synchronous');
+		expect(() => renderAgentFunction(asyncAgent)).toThrow('must be synchronous');
 	});
 
 	it('clears the frame after a render that throws', () => {
 		expect(() =>
-			renderAgentFunction(
-				() => {
-					throw new Error('render exploded');
-				},
-				{ model: MODEL },
-			),
+			renderAgentFunction(() => {
+				throw new Error('render exploded');
+			}),
 		).toThrow('render exploded');
 		// The frame must not leak: hooks are unavailable again immediately after.
 		expect(() => useInstruction('outside')).toThrow('outside an agent function');
@@ -264,12 +250,9 @@ describe('useInstruction()', () => {
 
 	it('rejects empty instruction text', () => {
 		expect(() =>
-			renderAgentFunction(
-				() => {
-					useInstruction('   ');
-				},
-				{ model: MODEL },
-			),
+			renderAgentFunction(() => {
+				useInstruction('   ');
+			}),
 		).toThrow('requires a non-empty string');
 	});
 });
@@ -286,14 +269,11 @@ describe('custom hooks (composition)', () => {
 			useTool(tool('offer_credit'));
 			useInstruction('Prefer the smallest credit that resolves the concern.');
 		}
-		const config = renderAgentFunction(
-			() => {
-				useInstruction('Ungrouped note.');
-				useRetention();
-				return 'Base.';
-			},
-			{ model: MODEL },
-		);
+		const config = renderAgentFunction(() => {
+			useInstruction('Ungrouped note.');
+			useRetention();
+			return 'Base.';
+		});
 
 		const doc = config.instructions ?? '';
 		const order = ['Base.', 'Ungrouped note.', 'Prefer the smallest credit that resolves the concern.'].map(
@@ -312,13 +292,10 @@ describe('custom hooks (composition)', () => {
 			useInner();
 			useInstruction('Outer contribution.');
 		}
-		const config = renderAgentFunction(
-			() => {
-				useOuter();
-				return 'Base.';
-			},
-			{ model: MODEL },
-		);
+		const config = renderAgentFunction(() => {
+			useOuter();
+			return 'Base.';
+		});
 		const doc = config.instructions ?? '';
 		const base = doc.indexOf('Base.');
 		const inner = doc.indexOf('Inner contribution.');
@@ -338,13 +315,10 @@ describe('custom hooks (composition)', () => {
 			return 'phase-ready';
 		}
 		let received: string | undefined;
-		const config = renderAgentFunction(
-			() => {
-				received = usePhase({ check: () => true, onComplete: () => 'You are now drafting.' });
-				return 'Gather facts.';
-			},
-			{ model: MODEL },
-		);
+		const config = renderAgentFunction(() => {
+			received = usePhase({ check: () => true, onComplete: () => 'You are now drafting.' });
+			return 'Gather facts.';
+		});
 		expect(received).toBe('phase-ready');
 		expect(config.instructions).toContain('Gather facts.');
 		expect(config.tools?.map((t) => t.name)).toEqual(['begin_draft']);
@@ -359,9 +333,9 @@ describe('custom hooks (composition)', () => {
 			if (mount) useRetention();
 			return 'Base.';
 		};
-		const first = renderAgentFunctionWithStructure(agent, { model: MODEL }).structure;
+		const first = renderAgentFunctionWithStructure(agent).structure;
 		mount = true;
-		const second = renderAgentFunctionWithStructure(agent, { model: MODEL }).structure;
+		const second = renderAgentFunctionWithStructure(agent).structure;
 		expect(() => assertRenderStructureInvariance(first, second)).not.toThrow();
 		expect(second.resources.tools.map((t) => t.name)).toEqual(['offer_credit']);
 	});
@@ -369,7 +343,7 @@ describe('custom hooks (composition)', () => {
 
 describe('assertRenderStructureInvariance()', () => {
 	const render = (agent: () => string | undefined) =>
-		renderAgentFunctionWithStructure(agent, { model: MODEL }).structure;
+		renderAgentFunctionWithStructure(agent).structure;
 
 	it('passes when consecutive renders are structurally identical', () => {
 		function useRetention() {
@@ -444,7 +418,7 @@ describe('assertRenderStructureInvariance()', () => {
 
 describe('agent() routing helper', () => {
 	it('builds a mountable router for a registered function agent', async () => {
-		const writer = defineAgent(() => 'Writer.', { model: MODEL });
+		const writer = defineAgent(() => 'Writer.');
 		registerFlueAgents([{ identity: 'writer', definition: writer }]);
 		const router = agentRouteHelper(writer).route();
 		// No runtime configured: hitting a route fails with the runtime error,

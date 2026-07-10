@@ -62,23 +62,25 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  * @example Existing VM (most common)
  * ```typescript
  * 'use agent';
- * import { defineAgent, useSandbox } from '@flue/runtime';
+ * import { defineAgent, useModel, useSandbox } from '@flue/runtime';
  * import { exedev } from './sandboxes/exedev';
  *
  * function Assistant() {
+ *   useModel('anthropic/claude-sonnet-4-6');
  *   useSandbox(exedev({ host: 'maple-dune.exe.xyz' }));
  *   return 'You are a helpful assistant with a full sandbox.';
  * }
- * export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
+ * export default defineAgent(Assistant);
  * ```
  *
  * @example Create a VM before wrapping it
  * ```typescript
  * 'use agent';
- * import { defineAgent, useSandbox } from '@flue/runtime';
+ * import { defineAgent, useModel, useSandbox } from '@flue/runtime';
  * import { createExeVm, exedev } from './sandboxes/exedev';
  *
  * function Assistant() {
+ *   useModel('anthropic/claude-sonnet-4-6');
  *   useSandbox({
  *     // Lazy, per the SandboxFactory contract: constructing this object is
  *     // cheap; the expensive VM creation happens once, inside
@@ -90,7 +92,7 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  *   });
  *   return 'You are a helpful assistant with a full sandbox.';
  * }
- * export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
+ * export default defineAgent(Assistant);
  * ```
  */
 import {
@@ -737,15 +739,16 @@ hostname before wiring the adapter.
 
 ```ts
 'use agent';
-import { defineAgent, useSandbox } from "@flue/runtime";
+import { defineAgent, useModel, useSandbox } from "@flue/runtime";
 import { exedev } from "../sandboxes/exedev";
 
 function Assistant() {
+	useModel("anthropic/claude-sonnet-4-6");
 	useSandbox(exedev({ host: process.env.EXE_VM_HOST }));
 	return "You are a helpful assistant with a full sandbox.";
 }
 
-export default defineAgent(Assistant, { model: "anthropic/claude-sonnet-4-6" });
+export default defineAgent(Assistant);
 ```
 
 The `'use agent'` directive at the top is what registers the module with
@@ -760,10 +763,11 @@ VM and passes it to `exedev(...)`.
 
 ```ts
 'use agent';
-import { defineAgent, useSandbox } from "@flue/runtime";
+import { defineAgent, useModel, useSandbox } from "@flue/runtime";
 import { createExeVm, exedev } from "../sandboxes/exedev";
 
 function Assistant() {
+	useModel("anthropic/claude-sonnet-4-6");
 	useSandbox({
 		async createSessionEnv(options) {
 			const vm = await createExeVm({ apiToken: process.env.EXE_API_TOKEN });
@@ -773,7 +777,7 @@ function Assistant() {
 	return "You are a helpful assistant with a full sandbox.";
 }
 
-export default defineAgent(Assistant, { model: "anthropic/claude-sonnet-4-6" });
+export default defineAgent(Assistant);
 ```
 
 ### Cloned VM
@@ -784,10 +788,11 @@ token needs `rm` permission.
 
 ```ts
 'use agent';
-import { defineAgent, useSandbox } from "@flue/runtime";
+import { defineAgent, useModel, useSandbox } from "@flue/runtime";
 import { cloneExeVm, exedev } from "../sandboxes/exedev";
 
 function Assistant() {
+	useModel("anthropic/claude-sonnet-4-6");
 	useSandbox({
 		async createSessionEnv(options) {
 			const vm = await cloneExeVm({
@@ -800,7 +805,7 @@ function Assistant() {
 	return "You are a helpful assistant with a full sandbox.";
 }
 
-export default defineAgent(Assistant, { model: "anthropic/claude-sonnet-4-6" });
+export default defineAgent(Assistant);
 ```
 
 ## Verify

@@ -14,6 +14,7 @@ import { defineAgent } from '../src/agent-definition.ts';
 import type { AgentExecutionStore } from '../src/agent-execution-store.ts';
 import type { ConversationRecord } from '../src/conversation-records.ts';
 import { useAgentStart } from '../src/hooks/use-agent-start.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { useSubagent } from '../src/hooks/use-subagent.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { createFlueContext, type DispatchInput, resolveModel } from '../src/internal.ts';
@@ -27,6 +28,10 @@ import type { ConversationStreamStore } from '../src/runtime/conversation-stream
 import type { CreateAgentContextFn } from '../src/runtime/handle-agent.ts';
 import { handleAgentConversationRead } from '../src/runtime/handle-conversation-routes.ts';
 import { generateSessionAffinityKey } from '../src/runtime/ids.ts';
+import {
+	__flueBindAgentModule,
+	resetFlueAgentRegistrationForTests,
+} from '../src/runtime/registration.ts';
 import { agentStreamPath } from '../src/runtime/stream-offsets.ts';
 import { defineTool } from '../src/tool.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
@@ -57,6 +62,7 @@ const providers: FauxProviderRegistration[] = [];
 const tempDirs: string[] = [];
 
 afterEach(() => {
+	resetFlueAgentRegistrationForTests();
 	for (const provider of providers.splice(0)) provider.unregister();
 	for (const dir of tempDirs.splice(0)) {
 		try {
@@ -164,7 +170,10 @@ async function createRealCoordinator(
 	const adapter = sqlite(dbPath);
 	await adapter.migrate?.();
 	const { executionStore, conversationStreamStore, attachmentStore } = await adapter.connect();
-	const agent = defineAgent(() => 'Assistant agent.', { model: REAL_MODEL });
+	const agent = defineAgent(() => {
+		useModel(REAL_MODEL);
+		return 'Assistant agent.';
+	});
 	const coordinator = createNodeAgentCoordinator({
 		submissions: executionStore.submissions,
 		agents: [{ name: 'assistant', definition: agent }],
@@ -184,10 +193,13 @@ async function createFauxCoordinator(
 	const adapter = sqlite(dbPath);
 	await adapter.migrate?.();
 	const { executionStore, conversationStreamStore, attachmentStore } = await adapter.connect();
-	const agent = defineAgent(() => 'Assistant agent.', {
-		model: `${provider.getModel().provider}/${provider.getModel().id}`,
-		durability,
+	const agent = defineAgent(() => {
+		useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+		return 'Assistant agent.';
 	});
+	if (durability !== undefined) {
+		__flueBindAgentModule(agent, { identity: 'assistant', durability });
+	}
 	const coordinator = createNodeAgentCoordinator({
 		submissions: executionStore.submissions,
 		agents: [{ name: 'assistant', definition: agent }],
@@ -548,8 +560,9 @@ describe('NodeAgentCoordinator', () => {
 				submissions: executionStore.submissions,
 				agents: [{
 					name: 'assistant',
-					definition: defineAgent(() => 'Assistant agent.', {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
+					definition: defineAgent(() => {
+						useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+						return 'Assistant agent.';
 					}),
 				}],
 				createContext: makeFauxCreateContext(provider),
@@ -747,8 +760,9 @@ describe('NodeAgentCoordinator', () => {
 				submissions: executionStore.submissions,
 				agents: [{
 					name: 'assistant',
-					definition: defineAgent(() => 'Assistant agent.', {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
+					definition: defineAgent(() => {
+						useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+						return 'Assistant agent.';
 					}),
 				}],
 				createContext: makeFauxCreateContext(provider),
@@ -799,8 +813,9 @@ describe('NodeAgentCoordinator', () => {
 				submissions: executionStore.submissions,
 				agents: [{
 					name: 'assistant',
-					definition: defineAgent(Assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
+					definition: defineAgent(() => {
+						useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+						return Assistant();
 					}),
 				}],
 				createContext: makeFauxCreateContext(provider),
@@ -858,8 +873,9 @@ describe('NodeAgentCoordinator', () => {
 				submissions: executionStore.submissions,
 				agents: [{
 					name: 'assistant',
-					definition: defineAgent(Assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
+					definition: defineAgent(() => {
+						useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+						return Assistant();
 					}),
 				}],
 				createContext: makeFauxCreateContext(provider),
@@ -919,7 +935,10 @@ describe('NodeAgentCoordinator', () => {
 				submissions: executionStore.submissions,
 				agents: [{
 					name: 'assistant',
-					definition: defineAgent(Assistant, { model }),
+					definition: defineAgent(() => {
+						useModel(model);
+						return Assistant();
+					}),
 				}],
 				createContext: makeFauxCreateContext(provider),
 				conversationStreamStore,
@@ -1424,8 +1443,9 @@ describe('NodeAgentCoordinator', () => {
 				agents: [
 					{
 						name: 'assistant',
-						definition: defineAgent(Assistant, {
-							model: `${provider.getModel().provider}/${provider.getModel().id}`,
+						definition: defineAgent(() => {
+							useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+							return Assistant();
 						}),
 					},
 				],
@@ -1758,18 +1778,16 @@ describe('NodeAgentCoordinator', () => {
 				signalHostStarted = resolve;
 			});
 			let hostGateArmed = true;
-			const agent = defineAgent(
-				() => {
-					useAgentStart(async () => {
-						if (!hostGateArmed) return;
-						hostGateArmed = false;
-						signalHostStarted();
-						await hostGate;
-					});
-					return 'Assistant agent.';
-				},
-				{ model: `${provider.getModel().provider}/${provider.getModel().id}` },
-			);
+			const agent = defineAgent(() => {
+				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+				useAgentStart(async () => {
+					if (!hostGateArmed) return;
+					hostGateArmed = false;
+					signalHostStarted();
+					await hostGate;
+				});
+				return 'Assistant agent.';
+			});
 			const adapter = sqlite(dbPath);
 			await adapter.migrate?.();
 			const { executionStore, conversationStreamStore, attachmentStore } = await adapter.connect();

@@ -87,8 +87,10 @@ registerProvider('flue-test', {
 `;
 
 export const ECHO_AGENT_MODULE = `'use agent';
-import { defineAgent } from '@flue/runtime';
-export default defineAgent(() => undefined, { model: 'flue-test/fake-model' });
+import { defineAgent, useModel } from '@flue/runtime';
+export default defineAgent(() => {
+	useModel('flue-test/fake-model');
+});
 export const description = 'Echo agent';
 `;
 

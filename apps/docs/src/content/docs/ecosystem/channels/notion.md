@@ -26,7 +26,7 @@ wires that tool into an agent. It may also add `"node"` to a restrictive
 ```ts title="src/channels/notion.ts (abridged)"
 import { Client } from '@notionhq/client';
 import { createNotionChannel } from '@flue/notion';
-import { dispatch } from '@flue/runtime';
+import { dispatch, useModel } from '@flue/runtime';
 import assistant from '../agents/assistant.ts';
 
 export const client = new Client({ auth: process.env.NOTION_TOKEN! });
@@ -107,7 +107,7 @@ is a type dependency and does not add Node code to a Worker bundle. If
 ```ts title="src/channels/notion.ts"
 import { Client } from '@notionhq/client';
 import { createNotionChannel } from '@flue/notion';
-import { defineTool, dispatch } from '@flue/runtime';
+import { defineTool, dispatch, useModel } from '@flue/runtime';
 import assistant from '../agents/assistant.ts';
 
 const PAGE_INSTANCE_PREFIX = 'notion-page:';
@@ -222,16 +222,17 @@ when one agent can cross credential domains.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
+import { type AgentProps, defineAgent, useModel, useTool } from '@flue/runtime';
 import { pageIdFromInstanceId, retrievePage } from '../channels/notion.ts';
 
 function Assistant({ id }: AgentProps) {
+  useModel('anthropic/claude-haiku-4-5');
   const pageId = pageIdFromInstanceId(id);
   useTool(retrievePage(pageId));
   return 'Review the Notion page change. Retrieve the current page when its properties are needed.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant);
 ```
 
 The model can request the current page summary, but it cannot select another

@@ -128,6 +128,8 @@ const registrations = scannedAgentModules.map(({ identity, module }) => ({
 	definition: module.default,
 	...(module.route !== undefined ? { route: module.route } : {}),
 	...(module.description !== undefined ? { description: module.description } : {}),
+	...(module.initialDataSchema !== undefined ? { initialDataSchema: module.initialDataSchema } : {}),
+	...(module.durability !== undefined ? { durability: module.durability } : {}),
 }));
 registerFlueAgents(registrations);
 const agents = registrations.map((registration) => ({

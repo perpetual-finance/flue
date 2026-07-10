@@ -5,7 +5,7 @@ import {
 	fauxToolCall,
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
-import { defineAgent, defineTool, useTool } from '@flue/runtime';
+import { defineAgent, defineTool, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { bot } from '../chat.ts';
 
@@ -63,8 +63,9 @@ const replyToChatThread = defineTool({
 });
 
 function Assistant() {
+	useModel('chat-sdk-example/assistant');
 	useTool(replyToChatThread);
 	return 'When receiving a chat message, use reply_to_chat_thread to reply in the supplied thread.';
 }
 
-export default defineAgent(Assistant, { model: 'chat-sdk-example/assistant' });
+export default defineAgent(Assistant);

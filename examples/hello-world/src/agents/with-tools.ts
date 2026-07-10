@@ -1,9 +1,10 @@
 'use agent';
-import { bash, defineAgent, defineTool, useSandbox, useTool } from '@flue/runtime';
+import { bash, defineAgent, defineTool, useModel, useSandbox, useTool } from '@flue/runtime';
 import { Bash, InMemoryFs } from 'just-bash';
 import * as v from 'valibot';
 
 function WithTools() {
+	useModel('anthropic/claude-sonnet-4-6');
 	useSandbox(
 		bash(() => new Bash({ fs: new InMemoryFs(), network: { dangerouslyAllowFullInternetAccess: true } })),
 	);
@@ -38,4 +39,4 @@ function WithTools() {
 	return 'When asked to run a demo, call the `tools-test` tool and report its result.';
 }
 
-export default defineAgent(WithTools, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(WithTools);

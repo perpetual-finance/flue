@@ -11,6 +11,7 @@ import * as v from 'valibot';
 import { afterEach, describe, expect, it } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
 import { useDataWriter } from '../src/hooks/use-data-writer.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { useResponseFinish } from '../src/hooks/use-response-finish.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import {
@@ -85,8 +86,9 @@ async function setupCoordinator(
 		agents: [
 			{
 				name: 'assistant',
-				definition: defineAgent(assistant, {
-					model: `${provider.getModel().provider}/${provider.getModel().id}`,
+				definition: defineAgent(() => {
+					useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+					return assistant();
 				}),
 			},
 		],

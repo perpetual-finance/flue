@@ -1,11 +1,12 @@
 'use agent';
-import { defineAgent, useTool } from '@flue/runtime';
+import { defineAgent, useModel, useTool } from '@flue/runtime';
 
 function isAbortError(error: unknown): boolean {
 	return !!error && typeof error === 'object' && (error as { name?: unknown }).name === 'AbortError';
 }
 
 function WithAbort() {
+	useModel('anthropic/claude-haiku-4-5');
 	useTool({
 		name: 'abort-test',
 		description: 'Verify timeout, manual, and pre-aborted cancellation for prompts and shells.',
@@ -62,4 +63,4 @@ function WithAbort() {
 	return 'When asked to run a demo, call the `abort-test` tool and report its result.';
 }
 
-export default defineAgent(WithAbort, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(WithAbort);

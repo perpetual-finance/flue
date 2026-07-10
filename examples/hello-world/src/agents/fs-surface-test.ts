@@ -1,8 +1,9 @@
 'use agent';
-import { bash, defineAgent, useSandbox, useTool } from '@flue/runtime';
+import { bash, defineAgent, useModel, useSandbox, useTool } from '@flue/runtime';
 import { Bash, InMemoryFs } from 'just-bash';
 
 function FsSurfaceTest() {
+	useModel('anthropic/claude-haiku-4-5');
 	useSandbox(bash(() => new Bash({ fs: new InMemoryFs() })));
 	useTool({
 		name: 'fs-surface-test',
@@ -36,4 +37,4 @@ function FsSurfaceTest() {
 	return 'When asked to run a demo, call the `fs-surface-test` tool and report its result.';
 }
 
-export default defineAgent(FsSurfaceTest, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(FsSurfaceTest);

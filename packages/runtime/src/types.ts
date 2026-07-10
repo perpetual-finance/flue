@@ -263,7 +263,7 @@ export interface SessionEnv {
  * to read the file itself.
  *
  * Paths can be absolute or relative. Relative paths are resolved against
- * the agent's cwd, which comes from `defineAgent(Agent, { cwd })` if set, otherwise from
+ * the agent's cwd, which comes from `useSandbox(factory, { cwd })` if set, otherwise from
  * the sandbox adapter's default (varies by provider). Use absolute paths
  * for portability across sandbox adapters.
  */
@@ -447,11 +447,6 @@ export interface AgentRuntimeConfig {
 	 * calls still compact when needed.
 	 */
 	compaction?: false | CompactionConfig;
-	/**
-	 * Durability configuration for durable agent submissions. Controls
-	 * recovery attempt limits and submission timeouts.
-	 */
-	durability?: DurabilityConfig;
 	/** Working directory inside the initialized sandbox. */
 	cwd?: string;
 	/** Sandbox factory used to construct the initialized environment. */
@@ -467,9 +462,9 @@ export interface AgentRuntimeConfig {
  * that teaches the model who it is and how to work. Return nothing for a
  * tools-only body. The author owns the formatting (headings included).
  *
- * An agent is an agent function given a model — `defineAgent(Agent, {
- * model })` — and a delegate is an agent function on the `task` catalog —
- * `useSubagent({ name, description, agent: Delegate })`. Shared behavior is
+ * An agent is an agent function that declares its model with `useModel()` —
+ * `defineAgent(Agent)` — and a delegate is an agent function on the `task`
+ * catalog — `useSubagent({ name, description, agent: Delegate })`. Shared behavior is
  * composed with custom hooks: plain functions that call `useTool()`,
  * `useInstruction()`, and the other hooks, and may return values to the
  * agent body.
@@ -512,11 +507,11 @@ export type AgentFunction<TProps = void> = TProps extends void
  *   useTool(lookupOrder(id.replace(/^order-/, '')));
  *   return 'Handle support for the one order this instance is bound to.';
  * }
- * export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+ * export default defineAgent(Assistant);
  * ```
  *
  * When the id encodes several structured facts, don't parse them back out of
- * it — pass them as creation `data` and read them with `useInitialData()`.
+ * it — pass them as `initialData` and read them with `useInitialData()`.
  *
  * Agents that don't need route data keep the zero-argument form — `() =>`
  * agent functions stay assignable unchanged.
@@ -531,58 +526,24 @@ export interface AgentProps {
 }
 
 /**
- * Static agent identity for {@link defineAgent}'s two-argument form: the
- * fields that never render. Everything dynamic (instructions, tools, state)
- * is composed inside the agent function; everything here is fixed for
- * the agent's lifetime.
- */
-export interface FunctionAgentConfig {
-	/** Model specifier (`'<provider-id>/<model-id>'`). Required. */
-	model: string;
-	/** Default reasoning effort. Individual operations may override this value. */
-	thinkingLevel?: ThinkingLevel;
-	/**
-	 * Automatic conversation-compaction configuration. `false` disables
-	 * threshold compaction; overflow recovery and explicit `session.compact()`
-	 * calls still compact when needed.
-	 */
-	compaction?: false | CompactionConfig;
-	/** Durability configuration for durable agent submissions. */
-	durability?: DurabilityConfig;
-	/** Working directory inside the initialized environment. */
-	cwd?: string;
-	/**
-	 * Schema for the instance's creation data — the `data` a caller sends
-	 * with the instance's first contact (`dispatch({ id, data, message })`,
-	 * or a `data` field beside the direct-HTTP message body). Validated once,
-	 * at instance creation; a mismatch (including absence, unless the schema
-	 * accepts `undefined`) fails the creating submission. Read the recorded
-	 * value with `useInitialData()`. Optional: without a schema, creation
-	 * data is still accepted and recorded, just untyped.
-	 */
-	input?: v.GenericSchema;
-}
-
-/**
- * The value `defineAgent(Agent, config)` returns: an addressable agent whose
- * behavior is the agent function (re-rendered by the runtime as state
- * changes) and whose identity is the static config. Default-export it from a
- * `'use agent'` module.
+ * The value `defineAgent(Agent)` returns: an addressable agent whose
+ * behavior is the agent function, re-rendered by the runtime as state
+ * changes. Default-export it from a `'use agent'` module.
  *
  * ```ts
  * 'use agent';
  * function Support() {
+ *   useModel('anthropic/claude-sonnet-4-6');
  *   const [phase] = usePersistentState('phase', 'gathering');
  *   useGatheringPhase({ ... });
  *   return 'Operator-facing support agent. Work only from verified evidence.';
  * }
- * export default defineAgent(Support, { model: 'anthropic/claude-sonnet-4-6' });
+ * export default defineAgent(Support);
  * ```
  */
 export interface FunctionAgentDefinition {
 	__flueFunctionAgent: true;
 	agent: AgentFunction<AgentProps>;
-	config: FunctionAgentConfig;
 	/**
 	 * Hono router serving this agent's HTTP surface. May be mounted multiple
 	 * times, including mounting the same agent at two paths (same identity,

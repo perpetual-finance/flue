@@ -20,7 +20,7 @@ The blueprint installs `@daytona/sdk` when needed and creates `sandboxes/daytona
 
 ```ts title="<source-root>/sandboxes/daytona.ts (abridged)"
 // flue-blueprint: sandbox/daytona@1
-import { createSandboxSessionEnv } from '@flue/runtime';
+import { createSandboxSessionEnv, useModel } from '@flue/runtime';
 import type { SandboxApi, SandboxFactory, SessionEnv, FileStat } from '@flue/runtime';
 import type { Sandbox as DaytonaSandbox } from '@daytona/sdk';
 
@@ -64,10 +64,11 @@ The generated adapter expects your application to create and own the Daytona san
 
 ```ts
 import { Daytona } from '@daytona/sdk';
-import { defineAgent, useSandbox } from '@flue/runtime';
+import { defineAgent, useModel, useSandbox } from '@flue/runtime';
 import { daytona } from '../sandboxes/daytona';
 
 function Assistant() {
+  useModel('anthropic/claude-sonnet-4-6');
   useSandbox({
     // Lazy, per the SandboxFactory contract: constructing this object is
     // cheap; the expensive Daytona sandbox creation happens once, inside
@@ -80,7 +81,7 @@ function Assistant() {
   });
 }
 
-const agent = defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
+const agent = defineAgent(Assistant);
 ```
 
 Configure images, snapshots, regions, environment variables, and volumes through the Daytona SDK before passing the sandbox to `daytona(...)`. For a narrower working directory, configure `cwd` on the agent definition; Flue resolves it once against the adapter's provider-owned base directory during `init()`.

@@ -1,8 +1,9 @@
 'use agent';
-import { defineAgent, useSubagent } from '@flue/runtime';
+import { defineAgent, useModel, useSubagent } from '@flue/runtime';
 
 /** A delegating agent: `session.task` delegations show up as `task` spans in Braintrust. */
 function Task() {
+	useModel('anthropic/claude-haiku-4-5');
 	useSubagent({
 		name: 'editor',
 		description: 'Rewrites the supplied sentence in a clearer, shorter form.',
@@ -11,4 +12,4 @@ function Task() {
 	return 'Delegate every rewrite request to the `editor` subagent with the task tool, then return its result verbatim.';
 }
 
-export default defineAgent(Task, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Task);

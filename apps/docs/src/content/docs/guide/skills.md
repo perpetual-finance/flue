@@ -33,19 +33,20 @@ Import your skills with the `skill` import attribute (a new feature in modern Ja
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useSkill } from '@flue/runtime';
+import { defineAgent, useModel, useSkill } from '@flue/runtime';
 import review from '../skills/review/SKILL.md' with { type: 'skill' };
 import triage from '../skills/triage/SKILL.md' with { type: 'skill' };
 import investigate from '../skills/investigate/SKILL.md' with { type: 'skill' };
 
 function Assistant() {
+  useModel('anthropic/claude-sonnet-4-6');
   useSkill(review);
   useSkill(triage);
   useSkill(investigate);
   return 'Use the skills below as needed to complete the request.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(Assistant);
 ```
 
 Each import produces a skill reference and includes that skill directory in the application build. Mounting a reference with `useSkill(...)` makes the skill available to this agent by its declared name. A skill mounted on every render is cataloged in the system prompt; a skill may also be mounted conditionally (`if (pro) useSkill(refundsSkill)`) — when it appears or disappears, the runtime announces the change to the model in the conversation while the prompt's catalog stays frozen (see [Dynamic resources](/docs/api/agent-api/#dynamic-resources)).
@@ -98,7 +99,7 @@ Normally you can trust the agent to use the skills you provide it, as needed, to
 In application-controlled code such as a [harness tool](/docs/guide/tools/#harness-tools), you can direct a skill through `harness.prompt(...)`: it runs in the same conversation context as the agent's own turns — same system prompt, skill catalog, and tools — so naming the skill in the instruction is enough for the model to activate it. This works with both registered imported skills and workspace-discovered skills.
 
 ```ts title="src/shared/review-tools.ts"
-import { defineTool } from '@flue/runtime';
+import { defineTool, useModel } from '@flue/runtime';
 import * as v from 'valibot';
 
 export const reviewChange = defineTool({

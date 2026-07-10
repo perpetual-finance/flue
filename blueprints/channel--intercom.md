@@ -234,27 +234,29 @@ Bind the verified workspace and conversation selected by trusted code:
 
 ```ts
 'use agent';
-import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { retrieveConversation } from '../channels/intercom.ts';
 
-const input = v.object({
+export const initialDataSchema = v.object({
 	workspaceId: v.string(),
 	conversationId: v.string(),
 });
 
 function Assistant() {
-	const data = useInitialData<v.InferOutput<typeof input>>();
+	useModel('anthropic/claude-haiku-4-5');
+	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the Intercom channel dispatch.');
 	useTool(retrieveConversation(data));
 	return 'Help with the inbound Intercom conversation. Retrieve the current conversation when more context is needed.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
+export default defineAgent(Assistant);
 ```
 
-The `input:` schema validates the dispatched `initialData` when the instance is
-created; `useInitialData()` returns the parsed value on every render.
+The `initialDataSchema` export validates the dispatched `initialData` when the
+instance is created; `useInitialData()` returns the parsed value on every
+render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback

@@ -7,7 +7,6 @@ import type {
 	AgentProps,
 	AgentRuntimeConfig,
 	DeliveredMessage,
-	FunctionAgentConfig,
 	ResolvedSubagent,
 	SubagentDefinition,
 } from '../types.ts';
@@ -35,18 +34,17 @@ function agentPropsFor(state: RenderStateContext | undefined): AgentProps {
 
 /**
  * Run one render of an agent function: invoke it inside a fresh frame,
- * validate the returned instruction, and map the static config + hook
- * attachments onto the internal runtime-config shape the initialization path
- * consumes (the same shape a legacy `defineAgent` initializer returns).
- * Config field values beyond shape (thinking levels, compaction/durability
- * fields) are validated downstream by the shared profile asserts.
+ * validate the returned instruction, and map the hook attachments onto the
+ * internal runtime-config shape the initialization path consumes. The whole
+ * config is hook-composed — `useModel` declares the model and its tuning,
+ * `useSandbox` the environment; hooks validated each value when it was
+ * declared.
  */
 export function renderAgentFunction(
 	agent: AgentFunction<AgentProps>,
-	config: FunctionAgentConfig,
 	state?: RenderStateContext,
 ): AgentRuntimeConfig {
-	return renderAgentFunctionWithStructure(agent, config, state).config;
+	return renderAgentFunctionWithStructure(agent, state).config;
 }
 
 /**
@@ -83,7 +81,6 @@ export interface AgentRenderStructure {
 /** `renderAgentFunction` plus the render's structural fingerprint. */
 export function renderAgentFunctionWithStructure(
 	agent: AgentFunction<AgentProps>,
-	config: FunctionAgentConfig,
 	state?: RenderStateContext,
 ): { config: AgentRuntimeConfig; structure: AgentRenderStructure } {
 	const props = agentPropsFor(state);
@@ -104,13 +101,12 @@ export function renderAgentFunctionWithStructure(
 	const tools = frame.root.tools;
 	return {
 		config: {
-			model: config.model,
+			...(frame.model !== undefined ? { model: frame.model } : {}),
 			...(instructions !== undefined ? { instructions } : {}),
 			...(tools.length > 0 ? { tools } : {}),
-			...(config.thinkingLevel !== undefined ? { thinkingLevel: config.thinkingLevel } : {}),
-			...(config.compaction !== undefined ? { compaction: config.compaction } : {}),
-			...(config.durability !== undefined ? { durability: config.durability } : {}),
-			...(config.cwd !== undefined ? { cwd: config.cwd } : {}),
+			...(frame.thinkingLevel !== undefined ? { thinkingLevel: frame.thinkingLevel } : {}),
+			...(frame.compaction !== undefined ? { compaction: frame.compaction } : {}),
+			...(frame.cwd !== undefined ? { cwd: frame.cwd } : {}),
 			...(frame.sandbox !== undefined ? { sandbox: frame.sandbox } : {}),
 			...(frame.skills.length > 0 ? { skills: frame.skills } : {}),
 			...(frame.subagents.length > 0 ? { subagents: frame.subagents } : {}),

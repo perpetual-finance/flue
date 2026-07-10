@@ -22,6 +22,13 @@ export interface StartAgent {
 	description?: string;
 	/** The agent — a `defineAgent(...)` value. */
 	agent: FlueAgentRegistration['definition'];
+	/**
+	 * Valibot schema for instance-creation data — the programmatic analog of
+	 * the agent module's `initialDataSchema` export.
+	 */
+	initialDataSchema?: FlueAgentRegistration['initialDataSchema'];
+	/** Submission retry policy — the analog of the module's `durability` export. */
+	durability?: FlueAgentRegistration['durability'];
 }
 
 export interface StartOptions {
@@ -94,6 +101,10 @@ export async function start(options: StartOptions): Promise<Flue> {
 			identity: record.name,
 			definition: record.agent,
 			...(record.description !== undefined ? { description: record.description } : {}),
+			...(record.initialDataSchema !== undefined
+				? { initialDataSchema: record.initialDataSchema }
+				: {}),
+			...(record.durability !== undefined ? { durability: record.durability } : {}),
 		};
 	});
 

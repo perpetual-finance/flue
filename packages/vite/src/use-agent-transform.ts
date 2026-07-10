@@ -24,7 +24,7 @@ import {
 } from './agent-scan.ts';
 
 /** Named exports the binding contract carries onto the definition. */
-const BOUND_NAMED_EXPORTS = ['route', 'description'] as const;
+const BOUND_NAMED_EXPORTS = ['route', 'description', 'initialDataSchema', 'durability'] as const;
 
 export interface UseAgentTransformResult {
 	code: string;

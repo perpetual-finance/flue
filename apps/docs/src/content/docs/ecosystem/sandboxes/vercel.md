@@ -20,7 +20,7 @@ The blueprint installs `@vercel/sandbox` when needed and creates `sandboxes/verc
 
 ```ts title="<source-root>/sandboxes/vercel.ts (abridged)"
 // flue-blueprint: sandbox/vercel@1
-import { createSandboxSessionEnv } from '@flue/runtime';
+import { createSandboxSessionEnv, useModel } from '@flue/runtime';
 import type { SandboxApi, SandboxFactory, SessionEnv, FileStat } from '@flue/runtime';
 import type { Sandbox as VercelSandbox } from '@vercel/sandbox';
 
@@ -117,10 +117,11 @@ Pass an initialized Vercel `Sandbox` to `vercel(...)` and assign the returned fa
 
 ```ts
 import { Sandbox } from '@vercel/sandbox';
-import { defineAgent, useSandbox } from '@flue/runtime';
+import { defineAgent, useModel, useSandbox } from '@flue/runtime';
 import { vercel } from '../sandboxes/vercel';
 
 function Assistant() {
+  useModel('anthropic/claude-sonnet-4-6');
   useSandbox({
     // Lazy, per the SandboxFactory contract: constructing this object is
     // cheap; the expensive Vercel sandbox creation happens once, inside
@@ -132,7 +133,7 @@ function Assistant() {
   });
 }
 
-const agent = defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
+const agent = defineAgent(Assistant);
 ```
 
 Keep Vercel authentication values in trusted application configuration and determine whether sandboxes should be fresh per job or reusable for stable agent identities.

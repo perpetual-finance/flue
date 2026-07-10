@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { defineAgent } from '../src/agent-definition.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { configureFlueRuntime, resetFlueRuntimeForTests } from '../src/runtime/flue-app.ts';
 import {
 	__flueBindAgentModule,
@@ -24,7 +25,9 @@ function boundAgent(
 		description?: string;
 	} = {},
 ): FunctionAgentDefinition {
-	const agent = defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' });
+	const agent = defineAgent(() => {
+		useModel('anthropic/claude-haiku-4-5');
+	});
 	__flueBindAgentModule(agent, { identity, ...metadata });
 	return agent;
 }
@@ -39,7 +42,9 @@ function promptRequest(url: string): Request {
 
 describe('AgentDefinition.route()', () => {
 	it('throws a directive hint when the definition has no identity binding and no registration', () => {
-		const agent = defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' });
+		const agent = defineAgent(() => {
+			useModel('anthropic/claude-haiku-4-5');
+		});
 		expect(() => agent.route()).toThrow("Add the 'use agent' directive");
 	});
 
@@ -93,7 +98,9 @@ describe('AgentDefinition.route()', () => {
 	});
 
 	it('serves a definition registered by the bootstrap without a module binding', async () => {
-		const agent = defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' });
+		const agent = defineAgent(() => {
+			useModel('anthropic/claude-haiku-4-5');
+		});
 		registerFlueAgents([{ definition: agent, identity: 'support' }]);
 		const createAgentAdmission = vi.fn((_agentName: string, _id: string) => async () => ({
 			submissionId: 'submission-1',

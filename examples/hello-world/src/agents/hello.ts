@@ -1,5 +1,5 @@
 'use agent';
-import { defineAgent, useTool } from '@flue/runtime';
+import { defineAgent, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 
 /**
@@ -10,6 +10,7 @@ import * as v from 'valibot';
  *   flue run src/agents/hello.ts --message "Run the hello tool."
  */
 function Hello() {
+	useModel('anthropic/claude-sonnet-4-6');
 	useTool({
 		name: 'hello',
 		description: 'Solve a small arithmetic prompt and return the structured answer.',
@@ -31,4 +32,4 @@ function Hello() {
 	return 'When asked to run a demo, call the `hello` tool and report its result.';
 }
 
-export default defineAgent(Hello, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(Hello);

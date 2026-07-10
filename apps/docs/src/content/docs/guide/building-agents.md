@@ -14,17 +14,18 @@ In a Flue project, an agent is a module marked with the [`'use agent'` directive
 
 ```ts title="src/agents/joke-teller.ts"
 'use agent';
-import { defineAgent, type AgentRouteHandler } from '@flue/runtime';
+import { type AgentRouteHandler, defineAgent, useModel } from '@flue/runtime';
 
 export const description = 'Tells a short joke in response to each message.';
 
 export const route: AgentRouteHandler = async (_c, next) => next();
 
 function JokeTeller() {
+  useModel('anthropic/claude-haiku-4-5');
   return 'Tell a short joke in response to each message.';
 }
 
-export default defineAgent(JokeTeller, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(JokeTeller);
 ```
 
 In this example:
@@ -54,15 +55,16 @@ The agent function is where an agent's behavior lives. Flue Hooks called in its 
 
 ```ts title="src/agents/order-assistant.ts"
 'use agent';
-import { defineAgent, useTool } from '@flue/runtime';
+import { defineAgent, useModel, useTool } from '@flue/runtime';
 import { lookupOrderStatus } from '../shared/order-tools.ts';
 
 function OrderAssistant() {
+  useModel('anthropic/claude-haiku-4-5');
   useTool(lookupOrderStatus);
   return 'Help customers check the status of their orders.';
 }
 
-export default defineAgent(OrderAssistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(OrderAssistant);
 ```
 
 The function runs again before every model turn, so guards and interpolated text always reflect current state. Resources — tools, skills, and subagents — may even be declared conditionally (`if (pro) useSkill(refundsSkill)`): when a render's resource set changes, the runtime announces the change to the model in the conversation instead of rewriting the system prompt, and when the instruction text itself changes (interpolated state, a redeploy), a short signal tells the model its instructions were updated (see [Dynamic resources](/docs/api/agent-api/#dynamic-resources)). The agent's _identity_ stays static: `usePersistentState`, `useDataWriter`, `useSandbox`, and the lifecycle hooks must be declared identically on every render. See [Tools](/docs/guide/tools/), [Skills](/docs/guide/skills/), [Sandboxes](/docs/guide/sandboxes/), and [Subagents](/docs/guide/subagents/) for what an agent's body can compose, and [Durable Agents](/docs/concepts/durable-execution/) for how that state persists.
@@ -71,23 +73,21 @@ The function runs again before every model turn, so guards and interpolated text
 
 ```ts title="src/agents/repository-reviewer.ts"
 'use agent';
-import { defineAgent, useSandbox, useSkill } from '@flue/runtime';
+import { defineAgent, useModel, useSandbox, useSkill } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 import reviewChecklist from '../skills/review-checklist/SKILL.md' with { type: 'skill' };
 
 function RepositoryReviewer() {
+  useModel('anthropic/claude-sonnet-4-6');
   useSkill(reviewChecklist);
-  useSandbox(local());
+  useSandbox(local(), { cwd: '/srv/repositories/catalog-service' });
   return 'Review the requested change and report only findings supported by evidence.';
 }
 
-export default defineAgent(RepositoryReviewer, {
-  model: 'anthropic/claude-sonnet-4-6',
-  cwd: '/srv/repositories/catalog-service',
-});
+export default defineAgent(RepositoryReviewer);
 ```
 
-`config` accepts `model` (required), `thinkingLevel`, `compaction`, `durability`, and `cwd` — see the [Agent API](/docs/api/agent-api/) for each field's semantics.
+`useModel()` is required (its options accept `thinkingLevel` and `compaction`); `useSandbox()` attaches the environment (its options accept `cwd`). Supervisor-facing configuration — `name`, `description`, `route`, `initialDataSchema`, `durability` — lives as optional module exports beside the default export. See the [Agent API](/docs/api/agent-api/) for each surface's semantics.
 
 ### Composing with custom hooks
 
@@ -95,7 +95,7 @@ Break a large agent into named pieces with custom hooks: plain functions that ca
 
 ```ts title="src/agents/support-assistant.ts"
 'use agent';
-import { defineAgent, useInstruction, useTool } from '@flue/runtime';
+import { defineAgent, useInstruction, useModel, useTool } from '@flue/runtime';
 import { escalateCase } from '../shared/support-tools.ts';
 
 function useEscalation() {
@@ -104,11 +104,12 @@ function useEscalation() {
 }
 
 function SupportAssistant() {
+  useModel('anthropic/claude-haiku-4-5');
   useEscalation();
   return 'Answer customer support questions clearly and accurately.';
 }
 
-export default defineAgent(SupportAssistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(SupportAssistant);
 ```
 
 A custom hook that only declares resources (tools, skills, subagents) may be called conditionally; one that also declares identity — state, message data, a sandbox, or lifecycle hooks — inherits the stricter rule and must be called on every render. Most behavior still wants state, arguments, and tool guards rather than conditional mounting — see [Durable Agents](/docs/concepts/durable-execution/) for the reasoning and the phased-workflow pattern this enables.
@@ -119,14 +120,15 @@ Long instructions can live in their own markdown file. Import a `.md` file with 
 
 ```ts title="src/agents/repository-reviewer.ts"
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useModel } from '@flue/runtime';
 import instructions from './repository-reviewer.md' with { type: 'markdown' };
 
 function RepositoryReviewer() {
+  useModel('anthropic/claude-sonnet-4-6');
   return instructions;
 }
 
-export default defineAgent(RepositoryReviewer, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(RepositoryReviewer);
 ```
 
 The attribute is required — a `.md` import without it fails the build. `SKILL.md` files are not plain markdown and must use `with { type: 'skill' }` instead; see [Skills](/docs/guide/skills/).
@@ -143,17 +145,18 @@ POST /agents/support-assistant/ticket-8472
 It's up to the developer to decide what `id` means and whether it maps to important application data, such as a user ID, customer support ticket, or GitHub issue. A randomly generated ID can also work. The `id` keys the conversation's durable storage, and the runtime passes it to the top-level agent function as a prop — the way a web framework passes route params to the page component:
 
 ```ts
-import { type AgentProps, defineAgent, useInitialData, useTool } from '@flue/runtime';
+import { type AgentProps, defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
 import type { SlackThreadRef } from '@flue/slack';
 import { replyInThread } from '../channels/slack.ts';
 
 function Assistant({ id }: AgentProps) {
+  useModel('anthropic/claude-haiku-4-5');
   const thread = useInitialData<SlackThreadRef>();
   useTool(replyInThread(thread!));
   return `Reply in the Slack thread bound to conversation ${id}.`;
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant);
 ```
 
 The `id` is the opaque address; structured facts like the thread ref arrive as
@@ -168,14 +171,15 @@ An instance usually exists _about something_ — a support ticket, a GitHub issu
 ```ts
 import * as v from 'valibot';
 
-const input = v.object({ issue: v.pipe(v.number(), v.integer()) });
+export const initialDataSchema = v.object({ issue: v.pipe(v.number(), v.integer()) });
 
 function Triage() {
-  const data = useInitialData<v.InferOutput<typeof input>>();
+  useModel('anthropic/claude-opus-4-6');
+  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
   return `Triage GitHub issue #${data!.issue} end-to-end.`;
 }
 
-export default defineAgent(Triage, { model: 'anthropic/claude-opus-4-6', input });
+export default defineAgent(Triage);
 ```
 
 ```ts
@@ -186,7 +190,7 @@ await dispatch(triage, {
 });
 ```
 
-The `input:` schema validates the data once, at instance creation — a creating call that omits or malforms it is rejected, so the value is guaranteed present and shaped from the first render on. Data sent to an existing instance is ignored; the recorded value never changes. Direct HTTP carries it the same way (`{ "initialData": {…}, "kind": "user", "body": "…" }`), as do `client.send({ message, initialData })` and `flue run --initial-data '<json>'`.
+The `initialDataSchema` export validates the data once, at instance creation — a creating call that omits or malforms it is rejected, so the value is guaranteed present and shaped from the first render on. Data sent to an existing instance is ignored; the recorded value never changes. Direct HTTP carries it the same way (`{ "initialData": {…}, "kind": "user", "body": "…" }`), as do `client.send({ message, initialData })` and `flue run --initial-data '<json>'`.
 
 The three input channels each have one job: **`useInitialData()` is what the instance is about, `useDelivery()` is what this message says, and `usePersistentState` is what the agent has learned.**
 
@@ -244,7 +248,7 @@ Use the `route` handler to protect direct HTTP access to a conversation:
 
 ```ts title="src/agents/support-assistant.ts"
 'use agent';
-import { defineAgent, type AgentRouteHandler } from '@flue/runtime';
+import { type AgentRouteHandler, defineAgent, useModel } from '@flue/runtime';
 import { authenticate } from '../auth.ts';
 
 export const route: AgentRouteHandler = async (c, next) => {
@@ -258,10 +262,11 @@ export const route: AgentRouteHandler = async (c, next) => {
 };
 
 function SupportAssistant() {
+  useModel('anthropic/claude-haiku-4-5');
   return 'Help with the authorized support ticket for this conversation.';
 }
 
-export default defineAgent(SupportAssistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(SupportAssistant);
 ```
 
 For more information, see [Routing](/docs/guide/routing/) and [SDK](/docs/sdk/overview/).
@@ -271,7 +276,7 @@ For more information, see [Routing](/docs/guide/routing/) and [SDK](/docs/sdk/ov
 Use `dispatch(...)` when your application receives an event for an agent asynchronously, such as a webhook, queue message, chat event, or notification. For example, an application route can verify an incoming support-system webhook and dispatch the comment to the agent for that ticket:
 
 ```ts title="src/app.ts"
-import { dispatch } from '@flue/runtime';
+import { dispatch, useModel } from '@flue/runtime';
 import { Hono } from 'hono';
 import supportAssistant from './agents/support-assistant.ts';
 import { verifySupportWebhook } from './shared/support-webhooks.ts';

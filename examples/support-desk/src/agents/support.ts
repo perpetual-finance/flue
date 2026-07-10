@@ -1,5 +1,5 @@
 'use agent';
-import { defineAgent, useInstruction, usePersistentState, useTool } from '@flue/runtime';
+import { defineAgent, useInstruction, useModel, usePersistentState, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { guarded, useMachine } from '../machine.ts';
 import {
@@ -92,6 +92,7 @@ function useRetention({ active }: { active: () => boolean }) {
 }
 
 function Support() {
+	useModel('anthropic/claude-sonnet-5');
 	const machine = useMachine({
 		name: 'phase',
 		phases: ['gathering', 'drafting', 'committing', 'done'] as const,
@@ -128,4 +129,4 @@ function Support() {
 	);
 }
 
-export default defineAgent(Support, { model: 'anthropic/claude-sonnet-5' });
+export default defineAgent(Support);

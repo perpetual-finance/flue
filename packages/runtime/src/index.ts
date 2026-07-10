@@ -66,10 +66,11 @@ export { useDelivery } from './hooks/use-delivery.ts';
 export { useDispatchMessage } from './hooks/use-dispatch-message.ts';
 export { useInitialData } from './hooks/use-initial-data.ts';
 export { useInstruction } from './hooks/use-instruction.ts';
+export { type UseModelOptions, useModel } from './hooks/use-model.ts';
 export { type StateSetter, usePersistentState } from './hooks/use-persistent-state.ts';
 export { useResponseFinish } from './hooks/use-response-finish.ts';
 export { useResponseStart } from './hooks/use-response-start.ts';
-export { useSandbox } from './hooks/use-sandbox.ts';
+export { type UseSandboxOptions, useSandbox } from './hooks/use-sandbox.ts';
 export { useSkill } from './hooks/use-skill.ts';
 export { useSubagent } from './hooks/use-subagent.ts';
 export { useTool } from './hooks/use-tool.ts';
@@ -128,8 +129,7 @@ export type {
 	FlueHarness,
 	FlueLogger,
 	FlueObservation,
-	FunctionAgentConfig,
-	FunctionAgentDefinition,
+		FunctionAgentDefinition,
 	LlmAssistantMessage,
 	LlmImageContent,
 	LlmMessage,

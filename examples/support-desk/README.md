@@ -8,9 +8,9 @@ tool mounting.
 ## What it demonstrates
 
 - **Everything is a hook.** `src/agents/support.ts`'s `Support` function is
-  itself the agent function — the one `defineAgent(Support, { model })` gives
-  a model. `useGathering`, `useDrafting`, `useCommitting`, `useDone`, and
-  `useRetention` are custom hooks it calls. Each is a plain sync function:
+  itself the agent function — the one `defineAgent(Support)` registers, whose
+  `useModel()` call gives it a model. `useGathering`, `useDrafting`,
+  `useCommitting`, `useDone`, and `useRetention` are custom hooks it calls. Each is a plain sync function:
   `useTool()` calls in its body attach tools, and `useInstruction()` calls
   contribute its prose (the author formats headings and prose themselves).
 - **All phases are always connected.** `useGathering(...)`, `useDrafting(...)`,

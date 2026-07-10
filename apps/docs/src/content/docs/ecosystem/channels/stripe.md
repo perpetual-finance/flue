@@ -26,7 +26,7 @@ application.
 ```ts title="src/channels/stripe.ts (abridged)"
 import Stripe from 'stripe';
 import { createStripeChannel } from '@flue/stripe';
-import { dispatch } from '@flue/runtime';
+import { dispatch, useModel } from '@flue/runtime';
 import billing from '../agents/billing.ts';
 
 export const client = new Stripe(process.env.STRIPE_SECRET_KEY!, {
@@ -110,7 +110,7 @@ Snapshot events are the default:
 ```ts title="src/channels/stripe.ts"
 import Stripe from 'stripe';
 import { createStripeChannel } from '@flue/stripe';
-import { defineTool, dispatch } from '@flue/runtime';
+import { defineTool, dispatch, useModel } from '@flue/runtime';
 import billing from '../agents/billing.ts';
 
 export const client = new Stripe(process.env.STRIPE_SECRET_KEY!, {
@@ -187,15 +187,16 @@ namespaces require it.
 
 ```ts title="src/agents/billing.ts"
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
+import { type AgentProps, defineAgent, useModel, useTool } from '@flue/runtime';
 import { retrieveCustomer } from '../channels/stripe.ts';
 
 function Billing({ id: customerId }: AgentProps) {
+  useModel('anthropic/claude-haiku-4-5');
   useTool(retrieveCustomer(customerId));
   return 'Review the completed Checkout event and summarize any billing follow-up that is needed.';
 }
 
-export default defineAgent(Billing, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Billing);
 ```
 
 The model can invoke the lookup but cannot select another customer, account, or

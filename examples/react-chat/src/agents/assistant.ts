@@ -1,6 +1,6 @@
 'use agent';
 import { fauxAssistantMessage, fauxText, registerFauxProvider } from '@earendil-works/pi-ai/compat';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useModel } from '@flue/runtime';
 
 // The 'use agent' directive registers this module with the app (its file
 // basename is the durable identity); app.ts exposes it over HTTP by mounting
@@ -31,7 +31,8 @@ const echo: Parameters<typeof faux.setResponses>[0][number] = (context) => {
 faux.setResponses([echo]);
 
 function Assistant() {
+	useModel('react-chat-example/assistant');
 	return 'Reply briefly and helpfully.';
 }
 
-export default defineAgent(Assistant, { model: 'react-chat-example/assistant' });
+export default defineAgent(Assistant);

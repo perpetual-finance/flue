@@ -132,15 +132,16 @@ The short version, for your reference:
 
    ```ts
    'use agent';
-   import { defineAgent, useSandbox } from '@flue/runtime';
+   import { defineAgent, useModel, useSandbox } from '@flue/runtime';
    import { cloudflareSandboxFactory } from '../cloudflare-sandbox'; // your own module — see note above
 
    function Assistant() {
+     useModel('anthropic/claude-opus-4-7');
      useSandbox(cloudflareSandboxFactory);
      return 'You are a helpful assistant with a full sandbox.';
    }
 
-   export default defineAgent(Assistant, { model: 'anthropic/claude-opus-4-7' });
+   export default defineAgent(Assistant);
    ```
 
    `cloudflareSandboxFactory` above stands in for whatever `SandboxFactory`

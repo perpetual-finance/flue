@@ -149,7 +149,7 @@ const response = await env.AGENT_APP.fetch(new Request(url));
 ```ts
 function Assistant() {}
 
-export default defineAgent(Assistant, { model: 'cloudflare/@cf/meta/llama-3.1-8b-instruct' });
+export default defineAgent(Assistant);
 ```
 
 No API key is needed. Authorization and billing follow the Worker account, including the [Workers AI free tier](https://developers.cloudflare.com/workers-ai/platform/pricing/).
@@ -166,17 +166,15 @@ To customize the gateway, disable it, or target a named gateway, re-register the
 'use agent';
 import { getSandbox } from '@cloudflare/sandbox';
 import { env } from 'cloudflare:workers';
-import { defineAgent, type AgentProps, useSandbox } from '@flue/runtime';
+import { type AgentProps, defineAgent, useModel, useSandbox } from '@flue/runtime';
 import { cloudflareSandbox } from '@flue/runtime/cloudflare';
 
 function Assistant({ id }: AgentProps) {
-  useSandbox(cloudflareSandbox(getSandbox(env.Sandbox, id)));
+  useModel('anthropic/claude-sonnet-4-6');
+  useSandbox(cloudflareSandbox(getSandbox(env.Sandbox, id)), { cwd: '/workspace' });
 }
 
-export default defineAgent(Assistant, {
-  model: 'anthropic/claude-sonnet-4-6',
-  cwd: '/workspace',
-});
+export default defineAgent(Assistant);
 ```
 
 See [Cloudflare Sandbox](/docs/ecosystem/sandboxes/cloudflare/) for container configuration and lifecycle guidance.
@@ -207,12 +205,12 @@ Flue owns each generated Durable Object class. When an agent needs access to nat
 
 ```ts
 'use agent';
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useModel } from '@flue/runtime';
 import { extend } from '@flue/runtime/cloudflare';
 
 function Assistant() {}
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(Assistant);
 
 export const cloudflare = extend({
   base: (Base) =>

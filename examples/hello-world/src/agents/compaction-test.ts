@@ -1,8 +1,9 @@
 'use agent';
-import { defineAgent, useTool } from '@flue/runtime';
+import { defineAgent, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 
 function CompactionTest() {
+	useModel('anthropic/claude-sonnet-4-6');
 	useTool({
 		name: 'compaction-test',
 		description: 'Fill the harness conversation with a large article and verify recall across compaction.',
@@ -22,4 +23,4 @@ function CompactionTest() {
 	return 'When asked to run a demo, call the `compaction-test` tool and report its result.';
 }
 
-export default defineAgent(CompactionTest, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(CompactionTest);

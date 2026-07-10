@@ -6,7 +6,14 @@ import type {
 	ResponseStartDeclaration,
 } from '../message-output.ts';
 import type { ToolDefinition } from '../tool-types.ts';
-import type { DeliveredMessage, SandboxFactory, Skill, SubagentDefinition } from '../types.ts';
+import type {
+	CompactionConfig,
+	DeliveredMessage,
+	SandboxFactory,
+	Skill,
+	SubagentDefinition,
+	ThinkingLevel,
+} from '../types.ts';
 
 /**
  * The render frame: the module-global slot Flue Hooks resolve against while
@@ -101,6 +108,14 @@ export interface RenderFrame {
 	agentFinishes: AgentFinishDeclaration[];
 	/** The render's `useSandbox` attachment; at most one per render. */
 	sandbox: SandboxFactory | undefined;
+	/** The render's `useSandbox` working directory (`{ cwd }` option). */
+	cwd: string | undefined;
+	/** The render's `useModel` declaration; exactly one per render. */
+	model: string | undefined;
+	/** `useModel` options: default reasoning effort. */
+	thinkingLevel: ThinkingLevel | undefined;
+	/** `useModel` options: threshold-compaction configuration. */
+	compaction: false | CompactionConfig | undefined;
 	/** `useSkill` mounts across the whole render, in call order; names unique. */
 	skills: Skill[];
 	/** `useSubagent` declarations across the whole render, in call order; names unique. */
@@ -148,6 +163,10 @@ export function renderWithFrame<T>(
 		agentStarts: [],
 		agentFinishes: [],
 		sandbox: undefined,
+		cwd: undefined,
+		model: undefined,
+		thinkingLevel: undefined,
+		compaction: undefined,
 		skills: [],
 		subagents: [],
 		state,

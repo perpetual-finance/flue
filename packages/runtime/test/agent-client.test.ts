@@ -12,6 +12,7 @@ import { useAgentFinish } from '../src/hooks/use-agent-finish.ts';
 import { useAgentStart } from '../src/hooks/use-agent-start.ts';
 import { useDelivery } from '../src/hooks/use-delivery.ts';
 import { useInitialData } from '../src/hooks/use-initial-data.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { useResponseFinish } from '../src/hooks/use-response-finish.ts';
 import { type Flue, start } from '../src/node/start.ts';
 import { resetFlueRuntimeForTests } from '../src/runtime/flue-app.ts';
@@ -61,6 +62,7 @@ describe('start() + init(): the scripted client', () => {
 		let startRuns = 0;
 		let finishRuns = 0;
 		function Reporter() {
+			useModel(model);
 			const delivery = useDelivery();
 			deliveries.push(`${delivery.kind}:${delivery.body}`);
 			useAgentStart(async () => {
@@ -71,7 +73,7 @@ describe('start() + init(): the scripted client', () => {
 			});
 			return 'Produce the report when triggered.';
 		}
-		const reporter = defineAgent(Reporter, { model });
+		const reporter = defineAgent(Reporter);
 
 		await startFlue({ name: 'reporter', agent: reporter });
 		const agent = init(reporter);
@@ -95,15 +97,17 @@ describe('start() + init(): the scripted client', () => {
 
 		let seenData: unknown;
 		function Seeded() {
+			useModel(model);
 			seenData = useInitialData<{ date: string }>();
 			return 'Reply.';
 		}
-		const seeded = defineAgent(Seeded, {
-			model,
-			input: v.object({ date: v.string() }),
-		});
+		const seeded = defineAgent(Seeded);
 
-		await startFlue({ name: 'seeded', agent: seeded });
+		await startFlue({
+			name: 'seeded',
+			agent: seeded,
+			initialDataSchema: v.object({ date: v.string() }),
+		});
 		const reply = await init(seeded, { initialData: { date: '2026-07-08' } }).dispatch('Go.');
 		expect(reply.text).toBe('Seeded.');
 		expect(seenData).toEqual({ date: '2026-07-08' });
@@ -112,7 +116,10 @@ describe('start() + init(): the scripted client', () => {
 	it('pins the contacted incarnation: create-only handles continue across sends', async () => {
 		const { provider, model } = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('one'), fauxAssistantMessage('two')]);
-		const echo = defineAgent(() => 'Reply.', { model });
+		const echo = defineAgent(() => {
+			useModel(model);
+			return 'Reply.';
+		});
 
 		await startFlue({ name: 'echo', agent: echo });
 		const agent = init(echo, { id: 'pin-1', uid: null });
@@ -131,12 +138,13 @@ describe('start() + init(): the scripted client', () => {
 		const { provider, model } = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('doomed')]);
 		function Doomed() {
+			useModel(model);
 			useResponseFinish(() => {
 				throw new Error('finish boom');
 			});
 			return 'Reply.';
 		}
-		const doomed = defineAgent(Doomed, { model });
+		const doomed = defineAgent(Doomed);
 
 		await startFlue({ name: 'doomed', agent: doomed });
 		const error = await init(doomed)
@@ -159,11 +167,12 @@ describe('start() + init(): the scripted client', () => {
 
 		const deliveries: string[] = [];
 		function Listener() {
+			useModel(model);
 			const delivery = useDelivery();
 			deliveries.push(`${delivery.kind}:${delivery.body}`);
 			return 'Reply.';
 		}
-		const listener = defineAgent(Listener, { model });
+		const listener = defineAgent(Listener);
 
 		await startFlue({ name: 'listener', agent: listener });
 		const agent = init(listener, { id: 'dispatch-1' });
@@ -193,9 +202,12 @@ describe('start() + init(): the scripted client', () => {
 				throw new Error('provider exploded');
 			},
 		]);
-		const echo = defineAgent(() => 'Reply.', { model, durability: { maxAttempts: 1 } });
+		const echo = defineAgent(() => {
+			useModel(model);
+			return 'Reply.';
+		});
 
-		await startFlue({ name: 'echo', agent: echo });
+		await startFlue({ name: 'echo', agent: echo, durability: { maxAttempts: 1 } });
 		const error = await init(echo, { id: 'dispatch-fail-1' })
 			.dispatch({ kind: 'signal', type: 'trigger', body: 'boom' })
 			.then(
@@ -212,7 +224,10 @@ describe('start() + init(): the scripted client', () => {
 	it('streams projected chunks to onEvent while awaiting', async () => {
 		const { provider, model } = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('streamed')]);
-		const echo = defineAgent(() => 'Reply.', { model });
+		const echo = defineAgent(() => {
+			useModel(model);
+			return 'Reply.';
+		});
 
 		await startFlue({ name: 'echo', agent: echo });
 		const seen: string[] = [];
@@ -223,7 +238,10 @@ describe('start() + init(): the scripted client', () => {
 
 	it('guards: start() refuses a configured process; unstarted init() throws with guidance', async () => {
 		const { model } = createFauxProvider();
-		const echo = defineAgent(() => 'Reply.', { model });
+		const echo = defineAgent(() => {
+			useModel(model);
+			return 'Reply.';
+		});
 
 		await expect(init(echo).dispatch('Go.')).rejects.toThrow(
 			/before the Flue runtime was configured/,
@@ -238,7 +256,10 @@ describe('start() + init(): the scripted client', () => {
 	it('init() validates its arguments eagerly', async () => {
 		expect(() => init({} as never)).toThrow(InvalidRequestError);
 		const { model } = createFauxProvider();
-		const echo = defineAgent(() => 'Reply.', { model });
+		const echo = defineAgent(() => {
+			useModel(model);
+			return 'Reply.';
+		});
 		expect(() => init(echo, { id: ' ' })).toThrow(/non-empty string instance id/);
 	});
 });

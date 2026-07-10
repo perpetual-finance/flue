@@ -21,6 +21,7 @@ import { renderAgentFunctionWithStructure } from '../src/hooks/render.ts';
 import { useAgentFinish } from '../src/hooks/use-agent-finish.ts';
 import { useAgentStart } from '../src/hooks/use-agent-start.ts';
 import { useDispatchMessage } from '../src/hooks/use-dispatch-message.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import {
 	configureFlueRuntime,
@@ -131,8 +132,9 @@ function setupDispatchHarness(
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
+					definition: defineAgent(() => {
+						useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+						return assistant();
 					}),
 				},
 			],
@@ -164,7 +166,7 @@ async function admitAndSettle(
 	await coordinator.waitForIdle();
 }
 
-const CONFIG = { model: 'faux/agent-dispatch-message' };
+const MODEL = 'faux/agent-dispatch-message';
 
 describe('useDispatchMessage()', () => {
 	it('a tool-triggered mid-run dispatch joins the live response at the next turn boundary', async () => {
@@ -521,13 +523,14 @@ describe('useDispatchMessage()', () => {
 	it('rejects a dispatch call made during render', async () => {
 		let duringRenderPromise: Promise<DispatchReceipt> | undefined;
 		renderAgentFunctionWithStructure(() => {
+			useModel(MODEL);
 			const dispatchMessage = useDispatchMessage();
 			duringRenderPromise = dispatchMessage({ kind: 'signal', type: 'note', body: 'Rendered.' });
 			// Attach a no-op catch so vitest's process-level unhandled-rejection
 			// guard does not flag the rejection we are about to assert on.
 			duringRenderPromise.catch(() => {});
 			return 'Base.';
-		}, CONFIG);
+		});
 
 		await expect(duringRenderPromise).rejects.toThrow(/called during render/);
 	});
@@ -547,9 +550,10 @@ describe('useDispatchMessage()', () => {
 	it('throws on call when the render has no durable runtime behind it (bare render)', async () => {
 		let dispatchMessage: ((message: DeliveredMessage) => Promise<DispatchReceipt>) | undefined;
 		renderAgentFunctionWithStructure(() => {
+			useModel(MODEL);
 			dispatchMessage = useDispatchMessage();
 			return 'Base.';
-		}, CONFIG);
+		});
 
 		await expect(
 			dispatchMessage?.({ kind: 'signal', type: 'note', body: 'Unbacked.' }),

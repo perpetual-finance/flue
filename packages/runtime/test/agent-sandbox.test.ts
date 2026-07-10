@@ -14,6 +14,7 @@ import {
 	assertRenderStructureInvariance,
 	renderAgentFunctionWithStructure,
 } from '../src/hooks/render.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { useSandbox } from '../src/hooks/use-sandbox.ts';
 import { useSkill } from '../src/hooks/use-skill.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
@@ -89,13 +90,17 @@ describe('useSandbox() (render)', () => {
 	it('attaches the sandbox to the rendered config and marks the structure', () => {
 		const factory = stubFactory();
 		const withIt = renderAgentFunctionWithStructure(() => {
+			useModel(CONFIG.model);
 			useSandbox(factory);
 			return 'Base.';
-		}, CONFIG);
+		});
 		expect(withIt.config.sandbox).toBe(factory);
 		expect(withIt.structure.hasSandbox).toBe(true);
 
-		const withoutIt = renderAgentFunctionWithStructure(() => 'Base.', CONFIG);
+		const withoutIt = renderAgentFunctionWithStructure(() => {
+			useModel(CONFIG.model);
+			return 'Base.';
+		});
 		expect(withoutIt.config.sandbox).toBeUndefined();
 		expect(withoutIt.structure.hasSandbox).toBe(false);
 	});
@@ -109,9 +114,10 @@ describe('useSandbox() (render)', () => {
 			useCompanySandbox();
 		}
 		const rendered = renderAgentFunctionWithStructure(() => {
+			useModel(CONFIG.model);
 			useEnvironment();
 			return 'Base.';
-		}, CONFIG);
+		});
 		expect(rendered.config.sandbox).toBe(factory);
 	});
 
@@ -121,19 +127,21 @@ describe('useSandbox() (render)', () => {
 		};
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
+				useModel(CONFIG.model);
 				useSandbox(stubFactory());
 				useEnvironment();
 				return 'Base.';
-			}, CONFIG),
+			}),
 		).toThrow(/useSandbox\(\) was called twice in one render/);
 	});
 
 	it('rejects values that are not sandbox factories', () => {
 		expect(() =>
 			renderAgentFunctionWithStructure(() => {
+				useModel(CONFIG.model);
 				useSandbox({} as SandboxFactory);
 				return 'Base.';
-			}, CONFIG),
+			}),
 		).toThrow(/requires a sandbox factory/);
 	});
 
@@ -146,10 +154,11 @@ describe('useSandbox() invariance', () => {
 	it('names the delta when the sandbox is attached conditionally', () => {
 		let attach = false;
 		const agent = () => {
+			useModel(CONFIG.model);
 			if (attach) useSandbox(stubFactory());
 			return 'Base.';
 		};
-		const render = () => renderAgentFunctionWithStructure(agent, CONFIG).structure;
+		const render = () => renderAgentFunctionWithStructure(agent).structure;
 		const without = render();
 		attach = true;
 		const withIt = render();
@@ -219,6 +228,7 @@ describe('useSandbox end to end (node coordinator, faux provider)', () => {
 
 		let observed: string | undefined;
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			useSandbox(sandbox);
 			useTool({
 				name: 'inspect',
@@ -240,9 +250,7 @@ describe('useSandbox end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext,
@@ -292,6 +300,7 @@ describe('useSandbox end to end (node coordinator, faux provider)', () => {
 		};
 
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			useSandbox(sandbox);
 			return 'Codemode agent.';
 		}
@@ -301,9 +310,7 @@ describe('useSandbox end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -348,6 +355,7 @@ describe('useSandbox end to end (node coordinator, faux provider)', () => {
 		};
 
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			useSandbox(sandbox);
 			useSkill(review);
 			return 'Reviewer agent.';
@@ -358,9 +366,7 @@ describe('useSandbox end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext: makeFauxCreateContext(provider),

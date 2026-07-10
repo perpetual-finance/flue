@@ -68,7 +68,7 @@ Before implementing, restate the chosen requirements to yourself as an implement
 3. Always create one minimal **agent module** matching the user's idea, keeping it closer to "hello world" than a production app.
    - Put it in the selected layout's immediate \`agents/\` directory, using a lower-kebab-case filename such as \`src/agents/hello-world.ts\`.
    - Its first statement must be the \`'use agent';\` directive — that is how the module joins the application (the build scans for marked modules; the file basename becomes the agent's durable identity).
-   - Write it as a plain function that returns its instruction as a string (\`<short purpose-specific instruction>\`), and default-export \`defineAgent(<the function>, { model: '<exact model specifier>' })\`.
+   - Write it as a plain function that calls \`useModel('<exact model specifier>')\` first and returns its instruction as a string (\`<short purpose-specific instruction>\`), and default-export \`defineAgent(<the function>)\`.
    - For an \`agent + tool\` starter, call \`useTool({ name, description, harness: true, run: ({ harness }) => { ... } })\` inside the function and mention the tool in the returned instruction.
 4. Create \`app.ts\` at the source root — the application's route map and the only required entry file. Mount the agent explicitly:
    \`\`\`ts

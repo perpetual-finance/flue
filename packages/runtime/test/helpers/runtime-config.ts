@@ -1,4 +1,5 @@
 import { defineAgent } from '../../src/agent-definition.ts';
+import { useModel } from '../../src/hooks/use-model.ts';
 import { sqlite } from '../../src/node/agent-execution-store.ts';
 import type {
 	AgentRecord,
@@ -18,7 +19,10 @@ export function agentRecord(
 	return {
 		name,
 		definition:
-			options.definition ?? defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' }),
+			options.definition ??
+			defineAgent(() => {
+				useModel('anthropic/claude-haiku-4-5');
+			}),
 		...(options.description === undefined ? {} : { description: options.description }),
 		...(options.route === undefined ? {} : { route: options.route }),
 	};

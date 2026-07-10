@@ -24,8 +24,16 @@ import { requireRenderFrame } from './frame.ts';
  * Callable from the agent body or a custom hook — but at most
  * once per render (an agent has one environment), and never conditionally.
  * Without it, the runtime's default environment applies.
+ *
+ * `options.cwd` scopes the agent's working directory inside the initialized
+ * environment. Like the factory, it is read once when a submission starts.
  */
-export function useSandbox(sandbox: SandboxFactory): void {
+export interface UseSandboxOptions {
+	/** Working directory inside the initialized environment. */
+	cwd?: string;
+}
+
+export function useSandbox(sandbox: SandboxFactory, options: UseSandboxOptions = {}): void {
 	const frame = requireRenderFrame('useSandbox');
 	if (frame.kind === 'subagent') {
 		throw new Error(
@@ -49,5 +57,17 @@ export function useSandbox(sandbox: SandboxFactory): void {
 			'[flue] useSandbox() was called twice in one render. An agent has one environment — attach it once, in the agent body or a single custom hook.',
 		);
 	}
+	if (options === null || typeof options !== 'object' || Array.isArray(options)) {
+		throw new Error('[flue] useSandbox() options must be an object.');
+	}
+	for (const key of Object.keys(options)) {
+		if (key !== 'cwd') {
+			throw new Error(`[flue] useSandbox() options received unknown field "${key}".`);
+		}
+	}
+	if (options.cwd !== undefined && (typeof options.cwd !== 'string' || options.cwd.length === 0)) {
+		throw new Error('[flue] useSandbox() options.cwd must be a non-empty string.');
+	}
 	frame.sandbox = sandbox;
+	if (options.cwd !== undefined) frame.cwd = options.cwd;
 }

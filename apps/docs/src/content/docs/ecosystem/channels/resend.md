@@ -20,7 +20,7 @@ The Resend blueprint installs `@flue/resend` and the official `resend` SDK, adds
 
 ```ts title="src/channels/resend.ts (abridged)"
 import { createResendChannel } from '@flue/resend';
-import { dispatch } from '@flue/runtime';
+import { dispatch, useModel } from '@flue/runtime';
 import { Resend } from 'resend';
 import assistant from '../agents/assistant.ts';
 
@@ -93,7 +93,7 @@ bundle.
 
 ```ts title="src/channels/resend.ts"
 import { createResendChannel } from '@flue/resend';
-import { defineTool, dispatch } from '@flue/runtime';
+import { defineTool, dispatch, useModel } from '@flue/runtime';
 import { Resend } from 'resend';
 import assistant from '../agents/assistant.ts';
 
@@ -198,16 +198,17 @@ or durable storage.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { type AgentProps, defineAgent, useTool } from '@flue/runtime';
+import { type AgentProps, defineAgent, useModel, useTool } from '@flue/runtime';
 import { emailIdFromInstanceId, retrieveReceivedEmail } from '../channels/resend.ts';
 
 function Assistant({ id }: AgentProps) {
+  useModel('anthropic/claude-haiku-4-5');
   const emailId = emailIdFromInstanceId(id);
   useTool(retrieveReceivedEmail(emailId));
   return 'Review the inbound support email. Retrieve the complete email when its body or headers are needed.';
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Assistant);
 ```
 
 The model can retrieve only the email already bound by trusted application

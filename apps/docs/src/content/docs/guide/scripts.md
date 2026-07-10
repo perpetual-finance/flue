@@ -86,7 +86,7 @@ Two loader caveats for bare `node`: attributed imports (`with { type: 'markdown'
 `init(agent, options?)` returns a handle addressing one instance. It creates nothing — the instance is created on first contact, with the same semantics as every other transport:
 
 - `id` — the instance address. Omit it for a fresh unique id (a throwaway instance for this run); pass a stable id to share conversation state across runs.
-- `initialData` — creation data, validated against the agent's `input:` schema; the seed, consulted only when the handle's first send creates the instance.
+- `initialData` — creation data, validated against the agent's `initialDataSchema` export; the seed, consulted only when the handle's first send creates the instance.
 - `uid` — a [send condition](/docs/guide/building-agents/) for the first contact: a string continues only that incarnation, `null` creates only. After a send, the handle pins the incarnation it contacted and later sends continue it.
 
 `dispatch(message, options?)` accepts exactly what the top-level verb accepts — a `DeliveredMessage` of either kind, or a bare string as shorthand for `{ kind: 'user', body }` — and resolves with the settled reply:

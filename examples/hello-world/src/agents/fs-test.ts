@@ -1,8 +1,9 @@
 'use agent';
-import { bash, defineAgent, useSandbox, useTool } from '@flue/runtime';
+import { bash, defineAgent, useModel, useSandbox, useTool } from '@flue/runtime';
 import { Bash, InMemoryFs } from 'just-bash';
 
 function FsTest() {
+	useModel('anthropic/claude-sonnet-4-6');
 	useSandbox(bash(() => new Bash({ fs: new InMemoryFs() })));
 	useTool({
 		name: 'fs-test',
@@ -32,4 +33,4 @@ function FsTest() {
 	return 'When asked to run a demo, call the `fs-test` tool and report its result.';
 }
 
-export default defineAgent(FsTest, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(FsTest);

@@ -4,7 +4,7 @@ import {
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineAgent, useSandbox } from '../src/index.ts';
+import { defineAgent, useModel, useSandbox } from '../src/index.ts';
 import type { FlueContextConfig } from '../src/internal.ts';
 import { createFlueContext, resolveModel } from '../src/internal.ts';
 import type { FlueEvent, SessionEnv } from '../src/types.ts';
@@ -260,19 +260,17 @@ describe('FlueContext', () => {
 	it('allows root harness initialization to retry after an earlier attempt fails', async () => {
 		let attempt = 0;
 		const ctx = createContext();
-		const agent = defineAgent(
-			() => {
-				useSandbox({
-					createSessionEnv: async () => {
-						attempt += 1;
-						if (attempt === 1) throw new Error('temporary sandbox failure');
-						return createEnv();
-					},
-				});
-				return undefined;
-			},
-			{ model: 'anthropic/claude-haiku-4-5' },
-		);
+		const agent = defineAgent(() => {
+			useModel('anthropic/claude-haiku-4-5');
+			useSandbox({
+				createSessionEnv: async () => {
+					attempt += 1;
+					if (attempt === 1) throw new Error('temporary sandbox failure');
+					return createEnv();
+				},
+			});
+			return undefined;
+		});
 
 		await expect(ctx.initializeRootHarness(agent)).rejects.toThrow('temporary sandbox failure');
 		await expect(ctx.initializeRootHarness(agent)).resolves.toMatchObject({
@@ -297,8 +295,9 @@ describe('session context discovery', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => 'Agent-specific review instructions.', {
-				model: `${provider.getModel().provider}/${provider.getModel().id}`,
+			defineAgent(() => {
+				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+				return 'Agent-specific review instructions.';
 			}),
 		);
 		const session = await harness.session();
@@ -361,8 +360,8 @@ describe('session context discovery', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => undefined, {
-				model: `${provider.getModel().provider}/${provider.getModel().id}`,
+			defineAgent(() => {
+				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			}),
 		);
 		const session = await harness.session();
@@ -389,22 +388,26 @@ describe('session context discovery', () => {
 			agentConfig: {
 				resolveModel: () => provider.getModel(),
 			},
-			createDefaultEnv: async () =>
-				createEnv({
-					cwd: '/repo',
-					files: {
-						'/repo/AGENTS.md': 'Root workspace guidance.',
-						'/repo/workspace/AGENTS.md': 'Nested workspace guidance.',
-					},
-				}),
 		});
 		ctx.setEventCallback((event) => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => undefined, {
-				model: `${provider.getModel().provider}/${provider.getModel().id}`,
-				cwd: 'workspace',
+			defineAgent(() => {
+				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+				useSandbox(
+					{
+						createSessionEnv: async () =>
+							createEnv({
+								cwd: '/repo',
+								files: {
+									'/repo/AGENTS.md': 'Root workspace guidance.',
+									'/repo/workspace/AGENTS.md': 'Nested workspace guidance.',
+								},
+							}),
+					},
+					{ cwd: 'workspace' },
+				);
 			}),
 		);
 		const session = await harness.session();
@@ -435,9 +438,10 @@ describe('session context discovery', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(
-				() => {
-					useSandbox({
+			defineAgent(() => {
+				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+				useSandbox(
+					{
 						createSessionEnv: async (options) => {
 							factoryOptions.push(options);
 							return createEnv({
@@ -448,14 +452,11 @@ describe('session context discovery', () => {
 								},
 							});
 						},
-					});
-					return undefined;
-				},
-				{
-					model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					cwd: 'workspace',
-				},
-			),
+					},
+					{ cwd: 'workspace' },
+				);
+				return undefined;
+			}),
 		);
 		const session = await harness.session();
 

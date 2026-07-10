@@ -1,9 +1,9 @@
 'use agent';
-import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { replyInThread } from '../channels/slack.ts';
 
-const input = v.object({
+export const initialDataSchema = v.object({
 	channelId: v.string(),
 	threadTs: v.string(),
 	startedBy: v.optional(v.string()),
@@ -11,11 +11,12 @@ const input = v.object({
 });
 
 function Assistant() {
-	const data = useInitialData<v.InferOutput<typeof input>>();
+	useModel('anthropic/claude-haiku-4-5');
+	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the Slack channel dispatch.');
 	useTool(replyInThread(data));
 	const startedBy = data.startedBy ? ` by <@${data.startedBy}>` : '';
 	return `Reply in the bound Slack thread when appropriate. This conversation was started${startedBy} at ${data.startedAt}.`;
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
+export default defineAgent(Assistant);

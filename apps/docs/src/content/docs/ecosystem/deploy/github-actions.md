@@ -26,15 +26,16 @@ npm install -D @flue/cli
 ### 2. Create your first agent
 
 ```typescript title="src/agents/hello.ts"
-import { defineAgent, useSandbox } from '@flue/runtime';
+import { defineAgent, useModel, useSandbox } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
 function Hello() {
+  useModel('anthropic/claude-sonnet-4-6');
   useSandbox(local());
   return 'Greet the person the user names and share an interesting fact.';
 }
 
-export default defineAgent(Hello, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(Hello);
 ```
 
 A few things to note:
@@ -122,10 +123,11 @@ Your agent often needs to interact with tools like `gh`, `npm`, or `git`. With `
 In GitHub Actions, this means you set the secrets you want the agent's CLIs to see in the workflow `env:` block, then forward them explicitly into the sandbox. The runner is your isolation boundary; flue makes the inner boundary (host → spawned shell) explicit.
 
 ```typescript title="src/agents/triage.ts"
-import { defineAgent, useSandbox } from '@flue/runtime';
+import { defineAgent, useModel, useSandbox } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
 function Triage() {
+  useModel('anthropic/claude-opus-4-7');
   useSandbox(
     local({
       env: {
@@ -137,7 +139,7 @@ function Triage() {
   return 'When given an issue number, run the `triage` skill on it and report severity, reproducibility, and a summary.';
 }
 
-export default defineAgent(Triage, { model: 'anthropic/claude-opus-4-7' });
+export default defineAgent(Triage);
 ```
 
 If you want a tighter boundary — the agent can call a specific operation but never see the underlying token — call `useTool(...)` inside the agent function. The tool implementation reads the secret from `process.env`; the agent only sees the tool's parameters and result.
@@ -148,7 +150,7 @@ Named subagents can run focused detached tasks. `useSubagent(...)` declares one,
 
 ```typescript title="src/agents/triage.ts"
 'use agent';
-import { defineAgent, useSubagent } from '@flue/runtime';
+import { defineAgent, useModel, useSubagent } from '@flue/runtime';
 
 function Reviewer() {
   return 'Focus on correctness, security, and project standards.';
@@ -163,7 +165,7 @@ function Triage() {
   return 'Delegate PR reviews to the `reviewer` subagent via a task.';
 }
 
-export default defineAgent(Triage, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(Triage);
 ```
 
 ### Sandbox context
@@ -246,11 +248,12 @@ Result schemas aren't just for type safety — they're how you orchestrate multi
 
 ```typescript title="src/agents/auto-triage.ts"
 'use agent';
-import { defineAgent, useSandbox, useTool } from '@flue/runtime';
+import { defineAgent, useModel, useSandbox, useTool } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 import * as v from 'valibot';
 
 function AutoTriage() {
+  useModel('anthropic/claude-sonnet-4-6');
   useSandbox(local());
   useTool({
     name: 'triage-issue',
@@ -280,7 +283,7 @@ function AutoTriage() {
   return 'When given an issue number, call the `triage-issue` tool and report its result.';
 }
 
-export default defineAgent(AutoTriage, { model: 'anthropic/claude-sonnet-4-6' });
+export default defineAgent(AutoTriage);
 ```
 
 This pattern — prompt, check the result, decide what to do next — is how you build sophisticated agents that go beyond single-shot prompts.

@@ -1,10 +1,11 @@
 'use agent';
 
-import { defineAgent } from '@flue/runtime';
+import { defineAgent, useModel } from '@flue/runtime';
 
 /** A plain prompting agent: each turn shows up as an `llm` span in Braintrust. */
 function Prompt() {
+	useModel('anthropic/claude-haiku-4-5');
 	return 'Write a one-sentence welcome for the person named in each message.';
 }
 
-export default defineAgent(Prompt, { model: 'anthropic/claude-haiku-4-5' });
+export default defineAgent(Prompt);

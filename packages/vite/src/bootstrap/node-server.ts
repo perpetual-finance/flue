@@ -86,6 +86,13 @@ function createAgentRegistrations(): FlueAgentRegistration[] {
 		if (module.route !== undefined) {
 			registration.route = module.route as FlueAgentRegistration['route'];
 		}
+		if (module.initialDataSchema !== undefined) {
+			registration.initialDataSchema =
+				module.initialDataSchema as FlueAgentRegistration['initialDataSchema'];
+		}
+		if (module.durability !== undefined) {
+			registration.durability = module.durability as FlueAgentRegistration['durability'];
+		}
 		if (module.description !== undefined) {
 			registration.description = module.description as FlueAgentRegistration['description'];
 		}

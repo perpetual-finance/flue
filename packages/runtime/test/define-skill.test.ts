@@ -9,6 +9,7 @@ import {
 	defineAgent,
 	defineSkill,
 	SkillDefinitionValidationError,
+	useModel,
 	useSandbox,
 	useSkill,
 } from '../src/index.ts';
@@ -122,16 +123,14 @@ describe('defineSkill()', () => {
 			createDefaultEnv: async () => createEnv(),
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(
-				() => {
-					useSkill(review);
-					useSandbox({
-						createSessionEnv: async () => createEnv(),
-						tools: () => [],
-					});
-				},
-				{ model: `${provider.getModel().provider}/${provider.getModel().id}` },
-			),
+			defineAgent(() => {
+				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+				useSkill(review);
+				useSandbox({
+					createSessionEnv: async () => createEnv(),
+					tools: () => [],
+				});
+			}),
 		);
 		const session = await harness.session();
 
@@ -187,8 +186,8 @@ describe('defineSkill()', () => {
 			createDefaultEnv: async () => createEnv(readFileCalls),
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => undefined, {
-				model: `${provider.getModel().provider}/${provider.getModel().id}`,
+			defineAgent(() => {
+				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			}),
 		);
 		const session = await harness.session();
@@ -221,8 +220,8 @@ describe('defineSkill()', () => {
 			createDefaultEnv: async () => createEnv(),
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => undefined, {
-				model: `${provider.getModel().provider}/${provider.getModel().id}`,
+			defineAgent(() => {
+				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			}),
 		);
 		const session = await harness.session();

@@ -12,8 +12,8 @@
  *
  *   1. {@link __flueBindAgentModule} — injected into each `'use agent'`
  *      module by the build transform; binds the module's identity and named
- *      exports (`route`, `description`) to the definition at
- *      module-evaluation time.
+ *      exports (`route`, `description`, `initialDataSchema`, `durability`)
+ *      to the definition at module-evaluation time.
  *   2. {@link registerFlueAgents} — called once by the generated bootstrap
  *      with the full scanned agent set; the app-membership registry.
  *
@@ -26,8 +26,11 @@
 
 import type { MiddlewareHandler } from 'hono';
 import { Hono } from 'hono';
+import type * as v from 'valibot';
+import { assertDurability } from '../agent-tuning.ts';
 import { MethodNotAllowedError, toHttpResponse } from '../errors.ts';
-import type { AgentModuleValue } from '../types.ts';
+import { isValibotSchema } from '../schema.ts';
+import type { AgentModuleValue, DurabilityConfig } from '../types.ts';
 import {
 	assertAgentInstanceId,
 	executeAgentAbort,
@@ -53,12 +56,17 @@ import { AgentMountRouteParamSchema, InvocationQuerySchema } from './schemas.ts'
  *   identity: '<identity slug>',        // required; non-empty, no ':'
  *   route,                              // only when the module exports it
  *   description,                        // only when the module exports it
+ *   initialDataSchema,                  // only when the module exports it
+ *   durability,                         // only when the module exports it
  * });
  * ```
  *
  * `route` is middleware applied to every route the definition's `.route()`
  * serves — including attachment downloads — and `description` is static
- * human-facing metadata.
+ * human-facing metadata. `initialDataSchema` validates instance-creation
+ * data at first contact, and `durability` is the submission retry policy —
+ * supervisor-facing config that must be readable without rendering (the
+ * policy governs render failure itself).
  */
 export interface AgentModuleBinding {
 	/** Module identity (file basename, or its `name` export). Keys durable storage; non-empty, no `:`. */
@@ -67,6 +75,16 @@ export interface AgentModuleBinding {
 	route?: MiddlewareHandler;
 	/** Static description (module `description` export). */
 	description?: string;
+	/**
+	 * Valibot schema for instance-creation data (module `initialDataSchema`
+	 * export). Validated once, at the instance's first contact; a mismatch
+	 * (including absence, unless the schema accepts `undefined`) fails the
+	 * creating submission. The schema-parsed output is what gets recorded and
+	 * what `useInitialData()` returns.
+	 */
+	initialDataSchema?: v.GenericSchema;
+	/** Submission retry policy (module `durability` export). */
+	durability?: DurabilityConfig;
 }
 
 /** One registered agent: a definition joined to its identity and module metadata. */
@@ -151,6 +169,10 @@ export function registerFlueAgents(records: readonly FlueAgentRegistration[]): v
 			identity: record.identity,
 			...(record.route !== undefined ? { route: record.route } : {}),
 			...(record.description !== undefined ? { description: record.description } : {}),
+			...(record.initialDataSchema !== undefined
+				? { initialDataSchema: record.initialDataSchema }
+				: {}),
+			...(record.durability !== undefined ? { durability: record.durability } : {}),
 		});
 	}
 }
@@ -328,16 +350,14 @@ function assertAgentDefinitionValue(
 		// A bare agent function is the likeliest authoring mistake: it
 		// carries no model. Point at the wrapper.
 		throw new Error(
-			`[flue] Agent "${identity}" default-exports a bare function. Wrap it: defineAgent(${value.name || 'Agent'}, { model: 'provider-id/model-id' }).`,
+			`[flue] Agent "${identity}" default-exports a bare function. Wrap it: defineAgent(${value.name || 'Agent'}).`,
 		);
 	}
 	const candidate = value as { __flueFunctionAgent?: unknown } | null;
 	const isFunctionAgent =
 		!!candidate && typeof candidate === 'object' && candidate.__flueFunctionAgent === true;
 	if (!isFunctionAgent) {
-		throw new Error(
-			`[flue] Agent "${identity}" must default-export defineAgent(Agent, { model }).`,
-		);
+		throw new Error(`[flue] Agent "${identity}" must default-export defineAgent(Agent).`);
 	}
 }
 
@@ -359,6 +379,12 @@ function assertAgentModuleBinding(binding: AgentModuleBinding): void {
 			`[flue] Agent "${binding.identity}" description export must be a non-empty string.`,
 		);
 	}
+	if (binding.initialDataSchema !== undefined && !isValibotSchema(binding.initialDataSchema)) {
+		throw new Error(
+			`[flue] Agent "${binding.identity}" initialDataSchema export must be a Valibot schema for the instance creation data.`,
+		);
+	}
+	assertDurability(binding.durability, `[agent "${binding.identity}"]`);
 }
 
 /**

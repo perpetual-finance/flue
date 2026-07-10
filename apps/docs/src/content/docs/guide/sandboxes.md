@@ -42,18 +42,16 @@ On the Node.js target, use `local()` when an agent should operate directly on th
 
 ```ts title="src/agents/repository-reviewer.ts"
 'use agent';
-import { defineAgent, useSandbox } from '@flue/runtime';
+import { defineAgent, useModel, useSandbox } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
 function RepositoryReviewer() {
-  useSandbox(local());
+  useModel('anthropic/claude-sonnet-4-6');
+  useSandbox(local(), { cwd: '/srv/checkouts/catalog-service' });
   return 'Inspect the requested change and run only relevant validation.';
 }
 
-export default defineAgent(RepositoryReviewer, {
-  model: 'anthropic/claude-sonnet-4-6',
-  cwd: '/srv/checkouts/catalog-service',
-});
+export default defineAgent(RepositoryReviewer);
 ```
 
 `local()` makes host files and installed commands reachable through the agent's workspace capabilities. It does not provide isolation between model-directed work and the host machine.

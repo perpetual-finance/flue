@@ -16,6 +16,7 @@ import {
 	reduceConversationRecords,
 } from '../src/conversation-reducer.ts';
 import { renderAgentFunction } from '../src/hooks/render.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { createHookStateBuffer, type StateSetter, usePersistentState } from '../src/hooks/use-persistent-state.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { createFlueContext, type DispatchInput } from '../src/internal.ts';
@@ -87,52 +88,40 @@ function renderStateContext(entries: [string, unknown][] = []) {
 
 describe('usePersistentState (render)', () => {
 	it('returns the default when nothing is persisted, undefined without one', () => {
-		renderAgentFunction(
-			() => {
-				const [count] = usePersistentState('count', 0);
-				const [note] = usePersistentState('note');
-				expect(count).toBe(0);
-				expect(note).toBeUndefined();
-			},
-			CONFIG,
-			renderStateContext(),
-		);
+		renderAgentFunction(() => {
+			useModel(CONFIG.model);
+			const [count] = usePersistentState('count', 0);
+			const [note] = usePersistentState('note');
+			expect(count).toBe(0);
+			expect(note).toBeUndefined();
+		}, renderStateContext());
 	});
 
 	it('reads the persisted snapshot value over the default', () => {
-		renderAgentFunction(
-			() => {
-				const [count] = usePersistentState('count', 0);
-				expect(count).toBe(7);
-			},
-			CONFIG,
-			renderStateContext([['count', 7]]),
-		);
+		renderAgentFunction(() => {
+			useModel(CONFIG.model);
+			const [count] = usePersistentState('count', 0);
+			expect(count).toBe(7);
+		}, renderStateContext([['count', 7]]));
 	});
 
 	it('reads its own buffered writes over the snapshot (read-your-writes)', () => {
 		const state = renderStateContext([['count', 1]]);
 		state.store.write('count', 2);
-		renderAgentFunction(
-			() => {
-				const [count] = usePersistentState('count', 0);
-				expect(count).toBe(2);
-			},
-			CONFIG,
-			state,
-		);
+		renderAgentFunction(() => {
+			useModel(CONFIG.model);
+			const [count] = usePersistentState('count', 0);
+			expect(count).toBe(2);
+		}, state);
 	});
 
 	it('throws on a duplicate name in one render', () => {
 		expect(() =>
-			renderAgentFunction(
-				() => {
-					usePersistentState('count');
-					usePersistentState('count');
-				},
-				CONFIG,
-				renderStateContext(),
-			),
+			renderAgentFunction(() => {
+				useModel(CONFIG.model);
+				usePersistentState('count');
+				usePersistentState('count');
+			}, renderStateContext()),
 		).toThrow(/Duplicate usePersistentState name "count"/);
 	});
 
@@ -141,54 +130,43 @@ describe('usePersistentState (render)', () => {
 	});
 
 	it('throws when written during render', () => {
-		renderAgentFunction(
-			() => {
-				const [, setCount] = usePersistentState('count', 0);
-				expect(() => setCount(1)).toThrow(/written during render/);
-			},
-			CONFIG,
-			renderStateContext(),
-		);
+		renderAgentFunction(() => {
+			useModel(CONFIG.model);
+			const [, setCount] = usePersistentState('count', 0);
+			expect(() => setCount(1)).toThrow(/written during render/);
+		}, renderStateContext());
 	});
 
 	it('throws on writes when the render has no durable runtime behind it', () => {
 		let setCount: StateSetter<number> | undefined;
 		renderAgentFunction(() => {
+			useModel(CONFIG.model);
 			[, setCount] = usePersistentState('count', 0);
-		}, CONFIG);
+		});
 		expect(() => setCount?.(1)).toThrow(/no durable runtime/);
 	});
 
 	it('rejects a non-string or empty name', () => {
 		expect(() =>
-			renderAgentFunction(
-				() => {
-					usePersistentState('');
-				},
-				CONFIG,
-				renderStateContext(),
-			),
+			renderAgentFunction(() => {
+				useModel(CONFIG.model);
+				usePersistentState('');
+			}, renderStateContext()),
 		).toThrow(/takes the state name as its first argument/);
 		expect(() =>
-			renderAgentFunction(
-				() => {
-					usePersistentState({ name: 'count' } as never);
-				},
-				CONFIG,
-				renderStateContext(),
-			),
+			renderAgentFunction(() => {
+				useModel(CONFIG.model);
+				usePersistentState({ name: 'count' } as never);
+			}, renderStateContext()),
 		).toThrow(/takes the state name as its first argument/);
 	});
 
 	it('rejects undefined and non-serializable written values', () => {
 		let setAny: StateSetter<unknown> | undefined;
-		renderAgentFunction(
-			() => {
-				[, setAny] = usePersistentState('anything');
-			},
-			CONFIG,
-			renderStateContext(),
-		);
+		renderAgentFunction(() => {
+			useModel(CONFIG.model);
+			[, setAny] = usePersistentState('anything');
+		}, renderStateContext());
 		expect(() => setAny?.(undefined)).toThrow(/cannot be set to undefined/);
 		const circular: Record<string, unknown> = {};
 		circular.self = circular;
@@ -198,13 +176,10 @@ describe('usePersistentState (render)', () => {
 	it('resolves a functional update against the buffered current value (read-your-writes)', () => {
 		const state = renderStateContext([['count', 1]]);
 		let setCount: StateSetter<number> | undefined;
-		renderAgentFunction(
-			() => {
-				[, setCount] = usePersistentState('count', 0);
-			},
-			CONFIG,
-			state,
-		);
+		renderAgentFunction(() => {
+			useModel(CONFIG.model);
+			[, setCount] = usePersistentState('count', 0);
+		}, state);
 		// The first updater reads the snapshot; the second reads the first's
 		// buffered write — the whole point over spreading the render value.
 		setCount?.((previous) => previous + 1);
@@ -219,14 +194,11 @@ describe('usePersistentState (render)', () => {
 		const state = renderStateContext();
 		let setCount: StateSetter<number> | undefined;
 		let setNote: StateSetter<string | undefined> | undefined;
-		renderAgentFunction(
-			() => {
-				[, setCount] = usePersistentState('count', 3);
-				[, setNote] = usePersistentState<string>('note');
-			},
-			CONFIG,
-			state,
-		);
+		renderAgentFunction(() => {
+			useModel(CONFIG.model);
+			[, setCount] = usePersistentState('count', 3);
+			[, setNote] = usePersistentState<string>('note');
+		}, state);
 		setCount?.((previous) => previous + 1);
 		let seenNote: unknown = 'sentinel';
 		setNote?.((previous) => {
@@ -240,13 +212,10 @@ describe('usePersistentState (render)', () => {
 	it('hands a persisted null to the updater — a value, not an absence', () => {
 		const state = renderStateContext([['flag', null]]);
 		let setFlag: StateSetter<unknown> | undefined;
-		renderAgentFunction(
-			() => {
-				[, setFlag] = usePersistentState<unknown>('flag', 'fallback');
-			},
-			CONFIG,
-			state,
-		);
+		renderAgentFunction(() => {
+			useModel(CONFIG.model);
+			[, setFlag] = usePersistentState<unknown>('flag', 'fallback');
+		}, state);
 		let seen: unknown = 'sentinel';
 		setFlag?.((previous: unknown) => {
 			seen = previous;
@@ -257,13 +226,10 @@ describe('usePersistentState (render)', () => {
 
 	it('validates a functional update result like a plain write', () => {
 		let setAny: StateSetter<unknown> | undefined;
-		renderAgentFunction(
-			() => {
-				[, setAny] = usePersistentState('anything');
-			},
-			CONFIG,
-			renderStateContext(),
-		);
+		renderAgentFunction(() => {
+			useModel(CONFIG.model);
+			[, setAny] = usePersistentState('anything');
+		}, renderStateContext());
 		expect(() => setAny?.(() => undefined)).toThrow(/cannot be set to undefined/);
 	});
 });
@@ -353,6 +319,7 @@ describe('usePersistentState end to end (node coordinator, faux provider)', () =
 
 		const renderedCounts: number[] = [];
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			const [count, setCount] = usePersistentState('count', 0);
 			renderedCounts.push(count);
 			useTool({
@@ -381,9 +348,7 @@ describe('usePersistentState end to end (node coordinator, faux provider)', () =
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -449,6 +414,7 @@ describe('usePersistentState end to end (node coordinator, faux provider)', () =
 		]);
 
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			const [count, setCount] = usePersistentState('count', 0);
 			useTool({
 				name: 'bump',
@@ -473,9 +439,7 @@ describe('usePersistentState end to end (node coordinator, faux provider)', () =
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -523,6 +487,7 @@ describe('usePersistentState end to end (node coordinator, faux provider)', () =
 			});
 		}
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			const [count, setCount] = usePersistentState('count', 0);
 			if (count > 0) useExtra();
 			useTool({
@@ -542,9 +507,7 @@ describe('usePersistentState end to end (node coordinator, faux provider)', () =
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext: makeFauxCreateContext(provider),

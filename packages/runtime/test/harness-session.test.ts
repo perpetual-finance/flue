@@ -4,6 +4,7 @@ import {
 	observe,
 	SessionAlreadyExistsError,
 	SessionNotFoundError,
+	useModel,
 } from '../src/index.ts';
 import { createFlueContext, type FlueContextConfig, resolveModel } from '../src/internal.ts';
 import type { FlueEvent, FlueObservation, SessionEnv } from '../src/types.ts';
@@ -11,7 +12,9 @@ import type { FlueEvent, FlueObservation, SessionEnv } from '../src/types.ts';
 describe('FlueHarness', () => {
 	it('uses the default harness name when init() receives no name', async () => {
 		const harness = await createContext(createEnv()).initializeRootHarness(
-			defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' }),
+			defineAgent(() => {
+				useModel('anthropic/claude-haiku-4-5');
+			}),
 		);
 
 		expect(harness.name).toBe('default');
@@ -19,7 +22,9 @@ describe('FlueHarness', () => {
 
 	it('exposes sandbox filesystem operations when a harness is initialized', async () => {
 		const harness = await createContext(createEnv()).initializeRootHarness(
-			defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' }),
+			defineAgent(() => {
+				useModel('anthropic/claude-haiku-4-5');
+			}),
 		);
 		const session = await harness.session('workspace');
 
@@ -47,7 +52,9 @@ describe('FlueHarness', () => {
 	it('runs a command straight through the live sandbox when sandbox.exec() is called', async () => {
 		const exec = vi.fn(async () => ({ stdout: 'checked\n', stderr: '', exitCode: 0 }));
 		const harness = await createContext(createEnv({ exec })).initializeRootHarness(
-			defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' }),
+			defineAgent(() => {
+				useModel('anthropic/claude-haiku-4-5');
+			}),
 		);
 
 		await expect(harness.sandbox.exec('printf checked')).resolves.toEqual({
@@ -72,7 +79,11 @@ describe('FlueHarness', () => {
 		const stopObserving = observe((event, context) => {
 			if (context === ctx) observations.push(event);
 		});
-		const harness = await ctx.initializeRootHarness(defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' }));
+		const harness = await ctx.initializeRootHarness(
+			defineAgent(() => {
+				useModel('anthropic/claude-haiku-4-5');
+			}),
+		);
 
 		try {
 			await harness.sandbox.exec('printenv TOKEN', { env: { TOKEN: 'secret-value' }, cwd: '/repo' });
@@ -99,7 +110,9 @@ describe('FlueHarness', () => {
 
 		it('hides internal runtime members when a session is handed to user code', async () => {
 				const harness = await createContext(createEnv()).initializeRootHarness(
-				defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' }),
+				defineAgent(() => {
+					useModel('anthropic/claude-haiku-4-5');
+				}),
 			);
 
 			const session = await harness.session();
@@ -129,7 +142,9 @@ describe('FlueHarness', () => {
 	describe('sessions', () => {
 		it('rejects a missing session when get() targets an unknown name', async () => {
 				const harness = await createContext(createEnv()).initializeRootHarness(
-				defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' }),
+				defineAgent(() => {
+					useModel('anthropic/claude-haiku-4-5');
+				}),
 			);
 
 			await expect(harness.sessions.get('missing-review')).rejects.toThrow(SessionNotFoundError);
@@ -137,7 +152,9 @@ describe('FlueHarness', () => {
 
 		it('rejects an existing session when create() targets an existing name', async () => {
 				const harness = await createContext(createEnv()).initializeRootHarness(
-				defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' }),
+				defineAgent(() => {
+					useModel('anthropic/claude-haiku-4-5');
+				}),
 			);
 			await harness.session('review');
 
@@ -146,7 +163,9 @@ describe('FlueHarness', () => {
 
 		it('rejects reserved task names when ordinary session APIs receive an internal session name', async () => {
 				const harness = await createContext(createEnv()).initializeRootHarness(
-				defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' }),
+				defineAgent(() => {
+					useModel('anthropic/claude-haiku-4-5');
+				}),
 			);
 
 			await expect(harness.session('task:default:child')).rejects.toThrow(

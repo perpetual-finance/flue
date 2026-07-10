@@ -9,10 +9,11 @@
  * ```typescript
  * 'use agent';
  * import { Daytona } from '@daytona/sdk';
- * import { defineAgent, useSandbox } from '@flue/runtime';
+ * import { defineAgent, useModel, useSandbox } from '@flue/runtime';
  * import { daytona } from './sandboxes/daytona';
  *
  * function MyAgent() {
+ *   useModel('anthropic/claude-sonnet-4-6');
  *   useSandbox({
  *     // Lazy: the expensive sandbox creation happens once, inside
  *     // createSessionEnv(), at initialization — never on a re-render.
@@ -24,7 +25,7 @@
  *   });
  *   return 'You have a Daytona sandbox.';
  * }
- * export default defineAgent(MyAgent, { model: 'anthropic/claude-sonnet-4-6' });
+ * export default defineAgent(MyAgent);
  * ```
  */
 

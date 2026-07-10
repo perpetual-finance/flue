@@ -249,11 +249,11 @@ callback.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useInitialData, useTool } from '@flue/runtime';
+import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { commentOnIssue } from '../channels/github.ts';
 
-const input = v.object({
+export const initialDataSchema = v.object({
   owner: v.string(),
   repo: v.string(),
   issueNumber: v.number(),
@@ -262,18 +262,19 @@ const input = v.object({
 });
 
 function Assistant() {
-  const data = useInitialData<v.InferOutput<typeof input>>();
+  useModel('anthropic/claude-haiku-4-5');
+  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
   if (!data) throw new Error('This agent is created by the GitHub channel dispatch.');
   useTool(commentOnIssue(data));
   return `Review the issue and post a concise triage comment when appropriate. "${data.title}" was opened by ${data.openedBy}.`;
 }
 
-export default defineAgent(Assistant, { model: 'anthropic/claude-haiku-4-5', input });
+export default defineAgent(Assistant);
 ```
 
 `initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
-dispatch. The `input:` schema validates the dispatched `initialData` when the
+dispatch. The `initialDataSchema` export validates the dispatched `initialData` when the
 instance is created; `useInitialData()` returns the parsed value on every
 render. Pull requests use their issue number for issue comments. The model
 selects the comment body; trusted code binds the repository and issue. The

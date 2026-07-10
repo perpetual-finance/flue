@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defineAgent } from '../src/agent-definition.ts';
 import type { Harness } from '../src/harness.ts';
 import { renderAgentFunctionWithStructure } from '../src/hooks/render.ts';
+import { useModel } from '../src/hooks/use-model.ts';
 import { usePersistentState } from '../src/hooks/use-persistent-state.ts';
 import { useSandbox } from '../src/hooks/use-sandbox.ts';
 import { useSubagent } from '../src/hooks/use-subagent.ts';
@@ -126,6 +127,7 @@ describe('defineTool({ harness })', () => {
 
 	it('mounts through useTool with the flag preserved', () => {
 		const rendered = renderAgentFunctionWithStructure(() => {
+			useModel(CONFIG.model);
 			useTool({
 				name: 'connected',
 				description: 'Runtime-connected tool.',
@@ -133,7 +135,7 @@ describe('defineTool({ harness })', () => {
 				run: ({ harness }) => harness.sandbox.exec('pwd').then((result) => result.stdout),
 			});
 			return 'Base.';
-		}, CONFIG);
+		});
 		expect(rendered.config.tools?.[0]?.harness).toBe(true);
 	});
 });
@@ -173,6 +175,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 		let pureContextKeys: string[] | undefined;
 		let harnessAnswer: string | undefined;
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			useTool({
 				name: 'pure_probe',
 				description: 'A tool without runtime access.',
@@ -203,9 +206,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -269,6 +270,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 		let structured: { count: number } | undefined;
 		let followUp: string | undefined;
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			useTool({
 				name: 'two_step',
 				description: 'Two prompts in one harness conversation.',
@@ -291,9 +293,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -365,6 +365,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 			return 'You verify the working tree.';
 		}
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			useSubagent({ name: 'checker', description: 'Checks the tree.', agent: Checker });
 			return 'Case agent.';
 		}
@@ -374,9 +375,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext,
@@ -409,6 +408,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 
 		let renderedNote: string | undefined;
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			const [note, setNote] = usePersistentState('note', 'unset');
 			renderedNote = note;
 			useTool({
@@ -429,9 +429,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant, {
-						model: `${provider.getModel().provider}/${provider.getModel().id}`,
-					}),
+					definition: defineAgent(assistant),
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -483,6 +481,7 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 			return 'You review the delegated scope.';
 		}
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			useSubagent({
 				name: 'reviewer',
 				description: 'Reviews the delegated scope.',
@@ -511,9 +510,7 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 			provider,
 			createNoopSessionEnv({ exec }),
 		).initializeRootHarness(
-			defineAgent(assistant, {
-				model: `${provider.getModel().provider}/${provider.getModel().id}`,
-			}),
+			defineAgent(assistant),
 		);
 
 		await (await harness.session()).prompt('Delegate inspection.');
@@ -553,6 +550,7 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 			},
 		});
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			useTool({
 				name: 'run_direct_shell',
 				description: 'Run a direct harness shell call.',
@@ -587,9 +585,7 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 			},
 		]);
 		const harness = await createDirectContext(provider, env).initializeRootHarness(
-			defineAgent(assistant, {
-				model: `${provider.getModel().provider}/${provider.getModel().id}`,
-			}),
+			defineAgent(assistant),
 		);
 
 		await (await harness.session()).prompt('Run shell.');
@@ -618,6 +614,7 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 			},
 		});
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			useTool({
 				name: 'wait_for_children',
 				description: 'Wait for child operations.',
@@ -641,9 +638,7 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 			fauxAssistantMessage(fauxToolCall('wait_for_children', {}), { stopReason: 'toolUse' }),
 		]);
 		const harness = await createDirectContext(provider, env).initializeRootHarness(
-			defineAgent(assistant, {
-				model: `${provider.getModel().provider}/${provider.getModel().id}`,
-			}),
+			defineAgent(assistant),
 		);
 		const parent = await harness.session();
 
@@ -667,6 +662,7 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 		const sharedEnv = createNoopSessionEnv({ writeFile });
 		const createSessionEnv = vi.fn(async () => sharedEnv);
 		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			useSandbox({ createSessionEnv });
 			useTool({
 				name: 'write_report',
@@ -684,9 +680,7 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 			fauxAssistantMessage('Done.'),
 		]);
 		const harness = await createDirectContext(provider).initializeRootHarness(
-			defineAgent(assistant, {
-				model: `${provider.getModel().provider}/${provider.getModel().id}`,
-			}),
+			defineAgent(assistant),
 		);
 
 		await (await harness.session()).prompt('Write the report.');
