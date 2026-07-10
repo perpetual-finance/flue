@@ -49,16 +49,18 @@ export function renderAgentFunction(
 
 /**
  * The structural fingerprint of one render. Identity and lifecycle hooks
- * (state by name, message data by name, the sandbox by presence, lifecycle
- * hooks by call-order count) feed the invariance guard — they must be
- * identical across renders. Resources (tools, skills, subagents) are
- * DYNAMIC: they may be declared conditionally, and the session narrates
- * their set changes to the model instead of forbidding them.
+ * (state by name, message data by name, lifecycle hooks by call-order
+ * count) feed the invariance guard — they must be identical across
+ * renders. Resources (tools, skills, subagents) are DYNAMIC: they may be
+ * declared conditionally, and the session narrates their set changes to
+ * the model instead of forbidding them. The sandbox is neither: it may be
+ * declared conditionally, but the declaration is submission-scoped — read
+ * once at initialization, so a mid-submission flip takes effect on the
+ * next submission rather than changing the running environment.
  */
 export interface AgentRenderStructure {
 	stateNames: readonly string[];
 	messageDataNames: readonly string[];
-	hasSandbox: boolean;
 	/**
 	 * Lifecycle declarations this render. Hooks have no names — identity is
 	 * call order — so the counts (with the rules of hooks) pin the order.
@@ -114,7 +116,6 @@ export function renderAgentFunctionWithStructure(
 		structure: {
 			stateNames: [...frame.stateNames],
 			messageDataNames: [...frame.messageDataNames],
-			hasSandbox: frame.sandbox !== undefined,
 			agentStartCount: frame.agentStarts.length,
 			agentFinishCount: frame.agentFinishes.length,
 			responseStartCount: frame.responseStarts.length,
@@ -183,10 +184,12 @@ export function resolveSubagentDefinition(
 /**
  * Resources are dynamic; identity and lifecycle are static. Tools, skills,
  * and subagents may be declared conditionally — the session narrates their
- * changes to the model. State, message data, the sandbox, and lifecycle
- * hooks are the agent's durable identity and must be declared identically
- * on every render. Throws with the precise delta when consecutive renders
- * disagree on an identity kind.
+ * changes to the model. State, message data, and lifecycle hooks are the
+ * agent's durable identity and must be declared identically on every
+ * render. The sandbox is exempt: its declaration is submission-scoped
+ * (read once at initialization), so presence may change between renders —
+ * the change lands at the next submission. Throws with the precise delta
+ * when consecutive renders disagree on an identity kind.
  */
 export function assertRenderStructureInvariance(
 	previous: AgentRenderStructure,
@@ -197,9 +200,6 @@ export function assertRenderStructureInvariance(
 	if (stateDelta) problems.push(`state ${stateDelta}`);
 	const messageDataDelta = setDelta(previous.messageDataNames, next.messageDataNames);
 	if (messageDataDelta) problems.push(`message data ${messageDataDelta}`);
-	if (previous.hasSandbox !== next.hasSandbox) {
-		problems.push(`sandbox ${next.hasSandbox ? 'added' : 'removed'}`);
-	}
 	if (previous.agentStartCount !== next.agentStartCount) {
 		problems.push(
 			`useAgentStart count changed (${previous.agentStartCount} → ${next.agentStartCount})`,
@@ -223,7 +223,7 @@ export function assertRenderStructureInvariance(
 	if (problems.length > 0) {
 		throw new Error(
 			`[flue] The agent's render changed identity between turns: ${problems.join('; ')}. ` +
-				'State, message data, the sandbox, and lifecycle hooks must be declared unconditionally on every render — they are the agent\'s durable identity. Resources (tools, skills, subagents) may be conditional; a custom hook that mixes both kinds inherits the stricter rule.',
+				"State, message data, and lifecycle hooks must be declared unconditionally on every render — they are the agent's durable identity. Resources (tools, skills, subagents) and the sandbox may be conditional; a custom hook that mixes both kinds inherits the stricter rule.",
 		);
 	}
 }

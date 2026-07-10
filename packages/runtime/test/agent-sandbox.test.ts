@@ -15,6 +15,7 @@ import {
 	renderAgentFunctionWithStructure,
 } from '../src/hooks/render.ts';
 import { useModel } from '../src/hooks/use-model.ts';
+import { usePersistentState } from '../src/hooks/use-persistent-state.ts';
 import { useSandbox } from '../src/hooks/use-sandbox.ts';
 import { useSkill } from '../src/hooks/use-skill.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
@@ -87,7 +88,7 @@ function stubFactory(env: SessionEnv = createNoopSessionEnv()): SandboxFactory {
 }
 
 describe('useSandbox() (render)', () => {
-	it('attaches the sandbox to the rendered config and marks the structure', () => {
+	it('attaches the sandbox to the rendered config', () => {
 		const factory = stubFactory();
 		const withIt = renderAgentFunctionWithStructure(() => {
 			useModel(CONFIG.model);
@@ -95,14 +96,12 @@ describe('useSandbox() (render)', () => {
 			return 'Base.';
 		});
 		expect(withIt.config.sandbox).toBe(factory);
-		expect(withIt.structure.hasSandbox).toBe(true);
 
 		const withoutIt = renderAgentFunctionWithStructure(() => {
 			useModel(CONFIG.model);
 			return 'Base.';
 		});
 		expect(withoutIt.config.sandbox).toBeUndefined();
-		expect(withoutIt.structure.hasSandbox).toBe(false);
 	});
 
 	it('is callable from a nested custom hook', () => {
@@ -151,7 +150,7 @@ describe('useSandbox() (render)', () => {
 });
 
 describe('useSandbox() invariance', () => {
-	it('names the delta when the sandbox is attached conditionally', () => {
+	it('tolerates conditional attachment — the declaration is submission-scoped, not identity', () => {
 		let attach = false;
 		const agent = () => {
 			useModel(CONFIG.model);
@@ -162,8 +161,8 @@ describe('useSandbox() invariance', () => {
 		const without = render();
 		attach = true;
 		const withIt = render();
-		expect(() => assertRenderStructureInvariance(without, withIt)).toThrow(/sandbox added/);
-		expect(() => assertRenderStructureInvariance(withIt, without)).toThrow(/sandbox removed/);
+		expect(() => assertRenderStructureInvariance(without, withIt)).not.toThrow();
+		expect(() => assertRenderStructureInvariance(withIt, without)).not.toThrow();
 	});
 });
 
@@ -385,5 +384,116 @@ describe('useSandbox end to end (node coordinator, faux provider)', () => {
 		await expect(factoryEnv?.readFile(`${checklistPath}.missing`)).rejects.toThrow(
 			'Packaged skill file not found',
 		);
+	});
+
+	it('reads a conditional sandbox once per submission: mid-submission flips stay sticky, the next submission attaches', async () => {
+		const dbPath = createTempDbPath();
+		const adapter = sqlite(dbPath);
+		await adapter.migrate?.();
+		const { executionStore, conversationStreamStore, attachmentStore } = await adapter.connect();
+		const provider = createFauxProvider();
+		// Submission 1: enable the sandbox (flips persistent state), then probe —
+		// the flip must NOT crash the run at the turn boundary, and the probe
+		// still runs in the default env (the declaration was read at init).
+		// Submission 2: probe again — init re-reads the declaration, which now
+		// attaches, so the probe runs in the sandbox env.
+		provider.setResponses([
+			fauxAssistantMessage(fauxToolCall('enable_sandbox', {}, { id: 'tool:enable-1' }), {
+				stopReason: 'toolUse',
+			}),
+			fauxAssistantMessage(fauxToolCall('probe', {}, { id: 'tool:probe-1' }), {
+				stopReason: 'toolUse',
+			}),
+			fauxAssistantMessage('Enabled.'),
+			fauxAssistantMessage(fauxToolCall('probe', {}, { id: 'tool:probe-2' }), {
+				stopReason: 'toolUse',
+			}),
+			fauxAssistantMessage('Probed.'),
+		]);
+
+		const defaultExecs: string[] = [];
+		const sandboxExecs: string[] = [];
+		let sandboxEnvBuilds = 0;
+		const sandbox: SandboxFactory = {
+			createSessionEnv: async () => {
+				sandboxEnvBuilds += 1;
+				return createNoopSessionEnv({
+					exec: async (command) => {
+						sandboxExecs.push(command);
+						return { stdout: 'sandbox', stderr: '', exitCode: 0 };
+					},
+				});
+			},
+		};
+		const createContext: CreateAgentContextFn = ({ id, request, initialEventIndex, dispatchId }) =>
+			createFlueContext({
+				id,
+				dispatchId,
+				env: {},
+				req: request,
+				initialEventIndex,
+				agentConfig: { subagents: {}, resolveModel: () => provider.getModel() },
+				createDefaultEnv: async () =>
+					createNoopSessionEnv({
+						exec: async (command) => {
+							defaultExecs.push(command);
+							return { stdout: 'default', stderr: '', exitCode: 0 };
+						},
+					}),
+			});
+
+		function assistant() {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+			const [enabled, setEnabled] = usePersistentState('sandboxEnabled', false);
+			if (enabled) useSandbox(sandbox);
+			useTool({
+				name: 'enable_sandbox',
+				description: 'Attach the workspace.',
+				input: v.object({}),
+				run: () => {
+					setEnabled(true);
+					return 'Sandbox enabled.';
+				},
+			});
+			useTool({
+				name: 'probe',
+				description: 'Probe the environment.',
+				input: v.object({}),
+				harness: true,
+				run: async ({ harness }) => (await harness.sandbox.exec('pwd')).stdout,
+			});
+			return 'Support agent.';
+		}
+
+		const coordinator = createNodeAgentCoordinator({
+			submissions: executionStore.submissions,
+			agents: [
+				{
+					name: 'assistant',
+					definition: defineAgent(assistant),
+				},
+			],
+			createContext,
+			conversationStreamStore,
+			attachmentStore,
+		});
+
+		await coordinator.admitDispatch(makeDispatchInput({ dispatchId: 'dispatch:sandbox-flip-1' }));
+		await coordinator.waitForIdle();
+		// The flip happened mid-submission: the env stayed the default one for
+		// the whole run, and the sandbox factory was never consulted.
+		expect(defaultExecs).toEqual(['pwd']);
+		expect(sandboxExecs).toEqual([]);
+		expect(sandboxEnvBuilds).toBe(0);
+
+		await coordinator.admitDispatch(makeDispatchInput({ dispatchId: 'dispatch:sandbox-flip-2' }));
+		await coordinator.waitForIdle();
+		await coordinator.shutdown();
+
+		// The next submission's init re-read the declaration: persistent state
+		// replays as true, so the sandbox attached and the probe ran inside it.
+		expect(sandboxEnvBuilds).toBeGreaterThanOrEqual(1);
+		expect(sandboxExecs).toEqual(['pwd']);
+		expect(defaultExecs).toEqual(['pwd']);
 	});
 });

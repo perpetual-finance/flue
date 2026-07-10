@@ -22,8 +22,17 @@ import { requireRenderFrame } from './frame.ts';
  * ```
  *
  * Callable from the agent body or a custom hook — but at most
- * once per render (an agent has one environment), and never conditionally.
- * Without it, the runtime's default environment applies.
+ * once per render (an agent has one environment). Without it, the runtime's
+ * default environment applies.
+ *
+ * The call may be conditional. The declaration is SUBMISSION-SCOPED: it is
+ * read once, when the submission's harness initializes, so a condition that
+ * changes mid-submission (a tool flipping `usePersistentState`, say) takes
+ * effect on the NEXT submission — the environment never changes under a
+ * running submission. A condition derived from persistent state replays
+ * durably, so every later submission re-attaches the same declaration, and
+ * adapters keyed on the instance id resolve back to the same durable
+ * workspace.
  *
  * `options.cwd` scopes the agent's working directory inside the initialized
  * environment. Like the factory, it is read once when a submission starts.

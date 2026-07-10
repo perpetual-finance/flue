@@ -67,9 +67,9 @@ function OrderAssistant() {
 export default defineAgent(OrderAssistant);
 ```
 
-The function runs again before every model turn, so guards and interpolated text always reflect current state. Resources — tools, skills, and subagents — may even be declared conditionally (`if (pro) useSkill(refundsSkill)`): when a render's resource set changes, the runtime announces the change to the model in the conversation instead of rewriting the system prompt, and when the instruction text itself changes (interpolated state, a redeploy), a short signal tells the model its instructions were updated (see [Dynamic resources](/docs/api/agent-api/#dynamic-resources)). The agent's _identity_ stays static: `usePersistentState`, `useDataWriter`, `useSandbox`, and the lifecycle hooks must be declared identically on every render. See [Tools](/docs/guide/tools/), [Skills](/docs/guide/skills/), [Sandboxes](/docs/guide/sandboxes/), and [Subagents](/docs/guide/subagents/) for what an agent's body can compose, and [Durable Agents](/docs/concepts/durable-execution/) for how that state persists.
+The function runs again before every model turn, so guards and interpolated text always reflect current state. Resources — tools, skills, and subagents — may even be declared conditionally (`if (pro) useSkill(refundsSkill)`): when a render's resource set changes, the runtime announces the change to the model in the conversation instead of rewriting the system prompt, and when the instruction text itself changes (interpolated state, a redeploy), a short signal tells the model its instructions were updated (see [Dynamic resources](/docs/api/agent-api/#dynamic-resources)). The agent's _identity_ stays static: `usePersistentState`, `useDataWriter`, and the lifecycle hooks must be declared identically on every render (`useSandbox` may be conditional — its declaration is read once per submission; see [Conditional attachment](/docs/guide/sandboxes/#conditional-attachment)). See [Tools](/docs/guide/tools/), [Skills](/docs/guide/skills/), [Sandboxes](/docs/guide/sandboxes/), and [Subagents](/docs/guide/subagents/) for what an agent's body can compose, and [Durable Agents](/docs/concepts/durable-execution/) for how that state persists.
 
-An agent's static identity — its model, tuning, and environment — is declared with the same hooks, fixed in shape across renders:
+An agent's model, tuning, and environment are declared with the same hooks — each read once per submission, at initialization:
 
 ```ts title="src/agents/repository-reviewer.ts"
 'use agent';
@@ -112,7 +112,7 @@ function SupportAssistant() {
 export default defineAgent(SupportAssistant);
 ```
 
-A custom hook that only declares resources (tools, skills, subagents) may be called conditionally; one that also declares identity — state, message data, a sandbox, or lifecycle hooks — inherits the stricter rule and must be called on every render. Most behavior still wants state, arguments, and tool guards rather than conditional mounting — see [Durable Agents](/docs/concepts/durable-execution/) for the reasoning and the phased-workflow pattern this enables.
+A custom hook that only declares resources (tools, skills, subagents) or a sandbox may be called conditionally; one that also declares identity — state, message data, or lifecycle hooks — inherits the stricter rule and must be called on every render. Most behavior still wants state, arguments, and tool guards rather than conditional mounting — see [Durable Agents](/docs/concepts/durable-execution/) for the reasoning and the phased-workflow pattern this enables.
 
 ### Markdown instructions
 

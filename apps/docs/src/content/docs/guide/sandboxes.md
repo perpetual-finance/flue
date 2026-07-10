@@ -1,7 +1,7 @@
 ---
 title: Sandboxes
 description: Give agents a workspace for files and command-driven work.
-lastReviewedAt: 2026-07-07
+lastReviewedAt: 2026-07-10
 ---
 
 Sandboxes give an agent a workspace to read, write, and run commands in while it works. Use them when an agent needs to operate on files or run commands, rather than only respond to prompts or call application-defined [tools](/docs/guide/tools/).
@@ -71,6 +71,47 @@ See the Ecosystem **Sandboxes** integrations, such as [Daytona](/docs/ecosystem/
 Cloudflare deployments can use [Cloudflare Sandbox](/docs/ecosystem/sandboxes/cloudflare/) for a native container-backed Linux sandbox. Use it when an agent deployed on Cloudflare needs tools such as git, package installation, or native commands; its setup and lifecycle details belong in the integration guide.
 
 A sandbox integration may expose different model-facing capabilities than the virtual and local sandboxes. Check the integration documentation before assuming ordinary file or command tools are available.
+
+## Conditional attachment
+
+An agent can start in the virtual sandbox and attach a real environment only when a condition is met — a support agent that answers most requests directly, say, and provisions a workspace only for conversations that need hands-on investigation:
+
+```ts title="src/agents/support-desk.ts"
+'use agent';
+import { env } from 'cloudflare:workers';
+import { type AgentProps, defineAgent, useModel, usePersistentState, useSandbox, useTool } from '@flue/runtime';
+import { cloudflareSandbox } from '@flue/runtime/cloudflare';
+import { getSandbox } from '@cloudflare/sandbox';
+
+interface Env {
+  Sandbox: DurableObjectNamespace;
+}
+
+function SupportDesk({ id }: AgentProps) {
+  useModel('anthropic/claude-sonnet-4-6');
+  const [sandboxEnabled, setSandboxEnabled] = usePersistentState('sandboxEnabled', false);
+
+  const { Sandbox } = env as unknown as Env;
+  if (sandboxEnabled) useSandbox(cloudflareSandbox(getSandbox(Sandbox, id)), { cwd: '/workspace' });
+
+  useTool({
+    name: 'enable_sandbox',
+    description: 'Call when a request needs hands-on investigation.',
+    run: () => {
+      setSandboxEnabled(true);
+      return 'Workspace enabled. It will be attached from the next message.';
+    },
+  });
+
+  return 'Answer support requests directly when you can. For anything needing real investigation, call enable_sandbox first.';
+}
+
+export default defineAgent(SupportDesk);
+```
+
+The `useSandbox()` declaration is read once per submission, when it initializes. A condition that changes mid-submission takes effect on the **next** submission — the environment never changes under a running submission, which is why the tool result above says "from the next message". Persistent state replays durably, so every later submission re-evaluates the same condition and re-attaches the same declaration; sandbox adapters key their durable resources on the agent's instance id, so the agent gets the same workspace back each time.
+
+Detaching works the same way: when a later submission's condition is false, the agent is back in the default virtual sandbox. Files in the detached environment follow that environment's own lifecycle — nothing carries over. Swapping one sandbox for another between submissions is likewise possible and likewise unguarded: if your agent changes environments, you own keeping its instructions and tools coherent about where its files went.
 
 ## Persistence and security
 

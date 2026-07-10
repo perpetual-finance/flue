@@ -124,7 +124,7 @@ export default defineAgent(Support);
 
 The directive gives the agent its durable identity (the file basename, or an `export const name` literal override) and registers it with the built application — there is no name-based addressing beyond that identity. To expose the agent over HTTP, mount `agent.route()` in `app.ts`; see the [Routing API](/docs/api/routing-api/). A dispatch-only agent needs no mount. `flue run <path>` and raw `defineAgent()` values in unit tests do not require the directive.
 
-The agent function re-renders every turn as durable state changes — it must return synchronously. Its identity hooks (`usePersistentState()`, `useDataWriter()`, `useSandbox()`, and the lifecycle hooks) must stay identical across renders; its resources (`useTool()`, `useSkill()`, `useSubagent()`) may be declared conditionally, with changes announced to the model (see [Dynamic resources](#dynamic-resources)). Async work belongs in tools, lifecycle hooks (`useAgentStart()`, `useAgentFinish()`), or resource factories, never in the agent function body itself.
+The agent function re-renders every turn as durable state changes — it must return synchronously. Its identity hooks (`usePersistentState()`, `useDataWriter()`, and the lifecycle hooks) must stay identical across renders; its resources (`useTool()`, `useSkill()`, `useSubagent()`) may be declared conditionally, with changes announced to the model (see [Dynamic resources](#dynamic-resources)); `useSandbox()` may be conditional too, read once per submission (see [`useSandbox`](#usesandbox)). Async work belongs in tools, lifecycle hooks (`useAgentStart()`, `useAgentFinish()`), or resource factories, never in the agent function body itself.
 
 The runtime passes the top-level agent function an `AgentProps` object — the agent's route data, the way a web framework passes route params to the page component. Zero-argument agent functions stay assignable unchanged. Only the root receives it: custom hooks get whatever arguments their caller passes, and a subagent's agent function gets nothing (a delegate runs in isolation from the parent).
 
@@ -240,7 +240,7 @@ function Support() {
 }
 ```
 
-Resources are dynamic; identity and lifecycle are static. The resource hooks — `useTool`, `useSkill`, `useSubagent` — may be called conditionally (`if (pro) useSkill(refundsSkill)`): when a render's resource set changes, the runtime announces the delta to the model as a `resources` signal instead of rewriting the system prompt (see [Dynamic resources](#dynamic-resources)). Every other hook — `usePersistentState`, `useDataWriter`, `useSandbox`, `useAgentStart`, `useAgentFinish`, `useResponseStart`, `useResponseFinish` — is part of the agent's durable identity and must be declared identically on every render; a custom hook that mixes both kinds inherits the stricter rule. A custom hook may take arguments and return values to its caller like any other function, and may call other custom hooks.
+Resources are dynamic; identity and lifecycle are static. The resource hooks — `useTool`, `useSkill`, `useSubagent` — may be called conditionally (`if (pro) useSkill(refundsSkill)`): when a render's resource set changes, the runtime announces the delta to the model as a `resources` signal instead of rewriting the system prompt (see [Dynamic resources](#dynamic-resources)). `useSandbox` may also be conditional — its declaration is read once per submission, at initialization, so a mid-submission change takes effect on the next submission (see [`useSandbox`](#usesandbox)). Every other hook — `usePersistentState`, `useDataWriter`, `useAgentStart`, `useAgentFinish`, `useResponseStart`, `useResponseFinish` — is part of the agent's durable identity and must be declared identically on every render; a custom hook that mixes both kinds inherits the stricter rule. A custom hook may take arguments and return values to its caller like any other function, and may call other custom hooks.
 
 #### Dynamic resources
 
@@ -470,7 +470,9 @@ function IssueTriage() {
 }
 ```
 
-Callable from the agent body or a custom hook — but at most once per render (an agent has one environment), and never conditionally. Without it, the runtime's default virtual sandbox applies. Not available in a subagent render (delegates share the parent agent's environment; scope work with the task call's `cwd` instead). See [Sandboxes](/docs/guide/sandboxes/).
+Callable from the agent body or a custom hook — but at most once per render (an agent has one environment). Without it, the runtime's default virtual sandbox applies. Not available in a subagent render (delegates share the parent agent's environment; scope work with the task call's `cwd` instead). See [Sandboxes](/docs/guide/sandboxes/).
+
+The call may be conditional. The declaration is submission-scoped: it is read once, when the submission initializes, so a condition that changes mid-submission — a tool flipping [`usePersistentState`](#usepersistentstate), say — takes effect on the **next** submission; the environment never changes under a running submission. A condition derived from persistent state replays durably, so every later submission re-attaches the same declaration, and adapters keyed on the instance id resolve back to the same durable workspace. See [Conditional attachment](/docs/guide/sandboxes/#conditional-attachment).
 
 ### `useDelivery()`
 
