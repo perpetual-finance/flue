@@ -10,7 +10,7 @@ For the underlying mental model, start with [What is an agent?](/docs/concepts/a
 
 ## Creating a new agent
 
-In a Flue project, an agent is a module marked with the [`'use agent'` directive](/docs/guide/use-agent/) whose default export is created with `defineAgent(Agent, config)`. The **agent function** is a plain function: Flue Hooks in its body attach tools, instructions, and state, and its returned string is the agent's instruction.
+In a Flue project, an agent is a module marked with the [`'use agent'` directive](/docs/guide/use-agent/) whose default export is created with `defineAgent(Agent)`. The **agent function** is a plain function: Flue Hooks in its body attach tools, instructions, and state, and its returned string is the agent's instruction.
 
 ```ts title="src/agents/joke-teller.ts"
 'use agent';
@@ -33,7 +33,7 @@ In this example:
 - **`'use agent'`:** This registers the module with the application. The filename gives the agent its durable identity: `joke-teller`.
 - `description`: This optional static description of the agent. When present, it must be a non-empty string.
 - `route`: This optional middleware runs on every HTTP request the agent's routes serve. Here it allows everything; real applications authenticate in it.
-- `defineAgent(JokeTeller, config)`: This pairs the agent function with the agent's static identity — its model and tuning, fixed for the agent's lifetime.
+- `defineAgent(JokeTeller)`: This wraps the agent function as the module's default export — the addressable agent value the application registers and `app.ts` mounts.
 
 The module defines the agent; making it reachable over HTTP is a separate, explicit step in `app.ts`:
 
@@ -69,7 +69,7 @@ export default defineAgent(OrderAssistant);
 
 The function runs again before every model turn, so guards and interpolated text always reflect current state. Resources — tools, skills, and subagents — may even be declared conditionally (`if (pro) useSkill(refundsSkill)`): when a render's resource set changes, the runtime announces the change to the model in the conversation instead of rewriting the system prompt, and when the instruction text itself changes (interpolated state, a redeploy), a short signal tells the model its instructions were updated (see [Dynamic resources](/docs/api/agent-api/#dynamic-resources)). The agent's _identity_ stays static: `usePersistentState`, `useDataWriter`, `useSandbox`, and the lifecycle hooks must be declared identically on every render. See [Tools](/docs/guide/tools/), [Skills](/docs/guide/skills/), [Sandboxes](/docs/guide/sandboxes/), and [Subagents](/docs/guide/subagents/) for what an agent's body can compose, and [Durable Agents](/docs/concepts/durable-execution/) for how that state persists.
 
-`defineAgent(Agent, config)`'s second argument is the agent's static identity — the fields that never render:
+An agent's static identity — its model, tuning, and environment — is declared with the same hooks, fixed in shape across renders:
 
 ```ts title="src/agents/repository-reviewer.ts"
 'use agent';
@@ -166,7 +166,7 @@ from the id itself. Only the top-level function receives `AgentProps`; a custom 
 
 ## Creation data
 
-An instance usually exists _about something_ — a support ticket, a GitHub issue, a customer. That fact is known when the instance is created, is constant for its whole life, and shouldn't be re-parsed out of later messages (only the first message is shaped by the code that creates the instance). Send it as `data` on the instance's first contact and read it with `useInitialData()`:
+An instance usually exists _about something_ — a support ticket, a GitHub issue, a customer. That fact is known when the instance is created, is constant for its whole life, and shouldn't be re-parsed out of later messages (only the first message is shaped by the code that creates the instance). Send it as `initialData` on the instance's first contact and read it with `useInitialData()`:
 
 ```ts
 import * as v from 'valibot';

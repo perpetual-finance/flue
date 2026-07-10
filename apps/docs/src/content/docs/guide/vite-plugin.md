@@ -29,7 +29,7 @@ The plugin does three jobs on both targets:
 
 1. **Resolves the project.** It discovers [`flue.config.ts`](/docs/reference/configuration/) and locates your entry modules (`app.ts` required; `db.ts` and `cloudflare.ts` optional).
 2. **Scans for agents.** The [`'use agent'`](/docs/guide/use-agent/) scan over your source root defines the application's agent set, and the generated server bootstrap registers every scanned module.
-3. **Transforms agent modules.** The build injects each marked module's identity and binds its named exports (`route`, `attachments`, `description`) onto the definition.
+3. **Transforms agent modules.** The build injects each marked module's identity and binds its named exports (`route`, `description`, `initialDataSchema`, `durability`) onto the definition.
 
 ## Plugin options
 

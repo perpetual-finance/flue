@@ -898,7 +898,7 @@ function dispatch(agent: AgentModuleValue, request: AgentDispatchRequest): Promi
 interface AgentDispatchRequest {
   id: string;
   message: DeliveredMessageInput; // a DeliveredMessage, or a string as user-message shorthand
-  data?: unknown;
+  initialData?: unknown;
   uid?: string | null;
 }
 

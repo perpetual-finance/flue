@@ -81,7 +81,7 @@ Sends are fire-and-forget: a message is delivered into the living conversation a
 | Field     | Type               | Description                                     |
 | --------- | ------------------ | ----------------------------------------------- |
 | `message` | `DeliveredMessage` | The message delivered into the agent's session. |
-| `data`    | `unknown`          | Instance-creation data — the seed, consulted only when this send creates the conversation: validated against the agent's `initialDataSchema` export (when declared) and recorded once; the agent reads it with `useInitialData()`. Ignored when the send continues an existing conversation (pair with `uid: null` to error instead). |
+| `initialData` | `unknown`      | Instance-creation data — the seed, consulted only when this send creates the conversation: validated against the agent's `initialDataSchema` export (when declared) and recorded once; the agent reads it with `useInitialData()`. Ignored when the send continues an existing conversation (pair with `uid: null` to error instead). |
 | `uid`     | `string \| null`   | Send condition — the instance uid played as an ETag. Omit to continue-or-create unconditionally; pass a previous send's `uid` to continue only that incarnation (rejects with `404` otherwise); pass `null` to create only when no conversation exists yet (rejects with `409`, naming the existing uid, otherwise). |
 | `signal`  | `AbortSignal`      | Cancel the in-flight HTTP request.              |
 

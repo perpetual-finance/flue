@@ -36,6 +36,7 @@ export const docsSections: DocsSection[] = [
 					{ title: 'Why Flue?', slug: 'introduction/why-flue' },
 					{ title: 'What is an agent?', slug: 'concepts/agents' },
 					{ title: 'Durable Agents', slug: 'concepts/durable-execution' },
+					{ title: 'Migrating from 1.0 Beta', slug: 'guide/migrate-from-beta' },
 					{ title: 'Changelog', href: 'https://github.com/withastro/flue/blob/main/CHANGELOG.md' },
 				],
 			},
