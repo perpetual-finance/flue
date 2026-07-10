@@ -392,6 +392,46 @@ describe('AgentDefinition.route()', () => {
 			}
 		});
 
+		it('forwards abort and attachment requests on the canonical identity path, whatever the mount', async () => {
+			// The DO coordinator recognizes abort/attachment intent by the
+			// `/agents/<identity>/<id>` URL tail; the public mount path is
+			// user-chosen and must not leak into the DO-bound request.
+			const agent = boundAgent('support-desk');
+			const forwarded: Array<{ method: string; pathname: string }> = [];
+			const routeAgentRequest = vi.fn(
+				async (
+					request: Request,
+					_env: unknown,
+					_target: { agentName: string; instanceId: string },
+				) => {
+					forwarded.push({ method: request.method, pathname: new URL(request.url).pathname });
+					return new Response('forwarded');
+				},
+			);
+			configureFlueRuntime(cloudflareRuntime({ routeAgentRequest }));
+			const app = new Hono();
+			app.route('/api/assistants/desk', agent.route());
+
+			const abort = await app.fetch(
+				new Request('http://localhost/api/assistants/desk/case%3A8472/abort', {
+					method: 'POST',
+				}),
+			);
+			expect(abort.status).toBe(200);
+			const attachment = await app.fetch(
+				new Request('http://localhost/api/assistants/desk/case%3A8472/attachments/att-1'),
+			);
+			expect(attachment.status).toBe(200);
+
+			expect(forwarded).toEqual([
+				{ method: 'POST', pathname: '/agents/support-desk/case%3A8472/abort' },
+				{ method: 'GET', pathname: '/agents/support-desk/case%3A8472/attachments/att-1' },
+			]);
+			for (const call of routeAgentRequest.mock.calls) {
+				expect(call[2]).toEqual({ agentName: 'support-desk', instanceId: 'case:8472' });
+			}
+		});
+
 		it('renders route_not_found when no DO matches the forwarded request', async () => {
 			const agent = boundAgent();
 			configureFlueRuntime(cloudflareRuntime({ routeAgentRequest: async () => null }));

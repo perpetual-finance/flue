@@ -105,8 +105,8 @@ export async function executeAgentAbort(
 		return Response.json({ aborted });
 	}
 	// Cloudflare: forward to the owning agent DO, which recognizes the
-	// abort path and settles via its coordinator.
-	const response = await rt.routeAgentRequest(request, target.env, {
+	// abort intent by the canonical path tail and settles via its coordinator.
+	const response = await rt.routeAgentRequest(canonicalAgentRequest(target, '/abort'), target.env, {
 		agentName,
 		instanceId,
 	});
@@ -114,7 +114,7 @@ export async function executeAgentAbort(
 	throw routeNotFound(request);
 }
 
-/** Serve one attachment's bytes. Reached only after opt-in `attachments` middleware ran. */
+/** Serve one attachment's bytes. Reached only after the module's `route` middleware ran. */
 export async function executeAgentAttachmentRead(
 	rt: FlueRuntime,
 	target: AgentRequestTarget & { attachmentId: string },
@@ -128,13 +128,31 @@ export async function executeAgentAttachmentRead(
 			attachmentId: target.attachmentId,
 		});
 	}
-	// Cloudflare: forward to the agent DO, which owns the attachment bytes.
-	const response = await rt.routeAgentRequest(request, target.env, {
-		agentName,
-		instanceId,
-	});
+	// Cloudflare: forward to the agent DO, which owns the attachment bytes and
+	// recognizes the download intent by the canonical path tail.
+	const response = await rt.routeAgentRequest(
+		canonicalAgentRequest(target, `/attachments/${encodeURIComponent(target.attachmentId)}`),
+		target.env,
+		{ agentName, instanceId },
+	);
 	if (response) return response;
 	throw routeNotFound(request);
+}
+
+/**
+ * Rebuild a DO-bound request on the canonical `/agents/<identity>/<id><tail>`
+ * path. The DO coordinator recognizes abort and attachment intent by the URL
+ * tail, while the public mount path is user-chosen ("URL shapes are yours") —
+ * so the wire shape the DO sees must derive from the identity, never from
+ * wherever the agent happens to be mounted. Method, headers, body, and the
+ * query string all pass through unchanged.
+ */
+function canonicalAgentRequest(target: AgentRequestTarget, tail: string): Request {
+	const url = new URL(target.request.url);
+	url.pathname = `/agents/${encodeURIComponent(target.agentName)}/${encodeURIComponent(
+		target.instanceId,
+	)}${tail}`;
+	return new Request(url, target.request);
 }
 
 function routeNotFound(request: Request): RouteNotFoundError {
@@ -145,8 +163,8 @@ function routeNotFound(request: Request): RouteNotFoundError {
 }
 
 /**
- * Run a route's authored middleware (an agent module's `route`/`attachments`
- * export) around a handler, preserving Hono's next()/finalization contract.
+ * Run a route's authored middleware (an agent module's `route` export)
+ * around a handler, preserving Hono's next()/finalization contract.
  * Middleware may short-circuit with its own response, or call `await next()`
  * to reach the handler.
  */

@@ -243,11 +243,12 @@ class CloudflareAgentCoordinator {
 		if (method === 'GET' || method === 'HEAD') {
 			const streamPath = agentStreamPath(this.agentName, this.instance.name);
 			// Attachment byte download. The outer Worker has already run the
-			// opt-in `attachments` middleware and only forwards GET, so the DO —
-			// which owns the bytes — just serves from its attachment store. Match
-			// the exact `<name>/<id>/attachments/<attachmentId>` tail (not a loose
-			// `/attachments/` substring) so an agent literally named "attachments"
-			// doesn't misroute its conversation reads here.
+			// module's `route` middleware, only forwards GET, and rewrites the
+			// request onto the canonical `/agents/<name>/<id>/attachments/<id>`
+			// path whatever the public mount looks like — so the DO, which owns
+			// the bytes, just serves from its attachment store. Match the exact
+			// tail (not a loose `/attachments/` substring) so an agent literally
+			// named "attachments" doesn't misroute its conversation reads here.
 			const segments = new URL(request.url).pathname.split('/');
 			const attachmentId =
 				method === 'GET' &&
