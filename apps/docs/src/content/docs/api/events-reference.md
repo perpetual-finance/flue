@@ -34,7 +34,7 @@ Recognized image content blocks in framework event payloads never carry raw imag
 | `agent_start`        | Agent loop started.                                                                                                                                                                                                                                                          |
 | `agent_end`          | Agent loop ended.                                                                                                                                                                                                                                                            |
 | `idle`               | Agent activity became idle.                                                                                                                                                                                                                                                  |
-| `submission_settled` | Recovery settled an interrupted durable agent submission. Includes the submission id, a `completed`, `failed`, or `aborted` outcome, and the terminal error message for non-completed outcomes. Emitted only by recovery — normally processed submissions settle without it. |
+| `submission_settled` | A durable agent submission reached its terminal state. Includes the submission id, a `completed`, `failed`, or `aborted` outcome, and the serialized terminal error for non-completed outcomes. Emitted on every terminal path — normal completion, failure, abort, and recovery of an interrupted submission — so it is the reliable per-submission terminal signal for observers. |
 
 ### Agent operations
 
