@@ -13,6 +13,8 @@ import {
 	type CreateTaskSessionOptions,
 	createPublicSession,
 	Session,
+	type SessionEnvRuntime,
+	type SessionEnvSlot,
 	type SessionRerender,
 	type SessionResourceRuntime,
 } from './session.ts';
@@ -55,11 +57,24 @@ export class Harness implements FlueHarness {
 	};
 
 	/**
-	 * The agent's initialized environment — the live {@link SessionEnv} the
-	 * configured sandbox resolved to at harness init (the runtime default when
-	 * none was attached). The public direct-to-sandbox surface.
+	 * The agent's CURRENT environment — the live {@link SessionEnv} behind the
+	 * shared env slot (the runtime default when no sandbox was attached). A
+	 * live getter, not a snapshot: a conditional `useSandbox()` may swap the
+	 * environment at a turn boundary, and this surface follows. Code doing
+	 * conditional swaps owns not caching the returned reference across
+	 * boundaries. The public direct-to-sandbox surface.
 	 */
-	readonly sandbox: SessionEnv;
+	get sandbox(): SessionEnv {
+		return this.envSlot.env;
+	}
+
+	/**
+	 * The harness's mutable environment: shared by reference with every
+	 * session this harness opens, so a session-driven swap is visible here
+	 * and to sessions opened later. Fresh per harness when the constructor
+	 * receives none (action harnesses, task-less legacy paths).
+	 */
+	private envSlot: SessionEnvSlot;
 
 	private openSessions = new Map<string, Session>();
 	private pendingSessionOperations = new Map<string, Promise<void>>();
@@ -70,11 +85,11 @@ export class Harness implements FlueHarness {
 		private instanceId: string,
 		readonly name: string,
 		private config: AgentConfig,
-		private env: SessionEnv,
+		env: SessionEnv,
 		private eventCallback: FlueEventInputCallback | undefined,
 
 		private agentTools: ToolDefinition[],
-		private toolFactory: SessionToolFactory | undefined,
+		toolFactory: SessionToolFactory | undefined,
 		private conversationWriter: ConversationRecordWriter,
 		private attachmentStore: AttachmentStore,
 		private executionContext: FlueExecutionContext = {},
@@ -117,8 +132,21 @@ export class Harness implements FlueHarness {
 		private advanceDelivery?: (message: DeliveredMessage) => void,
 		/** Dynamic-resource runtime (function agents only); same routing as hookState. */
 		private resources?: SessionResourceRuntime,
+		/**
+		 * Shared mutable environment slot from harness init (function agents
+		 * only). When absent, a fresh slot wraps the positional env/toolFactory
+		 * — same behavior as before, nothing ever swaps it.
+		 */
+		envSlot?: SessionEnvSlot,
+		/** Environment-swap wiring (function agents only); same routing as hookState. */
+		private envRuntime?: SessionEnvRuntime,
 	) {
-		this.sandbox = env;
+		this.envSlot = envSlot ?? {
+			env,
+			toolFactory,
+			attached: false,
+			rediscoverNeeded: false,
+		};
 		if (scopeSignal) {
 			if (scopeSignal.aborted) this.scopeAbortController.abort(scopeSignal.reason);
 			else
@@ -243,10 +271,10 @@ export class Harness implements FlueHarness {
 			name: sessionName,
 			conversation,
 			config: this.config,
-			env: this.env,
+			env: this.envSlot.env,
 			onAgentEvent: this.decorateEventCallback(this.eventCallback),
 			agentTools: this.agentTools,
-			toolFactory: this.toolFactory,
+			toolFactory: this.envSlot.toolFactory,
 			delegationDepth: this.scopeDepth,
 			createTaskSession: (taskOptions) => this.createTaskSession(taskOptions),
 			createActionHarness: (actionOptions) => this.createActionHarness(actionOptions),
@@ -260,6 +288,8 @@ export class Harness implements FlueHarness {
 			output: this.output,
 			advanceDelivery: this.advanceDelivery,
 			resources: this.resources,
+			envSlot: this.envSlot,
+			envRuntime: this.envRuntime,
 		});
 		await session.initializeCanonicalContext();
 		this.openSessions.set(sessionName, session);
@@ -334,7 +364,7 @@ export class Harness implements FlueHarness {
 			env: taskEnv,
 			onAgentEvent: eventCallback,
 			agentTools: taskAgent ? (taskAgent.tools ?? []) : this.agentTools,
-			toolFactory: this.toolFactory,
+			toolFactory: this.envSlot.toolFactory,
 			delegationDepth: options.depth,
 			createTaskSession: (childOptions) => this.createTaskSession(childOptions),
 			createActionHarness: (actionOptions) => this.createActionHarness(actionOptions),
@@ -398,7 +428,7 @@ export class Harness implements FlueHarness {
 			options.env,
 			options.eventCallback ?? this.eventCallback,
 			options.tools,
-			this.toolFactory,
+			this.envSlot.toolFactory,
 			this.conversationWriter,
 			this.attachmentStore,
 			options.executionContext,

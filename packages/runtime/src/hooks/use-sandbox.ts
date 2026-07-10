@@ -25,14 +25,18 @@ import { requireRenderFrame } from './frame.ts';
  * once per render (an agent has one environment). Without it, the runtime's
  * default environment applies.
  *
- * The call may be conditional. The declaration is SUBMISSION-SCOPED: it is
- * read once, when the submission's harness initializes, so a condition that
- * changes mid-submission (a tool flipping `usePersistentState`, say) takes
- * effect on the NEXT submission — the environment never changes under a
- * running submission. A condition derived from persistent state replays
- * durably, so every later submission re-attaches the same declaration, and
- * adapters keyed on the instance id resolve back to the same durable
- * workspace.
+ * The call may be conditional. Presence is read at initialization and again
+ * at every turn boundary: when it flips (a tool flipping `usePersistentState`
+ * mid-run, say), the runtime swaps the environment before the next model
+ * call — attach resolves the declared factory, detach returns a fresh
+ * default environment — and announces the change to the model as one
+ * `environment` signal restating the full current state. Only PRESENCE is
+ * observable (factories are fresh objects every render), so replacing one
+ * sandbox with another while staying attached takes effect at the next
+ * submission's initialization instead. A condition derived from persistent
+ * state replays durably, so every later submission re-attaches the same
+ * declaration, and adapters keyed on the instance id resolve back to the
+ * same durable workspace.
  *
  * `options.cwd` scopes the agent's working directory inside the initialized
  * environment. Like the factory, it is read once when a submission starts.

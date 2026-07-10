@@ -99,7 +99,7 @@ function SupportDesk({ id }: AgentProps) {
     description: 'Call when a request needs hands-on investigation.',
     run: () => {
       setSandboxEnabled(true);
-      return 'Workspace enabled. It will be attached from the next message.';
+      return 'Workspace enabled — it is attached as of your next step.';
     },
   });
 
@@ -109,9 +109,9 @@ function SupportDesk({ id }: AgentProps) {
 export default defineAgent(SupportDesk);
 ```
 
-The `useSandbox()` declaration is read once per submission, when it initializes. A condition that changes mid-submission takes effect on the **next** submission — the environment never changes under a running submission, which is why the tool result above says "from the next message". Persistent state replays durably, so every later submission re-evaluates the same condition and re-attaches the same declaration; sandbox adapters key their durable resources on the agent's instance id, so the agent gets the same workspace back each time.
+The swap lands at the next turn boundary: the model calls `enable_sandbox`, and by its very next step the workspace is attached — same response, no extra round-trip. The runtime announces every swap to the model with a single `environment` signal that restates the complete current state (working directory, tools, skills, agents), so the agent always knows exactly what it has after the ground moved (see [Dynamic resources](/docs/api/agent-api/#dynamic-resources)). Persistent state replays durably, so every later submission re-evaluates the same condition and re-attaches the same declaration; sandbox adapters key their durable resources on the agent's instance id, so the agent gets the same workspace back each time.
 
-Detaching works the same way: when a later submission's condition is false, the agent is back in the default virtual sandbox. Files in the detached environment follow that environment's own lifecycle — nothing carries over. Swapping one sandbox for another between submissions is likewise possible and likewise unguarded: if your agent changes environments, you own keeping its instructions and tools coherent about where its files went.
+Detaching works the same way: when the condition clears, the next turn boundary returns the agent to a **fresh** default virtual sandbox. Files in the detached environment follow that environment's own lifecycle — nothing carries over, and nothing from before the attach is restored. Swapping one sandbox for another is also possible and equally unguarded, with one nuance: the runtime observes only *presence*, so replacing sandbox A with sandbox B while staying attached takes effect at the next submission rather than the next turn. If your agent changes environments, you own keeping its behavior coherent about where its files went — the runtime will tell the model, but it won't stop you.
 
 ## Persistence and security
 

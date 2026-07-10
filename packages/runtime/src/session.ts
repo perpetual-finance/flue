@@ -85,11 +85,11 @@ import {
 	ConversationRecordInvariantError,
 	DelegationDepthExceededError,
 	OperationFailedError,
-	serializeEventError,
 	SessionBusyError,
 	SkillNotRegisteredError,
 	SubagentNotDeclaredError,
 	SubmissionTimeoutError,
+	serializeEventError,
 	ToolNameConflictError,
 } from './errors.ts';
 import {
@@ -122,6 +122,7 @@ import {
 	type ResourceEntry,
 	type ResourceKind,
 	type ResourceSnapshot,
+	renderEnvironmentSignalBody,
 	renderResourceSignalBody,
 } from './resources.ts';
 import {
@@ -159,7 +160,7 @@ import {
 	getRegisteredApiKey,
 	getRegisteredStoreResponses,
 } from './runtime/providers.ts';
-import { createFlueFs } from './sandbox.ts';
+import { createCwdSessionEnv } from './sandbox.ts';
 import { valibotToJsonSchema } from './schema.ts';
 import { execShellWithEvents, getErrorMessage } from './shell.ts';
 import { getSkillReferenceDirectory } from './skill-package.ts';
@@ -197,6 +198,7 @@ import type {
 	PromptResultResponse,
 	PromptUsage,
 	ResolvedSubagent,
+	SandboxFactory,
 	SessionEnv,
 	SessionToolFactory,
 	ShellOptions,
@@ -438,6 +440,17 @@ interface SessionInitOptions {
 	 * hook that swaps the frozen presentation surfaces at compaction.
 	 */
 	resources?: SessionResourceRuntime;
+	/**
+	 * Shared mutable environment slot (root harness sessions only). The
+	 * harness and every session it opens read the CURRENT env/toolFactory
+	 * through this slot, so a turn-boundary environment swap in one session
+	 * is immediately visible everywhere (`harness.sandbox`, later-opened
+	 * sessions, new task children). Task and action sessions get a plain
+	 * `env` instead — their environment is captured at creation.
+	 */
+	envSlot?: SessionEnvSlot;
+	/** Environment-swap wiring (function agents only); same routing as hookState. */
+	envRuntime?: SessionEnvRuntime;
 }
 
 /** One re-render's session-facing output: what the next turn runs with. */
@@ -445,7 +458,62 @@ export type SessionRerender = () => {
 	systemPrompt: string;
 	tools: ToolDefinition[];
 	resources: RenderedResources;
+	/**
+	 * The render's declared sandbox and cwd. The session only inspects
+	 * PRESENCE at turn boundaries (a factory is a fresh object every render,
+	 * so identity is meaningless): a presence flip triggers an environment
+	 * swap; while presence holds steady the initialized environment stays.
+	 */
+	sandbox?: SandboxFactory;
+	cwd?: string;
 };
+
+/**
+ * The mutable environment of one root harness: the live `SessionEnv`, the
+ * sandbox's tool factory, and the swap bookkeeping. One slot per harness,
+ * shared by reference with every session the harness opens.
+ */
+export interface SessionEnvSlot {
+	env: SessionEnv;
+	toolFactory: SessionToolFactory | undefined;
+	/** Whether `env` came from a render-declared sandbox (vs the runtime default). */
+	attached: boolean;
+	/**
+	 * True when the environment swapped after the prompt-composition context
+	 * last discovered the workspace. The prompt stays frozen mid-submission
+	 * by design; the next compaction rebaseline re-discovers and clears this.
+	 */
+	rediscoverNeeded: boolean;
+}
+
+/**
+ * Environment-swap callbacks the harness init wires in (function agents
+ * only). They close over the initialization scope in client.ts — the
+ * instance id, the default-env factory, and the discovery contexts backing
+ * `recompose`/`mergeSkills` — so the session can swap environments without
+ * owning any of that.
+ */
+export interface SessionEnvRuntime {
+	/** Resolve a render-declared sandbox — or the runtime default when undefined. */
+	resolve: (
+		sandbox: SandboxFactory | undefined,
+	) => Promise<{ env: SessionEnv; toolFactory?: SessionToolFactory }>;
+	/**
+	 * Re-run workspace discovery against the just-swapped env for the LIVE
+	 * sets only (skill merge). The prompt-composition context is untouched —
+	 * the system prompt keeps describing the init-time workspace until a
+	 * compaction rebaseline, so the transcript stays coherent with the
+	 * prompt the earlier turns actually ran under.
+	 */
+	swapDiscovery: (env: SessionEnv) => Promise<void>;
+	/**
+	 * Full re-discovery against the current env: rebuilds the
+	 * prompt-composition context too. Called at compaction rebaseline when
+	 * `rediscoverNeeded` is set — the post-compaction prompt must describe
+	 * the environment the agent is actually in.
+	 */
+	rediscover: (env: SessionEnv) => Promise<void>;
+}
 
 /**
  * One render's model-facing resources. `snapshot` carries the declared sets
@@ -616,12 +684,23 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	private agentLoop: Agent;
 	private affinityKey: string;
 	private config: AgentConfig;
-	private env: SessionEnv;
+	/**
+	 * The session's environment, read through the (possibly shared) slot so
+	 * a turn-boundary swap is visible to every consumer at its next call —
+	 * tool-group rebuilds, `session.shell()`, task creation, the fs facade.
+	 */
+	private envSlot: SessionEnvSlot;
+	private get env(): SessionEnv {
+		return this.envSlot.env;
+	}
+	private get toolFactory(): SessionToolFactory | undefined {
+		return this.envSlot.toolFactory;
+	}
+	private envRuntime: SessionEnvRuntime | undefined;
 	private compactionAbortController: AbortController | undefined;
 	private modelRetryAbortController: AbortController | undefined;
 	private eventCallback: FlueEventInputCallback | undefined;
 	private agentTools: ToolDefinition[];
-	private toolFactory: SessionToolFactory | undefined;
 	private closed = false;
 	private activeOperation: OperationKind | undefined;
 	private activeOperationId: string | undefined;
@@ -785,7 +864,15 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	 */
 	private async prepareRerenderTurn(): Promise<AgentLoopTurnUpdate | undefined> {
 		if (!this.rerender) return undefined;
-		const next = this.rerender();
+		let next = this.rerender();
+		// Environment swap: a conditional useSandbox() whose presence flipped
+		// since initialization takes effect HERE, at the turn boundary — the
+		// same rhythm as resource changes. The swap lands before the tool
+		// rebuild below so the next model call already runs in the new env,
+		// and the fresh render re-merges live skills over the re-discovered
+		// workspace.
+		const swapped = await this.maybeSwapEnvironment(next);
+		if (swapped) next = this.rerender();
 		this.agentTools = next.tools;
 		// Live resource sets follow the render: skill activation and task
 		// resolution always see what the agent declares NOW, even while the
@@ -810,11 +897,13 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		);
 		this.agentLoop.state.tools = tools;
 		this.agentLoop.state.systemPrompt = next.systemPrompt;
-		// Narrate resource deltas from the same render evaluation that just
-		// produced the tool projection — the signal and the model's actual
-		// view cannot disagree. The steered signal injects before the next
-		// provider request (the loop polls steering after this returns).
-		await this.narrateResourceDelta();
+		// Narrate from the same render evaluation that just produced the tool
+		// projection — the signal and the model's actual view cannot disagree.
+		// The steered signal injects before the next provider request (the
+		// loop polls steering after this returns). A swap turn narrates ONE
+		// unconditional full environment snapshot instead of deltas.
+		if (swapped) await this.narrateEnvironmentSnapshot(next.resources.snapshot);
+		else await this.narrateResourceDelta();
 		return {
 			context: {
 				systemPrompt: next.systemPrompt,
@@ -822,6 +911,92 @@ export class Session implements FlueSession, AgentSubmissionSession {
 				tools: this.agentLoop.state.tools,
 			},
 		};
+	}
+
+	/**
+	 * Swap the environment when the render's `useSandbox()` presence flipped
+	 * since the environment was last resolved. Presence is the only reliable
+	 * observation (factories are fresh objects every render), so an A→B swap
+	 * that keeps the hook present takes effect at the next submission's
+	 * initialization instead. Attach and detach both land here: detach
+	 * resolves the runtime default env (a fresh one — nothing carries over).
+	 * The declared `cwd` re-applies exactly as initialization applies it.
+	 */
+	private async maybeSwapEnvironment(next: ReturnType<SessionRerender>): Promise<boolean> {
+		if (!this.envRuntime || !this.resourceRuntime) return false;
+		const wantAttached = next.sandbox !== undefined;
+		if (wantAttached === this.envSlot.attached) return false;
+		const { env: baseEnv, toolFactory } = await this.envRuntime.resolve(next.sandbox);
+		const env =
+			next.cwd !== undefined
+				? createCwdSessionEnv(baseEnv, baseEnv.resolvePath(next.cwd))
+				: baseEnv;
+		this.envSlot.env = env;
+		this.envSlot.toolFactory = toolFactory;
+		this.envSlot.attached = wantAttached;
+		// The prompt still describes the init-time workspace (frozen by
+		// design); the next compaction rebaseline re-discovers against the
+		// then-current env and composes a truthful prompt.
+		this.envSlot.rediscoverNeeded = true;
+		// Live sets re-merge over the NEW workspace: old-env discovered
+		// skills drop, new-env skills appear — both restated by the snapshot
+		// signal, never silently dangling against a departed filesystem.
+		await this.envRuntime.swapDiscovery(env);
+		return true;
+	}
+
+	/**
+	 * The environment swap's narration: ONE `environment` signal restating
+	 * the complete current state (cwd + full tool/skill/agent rosters),
+	 * emitted unconditionally — a swap can be tool-invisible while changing
+	 * everything the model believed about its filesystem, so there is no
+	 * delta to trust. Supersedes that boundary's delta narration: the
+	 * narrated snapshot syncs to the current render batch-atomically with
+	 * the signal, so the reconciler never restates the same change as
+	 * deltas one turn later. The snapshot record is NON-baseline — baseline
+	 * stays reserved for states the system prompt was actually composed
+	 * from (first contact, compaction).
+	 */
+	private async narrateEnvironmentSnapshot(current: ResourceSnapshot): Promise<void> {
+		if (!this.resourceRuntime || !this.activeSubmissionId) return;
+		const previous = this.lastNarratedResources;
+		const parentId = await this.conversationWriter.getConversationLeaf(this.conversationId);
+		const records: ConversationRecord[] = [];
+		// A swap at the very first boundary beats the lazy first-contact
+		// baseline: record what the frozen presentation surfaces WERE
+		// composed from before narrating the swap away from it.
+		if (!previous) {
+			records.push(this.resourceSnapshotRecord(this.resourceRuntime.initial.snapshot, true));
+		} else if (instructionsChanged(previous, current)) {
+			// The snapshot restates resources, not instruction prose — the
+			// instructions marker still travels when the document moved.
+			this.enqueueSignalAppend({
+				type: 'instructions',
+				body: INSTRUCTIONS_UPDATED_SIGNAL_BODY,
+			});
+		}
+		this.enqueueSignalAppend({
+			type: 'environment',
+			body: renderEnvironmentSignalBody({
+				cwd: this.env.cwd,
+				tools: this.agentLoop.state.tools.map((tool) => tool.name),
+				skills: Object.values(this.liveSkills).map((skill) => ({
+					name: skill.name,
+					...(skill.description ? { description: skill.description } : {}),
+				})),
+				subagents: Object.values(this.liveSubagents).map((subagent) => ({
+					name: subagent.name,
+					description: subagent.description,
+				})),
+			}),
+		});
+		const { records: signalRecords } = this.drainSignalAppendRecords(parentId);
+		await this.appendCanonical([
+			...records,
+			...signalRecords,
+			this.resourceSnapshotRecord(current, false),
+		]);
+		this.lastNarratedResources = current;
 	}
 
 	/**
@@ -902,6 +1077,15 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	 */
 	private async rebaselineResources(): Promise<void> {
 		if (!this.resourceRuntime || !this.rerender || !this.lastRenderedResources) return;
+		// An environment swap left the prompt describing the init-time
+		// workspace on purpose (mid-submission recompose would gaslight the
+		// transcript). The rebaseline is the truth point: re-discover against
+		// the CURRENT env so the recomposed prompt's cwd, directory listing,
+		// AGENTS.md, and skill catalog describe where the agent actually is.
+		if (this.envRuntime && this.envSlot.rediscoverNeeded) {
+			await this.envRuntime.rediscover(this.env);
+			this.envSlot.rediscoverNeeded = false;
+		}
 		// Render fresh so the recorded baseline and the recomposed surfaces
 		// come from the same evaluation.
 		const refreshed = this.rerender();
@@ -1748,10 +1932,26 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		this.conversationId = options.conversation.conversationId;
 		this.affinityKey = options.conversation.affinityKey;
 		this.config = options.config;
-		this.env = options.env;
-		this.fs = createFlueFs(options.env);
+		this.envSlot = options.envSlot ?? {
+			env: options.env,
+			toolFactory: options.toolFactory,
+			attached: false,
+			rediscoverNeeded: false,
+		};
+		this.envRuntime = options.envRuntime;
+		// Live facade: every call reads the slot's CURRENT env, so a swapped
+		// environment is immediately what `session.fs` operates on.
+		this.fs = {
+			readFile: (path) => this.env.readFile(path),
+			readFileBuffer: (path) => this.env.readFileBuffer(path),
+			writeFile: (path, content) => this.env.writeFile(path, content),
+			stat: (path) => this.env.stat(path),
+			readdir: (path) => this.env.readdir(path),
+			exists: (path) => this.env.exists(path),
+			mkdir: (path, mkdirOptions) => this.env.mkdir(path, mkdirOptions),
+			rm: (path, rmOptions) => this.env.rm(path, rmOptions),
+		};
 		this.agentTools = options.agentTools ?? [];
-		this.toolFactory = options.toolFactory;
 		this.delegationDepth = options.delegationDepth ?? 0;
 		this.createTaskSession = options.createTaskSession;
 		this.createActionHarness = options.createActionHarness;

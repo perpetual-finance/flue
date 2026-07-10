@@ -172,3 +172,47 @@ export function renderResourceSignalBody(delta: ResourceKindDelta, roster: strin
 function catalogLine(entry: ResourceEntry): string {
 	return entry.description ? `- **${entry.name}** — ${entry.description}` : `- **${entry.name}**`;
 }
+
+/** Everything the `environment` signal tells the model about the new state. */
+export interface EnvironmentSignalSnapshot {
+	cwd: string;
+	/** Full model-facing tool roster (builtins/adapter tools included), names only. */
+	tools: string[];
+	/** Live skill set — catalog-shape, since the prompt's skill catalog is stale by design. */
+	skills: ResourceEntry[];
+	/** Live subagent set — catalog-shape, matching the added-agent delta lines. */
+	subagents: ResourceEntry[];
+}
+
+/**
+ * The `environment` signal body: a deliberate FULL snapshot, not a delta.
+ * An environment swap can be tool-invisible (a virtual `bash` replaced by a
+ * container `bash`) while changing everything the model believed about its
+ * filesystem, so this signal is emitted unconditionally on every swap and
+ * restates the complete current state — verbose over ambiguous, on purpose.
+ * Tools are names-only (descriptions and schemas reach the model natively in
+ * the tools array); skills and agents keep catalog-shape lines because their
+ * frozen presentation surfaces (prompt catalog, task roster) may be stale.
+ */
+export function renderEnvironmentSignalBody(snapshot: EnvironmentSignalSnapshot): string {
+	const lines: string[] = [
+		`The agent's execution environment was replaced. The working directory is now ${snapshot.cwd}.`,
+		'Files, directories, and command results from the previous environment are no longer accessible — do not rely on anything learned about that filesystem without re-verifying it here.',
+		'',
+		'This is a complete snapshot of what is available now.',
+		`All available tools: ${snapshot.tools.length > 0 ? snapshot.tools.join(', ') : '(none)'}`,
+	];
+	if (snapshot.skills.length > 0) {
+		lines.push('All available skills:');
+		for (const entry of snapshot.skills) lines.push(catalogLine(entry));
+	} else {
+		lines.push('All available skills: (none)');
+	}
+	if (snapshot.subagents.length > 0) {
+		lines.push('All available agents:');
+		for (const entry of snapshot.subagents) lines.push(catalogLine(entry));
+	} else {
+		lines.push('All available agents: (none)');
+	}
+	return lines.join('\n');
+}

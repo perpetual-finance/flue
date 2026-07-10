@@ -484,8 +484,9 @@ export interface AgentRuntimeConfig {
  * Resources are dynamic; identity is static: tools, skills, and subagents
  * may be declared conditionally (the runtime narrates set changes to the
  * model), while state, message data, and lifecycle hooks must be declared
- * identically on every render. The sandbox may be conditional too, read
- * once per submission at initialization. Guards like the one above scope
+ * identically on every render. The sandbox may be conditional too — a
+ * presence flip swaps the environment at the next turn boundary. Guards
+ * like the one above scope
  * when an always-present tool may act. Agent functions must return
  * synchronously — async work lives in tools and resource factories.
  */

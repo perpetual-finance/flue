@@ -54,9 +54,9 @@ export function renderAgentFunction(
  * renders. Resources (tools, skills, subagents) are DYNAMIC: they may be
  * declared conditionally, and the session narrates their set changes to
  * the model instead of forbidding them. The sandbox is neither: it may be
- * declared conditionally, but the declaration is submission-scoped — read
- * once at initialization, so a mid-submission flip takes effect on the
- * next submission rather than changing the running environment.
+ * declared conditionally, and a presence flip swaps the environment at the
+ * next turn boundary (narrated as an `environment` signal) — never
+ * mid-turn, and never as an identity violation.
  */
 export interface AgentRenderStructure {
 	stateNames: readonly string[];
@@ -186,10 +186,10 @@ export function resolveSubagentDefinition(
  * and subagents may be declared conditionally — the session narrates their
  * changes to the model. State, message data, and lifecycle hooks are the
  * agent's durable identity and must be declared identically on every
- * render. The sandbox is exempt: its declaration is submission-scoped
- * (read once at initialization), so presence may change between renders —
- * the change lands at the next submission. Throws with the precise delta
- * when consecutive renders disagree on an identity kind.
+ * render. The sandbox is exempt: presence may change between renders — the
+ * session swaps the environment at the next turn boundary and narrates it.
+ * Throws with the precise delta when consecutive renders disagree on an
+ * identity kind.
  */
 export function assertRenderStructureInvariance(
 	previous: AgentRenderStructure,

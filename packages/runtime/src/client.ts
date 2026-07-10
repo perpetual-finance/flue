@@ -18,7 +18,13 @@ import { generateInstanceUid } from './runtime/ids.ts';
 import { resolveAgentModuleBinding } from './runtime/registration.ts';
 import { agentStreamPath } from './runtime/stream-offsets.ts';
 import { createCwdSessionEnv } from './sandbox.ts';
-import type { RenderedResources, SessionRerender, SessionResourceRuntime } from './session.ts';
+import type {
+	RenderedResources,
+	SessionEnvRuntime,
+	SessionEnvSlot,
+	SessionRerender,
+	SessionResourceRuntime,
+} from './session.ts';
 import type {
 	AgentConfig,
 	AgentModuleValue,
@@ -332,7 +338,8 @@ export async function initializeRootHarness(
 	// The render composes the whole config: hooks validated every value when
 	// it was declared. Values are submission-scoped — read HERE, once per
 	// initialized harness; a later render's different value takes effect on
-	// the next submission.
+	// the next submission. The sandbox is the one exception: a PRESENCE flip
+	// swaps the environment at a turn boundary (see maybeSwapEnvironment).
 	const definition = resolvedOptions;
 	if (typeof definition.model !== 'string') {
 		throw new Error(
@@ -351,18 +358,53 @@ export async function initializeRootHarness(
 	const env = resolvedOptions.cwd
 		? createCwdSessionEnv(baseEnv, baseEnv.resolvePath(resolvedOptions.cwd))
 		: baseEnv;
-	const localContext = await discoverSessionContext(
+	// The harness's mutable environment. A conditional useSandbox() whose
+	// presence flips mid-submission swaps it at a turn boundary; every env
+	// consumer reads through this slot.
+	const envSlot: SessionEnvSlot = {
+		env,
+		toolFactory,
+		attached: resolvedOptions.sandbox !== undefined,
+		rediscoverNeeded: false,
+	};
+	// Two live views of workspace discovery. `promptContext` backs the
+	// system-prompt surfaces (recompose, catalog baseline) and stays frozen
+	// across environment swaps until a compaction rebaseline — the prompt
+	// must keep describing the workspace the transcript's earlier turns
+	// actually ran in. `workspaceContext` backs the live skill merge and
+	// follows the current environment immediately.
+	let promptContext = await discoverSessionContext(
 		env,
 		definition.instructions,
 		definition.skills,
 	);
+	let workspaceContext = promptContext;
+	const envRuntime: SessionEnvRuntime = {
+		resolve: (sandbox) => resolveSessionEnv(config.id, sandbox, config),
+		swapDiscovery: async (nextEnv) => {
+			workspaceContext = await discoverSessionContext(
+				nextEnv,
+				definition.instructions,
+				definition.skills,
+			);
+		},
+		rediscover: async (currentEnv) => {
+			const fresh = await discoverSessionContext(
+				currentEnv,
+				definition.instructions,
+				definition.skills,
+			);
+			promptContext = fresh;
+			workspaceContext = fresh;
+		},
+	};
 	// One render's model-facing resources: the declared snapshot with skills
 	// merged over workspace discovery (what narration diffs), plus the live
 	// maps that back skill activation and task-agent resolution.
 	const renderedResources = (
 		rendered: ReturnType<typeof renderAgentFunctionWithStructure>,
 	): RenderedResources => {
-		const skills = localContext.mergeSkills(rendered.config.skills ?? []);
+		const skills = workspaceContext.mergeSkills(rendered.config.skills ?? []);
 		return {
 			snapshot: {
 				...rendered.structure.resources,
@@ -381,13 +423,13 @@ export async function initializeRootHarness(
 	// themselves as `resources` signals instead of rewriting the prompt; a
 	// compaction rebaseline swaps the catalog to the then-current set.
 	const durableResources = reduced.resources;
-	if (durableResources?.baseline) localContext.setCatalog(durableResources.baseline.skills);
+	if (durableResources?.baseline) promptContext.setCatalog(durableResources.baseline.skills);
 	const agentConfig: AgentConfig = {
 		...config.agentConfig,
-		systemPrompt: localContext.recompose(definition.instructions),
+		systemPrompt: promptContext.recompose(definition.instructions),
 		instructions: definition.instructions,
 		definitionSkills: definition.skills,
-		skills: localContext.skills,
+		skills: promptContext.skills,
 		subagents: initialResources.subagents,
 		model: resolvedModel,
 		thinkingLevel: definition.thinkingLevel ?? config.agentConfig.thinkingLevel,
@@ -407,16 +449,20 @@ export async function initializeRootHarness(
 		assertRenderStructureInvariance(lastStructure, next.structure);
 		lastStructure = next.structure;
 		return {
-			systemPrompt: localContext.recompose(next.config.instructions),
+			// `promptContext` is read at call time: frozen across environment
+			// swaps, refreshed by the compaction rebaseline's rediscover.
+			systemPrompt: promptContext.recompose(next.config.instructions),
 			tools: next.config.tools ?? [],
 			resources: renderedResources(next),
+			sandbox: next.config.sandbox,
+			cwd: next.config.cwd,
 		};
 	};
 	const resourceRuntime: SessionResourceRuntime = {
 		initial: initialResources,
 		...(durableResources?.baseline ? { baseline: durableResources.baseline } : {}),
 		...(durableResources?.narrated ? { narrated: durableResources.narrated } : {}),
-		rebaseline: (snapshot) => localContext.setCatalog(snapshot.skills),
+		rebaseline: (snapshot) => promptContext.setCatalog(snapshot.skills),
 	};
 	return new Harness(
 		config.id,
@@ -442,6 +488,8 @@ export async function initializeRootHarness(
 			renderState.delivery = message;
 		},
 		resourceRuntime,
+		envSlot,
+		envRuntime,
 	);
 }
 

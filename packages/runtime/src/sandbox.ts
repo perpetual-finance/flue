@@ -7,27 +7,12 @@ import type {
 	BashFactory,
 	BashLike,
 	FileStat,
-	FlueFs,
 	SandboxFactory,
 	SessionEnv,
 	ShellResult,
 } from './types.ts';
 
 export type { SessionEnv } from './types.ts';
-
-/** Adapt a SessionEnv to the public FlueFs surface. */
-export function createFlueFs(env: SessionEnv): FlueFs {
-	return {
-		readFile: (path) => env.readFile(path),
-		readFileBuffer: (path) => env.readFileBuffer(path),
-		writeFile: (path, content) => env.writeFile(path, content),
-		stat: (path) => env.stat(path),
-		readdir: (path) => env.readdir(path),
-		exists: (path) => env.exists(path),
-		mkdir: (path, options) => env.mkdir(path, options),
-		rm: (path, options) => env.rm(path, options),
-	};
-}
 
 /**
  * Shared implementation of the `FlueFs.writeFile` parent-creation guarantee.
