@@ -86,9 +86,6 @@ function createAgentRegistrations(): FlueAgentRegistration[] {
 		if (module.route !== undefined) {
 			registration.route = module.route as FlueAgentRegistration['route'];
 		}
-		if (module.attachments !== undefined) {
-			registration.attachments = module.attachments as FlueAgentRegistration['attachments'];
-		}
 		if (module.description !== undefined) {
 			registration.description = module.description as FlueAgentRegistration['description'];
 		}

@@ -42,11 +42,11 @@ describe('transformUseAgentModule', () => {
 				`const authMiddleware = async (_c, next) => next();`,
 				`const agent = defineAgent(() => undefined, { model: 'anthropic/claude-haiku-4-5' });`,
 				`export { agent as default, authMiddleware as route };`,
-				`export { attachments } from './middleware.ts';`,
+				`export { description } from './metadata.ts';`,
 			].join('\n'),
 		);
 		expect(result?.code).toContain('route: __flue_agent_module__.route');
-		expect(result?.code).toContain('attachments: __flue_agent_module__.attachments');
+		expect(result?.code).toContain('description: __flue_agent_module__.description');
 	});
 
 	it('throws with the directive location when a marked module has no default export', async () => {

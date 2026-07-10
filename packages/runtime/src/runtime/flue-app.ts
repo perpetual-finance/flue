@@ -21,13 +21,6 @@ export interface AgentRecord {
 	definition: AgentModuleValue;
 	description?: string;
 	route?: MiddlewareHandler;
-	/**
-	 * Opt-in gate for `GET /agents/:name/:id/attachments/:attachmentId`. When
-	 * absent, the attachment-download endpoint returns 404. When present, it runs
-	 * as middleware before bytes are served, so the agent author authorizes and
-	 * scopes access (the bytes may contain sensitive content).
-	 */
-	attachments?: MiddlewareHandler;
 }
 
 interface RuntimeBase {

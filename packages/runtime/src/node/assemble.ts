@@ -138,7 +138,6 @@ export async function assembleNodeAgentRuntime(
 		definition: registration.definition,
 		...(registration.description !== undefined ? { description: registration.description } : {}),
 		...(registration.route !== undefined ? { route: registration.route } : {}),
-		...(registration.attachments !== undefined ? { attachments: registration.attachments } : {}),
 	}));
 
 	const activityGate = createRuntimeActivityGate();

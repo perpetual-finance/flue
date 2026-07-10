@@ -21,7 +21,6 @@ function boundAgent(
 	identity = 'triage',
 	metadata: {
 		route?: MiddlewareHandler;
-		attachments?: MiddlewareHandler;
 		description?: string;
 	} = {},
 ): FunctionAgentDefinition {
@@ -285,25 +284,26 @@ describe('AgentDefinition.route()', () => {
 	});
 
 	describe('attachments route', () => {
-		it('renders the opt-out 404 when the module has no attachments export', async () => {
+		it('serves the download endpoint on every mounted agent, no export required', async () => {
 			const agent = boundAgent();
-			configureFlueRuntime(nodeRuntime({ devMode: true }));
+			configureFlueRuntime(nodeRuntime());
 			const app = new Hono();
 			app.route('/agents/triage', agent.route());
 
+			// No stream exists yet, so the byte handler reports a missing
+			// stream — proof the endpoint exists without any opt-in.
 			const response = await app.fetch(
 				new Request('http://localhost/agents/triage/inst-1/attachments/att-1'),
 			);
 
 			expect(response.status).toBe(404);
-			const body = (await response.json()) as { error: { type: string; dev?: string } };
-			expect(body.error.type).toBe('route_not_found');
-			expect(body.error.dev).toContain('attachments');
+			const body = (await response.json()) as { error: { type: string } };
+			expect(body.error.type).toBe('stream_not_found');
 		});
 
-		it('runs the exposed attachments middleware before serving bytes', async () => {
+		it('wraps the download endpoint with the route middleware', async () => {
 			const agent = boundAgent('triage', {
-				attachments: async (c) => c.text('forbidden', 403),
+				route: async (c) => c.text('forbidden', 403),
 			});
 			configureFlueRuntime(nodeRuntime());
 			const app = new Hono();
@@ -317,9 +317,9 @@ describe('AgentDefinition.route()', () => {
 			expect(await response.text()).toBe('forbidden');
 		});
 
-		it('reaches the byte handler when the attachments middleware calls next', async () => {
+		it('reaches the byte handler when the route middleware calls next', async () => {
 			const agent = boundAgent('triage', {
-				attachments: async (_c, next) => {
+				route: async (_c, next) => {
 					await next();
 				},
 			});
@@ -327,8 +327,6 @@ describe('AgentDefinition.route()', () => {
 			const app = new Hono();
 			app.route('/agents/triage', agent.route());
 
-			// No stream exists yet, so the handler reports a missing stream —
-			// distinct from the not-exposed 404 above.
 			const response = await app.fetch(
 				new Request('http://localhost/agents/triage/inst-1/attachments/att-1'),
 			);
@@ -338,12 +336,8 @@ describe('AgentDefinition.route()', () => {
 			expect(body.error.type).toBe('stream_not_found');
 		});
 
-		it('rejects non-GET methods on an exposed attachments route', async () => {
-			const agent = boundAgent('triage', {
-				attachments: async (_c, next) => {
-					await next();
-				},
-			});
+		it('rejects non-GET methods on the attachments route', async () => {
+			const agent = boundAgent();
 			configureFlueRuntime(nodeRuntime());
 			const app = new Hono();
 			app.route('/agents/triage', agent.route());
@@ -361,11 +355,7 @@ describe('AgentDefinition.route()', () => {
 
 	describe('cloudflare target', () => {
 		it('forwards prompt, read, abort, and attachment requests to the agent DO by identity', async () => {
-			const agent = boundAgent('triage', {
-				attachments: async (_c, next) => {
-					await next();
-				},
-			});
+			const agent = boundAgent();
 			const routeAgentRequest = vi.fn(
 				async (
 					_request: Request,

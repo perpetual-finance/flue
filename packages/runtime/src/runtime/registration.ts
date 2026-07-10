@@ -12,7 +12,7 @@
  *
  *   1. {@link __flueBindAgentModule} — injected into each `'use agent'`
  *      module by the build transform; binds the module's identity and named
- *      exports (`route`, `attachments`, `description`) to the definition at
+ *      exports (`route`, `description`) to the definition at
  *      module-evaluation time.
  *   2. {@link registerFlueAgents} — called once by the generated bootstrap
  *      with the full scanned agent set; the app-membership registry.
@@ -26,7 +26,7 @@
 
 import type { MiddlewareHandler } from 'hono';
 import { Hono } from 'hono';
-import { AttachmentsNotExposedError, MethodNotAllowedError, toHttpResponse } from '../errors.ts';
+import { MethodNotAllowedError, toHttpResponse } from '../errors.ts';
 import type { AgentModuleValue } from '../types.ts';
 import {
 	assertAgentInstanceId,
@@ -50,25 +50,21 @@ import { AgentMountRouteParamSchema, InvocationQuerySchema } from './schemas.ts'
  * ```ts
  * import { __flueBindAgentModule } from '@flue/runtime';
  * __flueBindAgentModule(<defaultExport>, {
- *   identity: '<file basename>',        // required; non-empty, no ':'
+ *   identity: '<identity slug>',        // required; non-empty, no ':'
  *   route,                              // only when the module exports it
- *   attachments,                        // only when the module exports it
  *   description,                        // only when the module exports it
  * });
  * ```
  *
- * The named-export fields keep exactly their legacy meanings: `route` is
- * middleware applied to every route the definition's `.route()` serves,
- * `attachments` opts the attachment-download endpoint in (absent ⇒ 404), and
- * `description` is static human-facing metadata.
+ * `route` is middleware applied to every route the definition's `.route()`
+ * serves — including attachment downloads — and `description` is static
+ * human-facing metadata.
  */
 export interface AgentModuleBinding {
-	/** Module identity (file basename). Keys durable storage; non-empty, no `:`. */
+	/** Module identity (file basename, or its `name` export). Keys durable storage; non-empty, no `:`. */
 	identity: string;
 	/** Middleware applied to all of the agent's routes (module `route` export). */
 	route?: MiddlewareHandler;
-	/** Opt-in gate for attachment byte downloads (module `attachments` export). */
-	attachments?: MiddlewareHandler;
 	/** Static description (module `description` export). */
 	description?: string;
 }
@@ -127,7 +123,7 @@ export function registerFlueAgents(records: readonly FlueAgentRegistration[]): v
 		if (duplicateIdentity) {
 			throw new Error(
 				`[flue] Duplicate agent identity "${record.identity}". ` +
-					'Agent identities derive from file basenames; keep one agent module per basename.',
+					'Agent identities derive from file basenames (or their `export const name` override) and must be unique.',
 			);
 		}
 		const duplicateDefinition = [...next.values()].find(
@@ -154,7 +150,6 @@ export function registerFlueAgents(records: readonly FlueAgentRegistration[]): v
 		moduleBindings.set(record.definition, {
 			identity: record.identity,
 			...(record.route !== undefined ? { route: record.route } : {}),
-			...(record.attachments !== undefined ? { attachments: record.attachments } : {}),
 			...(record.description !== undefined ? { description: record.description } : {}),
 		});
 	}
@@ -194,14 +189,13 @@ export function resetFlueAgentRegistrationForTests(): void {
  * - `POST /:id` — send a prompt (202 admission)
  * - `GET|HEAD /:id` — DS conversation stream read
  * - `POST /:id/abort` — abort in-flight/queued work
- * - `ALL /:id/attachments/:attachmentId` — opt-in byte download; without an
- *   `attachments` module export the endpoint renders the canonical 404
+ * - `ALL /:id/attachments/:attachmentId` — attachment byte download
  *
- * The module's `route` export (middleware) wraps the prompt, stream, and
- * abort routes; the `attachments` export wraps the attachment route. Handlers
- * resolve identity/metadata and the runtime at request time and dispatch
- * through the same machinery as the legacy name-addressed router, so both
- * surfaces share storage keying and wire behavior.
+ * The module's `route` export (middleware) wraps every route above —
+ * mounting is the exposure decision, and `route` is the one auth point.
+ * Handlers resolve identity/metadata and the runtime at request time and
+ * dispatch through the same machinery as the legacy name-addressed router,
+ * so both surfaces share storage keying and wire behavior.
  */
 export function createAgentRouter(definition: AgentModuleValue): Hono {
 	// Fail fast at build/mount time when the module was never marked — but
@@ -254,27 +248,18 @@ export function createAgentRouter(definition: AgentModuleValue): Hono {
 		);
 	});
 
-	// Opt-in attachment byte download. A distinct (longer) path, so it never
+	// Attachment byte download. A distinct (longer) path, so it never
 	// collides with the prompt/stream routes.
 	app.all('/:id/attachments/:attachmentId', async (c) => {
 		const binding = resolve();
 		const rt = requireRuntime();
-		// Strictly opt-in: without an exported `attachments` middleware the
-		// endpoint does not exist. The 404 carries dev-only guidance.
-		if (!binding.attachments) {
-			throw new AttachmentsNotExposedError({
-				method: c.req.method,
-				path: new URL(c.req.url).pathname,
-				agentName: binding.identity,
-			});
-		}
 		if (c.req.method !== 'GET') {
 			throw new MethodNotAllowedError({ method: c.req.method, allowed: ['GET'] });
 		}
 		const id = c.req.param('id') ?? '';
 		const attachmentId = c.req.param('attachmentId') ?? '';
 		const request = c.req.raw.clone();
-		return runAttachedMiddleware(c, binding.attachments, () =>
+		return runAttachedMiddleware(c, binding.route, () =>
 			executeAgentAttachmentRead(rt, {
 				agentName: binding.identity,
 				instanceId: id,
@@ -364,11 +349,6 @@ function assertAgentModuleBinding(binding: AgentModuleBinding): void {
 	if (binding.route !== undefined && typeof binding.route !== 'function') {
 		throw new Error(
 			`[flue] Agent "${binding.identity}" route export must be a callable Hono middleware value.`,
-		);
-	}
-	if (binding.attachments !== undefined && typeof binding.attachments !== 'function') {
-		throw new Error(
-			`[flue] Agent "${binding.identity}" attachments export must be a callable Hono middleware value.`,
 		);
 	}
 	if (

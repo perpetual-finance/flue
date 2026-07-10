@@ -96,15 +96,6 @@ describe('registerFlueAgents()', () => {
 		).toThrow('route export must be a callable Hono middleware value');
 		expect(() =>
 			registerFlueAgents([
-				{
-					definition: testAgent(),
-					identity: 'triage',
-					attachments: 42 as unknown as never,
-				},
-			]),
-		).toThrow('attachments export must be a callable Hono middleware value');
-		expect(() =>
-			registerFlueAgents([
 				{ definition: testAgent(), identity: 'triage', description: '   ' },
 			]),
 		).toThrow('description export must be a non-empty string');
@@ -122,18 +113,18 @@ describe('registerFlueAgents()', () => {
 describe('__flueBindAgentModule()', () => {
 	it('binds identity and module metadata to the definition and returns it', () => {
 		const triage = testAgent();
-		const attachments: MiddlewareHandler = async (_c, next) => next();
+		const route: MiddlewareHandler = async (_c, next) => next();
 
 		const returned = __flueBindAgentModule(triage, {
 			identity: 'triage',
-			attachments,
+			route,
 			description: 'Triage agent',
 		});
 
 		expect(returned).toBe(triage);
 		expect(resolveAgentModuleBinding(triage)).toMatchObject({
 			identity: 'triage',
-			attachments,
+			route,
 			description: 'Triage agent',
 		});
 	});

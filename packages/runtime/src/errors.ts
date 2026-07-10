@@ -316,24 +316,6 @@ export class StreamNotFoundError extends FlueHttpError {
 	}
 }
 
-/**
- * The attachments endpoint exists but the agent module did not export an
- * `attachments` middleware, so byte downloads are not exposed. Rendered as a
- * plain 404 in production (indistinguishable from any other unmatched route);
- * in dev the `dev` field explains how to opt in.
- */
-export class AttachmentsNotExposedError extends FlueHttpError {
-	constructor({ method, path, agentName }: { method: string; path: string; agentName: string }) {
-		super({
-			type: 'route_not_found',
-			message: `No route matches ${method} ${path}.`,
-			details: 'Verify the request method and path are correct.',
-			dev: `Attachment downloads are opt-in. Export an \`attachments\` Hono middleware from agents/${agentName}.ts to expose GET /agents/${agentName}/:id/attachments/:attachmentId; use it to authorize and scope access. Without it this endpoint returns 404.`,
-			status: 404,
-		});
-	}
-}
-
 export class AttachmentNotFoundError extends FlueHttpError {
 	constructor({ attachmentId }: { attachmentId: string }) {
 		super({

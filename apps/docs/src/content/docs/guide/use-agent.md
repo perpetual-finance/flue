@@ -55,10 +55,9 @@ The build transform binds the module's optional named exports onto the definitio
 ```ts title="src/agents/triage.ts"
 'use agent';
 import { defineAgent, type AgentRouteHandler } from '@flue/runtime';
-import { requireUser, gateAttachments } from '../auth.ts';
+import { requireUser } from '../auth.ts';
 
 export const route: AgentRouteHandler = requireUser; // middleware on all agent routes
-export const attachments: AgentRouteHandler = gateAttachments; // opt-in attachment downloads
 export const description = 'Triages incoming issues.'; // static metadata
 
 function Triage() {

@@ -62,7 +62,7 @@ Builds the agent's mountable Hono sub-app. Routes, relative to wherever the call
 | `GET /:id`                           | Read materialized history (`?view=history`, the default) or projected updates (`?view=updates`). |
 | `HEAD /:id`                          | Return canonical conversation-stream metadata.                                                   |
 | `POST /:id/abort`                    | Abort the conversation's in-flight and queued durable work; returns `200 { aborted }`.           |
-| `GET /:id/attachments/:attachmentId` | Serve one attachment's bytes. Exists only when the module exports `attachments`.                 |
+| `GET /:id/attachments/:attachmentId` | Serve one attachment's bytes.                                                                    |
 
 `:id` is the caller-chosen conversation id — the trailing URL segment. An empty id segment is rejected with `400 invalid_request`. Unsupported methods on known paths render the canonical `405 method_not_allowed` envelope with an `Allow` header.
 
@@ -81,15 +81,13 @@ function Triage() {
 export default defineAgent(Triage, { model: '...' });
 
 export const route: AgentRouteHandler = async (c, next) => next(); // middleware on all routes
-export const attachments: AgentRouteHandler = async (c, next) => next(); // opt-in downloads
 export const description = 'Triage incoming bug reports.'; // static metadata
 ```
 
-| Export        | Applied to                           | Meaning                                                                                                   |
-| ------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| `route`       | The prompt, stream, and abort routes | Hono middleware. May authenticate and call `await next()`, or short-circuit with its own response.        |
-| `attachments` | The attachment-download route        | Opt-in gate for attachment byte downloads. Without this export, the endpoint renders the canonical `404`. |
-| `description` | —                                    | Static human-facing metadata for the agent.                                                               |
+| Export        | Applied to                            | Meaning                                                                                                   |
+| ------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `route`       | Every route, attachments included     | Hono middleware. May authenticate and call `await next()`, or short-circuit with its own response.        |
+| `description` | —                                     | Static human-facing metadata for the agent.                                                               |
 
 Naming note: the `route` **named export** is middleware; the `.route()` **method** is the mount factory. They are related but distinct — `.route()` applies the `route` export automatically.
 

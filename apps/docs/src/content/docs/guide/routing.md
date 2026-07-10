@@ -33,7 +33,7 @@ URL shapes are yours. `/agents/triage` is a convention, not a requirement — mo
 | `POST /:id`                          | Deliver one message to the conversation (`202` admission).                    |
 | `GET` / `HEAD` `/:id`                | Read the conversation: durable event stream, or `?view=history` snapshot.     |
 | `POST /:id/abort`                    | Abort in-flight and queued work for the conversation.                         |
-| `GET /:id/attachments/:attachmentId` | Attachment byte download — exists only when the module exports `attachments`. |
+| `GET /:id/attachments/:attachmentId` | Attachment byte download.                                                     |
 
 `:id` is the caller-chosen conversation id. A conversation URL is therefore the mount path plus an id: mounting `triage.route()` at `/agents/triage` makes `/agents/triage/ticket-8472` one continuing conversation.
 
@@ -72,11 +72,10 @@ function Triage({ id }: AgentProps) {
 export default defineAgent(Triage, { model: 'anthropic/claude-haiku-4-5' });
 ```
 
-| Named export  | Meaning                                                                                                                              |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `route`       | Hono middleware applied to the prompt, stream, and abort routes. Call `next()` to allow; return a response to deny.                  |
-| `attachments` | Opts the attachment-download endpoint in, and is the middleware that protects it. Without this export, attachment URLs return `404`. |
-| `description` | Optional static human-facing description of the agent.                                                                               |
+| Named export  | Meaning                                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `route`       | Hono middleware applied to every route `.route()` serves, including attachment downloads. Call `next()` to allow; return a response to deny. |
+| `description` | Optional static human-facing description of the agent.                                                             |
 
 A naming adjacency to keep straight: the **`route` named export** is middleware _inside_ the agent module, while the **`.route()` method** is the mount factory called _from `app.ts`_. The export configures what the method serves.
 
