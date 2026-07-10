@@ -196,10 +196,10 @@ export interface EnvironmentSignalSnapshot {
  */
 export function renderEnvironmentSignalBody(snapshot: EnvironmentSignalSnapshot): string {
 	const lines: string[] = [
-		`The agent's execution environment was replaced. The working directory is now ${snapshot.cwd}.`,
-		'Files, directories, and command results from the previous environment are no longer accessible — do not rely on anything learned about that filesystem without re-verifying it here.',
+		"The agent's execution environment (sandbox) was replaced.",
+		`The current working directory is now \`${snapshot.cwd}\`.`,
+		'Files, directories, and command results from the previous environment may no longer be accessible — do not rely on anything learned about the previous environment without re-verifying it here, unless instructed otherwise.',
 		'',
-		'This is a complete snapshot of what is available now.',
 		`All available tools: ${snapshot.tools.length > 0 ? snapshot.tools.join(', ') : '(none)'}`,
 	];
 	if (snapshot.skills.length > 0) {

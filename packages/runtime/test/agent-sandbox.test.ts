@@ -586,13 +586,15 @@ describe('conditional sandbox: turn-boundary swap (node coordinator, faux provid
 		// The model's first post-swap turn read the full snapshot: forceful
 		// preamble, the NEW cwd, and complete rosters including the tool that
 		// appeared with the environment.
-		expect(postSwapMessages).toContain('execution environment was replaced');
-		expect(postSwapMessages).toContain('working directory is now /sandbox');
+		expect(postSwapMessages).toContain('execution environment (sandbox) was replaced');
+		expect(postSwapMessages).toContain('working directory is now `/sandbox`');
 		expect(postSwapMessages).toContain('All available tools:');
 		expect(postSwapMessages).toContain('diagnose');
 		// Exactly one snapshot, and no delta narration trailing it: the swap
 		// turn synced the narrated snapshot, so the reconciler stays quiet.
-		expect(finalTurnMessages.split('execution environment was replaced')).toHaveLength(2);
+		expect(finalTurnMessages.split('execution environment (sandbox) was replaced')).toHaveLength(
+			2,
+		);
 		expect(finalTurnMessages).not.toContain('New tool available');
 	});
 
@@ -750,8 +752,8 @@ describe('conditional sandbox: turn-boundary swap (node coordinator, faux provid
 		// default env's cwd.
 		expect(sandboxExecs).toEqual([]);
 		expect(defaultExecs).toEqual(['pwd']);
-		expect(postSwapMessages).toContain('execution environment was replaced');
-		expect(postSwapMessages).toContain('working directory is now /');
+		expect(postSwapMessages).toContain('execution environment (sandbox) was replaced');
+		expect(postSwapMessages).toContain('working directory is now `/`');
 	});
 
 	it('keeps the prompt frozen across the swap, then re-discovers at compaction', async () => {

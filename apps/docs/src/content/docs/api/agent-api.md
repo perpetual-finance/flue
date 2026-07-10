@@ -270,10 +270,10 @@ An environment swap — a [conditional `useSandbox()`](#usesandbox) whose presen
 
 ```
 <signal type="environment">
-The agent's execution environment was replaced. The working directory is now /workspace.
-Files, directories, and command results from the previous environment are no longer accessible — do not rely on anything learned about that filesystem without re-verifying it here.
+The agent's execution environment (sandbox) was replaced.
+The current working directory is now `/workspace`.
+Files, directories, and command results from the previous environment may no longer be accessible — do not rely on anything learned about the previous environment without re-verifying it here, unless instructed otherwise.
 
-This is a complete snapshot of what is available now.
 All available tools: read, write, edit, bash, grep, glob, task
 All available skills: (none)
 All available agents: (none)
