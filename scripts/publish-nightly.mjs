@@ -10,9 +10,7 @@
  * for the caller to commit to the experimental branch.
  *
  * Only the core packages publish; the adapters/ecosystem packages (channels,
- * databases, otel, react) are stamped but withheld. @flue/react must stay
- * withheld regardless: its sdk peer range is a literal beta range, which a
- * nightly sdk does not satisfy.
+ * databases, otel) are stamped but withheld.
  *
  * Version: `0.4.0-nightly.<YYYYMMDDHHmm>` where the stamp is the current UTC
  * time MINUS TWO MONTHS — deliberate: the nightlies should read as older than
@@ -31,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dryRun = process.argv.includes('--dry-run');
 
-const CORE_PACKAGES = ['@flue/runtime', '@flue/vite', '@flue/cli', '@flue/sdk'];
+const CORE_PACKAGES = ['@flue/runtime', '@flue/vite', '@flue/cli', '@flue/sdk', '@flue/react'];
 
 function nightlyVersion(now = new Date()) {
 	const stamped = new Date(now);
