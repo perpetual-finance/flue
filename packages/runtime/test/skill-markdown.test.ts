@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { parseSkillMarkdown } from '../src/skill-frontmatter.ts';
 
 describe('parseSkillMarkdown()', () => {
+	it('takes the frontmatter name as authoritative when no directoryName is given (single-file skills)', () => {
+		const parsed = parseSkillMarkdown(
+			['---', 'name: notes', 'description: Odd-named skill file.', '---', 'Take notes.'].join(
+				'\n',
+			),
+			{ path: '/src/prompts/playbook.md' },
+		);
+		expect(parsed.name).toBe('notes');
+	});
+
 	it('trims required strings and body while preserving supported optional fields when SKILL markdown is valid', () => {
 		expect(
 			parseSkillMarkdown(

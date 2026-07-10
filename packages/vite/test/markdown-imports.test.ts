@@ -25,8 +25,13 @@ function markdownImportsFixture(): Fixture {
 		'src/guide.md': '# Fixture guide\n',
 		'src/skills/explore/SKILL.md':
 			'---\nname: explore\ndescription: Explore a repository.\n---\nExplore carefully.\n',
-		'src/skills/notes/playbook.md':
+		// Odd-named single-file skill: the parent directory ("prompts") does NOT
+		// match the frontmatter name — frontmatter is authoritative for ?skill —
+		// and the sensitive sibling proves only the file itself gets packaged
+		// (directory packaging would throw on the .pem).
+		'src/prompts/playbook.md':
 			'---\nname: notes\ndescription: Odd-named skill file.\n---\nTake notes.\n',
+		'src/prompts/private.pem': 'NOT A REAL KEY\n',
 		'src/agents/echo.ts': `'use agent';
 import { defineAgent, useInstruction, useModel, useSkill } from '@flue/runtime';
 import explore from '../skills/explore/SKILL.md';
@@ -42,7 +47,7 @@ export default defineAgent(echo);
 import './test-model.ts';
 import echo from './agents/echo.ts';
 import explore from './skills/explore/SKILL.md';
-import notes from './skills/notes/playbook.md?skill';
+import notes from './prompts/playbook.md?skill';
 import guide from './guide.md';
 
 const app = new Hono();

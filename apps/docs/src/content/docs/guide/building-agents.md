@@ -131,7 +131,7 @@ function RepositoryReviewer() {
 export default defineAgent(RepositoryReviewer);
 ```
 
-`SKILL.md` files are not plain markdown — an import that resolves to one packages the whole skill directory instead; see [Skills](/docs/guide/skills/). To package an odd-named markdown file as a skill, opt in with a `?skill` query (`import s from './notes.md?skill'`). Vite-native queries (`?raw`, `?url`) keep their usual meanings.
+`SKILL.md` files are not plain markdown — an import that resolves to one packages the whole skill directory instead; see [Skills](/docs/guide/skills/). To package an odd-named markdown file as a skill, opt in with a `?skill` query (`import s from './playbook.md?skill'`) — a **single-file** skill whose frontmatter `name` is authoritative (no directory layout exists to match against, and only the file itself is packaged; supporting files want the real `<name>/SKILL.md` layout). Vite-native queries (`?raw`, `?url`) keep their usual meanings.
 
 ## Conversation ID
 

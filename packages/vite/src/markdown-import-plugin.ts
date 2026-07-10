@@ -146,6 +146,15 @@ export function markdownImportPlugin(): Plugin {
 		hotUpdate(options) {
 			const changedPath = canonicalPath(options.file);
 
+			// A single-file (`?skill`) skill module's id is the file itself.
+			const fileModule = this.environment.moduleGraph.getModuleById(
+				`${internalSkillModulePrefix}${changedPath}`,
+			);
+			if (fileModule) {
+				this.environment.moduleGraph.invalidateModule(fileModule);
+				return [fileModule];
+			}
+
 			const directory = [...trackedSkillDirectories].find((trackedDirectory) =>
 				isWithinDirectory(changedPath, trackedDirectory),
 			);
@@ -166,8 +175,12 @@ export function markdownImportPlugin(): Plugin {
 			}
 			if (!id.startsWith(internalSkillModulePrefix)) return null;
 			const skillPath = id.slice(internalSkillModulePrefix.length);
-			const directory = path.dirname(skillPath);
-			trackedSkillDirectories.add(canonicalPath(directory));
+			// Dev invalidation needs no addWatchFile: the dev watcher covers the
+			// source root, and hotUpdate maps changed files back to skill modules
+			// (single-file skills by module id, SKILL.md layouts by directory).
+			if (isSkillMarkdownPath(skillPath)) {
+				trackedSkillDirectories.add(canonicalPath(path.dirname(skillPath)));
+			}
 			const packagedSkill = await packageSkill(skillPath);
 			return [
 				`import { createSkillReference } from '@flue/runtime/internal';`,
@@ -179,6 +192,7 @@ export function markdownImportPlugin(): Plugin {
 }
 
 async function packageSkill(skillPath: string): Promise<PackagedSkillDirectory> {
+	if (!isSkillMarkdownPath(skillPath)) return packageSingleFileSkill(skillPath);
 	const directory = path.dirname(skillPath);
 	const parsed = parseSkillMarkdown(await fs.promises.readFile(skillPath, 'utf8'), {
 		directoryName: path.basename(directory),
@@ -198,6 +212,26 @@ async function packageSkill(skillPath: string): Promise<PackagedSkillDirectory> 
 		});
 	}
 	return buildPackagedSkill({ name: parsed.name, description: parsed.description, files });
+}
+
+/**
+ * An odd-named `?skill` file is a SINGLE-FILE skill: the frontmatter name is
+ * authoritative (no directory exists to match against — the Agent Skills
+ * name↔directory rule presumes the SKILL.md layout), and only the file itself
+ * is packaged. Packaging its containing directory would sweep in unrelated
+ * siblings — a free-floating skill file makes no claim over its neighbors.
+ * Inside the package the file becomes `SKILL.md`, so the packaged output is
+ * spec-shaped like every other skill. Supporting files want the real
+ * `<name>/SKILL.md` layout.
+ */
+async function packageSingleFileSkill(skillPath: string): Promise<PackagedSkillDirectory> {
+	const content = await fs.promises.readFile(skillPath);
+	const parsed = parseSkillMarkdown(content.toString('utf8'), { path: skillPath });
+	return buildPackagedSkill({
+		name: parsed.name,
+		description: parsed.description,
+		files: [{ path: 'SKILL.md', content: new Uint8Array(content) }],
+	});
 }
 
 function canonicalPath(filePath: string): string {
