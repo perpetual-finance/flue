@@ -94,15 +94,15 @@ Two loader caveats for bare `node`: markdown and skill imports (`.md` / `SKILL.m
 `init(agent, options?)` returns a handle addressing one instance. It creates nothing — the instance is created on first contact, with the same semantics as every other transport:
 
 - `id` — the instance address. Omit it for a fresh unique id (a throwaway instance for this run); pass a stable id to share conversation state across runs.
-- `initialData` — creation data, validated against the agent's `initialDataSchema` export; the seed, consulted only when the handle's first send creates the instance.
 - `uid` — a [send condition](/docs/guide/building-agents/) for the first contact: a string continues only that incarnation, `null` creates only. After a send, the handle pins the incarnation it contacted and later sends continue it.
 
-`dispatch(message, options?)` accepts exactly what the top-level verb accepts — a `DeliveredMessage` of either kind, or a bare string as shorthand for `{ kind: 'user', body }` — and resolves with the settled reply:
+`dispatch(request, options?)` takes the top-level verb's payload 1:1, minus the `id` and `uid` the handle owns: `{ message, initialData? }`, where `message` is a `DeliveredMessage` of either kind (or a string, as everywhere) and `initialData` is the creation seed, consulted only when this send creates the instance. A bare string is accepted as shorthand for `{ message }`. It resolves with the settled reply:
 
 ```ts
-const reply = await agent.dispatch('Summarize the failures.', {
-  onEvent: (chunk) => process.stdout.write(chunk.type === 'message-delta' ? chunk.delta : ''),
-});
+const reply = await agent.dispatch(
+  { message: 'Summarize the failures.', initialData: { date } },
+  { onEvent: (chunk) => process.stdout.write(chunk.type === 'message-delta' ? chunk.delta : '') },
+);
 reply.text; // final assistant text
 reply.data; // useDataWriter parts, keyed by name
 reply.metadata; // useResponseStart/useResponseFinish, when attached

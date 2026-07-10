@@ -4,8 +4,9 @@
  * The handle is an *address*, not a resource: `init()` creates nothing, and
  * the instance itself is created on first contact exactly as it would be for
  * any other delivery. `dispatch()` delivers one message through the dispatch
- * queue — either kind, exactly like the top-level `dispatch()`, with the same
- * string shorthand for a user message — and every hook (`useDelivery`,
+ * queue — its payload is the top-level `dispatch()` request minus the
+ * `id`/`uid` the handle owns, with a string shorthand for a plain user
+ * message — and every hook (`useDelivery`,
  * `useAgentStart`, `useAgentFinish`, state, output, joins) fires exactly as
  * it does on the other transports. The one difference is the await: the
  * handle is the "control this agent" surface, so its `dispatch()` waits for
@@ -42,7 +43,7 @@ import { getFlueRuntime } from './runtime/flue-app.ts';
 import { generateInstanceId } from './runtime/ids.ts';
 import { normalizeMessageInput } from './runtime/message-input.ts';
 import { agentStreamPath } from './runtime/stream-offsets.ts';
-import type { AgentModuleValue, DeliveredMessageInput } from './types.ts';
+import type { AgentDispatchRequest, AgentModuleValue } from './types.ts';
 
 export interface InitOptions {
 	/**
@@ -52,12 +53,6 @@ export interface InitOptions {
 	 */
 	id?: string;
 	/**
-	 * Instance-creation data, validated against the agent's `input:` schema.
-	 * The seed, consulted only when the handle's first send creates the
-	 * instance; ignored after.
-	 */
-	initialData?: unknown;
-	/**
 	 * Send condition for the handle's first contact (uid ≈ ETag): a string
 	 * continues only that incarnation, `null` creates only when no instance
 	 * exists, omit to send unconditionally. After a send's receipt, the handle
@@ -65,6 +60,13 @@ export interface InitOptions {
 	 */
 	uid?: string | null;
 }
+
+/**
+ * The handle-scoped dispatch payload: exactly the top-level `dispatch()`
+ * request, minus the address (`id`) and send condition (`uid`) the handle
+ * itself owns — `{ message, initialData? }`.
+ */
+export type AgentHandleDispatchRequest = Omit<AgentDispatchRequest, 'id' | 'uid'>;
 
 export interface AgentDispatchOptions {
 	/** Receives every projected conversation chunk as it is durably recorded. */
@@ -112,23 +114,30 @@ export interface AgentInstanceHandle {
 	/** The instance address this handle targets. */
 	readonly id: string;
 	/**
-	 * Deliver one message — either kind; a string is shorthand for
-	 * `{ kind: 'user', body }` — and await its settled reply. Concurrent
-	 * sends to one instance serialize (or join a live response at a turn
-	 * boundary); a delivery that joined resolves with the coalesced reply
-	 * that answered it. Rejects with {@link AgentRunError} on a failed or
-	 * aborted settlement. For fire-and-forget delivery, use the top-level
-	 * `dispatch()` instead.
+	 * Deliver one message and await its settled reply. Takes the top-level
+	 * `dispatch()` request payload minus the `id`/`uid` the handle owns —
+	 * `{ message, initialData? }` — or a bare string as shorthand for
+	 * `{ message }`. Concurrent sends to one instance serialize (or join a
+	 * live response at a turn boundary); a delivery that joined resolves with
+	 * the coalesced reply that answered it. Rejects with {@link AgentRunError}
+	 * on a failed or aborted settlement. For fire-and-forget delivery, use the
+	 * top-level `dispatch()` instead.
 	 */
-	dispatch(message: DeliveredMessageInput, options?: AgentDispatchOptions): Promise<AgentReply>;
+	dispatch(
+		request: string | AgentHandleDispatchRequest,
+		options?: AgentDispatchOptions,
+	): Promise<AgentReply>;
 }
 
 /**
  * Address an agent instance for programmatic control.
  *
  * ```ts
- * const agent = init(reporter, { id: `nightly-${date}`, initialData: { date } });
- * const reply = await agent.dispatch('You have been triggered. Produce the nightly report.');
+ * const agent = init(reporter, { id: `nightly-${date}` });
+ * const reply = await agent.dispatch({
+ *   message: 'You have been triggered. Produce the nightly report.',
+ *   initialData: { date },
+ * });
  * console.log(reply.text);
  * ```
  *
@@ -150,29 +159,33 @@ export function init(agent: AgentModuleValue, options: InitOptions = {}): AgentI
 	}
 	const id = options.id ?? generateInstanceId();
 
-	// The handle's first send carries the creation seed / send condition;
-	// afterwards the handle continues the incarnation it contacted.
+	// The handle's first send carries the send condition; afterwards the
+	// handle continues the incarnation it contacted.
 	let contacted = false;
 	let pinnedUid: string | undefined;
-	const firstContact = () => ({
-		...(options.initialData !== undefined ? { initialData: options.initialData } : {}),
-		...('uid' in options && options.uid !== undefined ? { uid: options.uid } : {}),
-	});
-
-	const contactOptions = () =>
-		contacted ? { ...(pinnedUid !== undefined ? { uid: pinnedUid } : {}) } : firstContact();
+	const uidCondition = () => {
+		if (contacted) return pinnedUid !== undefined ? { uid: pinnedUid } : {};
+		return options.uid !== undefined ? { uid: options.uid } : {};
+	};
 
 	return {
 		id,
 
-		async dispatch(message, dispatchOptions = {}) {
+		async dispatch(request, dispatchOptions = {}) {
+			const payload = normalizeHandleDispatchRequest(request);
 			const rt = requireRuntime('init');
 			const name = resolveAgentName(rt, agent, 'init');
-			const delivered = normalizeMessageInput(message);
+			const delivered = normalizeMessageInput(payload.message);
 
 			throwIfAborted(dispatchOptions.signal);
 			const receipt = await enqueueDispatch({
-				request: { agent: name, id, message: delivered, ...contactOptions() },
+				request: {
+					agent: name,
+					id,
+					message: delivered,
+					...(payload.initialData !== undefined ? { initialData: payload.initialData } : {}),
+					...uidCondition(),
+				},
 				dispatchQueue: rt.dispatchQueue,
 				rt,
 			});
@@ -378,4 +391,29 @@ function isAgentDefinitionValue(value: unknown): value is AgentModuleValue {
 
 function throwIfAborted(signal?: AbortSignal): void {
 	if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
+}
+
+/**
+ * The handle accepts the top-level dispatch payload 1:1 (string shorthand
+ * aside), so the shapes that fit the OLD first argument — a bare
+ * `DeliveredMessage`, or a payload smuggling the `id`/`uid` the handle owns —
+ * fail loudly with the corrected form instead of misdelivering.
+ */
+function normalizeHandleDispatchRequest(
+	request: string | AgentHandleDispatchRequest,
+): AgentHandleDispatchRequest {
+	if (typeof request === 'string') return { message: request };
+	if (typeof request !== 'object' || request === null || !('message' in request)) {
+		throw new Error(
+			'[flue] The handle dispatch() takes a string or the dispatch payload object. ' +
+				'Wrap a message value as dispatch({ message, initialData? }).',
+		);
+	}
+	if ('id' in request || 'uid' in request) {
+		throw new Error(
+			'[flue] The handle dispatch() payload cannot carry "id" or "uid" — the handle owns ' +
+				'the address and send condition. Pass them to init(agent, { id, uid }) instead.',
+		);
+	}
+	return request;
 }

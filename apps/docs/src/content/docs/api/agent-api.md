@@ -990,14 +990,16 @@ function init(agent: AgentModuleValue, options?: InitOptions): AgentInstanceHand
 
 interface InitOptions {
   id?: string; // instance address; omitted -> a fresh unique id
-  initialData?: unknown; // creation data (initialDataSchema export), seed iff the first send creates
   uid?: string | null; // send condition for the handle's first contact
 }
 
 interface AgentInstanceHandle {
   readonly id: string;
-  dispatch(message: DeliveredMessageInput, options?: AgentDispatchOptions): Promise<AgentReply>;
+  dispatch(request: string | AgentHandleDispatchRequest, options?: AgentDispatchOptions): Promise<AgentReply>;
 }
+
+// The top-level dispatch() request minus the id/uid the handle owns.
+type AgentHandleDispatchRequest = Omit<AgentDispatchRequest, 'id' | 'uid'>; // { message, initialData? }
 
 interface AgentReply {
   text: string; // final assistant text ('' when none)
@@ -1008,9 +1010,9 @@ interface AgentReply {
 }
 ```
 
-The programmatic client for one agent instance — the "control this agent" surface. Its `dispatch(...)` takes exactly what the top-level verb takes (either message kind; a string is shorthand for `{ kind: 'user', body }`) and delivers through the same queue, with one difference: it waits for the submission to settle and resolves with the reply. Every hook fires exactly as it does on any other transport, and a delivery that joined a live response resolves with the coalesced reply that answered it. A `failed`/`aborted` settlement rejects with `AgentRunError` (`outcome`, `submissionId`, `cause`). `AgentDispatchOptions` carries `onEvent` (every projected `ConversationStreamChunk` as it is durably recorded) and `signal` (durable abort intent; the call rejects once the aborted settlement lands). For fire-and-forget delivery, use the top-level [`dispatch()`](#dispatch).
+The programmatic client for one agent instance — the "control this agent" surface. Its `dispatch(...)` takes the top-level verb's request payload 1:1 — `{ message, initialData? }`, with the `id`/`uid` the handle owns hoisted into `init()`; a bare string is shorthand for `{ message }` — and delivers through the same queue, with one difference: it waits for the submission to settle and resolves with the reply. Every hook fires exactly as it does on any other transport, and a delivery that joined a live response resolves with the coalesced reply that answered it. A `failed`/`aborted` settlement rejects with `AgentRunError` (`outcome`, `submissionId`, `cause`). `AgentDispatchOptions` carries `onEvent` (every projected `ConversationStreamChunk` as it is durably recorded) and `signal` (durable abort intent; the call rejects once the aborted settlement lands). For fire-and-forget delivery, use the top-level [`dispatch()`](#dispatch).
 
-The handle is an address: nothing is created until first contact, `initialData`/`uid` gate that first send, and after a send the handle pins the incarnation it contacted. Like `dispatch()`, `init()` taps the process's configured runtime — inside a Flue server it works directly; in a standalone script call `start()` from `@flue/runtime/node` first. On Cloudflare the awaited send admits to the agent's Durable Object and observes its settlement over bounded reads; its natural home there is a Cloudflare Workflow step, where the reply becomes the step's durable result (see [Scripts › On Cloudflare](/docs/guide/scripts/#on-cloudflare)).
+The handle is an address: nothing is created until first contact, the `uid` option gates that first send (and `initialData` on the creating dispatch seeds it), and after a send the handle pins the incarnation it contacted. Like `dispatch()`, `init()` taps the process's configured runtime — inside a Flue server it works directly; in a standalone script call `start()` from `@flue/runtime/node` first. On Cloudflare the awaited send admits to the agent's Durable Object and observes its settlement over bounded reads; its natural home there is a Cloudflare Workflow step, where the reply becomes the step's durable result (see [Scripts › On Cloudflare](/docs/guide/scripts/#on-cloudflare)).
 
 Inside a tool, an awaited send to the agent that is currently running you deadlocks by design — the delivery joins your own live response, which cannot settle while the tool is still executing. A tool never needs it: the `harness` prop is the tool's own model surface, with its own scratch session. Handles inside tools are for *other* instances.
 
@@ -1045,7 +1047,7 @@ if (info) await dispatch(triage, { id: info.id, uid: info.uid, message });
 
 ## Agent
 
-A `FunctionAgentDefinition` is the opaque value returned by `defineAgent(Agent, config)`. Default-export it from a `'use agent'` module to register it with the application; mount `agent.route()` in `app.ts` to make its conversations addressable over HTTP.
+A `FunctionAgentDefinition` is the opaque value returned by `defineAgent(Agent)`. Default-export it from a `'use agent'` module to register it with the application; mount `agent.route()` in `app.ts` to make its conversations addressable over HTTP.
 
 ## Harness
 

@@ -72,9 +72,10 @@ describe('start() + init(): the scripted client', () => {
 		};
 
 		await startFlue(agentModule);
-		const reply = await init(agentModule.default, {
+		const reply = await init(agentModule.default).dispatch({
+			message: 'Go.',
 			initialData: { date: '2026-07-09' },
-		}).dispatch('Go.');
+		});
 		expect(reply.text).toBe('Seeded.');
 		expect(seenData).toEqual({ date: '2026-07-09' });
 	});
@@ -156,7 +157,10 @@ describe('start() + init(): the scripted client', () => {
 			agent: seeded,
 			initialDataSchema: v.object({ date: v.string() }),
 		});
-		const reply = await init(seeded, { initialData: { date: '2026-07-08' } }).dispatch('Go.');
+		const reply = await init(seeded).dispatch({
+			message: 'Go.',
+			initialData: { date: '2026-07-08' },
+		});
 		expect(reply.text).toBe('Seeded.');
 		expect(seenData).toEqual({ date: '2026-07-08' });
 	});
@@ -228,9 +232,7 @@ describe('start() + init(): the scripted client', () => {
 		// with the reply that answered it — its durable settled record,
 		// unified across submission kinds, is what the await observes.
 		const ack = await agent.dispatch({
-			kind: 'signal',
-			type: 'trigger',
-			body: 'from the script',
+			message: { kind: 'signal', type: 'trigger', body: 'from the script' },
 		});
 		expect(ack.text).toBe('signal ack');
 		expect(ack.submissionId).toEqual(expect.any(String));
@@ -257,7 +259,7 @@ describe('start() + init(): the scripted client', () => {
 
 		await startFlue({ name: 'echo', agent: echo, durability: { maxAttempts: 1 } });
 		const error = await init(echo, { id: 'dispatch-fail-1' })
-			.dispatch({ kind: 'signal', type: 'trigger', body: 'boom' })
+			.dispatch({ message: { kind: 'signal', type: 'trigger', body: 'boom' } })
 			.then(
 				() => {
 					throw new Error('Expected the dispatch to reject.');
@@ -309,5 +311,13 @@ describe('start() + init(): the scripted client', () => {
 			return 'Reply.';
 		});
 		expect(() => init(echo, { id: ' ' })).toThrow(/non-empty string instance id/);
+		// The payload is the top-level dispatch request 1:1 — a bare message
+		// object or a smuggled id/uid fails loudly with the corrected form.
+		await expect(
+			init(echo).dispatch({ kind: 'signal', type: 'trigger', body: 'x' } as never),
+		).rejects.toThrow(/dispatch\({ message, initialData\? }\)/);
+		await expect(
+			init(echo).dispatch({ message: 'x', uid: null } as never),
+		).rejects.toThrow(/init\(agent, { id, uid }\)/);
 	});
 });

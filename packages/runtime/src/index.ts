@@ -14,6 +14,7 @@ export {
 } from './agent.ts';
 export {
 	type AgentDispatchOptions,
+	type AgentHandleDispatchRequest,
 	type AgentInstanceHandle,
 	type AgentReply,
 	AgentRunError,
