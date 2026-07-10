@@ -7,8 +7,8 @@ Not another SDK. Build autonomous agents with Flue's programmable TypeScript har
 'use agent';
 import { defineAgent, useSandbox, useSkill, useTool, type AgentRouteHandler } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
-import triage from '../skills/triage/SKILL.md';
-import verify from '../skills/verify/SKILL.md';
+import triage from '../skills/triage/SKILL.md' with { type: 'skill' };
+import verify from '../skills/verify/SKILL.md' with { type: 'skill' };
 import { openIssue, searchCode } from '../tools/github.ts';
 
 // Compose the complete harness your agent needs to do real work,
