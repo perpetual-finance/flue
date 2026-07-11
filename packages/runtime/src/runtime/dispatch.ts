@@ -1,5 +1,6 @@
 import type { DeliveredMessage, DispatchReceipt, NamedAgentDispatchRequest } from '../types.ts';
 import type { DispatchQueue } from './dispatch-queue.ts';
+import { verifyDeliveredPrivateContext } from './private-context.ts';
 import { parseDeliveredMessage } from './schemas.ts';
 
 export interface DispatchRuntime {
@@ -13,6 +14,7 @@ export async function enqueueDispatch(options: {
 }): Promise<DispatchReceipt> {
 	const agent = options.request.agent;
 	const message = validateDispatchRequest(options.request, agent, options.rt);
+	await verifyDeliveredPrivateContext(message);
 	return options.dispatchQueue.enqueue({
 		dispatchId: crypto.randomUUID(),
 		agent,

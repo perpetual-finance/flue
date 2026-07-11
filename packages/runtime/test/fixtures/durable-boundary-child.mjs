@@ -4,6 +4,89 @@ const [mode, dbPath] = process.argv.slice(2);
 const adapter = sqlite(dbPath);
 await adapter.migrate?.();
 const stores = await adapter.connect();
+
+function providerRequestBytes(model, context, options) {
+	const serializableOptions =
+		options && typeof options === 'object'
+			? Object.fromEntries(
+				Object.entries(options).filter(
+					([, value]) => typeof value !== 'function' && !(value instanceof AbortSignal),
+				),
+			)
+			: options;
+	return Buffer.from(JSON.stringify({ model, context, options: serializableOptions }), 'utf8');
+}
+
+if (mode === 'private-context-before-output') {
+	const [, , encodedInputs, providerApi, providerId] = process.argv.slice(2);
+	const inputs = JSON.parse(Buffer.from(encodedInputs, 'base64url').toString('utf8'));
+	const { fauxAssistantMessage, registerFauxProvider } = await import('@earendil-works/pi-ai/compat');
+	const { defineAgent } = await import('../../dist/index.mjs');
+	const { createFlueContext, createNodeAgentCoordinator } = await import('../../dist/internal.mjs');
+	const provider = registerFauxProvider({ api: providerApi, provider: providerId });
+	provider.setResponses([
+		...inputs.slice(0, -1).map((_, index) => fauxAssistantMessage(`public reply ${index + 1}`)),
+		async (context, requestOptions, _state, model) => {
+			process.send?.({
+				type: 'provider-request',
+				bytes: providerRequestBytes(model, context, requestOptions).toString('base64'),
+			});
+			await new Promise(() => {});
+		},
+	]);
+	const createDefaultEnv = async () => ({
+		cwd: '/',
+		resolvePath: (path) => path.startsWith('/') ? path : `/${path}`,
+		exec: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
+		readFile: async () => '',
+		readFileBuffer: async () => new Uint8Array(),
+		writeFile: async () => {},
+		stat: async () => ({
+			isFile: false,
+			isDirectory: false,
+			isSymbolicLink: false,
+			size: 0,
+			mtime: new Date(0),
+		}),
+		readdir: async () => [],
+		exists: async () => false,
+		mkdir: async () => {},
+		rm: async () => {},
+	});
+	const coordinator = createNodeAgentCoordinator({
+		submissions: stores.executionStore.submissions,
+		agents: [{
+			name: 'assistant',
+			definition: defineAgent(() => ({
+				model: `${provider.getModel().provider}/${provider.getModel().id}`,
+			})),
+		}],
+		createContext: ({ id, request, initialEventIndex, dispatchId }) =>
+			createFlueContext({
+				id,
+				dispatchId,
+				env: {},
+				req: request,
+				initialEventIndex,
+				agentConfig: {
+					subagents: {},
+					resolveModel: () => provider.getModel(),
+				},
+				createDefaultEnv,
+			}),
+		conversationStreamStore: stores.conversationStreamStore,
+		attachmentStore: stores.attachmentStore,
+	});
+	for (const input of inputs.slice(0, -1)) {
+		await coordinator.admitDispatch(input);
+		await coordinator.waitForIdle();
+	}
+	await coordinator.admitDispatch(inputs.at(-1));
+	await new Promise(() => {
+		setInterval(() => {}, 1_000);
+	});
+}
+
 const submissions = stores.executionStore.submissions;
 const path = 'agents/assistant/instance-1';
 const timestamp = new Date().toISOString();

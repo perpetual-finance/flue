@@ -46,6 +46,7 @@ export type {
 	AgentSendResult,
 	DeliveredAttachment,
 	DeliveredMessage,
+	OpaquePrivateContext,
 } from './public/invoke.ts';
 export {
 	type AgentWaitOptions,

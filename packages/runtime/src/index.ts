@@ -64,6 +64,7 @@ export type { AgentManifestEntry } from './runtime/flue-app.ts';
 export { dispatch, invoke } from './runtime/flue-app.ts';
 export { getRun, listAgents, listRuns } from './runtime/inspect.ts';
 export type { WorkflowInvocationReceipt, WorkflowInvokeRequest } from './runtime/invoke.ts';
+export { PRIVATE_CONTEXT_CAPABILITY } from './runtime/private-context.ts';
 export {
 	type HttpProviderRegistration,
 	type ProviderRegistration,
@@ -121,6 +122,7 @@ export type {
 	ModelRequestInput,
 	ModelResponse,
 	NamedAgentDispatchRequest,
+	OpaquePrivateContext,
 	PackagedSkillDirectory,
 	PackagedSkillFile,
 	PromptImage,

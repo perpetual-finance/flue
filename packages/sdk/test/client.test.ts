@@ -57,6 +57,37 @@ describe('createFlueClient', () => {
 				attachments: [{ type: 'image', data: 'YWJj', mimeType: 'image/png' }],
 			});
 		});
+
+		it('sends an opaque private-context envelope verbatim', async () => {
+			const seen: Request[] = [];
+			const client = createFlueClient({
+				baseUrl: 'https://flue.test',
+				fetch: async (input, init) => {
+					seen.push(new Request(input, init));
+					return Response.json({
+						streamUrl: 'https://flue.test/stream',
+						offset: '-1',
+						submissionId: 'submission-private',
+					});
+				},
+			});
+			const privateContext = {
+				encoding: 'base64' as const,
+				data: 'dHJ1c3RlZCBieXRlcw==',
+				sha256: '6acd7c3c149b0fdbc542a20bb7ece8164ebf4b78148c3f65c2fddf208cc74e35',
+			};
+
+			await client.agents.send('hello', 'inst-1', {
+				message: { kind: 'signal', type: 'studio.state', body: 'tick', privateContext },
+			});
+
+			expect(await seen[0]?.json()).toEqual({
+				kind: 'signal',
+				type: 'studio.state',
+				body: 'tick',
+				privateContext,
+			});
+		});
 	});
 
 	describe('agents.history() attachment urls', () => {

@@ -3,6 +3,24 @@ import { InvalidRequestError } from '../errors.ts';
 import type { DeliveredMessage } from '../types.ts';
 
 export const MAX_IMAGE_DATA_LENGTH = 14 * 1024 * 1024;
+export const MAX_PRIVATE_CONTEXT_BYTES = 64 * 1024;
+const MAX_PRIVATE_CONTEXT_BASE64_LENGTH = 4 * Math.ceil(MAX_PRIVATE_CONTEXT_BYTES / 3);
+
+const OpaquePrivateContextSchema = v.strictObject({
+	encoding: v.literal('base64'),
+	data: v.pipe(
+		v.string(),
+		v.nonEmpty('Private context data must not be empty.'),
+		v.maxLength(
+			MAX_PRIVATE_CONTEXT_BASE64_LENGTH,
+			`Private context exceeds the ${MAX_PRIVATE_CONTEXT_BYTES} byte limit.`,
+		),
+	),
+	sha256: v.pipe(
+		v.string(),
+		v.regex(/^[0-9a-f]{64}$/, 'Private context sha256 must be 64 lowercase hexadecimal characters.'),
+	),
+});
 
 /** Attachment shape for a `DeliveredMessage`'s `attachments`. */
 const DeliveredAttachmentSchema = v.object({
@@ -22,6 +40,7 @@ const DeliveredUserMessageSchema = v.object({
 	kind: v.literal('user'),
 	body: v.string(),
 	attachments: v.optional(v.array(DeliveredAttachmentSchema)),
+	privateContext: v.optional(OpaquePrivateContextSchema),
 });
 
 const DeliveredSignalMessageSchema = v.object({
@@ -29,6 +48,7 @@ const DeliveredSignalMessageSchema = v.object({
 	type: v.pipe(v.string(), v.nonEmpty('Signal message "type" must not be empty.')),
 	body: v.string(),
 	attributes: v.optional(v.record(v.string(), v.string())),
+	privateContext: v.optional(OpaquePrivateContextSchema),
 	// The tag name is rendered unescaped as the signal's XML envelope in model
 	// context, so it must be a valid XML name — anything looser would let a
 	// caller-controlled value inject markup that the body/attribute escaping
@@ -64,13 +84,13 @@ export function parseDeliveredMessage(value: unknown): DeliveredMessage {
 	const parsed = v.safeParse(DeliveredMessageSchema, value);
 	if (parsed.success) return parsed.output;
 	const specificIssue = parsed.issues.find(
-		(issue) => issue.type === 'max_length' || issue.type === 'regex',
+		(issue) => issue.type === 'max_length' || issue.type === 'regex' || issue.type === 'non_empty',
 	);
 	throw new InvalidRequestError({
 		reason:
 			specificIssue?.message ??
-			'Delivered messages must be { kind: "user", body: string, attachments?: attachment[] } ' +
-				'or { kind: "signal", type: string, body: string, attributes?: Record<string, string>, tagName?: string }.',
+			'Delivered messages must be { kind: "user", body: string, attachments?: attachment[], privateContext?: opaqueContext } ' +
+				'or { kind: "signal", type: string, body: string, attributes?: Record<string, string>, tagName?: string, privateContext?: opaqueContext }.',
 	});
 }
 

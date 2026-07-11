@@ -13,6 +13,7 @@ import type {
 import { Agent } from '@earendil-works/pi-agent-core';
 import type {
 	AssistantMessage,
+	Context,
 	ImageContent,
 	Message,
 	Model,
@@ -114,6 +115,13 @@ import type {
 } from './runtime/agent-submissions.ts';
 import { type AttachmentStore, createAttachmentRef } from './runtime/attachment-store.ts';
 import { generateOperationId, generateTurnId } from './runtime/ids.ts';
+import {
+	maximumPrivateContextRecentTokens,
+	PRIVATE_CONTEXT_REQUEST_OVERHEAD_TOKENS,
+	PRIVATE_CONTEXT_SYSTEM_SEPARATOR,
+	type VerifiedOpaquePrivateContext,
+	verifyOpaquePrivateContext,
+} from './runtime/private-context.ts';
 import {
 	getProviderTelemetry,
 	getRegisteredApiKey,
@@ -465,6 +473,16 @@ function sleepUntilRetry(delayMs: number, signal: AbortSignal): Promise<void> {
 	});
 }
 
+function jsonByteLength(value: unknown, encoder: TextEncoder): number {
+	try {
+		return encoder.encode(JSON.stringify(value) ?? '').byteLength;
+	} catch {
+		// A provider context that cannot be serialized safely cannot support a
+		// trustworthy size preflight. Fail closed before the provider call.
+		return Number.MAX_SAFE_INTEGER;
+	}
+}
+
 export class Session implements FlueSession, AgentSubmissionSession {
 	readonly name: string;
 	readonly conversationId: string;
@@ -483,6 +501,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 	private activeOperation: OperationKind | undefined;
 	private activeOperationId: string | undefined;
 	private activeAgentInput: FlueObservationDetail['agentInput'];
+	private activePrivateContext: VerifiedOpaquePrivateContext | undefined;
 	private activeOperationSettlement: Promise<void> = Promise.resolve();
 	private resolveActiveOperationSettlement: (() => void) | undefined;
 	private closePromise: Promise<void> | undefined;
@@ -521,13 +540,49 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		if (this.activeTurnId === undefined) this.activeTurnId = generateTurnId();
 		const turnId = this.activeTurnId;
 		const operationId = this.activeOperationId ?? generateOperationId();
+		this.assertPrivateContextFitsModel(model, context, options);
 		this.emitTurnRequest(turnId, 'agent', model, context, options);
+		const providerContext = this.activePrivateContext === undefined
+			? context
+			: {
+					...context,
+					systemPrompt: `${context.systemPrompt ?? ''}${PRIVATE_CONTEXT_SYSTEM_SEPARATOR}${this.activePrivateContext.text}`,
+				};
 		const operation = { type: 'model' as const, turnId };
 		const executionContext = this.executionContext({ operationId, turnId });
 		return interceptExecution(operation, executionContext, async () =>
-			wrapProviderStream(streamSimple(model, context, options), operation, executionContext),
+			wrapProviderStream(streamSimple(model, providerContext, options), operation, executionContext),
 		);
 	};
+
+	private assertPrivateContextFitsModel(
+		model: Model<any>,
+		context: Context,
+		options?: SimpleStreamOptions,
+	): void {
+		const privateContext = this.activePrivateContext;
+		const contextWindow = model.contextWindow ?? 0;
+		if (!privateContext || contextWindow <= 0) return;
+		const outputTokens = options?.maxTokens ?? model.maxTokens ?? 0;
+		const encoder = new TextEncoder();
+		const fixedContextTokenCeiling =
+			encoder.encode(context.systemPrompt ?? '').byteLength +
+			encoder.encode(PRIVATE_CONTEXT_SYSTEM_SEPARATOR).byteLength +
+			jsonByteLength(context.messages.at(-1), encoder) +
+			jsonByteLength(context.tools ?? [], encoder);
+		if (
+			privateContext.byteLength +
+				fixedContextTokenCeiling +
+				outputTokens +
+				PRIVATE_CONTEXT_REQUEST_OVERHEAD_TOKENS >
+			contextWindow
+		) {
+			throw new OperationFailedError({
+				operation: 'private context',
+				reason: 'private context cannot fit the selected model context window',
+			});
+		}
+	}
 
 	private canonicalEnvelope(type: ConversationRecord['type'], id = generateConversationRecordId()) {
 		return {
@@ -992,16 +1047,28 @@ export class Session implements FlueSession, AgentSubmissionSession {
 					maxTokens: model.maxTokens ?? 0,
 				})
 			: DEFAULT_COMPACTION_SETTINGS;
-		if (cc === false) {
-			return { ...defaults, enabled: false };
-		}
-		if (!cc) {
-			return defaults;
-		}
+		const settings = cc === false
+			? { ...defaults, enabled: false }
+			: !cc
+				? defaults
+				: {
+						enabled: true,
+						reserveTokens: cc.reserveTokens ?? defaults.reserveTokens,
+						keepRecentTokens: cc.keepRecentTokens ?? defaults.keepRecentTokens,
+					};
+		const privateContext = this.activePrivateContext;
+		const contextWindow = model?.contextWindow ?? 0;
+		if (!privateContext || contextWindow <= 0) return settings;
+		const systemPromptTokenCeiling = new TextEncoder().encode(this.config.systemPrompt ?? '').byteLength;
 		return {
-			enabled: true,
-			reserveTokens: cc.reserveTokens ?? defaults.reserveTokens,
-			keepRecentTokens: cc.keepRecentTokens ?? defaults.keepRecentTokens,
+			...settings,
+			keepRecentTokens: maximumPrivateContextRecentTokens({
+				contextWindow,
+				reserveTokens: settings.reserveTokens,
+				configuredKeepRecentTokens: settings.keepRecentTokens,
+				privateContextByteLength: privateContext.byteLength,
+				systemPromptByteLength: systemPromptTokenCeiling,
+			}),
 		};
 	}
 
@@ -3145,7 +3212,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		options?: ProcessAgentSubmissionOptions,
 	): Promise<void> {
 		const message = input.message;
-		this.activeAgentInput =
+		const activeAgentInput: FlueObservationDetail['agentInput'] =
 			message.kind === 'user'
 				? {
 						text: message.body,
@@ -3163,6 +3230,17 @@ export class Session implements FlueSession, AgentSubmissionSession {
 							timestamp: Date.now(),
 						}),
 					};
+		const privateContext = message.privateContext
+			? await verifyOpaquePrivateContext(message.privateContext)
+			: undefined;
+		const previousPrivateContext = this.activePrivateContext;
+		this.activePrivateContext = privateContext;
+		this.activeAgentInput = privateContext
+			? {
+					...activeAgentInput,
+					privateContext: { present: true, byteLength: privateContext.byteLength },
+				}
+			: activeAgentInput;
 		return this.runPersistedContextInput({
 			inputEntryId: submissionEntryId(input.kind, input.submissionId),
 			createCanonicalInput: async (parentId) => {
@@ -3206,6 +3284,8 @@ export class Session implements FlueSession, AgentSubmissionSession {
 			startedAt: options?.startedAt,
 			timeoutAt: options?.timeoutAt,
 			signal,
+		}).finally(() => {
+			this.activePrivateContext = previousPrivateContext;
 		});
 	}
 

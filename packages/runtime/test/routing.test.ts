@@ -279,6 +279,98 @@ describe('flue()', () => {
 		});
 	});
 
+	it('accepts a verified opaque private-context envelope on the direct agent route', async () => {
+		let delivered: unknown;
+		configureFlueRuntime(nodeRuntime({
+			target: 'node',
+			agents: [agentRecord('assistant', { route: async (_c, next) => next() })],
+			createAgentAdmission: (_agentName, _id) => async (message) => {
+				delivered = message;
+				return { submissionId: 'submission-private', offset: '-1' };
+			},
+			createWorkflowContext: createTestContext,
+			eventStreamStore: createTestEventStreamStore(),
+		}));
+		const app = new Hono();
+		app.route('/api', flue());
+		const privateContext = {
+			encoding: 'base64',
+			data: 'dHJ1c3RlZCBieXRlcw==',
+			sha256: '6acd7c3c149b0fdbc542a20bb7ece8164ebf4b78148c3f65c2fddf208cc74e35',
+		};
+
+		const response = await app.fetch(
+			new Request('http://localhost/api/agents/assistant/customer-123', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ kind: 'signal', type: 'studio.state', body: 'tick', privateContext }),
+			}),
+		);
+
+		expect(response.status).toBe(202);
+		expect(delivered).toEqual({
+			kind: 'signal',
+			type: 'studio.state',
+			body: 'tick',
+			privateContext,
+		});
+	});
+
+	it('rejects malformed, non-UTF-8, mismatched, and oversized private context before admission', async () => {
+		const admitted = vi.fn();
+		configureFlueRuntime(nodeRuntime({
+			target: 'node',
+			agents: [agentRecord('assistant', { route: async (_c, next) => next() })],
+			createAgentAdmission: (_agentName, _id) => async () => {
+				admitted();
+				return { submissionId: 'submission-private', offset: '-1' };
+			},
+			createWorkflowContext: createTestContext,
+			eventStreamStore: createTestEventStreamStore(),
+		}));
+		const app = new Hono();
+		app.route('/api', flue());
+		const oversizedBytes = new Uint8Array(64 * 1024 + 1).fill(97);
+		const oversizedDigest = Array.from(
+			new Uint8Array(await crypto.subtle.digest('SHA-256', oversizedBytes)),
+		)
+			.map((byte) => byte.toString(16).padStart(2, '0'))
+			.join('');
+		const invalidContexts = [
+			{ encoding: 'base64', data: 'not base64!', sha256: '0'.repeat(64) },
+			{
+				encoding: 'base64',
+				data: '/w==',
+				sha256: 'a8100ae6aa1940d0b663bb31cd466142ebbdbd5187131b92d93818987832eb89',
+			},
+			{ encoding: 'base64', data: 'dHJ1c3RlZCBieXRlcw==', sha256: '0'.repeat(64) },
+			{
+				encoding: 'base64',
+				data: 'dHJ1c3RlZCBieXRlcw==',
+				sha256: '6acd7c3c149b0fdbc542a20bb7ece8164ebf4b78148c3f65c2fddf208cc74e35',
+				unexpected: 'not allowed',
+			},
+			{
+				encoding: 'base64',
+				data: Buffer.from(oversizedBytes).toString('base64'),
+				sha256: oversizedDigest,
+			},
+		];
+
+		for (const privateContext of invalidContexts) {
+			const response = await app.fetch(
+				new Request('http://localhost/api/agents/assistant/customer-123', {
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ kind: 'user', body: 'hello', privateContext }),
+				}),
+			);
+			expect(response.status).toBe(400);
+			expect(await response.json()).toMatchObject({ error: { type: 'invalid_request' } });
+		}
+		expect(admitted).not.toHaveBeenCalled();
+	});
+
 	it('rejects any wait query param with invalid_request when an agent POST is sent', async () => {
 		configureFlueRuntime(nodeRuntime({
 			target: 'node',
@@ -956,8 +1048,8 @@ describe('flue()', () => {
 				type: 'invalid_request',
 				message: 'Request is malformed.',
 				details:
-					'Delivered messages must be { kind: "user", body: string, attachments?: attachment[] } ' +
-					'or { kind: "signal", type: string, body: string, attributes?: Record<string, string>, tagName?: string }.',
+					'Delivered messages must be { kind: "user", body: string, attachments?: attachment[], privateContext?: opaqueContext } ' +
+					'or { kind: "signal", type: string, body: string, attributes?: Record<string, string>, tagName?: string, privateContext?: opaqueContext }.',
 			},
 		});
 	});

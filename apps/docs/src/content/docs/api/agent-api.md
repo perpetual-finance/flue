@@ -287,14 +287,26 @@ Delivers a message for asynchronous processing by a continuing agent instance. T
 
 ```ts
 type DeliveredMessage =
-  | { kind: 'user'; body: string; attachments?: DeliveredAttachment[] }
+  | {
+      kind: 'user';
+      body: string;
+      attachments?: DeliveredAttachment[];
+      privateContext?: OpaquePrivateContext;
+    }
   | {
       kind: 'signal';
       type: string;
       body: string;
       attributes?: Record<string, string>;
       tagName?: string;
+      privateContext?: OpaquePrivateContext;
     };
+
+interface OpaquePrivateContext {
+  encoding: 'base64';
+  data: string;
+  sha256: string;
+}
 ```
 
 The single unified message shape delivered into an agent's session, whether it arrives through `dispatch(...)` or a direct HTTP prompt.
@@ -310,6 +322,15 @@ The single unified message shape delivered into an agent's session, whether it a
 | `type`        | `signal`   | Caller-defined event/signal type, e.g. `'slack.message'`.                                              |
 | `attributes`  | `signal`   | Flat, scalar-valued metadata for correlation — analogous to HTTP headers. Rendered alongside the body.  |
 | `tagName`     | `signal`   | Overrides the XML tag name used when rendering the signal into the model prompt. Defaults to `signal`. |
+| `privateContext` | both    | Optional opaque UTF-8 context for only the active model request. See below.                              |
+
+`privateContext` carries application state that should influence the current submission without becoming a canonical input record. `data` is canonical padded Base64 for at most 64 KiB of valid UTF-8, and `sha256` is its lowercase hexadecimal SHA-256. Flue verifies the digest before admission, persists the exact envelope for restart recovery, and appends the decoded text at a fixed suffix of the active model request's system prompt. Flue does not directly copy that private input into later model turns, compaction input or summaries, canonical/public history, streams, events, observations, logs, or OpenTelemetry content.
+
+This is structural input isolation, not encryption or a confidentiality boundary. The provider necessarily receives the decoded context, and the durable submission payload stores the envelope. A model can echo or transform the data into assistant output or tool arguments, and provider error text can enter ordinary error and log paths; those outputs are not automatically redacted. Safely render untrusted values as data, avoid copying external instruction-like content when a reference is sufficient, constrain tools and outputs, and evaluate the agent for disclosure and prompt injection. Use encrypted storage and a provider retention policy appropriate for the data. Reusing a durable submission identifier with different envelope bytes is a conflict.
+
+The 64 KiB admission limit is a transport ceiling, not a promise that every payload fits every model. Before provider execution, Flue computes a conservative non-compactable floor from the private byte count, fixed system prompt and separator, current trailing message, tool schemas, requested output, and request overhead against a known model context window. A request whose measured floor cannot fit settles as an error without calling the provider; overflow recovery also reduces the retained public suffix to leave room for the active private context. Models with unknown window metadata cannot be preflighted and may still return their normal context-overflow error.
+
+Treat `privateContext` as a privileged server-to-server field. Its SHA-256 detects corruption; it does not authenticate the caller, because any caller can hash its own bytes. If a browser or other untrusted client can reach an agent route, protect that route with authorization middleware and reject `privateContext` from the untrusted admission path. Only a trusted application service should construct it.
 
 #### `DeliveredAttachment`
 

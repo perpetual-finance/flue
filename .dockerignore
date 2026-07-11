@@ -1,0 +1,13 @@
+.git
+.github
+.changeset
+**/node_modules
+**/dist
+**/coverage
+**/.cache
+**/.turbo
+**/.wrangler
+**/.vite
+**/.astro
+*.log
+.DS_Store

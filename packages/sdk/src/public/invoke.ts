@@ -9,6 +9,13 @@ export interface DeliveredAttachment {
 	filename?: string;
 }
 
+/** Opaque, integrity-checked UTF-8 bytes visible only to the active model request. */
+export interface OpaquePrivateContext {
+	encoding: 'base64';
+	data: string;
+	sha256: string;
+}
+
 /**
  * The message delivered into an agent's session — the same unified shape the
  * server accepts from `dispatch()`. `kind: 'user'` is a direct user chat turn;
@@ -16,13 +23,19 @@ export interface DeliveredAttachment {
  * surfaces the agent participates in).
  */
 export type DeliveredMessage =
-	| { kind: 'user'; body: string; attachments?: DeliveredAttachment[] }
+	| {
+			kind: 'user';
+			body: string;
+			attachments?: DeliveredAttachment[];
+			privateContext?: OpaquePrivateContext;
+	  }
 	| {
 			kind: 'signal';
 			type: string;
 			body: string;
 			attributes?: Record<string, string>;
 			tagName?: string;
+			privateContext?: OpaquePrivateContext;
 	  };
 
 /** Options for one direct-agent prompt. */
