@@ -88,7 +88,7 @@ interface ConversationStreamStore {
 }
 ```
 
-This append-only, per-agent-instance stream is the sole canonical transcript. Stream paths key on the agent's module identity (the `'use agent'` file basename, or its `export const name` override) plus the conversation id. The stream contains records for all sessions in that instance and preserves their history for the instance lifetime. Adapters must not model a second authoritative transcript in session rows, snapshots, or event streams.
+This append-only, per-agent-instance stream is the sole canonical transcript. Stream paths key on the agent's identity (the exported agent function's name, or its `agentName` static override) plus the conversation id. The stream contains records for all sessions in that instance and preserves their history for the instance lifetime. Adapters must not model a second authoritative transcript in session rows, snapshots, or event streams.
 
 Producer claims fence stale writers. Appends preserve producer sequence invariants, and reads return durable resume offsets. `delete(path)` is a low-level whole-instance primitive; its presence does not promise a public retention or deletion workflow.
 

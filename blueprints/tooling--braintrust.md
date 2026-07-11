@@ -125,7 +125,8 @@ import './braintrust.ts';
 Preserve the application's existing imports, middleware, routes, and default
 export. If there is no `app.ts`, create one that imports `./braintrust.ts`,
 creates a Hono application, mounts each HTTP-reachable agent with
-`app.route('/agents/<name>', agent.route())`, and default-exports the app.
+`app.route('/agents/<name>', createAgentRouter(<AgentFn>))` (from
+`@flue/runtime/routing`), and default-exports the app.
 Install a direct `hono` dependency when authoring that file.
 
 When `BRAINTRUST_API_KEY` is absent, the integration does not initialize or

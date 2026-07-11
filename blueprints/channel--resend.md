@@ -40,7 +40,7 @@ message, local message identity, and retrieval tool to the application:
 import { createResendChannel } from '@flue/resend';
 import { defineTool, dispatch, type JsonValue } from '@flue/runtime';
 import { Resend } from 'resend';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 const EMAIL_INSTANCE_PREFIX = 'resend-email:';
 
@@ -54,7 +54,7 @@ export const channel = createResendChannel({
   async webhook({ event, delivery }) {
     switch (event.type) {
       case 'email.received': {
-        await dispatch(assistant, {
+        await dispatch(Assistant, {
           id: emailInstanceId(event.data.email_id),
           // Recorded once when this event creates the instance; ignored after.
           initialData: {
@@ -153,18 +153,18 @@ Bind the trusted inbound email fields inside the agent component:
 
 ```ts
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { retrieveReceivedEmail } from '../channels/resend.ts';
 
-export const initialDataSchema = v.object({
+const initialDataSchema = v.object({
   emailId: v.string(),
   from: v.string(),
   subject: v.string(),
   receivedAt: v.pipe(v.string(), v.isoTimestamp()),
 });
 
-function Assistant() {
+export function Assistant() {
 	useModel('anthropic/claude-haiku-4-5');
 	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the Resend channel dispatch.');
@@ -172,17 +172,18 @@ function Assistant() {
 	return `Review the inbound support email, handling an email from ${data.from} about ${data.subject} received at ${data.receivedAt}. Retrieve the complete email when its body or headers are needed.`;
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialDataSchema;
 ```
 
-The `initialDataSchema` export validates the dispatched `initialData` when the
+The `initialData` static validates the dispatched `initialData` when the
 instance is created; `useInitialData()` returns the parsed value on every
 render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback
 needs no `app.ts` mounting. Add
-`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+`app.route('/agents/<name>', createAgentRouter(Assistant))` (from
+`@flue/runtime/routing`) in `app.ts` only when the agent
 should also be reachable over HTTP directly.
 
 This is an application-defined message-scoped agent instance. `@flue/resend`

@@ -1,7 +1,7 @@
 ---
 title: Project Layout
 description: Understand the source files and generated output in a Flue project.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-11
 ---
 
 A Flue project is a Vite project. Two config files at the root wire it up, `src/app.ts` is the application's route map (and the only required source file), and agents are ordinary modules marked with the [`'use agent'` directive](/docs/guide/use-agent/) anywhere under the source directory.
@@ -19,7 +19,7 @@ my-project/
 │  ├─ db.ts              # optional — Node persistence
 │  ├─ cloudflare.ts      # optional — non-HTTP Worker handlers
 │  ├─ agents/
-│  │  └─ support-assistant.ts   # 'use agent'
+│  │  └─ support-assistant.ts   # 'use agent' — exports the SupportAssistant agent
 │  └─ channels/
 │     └─ github.ts
 └─ dist/
@@ -41,7 +41,7 @@ Organize supporting application code however you prefer inside `src/`. Only `app
 
 ### `app.ts`
 
-`app.ts` default-exports an ordinary Hono application and is the single source of truth for your application's URLs — every agent and channel route is mounted there explicitly (`app.route('/agents/triage', triage.route())`). A project without an `app.ts` fails the build with a two-line starter suggestion. Because it imports `Hono`, include `hono` in your application dependencies.
+`app.ts` default-exports an ordinary Hono application and is the single source of truth for your application's URLs — every agent and channel route is mounted there explicitly (`app.route('/agents/triage', createAgentRouter(Triage))`). A project without an `app.ts` fails the build with a two-line starter suggestion. Because it imports `Hono`, include `hono` in your application dependencies.
 
 For more information, see [Routing](/docs/guide/routing/).
 
@@ -59,9 +59,9 @@ For more information, see [Cloudflare](/docs/guide/targets/cloudflare/#extending
 
 ### Agent modules
 
-An agent is any module under the source directory whose first statement is the `'use agent'` directive and whose default export is `defineAgent(...)`. The file basename is the agent's durable identity (an `export const name` literal overrides it), so identities must be unique among an application's agents and use lower-kebab-case (`support-assistant.ts`). Nesting is fine — `src/agents/` is just a tidy convention.
+An agent module is any module under the source directory whose first statement is the `'use agent'` directive. Every exported function with a capitalized name in it is an agent — a file may export several. The exported function's name is the agent's durable identity (an `Fn.agentName = '...'` string-literal static overrides it), so identities must be unique among an application's agents; the filename itself carries no meaning, and nesting is fine — `src/agents/` is just a tidy convention.
 
-The build scans the source directory for marked modules and registers all of them; mounting in `app.ts` is a separate, explicit step (and optional for dispatch-only agents). To narrow the scan, set the `agents` glob in `flue.config.ts`.
+The build scans the source directory for marked modules and registers every agent they export; mounting in `app.ts` is a separate, explicit step (and optional for dispatch-only agents). To narrow the scan, set the `agents` glob in `flue.config.ts`.
 
 For more information, see ['use agent'](/docs/guide/use-agent/).
 

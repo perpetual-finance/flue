@@ -1,7 +1,7 @@
 ---
 title: Agents
 description: Create an agent, configure its capabilities, and send it messages over time.
-lastReviewedAt: 2026-07-07
+lastReviewedAt: 2026-07-11
 ---
 
 Agents are useful when your application needs a model to keep working within a continuing context. This guide covers creating an agent, composing its capabilities and environment, and exposing it safely to users.
@@ -10,44 +10,37 @@ For the underlying mental model, start with [What is an agent?](/docs/concepts/a
 
 ## Creating a new agent
 
-In a Flue project, an agent is a module marked with the [`'use agent'` directive](/docs/guide/use-agent/) whose default export is created with `defineAgent(Agent)`. The **agent function** is a plain function: Flue Hooks in its body attach tools, instructions, and state, and its returned string is the agent's instruction.
+In a Flue project, an agent is an exported capitalized function of a module marked with the [`'use agent'` directive](/docs/guide/use-agent/). **The agent is the function**: Flue Hooks in its body attach tools, instructions, and state, and its returned string is the agent's instruction.
 
 ```ts title="src/agents/joke-teller.ts"
 'use agent';
-import { type AgentRouteHandler, defineAgent, useModel } from '@flue/runtime';
+import { useModel } from '@flue/runtime';
 
-export const description = 'Tells a short joke in response to each message.';
-
-export const route: AgentRouteHandler = async (_c, next) => next();
-
-function JokeTeller() {
+export function JokeTeller() {
   useModel('anthropic/claude-haiku-4-5');
   return 'Tell a short joke in response to each message.';
 }
-
-export default defineAgent(JokeTeller);
 ```
 
 In this example:
 
-- **`'use agent'`:** This registers the module with the application. The filename gives the agent its durable identity: `joke-teller`.
-- `description`: This optional static description of the agent. When present, it must be a non-empty string.
-- `route`: This optional middleware runs on every HTTP request the agent's routes serve. Here it allows everything; real applications authenticate in it.
-- `defineAgent(JokeTeller)`: This wraps the agent function as the module's default export — the addressable agent value the application registers and `app.ts` mounts.
+- **`'use agent'`:** This marks the module for the build scan, which registers its agents with the application.
+- **`export function JokeTeller()`:** The exported capitalized function is the agent (lowercase exports are helpers; a file may export several agents). Its name is the agent's durable identity, `JokeTeller` — assign an optional `JokeTeller.agentName = '...'` string literal to decouple the two.
 
 The module defines the agent; making it reachable over HTTP is a separate, explicit step in `app.ts`:
 
 ```ts title="src/app.ts"
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
-import jokeTeller from './agents/joke-teller.ts';
+import { JokeTeller } from './agents/joke-teller.ts';
 
 const app = new Hono();
-app.route('/agents/joke-teller', jokeTeller.route());
+app.route('/agents/joke-teller', createAgentRouter(JokeTeller));
 
 export default app;
 ```
 
-See [Routing](/docs/guide/routing/) for the routes `.route()` serves and [Models & Providers](/docs/guide/models/) for model selection.
+See [Routing](/docs/guide/routing/) for the routes `createAgentRouter()` serves and [Models & Providers](/docs/guide/models/) for model selection.
 
 ## The agent function
 
@@ -55,16 +48,14 @@ The agent function is where an agent's behavior lives. Flue Hooks called in its 
 
 ```ts title="src/agents/order-assistant.ts"
 'use agent';
-import { defineAgent, useModel, useTool } from '@flue/runtime';
+import { useModel, useTool } from '@flue/runtime';
 import { lookupOrderStatus } from '../shared/order-tools.ts';
 
-function OrderAssistant() {
+export function OrderAssistant() {
   useModel('anthropic/claude-haiku-4-5');
   useTool(lookupOrderStatus);
   return 'Help customers check the status of their orders.';
 }
-
-export default defineAgent(OrderAssistant);
 ```
 
 The function runs again before every model turn, so guards and interpolated text always reflect current state. Resources — tools, skills, and subagents — may even be declared conditionally (`if (pro) useSkill(refundsSkill)`): when a render's resource set changes, the runtime announces the change to the model in the conversation instead of rewriting the system prompt, and when the instruction text itself changes (interpolated state, a redeploy), a short signal tells the model its instructions were updated (see [Dynamic resources](/docs/api/agent-api/#dynamic-resources)). The agent's _identity_ stays static: `usePersistentState`, `useDataWriter`, and the lifecycle hooks must be declared identically on every render (`useSandbox` may be conditional — a presence flip swaps the environment at the next turn boundary; see [Conditional attachment](/docs/guide/sandboxes/#conditional-attachment)). See [Tools](/docs/guide/tools/), [Skills](/docs/guide/skills/), [Sandboxes](/docs/guide/sandboxes/), and [Subagents](/docs/guide/subagents/) for what an agent's body can compose, and [Durable Agents](/docs/concepts/durable-execution/) for how that state persists.
@@ -73,21 +64,19 @@ An agent's model, tuning, and environment are declared with the same hooks — m
 
 ```ts title="src/agents/repository-reviewer.ts"
 'use agent';
-import { defineAgent, useModel, useSandbox, useSkill } from '@flue/runtime';
+import { useModel, useSandbox, useSkill } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 import reviewChecklist from '../skills/review-checklist/SKILL.md';
 
-function RepositoryReviewer() {
+export function RepositoryReviewer() {
   useModel('anthropic/claude-sonnet-4-6');
   useSkill(reviewChecklist);
   useSandbox(local(), { cwd: '/srv/repositories/catalog-service' });
   return 'Review the requested change and report only findings supported by evidence.';
 }
-
-export default defineAgent(RepositoryReviewer);
 ```
 
-`useModel()` is required (its options accept `thinkingLevel` and `compaction`); `useSandbox()` attaches the environment (its options accept `cwd`). Supervisor-facing configuration — `name`, `description`, `route`, `initialDataSchema`, `durability` — lives as optional module exports beside the default export. See the [Agent API](/docs/api/agent-api/) for each surface's semantics.
+`useModel()` is required (its options accept `thinkingLevel` and `compaction`); `useSandbox()` attaches the environment (its options accept `cwd`). The agent's contract rides as optional statics on the function — `agentName` (identity override) and `initialData` (creation-data schema) — while environment policy such as durability belongs to the binding (`createAgentRouter(fn, { durability })`, a `start()` entry, or `flue run` flags). See the [Agent API](/docs/api/agent-api/) for each surface's semantics.
 
 ### Composing with custom hooks
 
@@ -95,7 +84,7 @@ Break a large agent into named pieces with custom hooks: plain functions that ca
 
 ```ts title="src/agents/support-assistant.ts"
 'use agent';
-import { defineAgent, useInstruction, useModel, useTool } from '@flue/runtime';
+import { useInstruction, useModel, useTool } from '@flue/runtime';
 import { escalateCase } from '../shared/support-tools.ts';
 
 function useEscalation() {
@@ -103,13 +92,11 @@ function useEscalation() {
   useInstruction('Escalate to a specialist only after you have confirmed the account and issue.');
 }
 
-function SupportAssistant() {
+export function SupportAssistant() {
   useModel('anthropic/claude-haiku-4-5');
   useEscalation();
   return 'Answer customer support questions clearly and accurately.';
 }
-
-export default defineAgent(SupportAssistant);
 ```
 
 A custom hook that only declares resources (tools, skills, subagents) or a sandbox may be called conditionally; one that also declares identity — state, message data, or lifecycle hooks — inherits the stricter rule and must be called on every render. Most behavior still wants state, arguments, and tool guards rather than conditional mounting — see [Durable Agents](/docs/concepts/durable-execution/) for the reasoning and the phased-workflow pattern this enables.
@@ -120,15 +107,13 @@ Long instructions can live in their own markdown file. Import any `.md` file and
 
 ```ts title="src/agents/repository-reviewer.ts"
 'use agent';
-import { defineAgent, useModel } from '@flue/runtime';
+import { useModel } from '@flue/runtime';
 import instructions from './repository-reviewer.md';
 
-function RepositoryReviewer() {
+export function RepositoryReviewer() {
   useModel('anthropic/claude-sonnet-4-6');
   return instructions;
 }
-
-export default defineAgent(RepositoryReviewer);
 ```
 
 `SKILL.md` files are not plain markdown — an import that resolves to one packages the whole skill directory instead; see [Skills](/docs/guide/skills/). Any other `.md` file is always markdown text; to turn one into a skill, pass the imported string to `defineSkill` yourself (`defineSkill({ name: 'playbook', description: '...', instructions: playbook })` — `defineSkill` writes the skill's frontmatter from `name` and `description`, so the file stays plain markdown). Vite-native queries (`?raw`, `?url`) keep their usual meanings.
@@ -145,18 +130,16 @@ POST /agents/support-assistant/ticket-8472
 It's up to the developer to decide what `id` means and whether it maps to important application data, such as a user ID, customer support ticket, or GitHub issue. A randomly generated ID can also work. The `id` keys the conversation's durable storage, and the runtime passes it to the top-level agent function as a prop — the way a web framework passes route params to the page component:
 
 ```ts
-import { type AgentProps, defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { type AgentProps, useInitialData, useModel, useTool } from '@flue/runtime';
 import type { SlackThreadRef } from '@flue/slack';
 import { replyInThread } from '../channels/slack.ts';
 
-function Assistant({ id }: AgentProps) {
+export function Assistant({ id }: AgentProps) {
   useModel('anthropic/claude-haiku-4-5');
   const thread = useInitialData<SlackThreadRef>();
   useTool(replyInThread(thread!));
   return `Reply in the Slack thread bound to conversation ${id}.`;
 }
-
-export default defineAgent(Assistant);
 ```
 
 The `id` is the opaque address; structured facts like the thread ref arrive as
@@ -171,30 +154,27 @@ An instance usually exists _about something_ — a support ticket, a GitHub issu
 ```ts
 import * as v from 'valibot';
 
-export const initialDataSchema = v.object({ issue: v.pipe(v.number(), v.integer()) });
-
-function Triage() {
+export function Triage() {
   useModel('anthropic/claude-opus-4-6');
-  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
+  const data = useInitialData<v.InferOutput<typeof Triage.initialData>>();
   return `Triage GitHub issue #${data!.issue} end-to-end.`;
 }
-
-export default defineAgent(Triage);
+Triage.initialData = v.object({ issue: v.pipe(v.number(), v.integer()) });
 ```
 
 ```ts
-await dispatch(triage, {
+await dispatch(Triage, {
   id: 'issue-17307',
   initialData: { issue: 17307 },
   message: { kind: 'signal', type: 'github.issue', body: '…' },
 });
 ```
 
-The `initialDataSchema` export validates the data once, at instance creation — a creating call that omits or malforms it is rejected, so the value is guaranteed present and shaped from the first render on. Data sent to an existing instance is ignored; the recorded value never changes. Direct HTTP carries it the same way (`{ "initialData": {…}, "kind": "user", "body": "…" }`), as do `client.send({ message, initialData })` and `flue run --initial-data '<json>'`.
+The `initialData` schema static validates the data once, at instance creation — a creating call that omits or malforms it is rejected, so the value is guaranteed present and shaped from the first render on. Data sent to an existing instance is ignored; the recorded value never changes. Direct HTTP carries it the same way (`{ "initialData": {…}, "kind": "user", "body": "…" }`), as do `client.send({ message, initialData })` and `flue run --initial-data '<json>'`.
 
 The three input channels each have one job: **`useInitialData()` is what the instance is about, `useDelivery()` is what this message says, and `usePersistentState` is what the agent has learned.**
 
-Authorize access to an `id` in the [`route`](#interacting-with-your-agent) handler. For work that arrives as a dispatched or signal-kind message — a webhook, a chat platform event — carry the identifier your application already validated in the message's `attributes` and read it inside the agent with `useDelivery()`; see [Tools](/docs/guide/tools/#protect-access) for the pattern.
+Authorize access to an `id` in [middleware in front of the mount](#interacting-with-your-agent). For work that arrives as a dispatched or signal-kind message — a webhook, a chat platform event — carry the identifier your application already validated in the message's `attributes` and read it inside the agent with `useDelivery()`; see [Tools](/docs/guide/tools/#protect-access) for the pattern.
 
 ### The id names the address, the uid names the incarnation
 
@@ -212,11 +192,11 @@ Every send is a request against that address, and it can carry the uid as a cond
 Every successful send's receipt carries the uid — fresh on a creating send, echoed back on a continuing one — so the common case needs no separate lookup:
 
 ```ts
-const receipt = await dispatch(triage, { id: 'issue-17307', initialData: { issue: 17307 }, message });
+const receipt = await dispatch(Triage, { id: 'issue-17307', initialData: { issue: 17307 }, message });
 receipt.uid; // 'inst_01KW…'
 
-await dispatch(triage, { id: 'issue-17307', uid: receipt.uid, message }); // continue only this incarnation
-await dispatch(triage, { id: 'issue-17307', uid: null, initialData: { issue: 17307 }, message }); // create only, fresh
+await dispatch(Triage, { id: 'issue-17307', uid: receipt.uid, message }); // continue only this incarnation
+await dispatch(Triage, { id: 'issue-17307', uid: null, initialData: { issue: 17307 }, message }); // create only, fresh
 ```
 
 Reach for a uid condition in programmatic callers that mint their own ids and want to guard against a typo'd id silently continuing the wrong conversation, or against a stale reference reaching an instance that was deleted and re-created under the same id. Most callers don't need this: quick starts and a first prototype send unconditionally, and so do channels — a channel's derived instance id can't be typo'd, and "already exists" is its normal case for every message after the first (see [Channels](/docs/guide/channels/)). `uid: '<string>'` combined with `initialData` is a contradiction Flue rejects: the condition forbids creation, so the seed could never apply. See the [Agent API](/docs/api/agent-api/#conditional-sends) for the full condition semantics and error shapes, including `getAgentInstance()` for code that wants to condition a send it did not originate.
@@ -244,29 +224,28 @@ Content-Type: application/json
 
 The server responds `202` with an admission record — prompts are fire-and-forget, and the reply is read from the conversation (`GET` the same URL for the durable event stream, or `?view=history` for a snapshot). A `kind: 'user'` message may also carry an `attachments` array of `{ "type": "image", "data": "<base64>", "mimeType": "image/png" }` values for vision-capable models. The [SDK](/docs/sdk/overview/) wraps all of this — `send()`, `wait()`, `observe()`, `history()` — around one conversation URL.
 
-Use the `route` handler to protect direct HTTP access to a conversation:
+Protect direct HTTP access to a conversation with plain Hono middleware in front of the mount:
 
-```ts title="src/agents/support-assistant.ts"
-'use agent';
-import { type AgentRouteHandler, defineAgent, useModel } from '@flue/runtime';
-import { authenticate } from '../auth.ts';
+```ts title="src/app.ts"
+import { createAgentRouter } from '@flue/runtime/routing';
+import { Hono } from 'hono';
+import { SupportAssistant } from './agents/support-assistant.ts';
+import { authenticate } from './auth.ts';
 
-export const route: AgentRouteHandler = async (c, next) => {
+const app = new Hono();
+
+app.use('/agents/support-assistant/*', async (c, next) => {
   const principal = await authenticate(c.req.header('authorization'));
-  const ticketId = c.req.param('id');
+  const ticketId = c.req.path.split('/')[3]; // the conversation id segment
 
   if (!principal) return c.json({ error: 'Unauthorized' }, 401);
-  if (!principal.supportTicketIds.includes(ticketId)) return c.notFound();
+  if (!ticketId || !principal.supportTicketIds.includes(ticketId)) return c.notFound();
 
   await next();
-};
+});
+app.route('/agents/support-assistant', createAgentRouter(SupportAssistant));
 
-function SupportAssistant() {
-  useModel('anthropic/claude-haiku-4-5');
-  return 'Help with the authorized support ticket for this conversation.';
-}
-
-export default defineAgent(SupportAssistant);
+export default app;
 ```
 
 For more information, see [Routing](/docs/guide/routing/) and [SDK](/docs/sdk/overview/).
@@ -276,16 +255,17 @@ For more information, see [Routing](/docs/guide/routing/) and [SDK](/docs/sdk/ov
 Use `dispatch(...)` when your application receives an event for an agent asynchronously, such as a webhook, queue message, chat event, or notification. For example, an application route can verify an incoming support-system webhook and dispatch the comment to the agent for that ticket:
 
 ```ts title="src/app.ts"
-import { dispatch, useModel } from '@flue/runtime';
+import { dispatch } from '@flue/runtime';
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
-import supportAssistant from './agents/support-assistant.ts';
+import { SupportAssistant } from './agents/support-assistant.ts';
 import { verifySupportWebhook } from './shared/support-webhooks.ts';
 
 const app = new Hono();
 
 app.post('/webhooks/support-comments', async (c) => {
   const event = await verifySupportWebhook(c.req.raw);
-  const receipt = await dispatch(supportAssistant, {
+  const receipt = await dispatch(SupportAssistant, {
     id: event.ticketId,
     message: {
       kind: 'signal',
@@ -298,7 +278,7 @@ app.post('/webhooks/support-comments', async (c) => {
   return c.json(receipt, 202);
 });
 
-app.route('/agents/support-assistant', supportAssistant.route());
+app.route('/agents/support-assistant', createAgentRouter(SupportAssistant));
 
 export default app;
 ```

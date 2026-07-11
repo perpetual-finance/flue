@@ -15,7 +15,10 @@ import { type AttachmentStore, InMemoryAttachmentStore } from './runtime/attachm
 import { InMemoryConversationStreamStore } from './runtime/conversation-stream-store.ts';
 import { dispatchGlobalEvent } from './runtime/events.ts';
 import { generateInstanceUid } from './runtime/ids.ts';
-import { resolveAgentModuleBinding } from './runtime/registration.ts';
+import {
+	resolveAgentDurability,
+	resolveAgentInitialDataSchema,
+} from './runtime/registration.ts';
 import { agentStreamPath } from './runtime/stream-offsets.ts';
 import { createCwdSessionEnv } from './sandbox.ts';
 import type {
@@ -26,8 +29,8 @@ import type {
 	SessionResourceRuntime,
 } from './session.ts';
 import type {
+	Agent,
 	AgentConfig,
-	AgentModuleValue,
 	AgentRuntimeConfig,
 	DeliveredMessage,
 	FlueEvent,
@@ -71,7 +74,7 @@ export interface FlueContextInternal extends FlueEventContext {
 	 * `useDelivery()`. Omit for invocations no delivered message triggered.
 	 */
 	initializeRootHarness(
-		agent: AgentModuleValue,
+		agent: Agent,
 		delivery?: DeliveredMessage,
 		data?: unknown,
 	): Promise<Harness>;
@@ -161,7 +164,7 @@ export function createFlueContext(config: FlueContextConfig): FlueContextInterna
 		},
 
 		async initializeRootHarness(
-			agent: AgentModuleValue,
+			agent: Agent,
 			delivery?: DeliveredMessage,
 			data?: unknown,
 		): Promise<Harness> {
@@ -266,7 +269,7 @@ async function createLocalConversationRuntime(config: FlueContextConfig): Promis
 }
 
 export async function initializeRootHarness(
-	agent: AgentModuleValue,
+	agent: Agent,
 	config: FlueContextConfig,
 	emitEvent: (event: FlueEventInput, observation?: FlueObservationDetail) => void,
 	delivery?: DeliveredMessage,
@@ -280,18 +283,14 @@ export async function initializeRootHarness(
 	// writes through this buffer, which the session drains into the tool
 	// batch's append. One buffer per harness lifetime (one submission attempt).
 	const reduced = await config.conversationWriter.loadReducedState();
-	// Supervisor-facing module exports (initialDataSchema, durability) ride
-	// the identity binding — populated by the build transform at module
-	// evaluation and by registerFlueAgents. Absent on raw defineAgent values
-	// in unit tests, where no schema/policy applies unless the test registers.
-	const moduleBinding = resolveAgentModuleBinding(agent);
 	// Instance-creation data. Once the root conversation exists, the recorded
 	// value wins forever (data on later messages is deliberately ignored, and
 	// nothing re-validates). On first contact — including re-attempts of the
 	// creating submission, which run before the birth record lands — the
-	// incoming value is validated against the module's `initialDataSchema`
-	// export; the schema-parsed output is what renders see and what the birth
+	// incoming value is validated against the agent's `initialData` contract
+	// static; the schema-parsed output is what renders see and what the birth
 	// record stores.
+	const initialDataSchema = resolveAgentInitialDataSchema(agent);
 	let initialData: unknown;
 	let creationData: unknown;
 	let creationUid: string | undefined;
@@ -299,11 +298,11 @@ export async function initializeRootHarness(
 		initialData = reduced.initialData.value;
 	} else {
 		initialData = data;
-		if (moduleBinding?.initialDataSchema !== undefined) {
-			const parsedData = v.safeParse(moduleBinding.initialDataSchema, data);
+		if (initialDataSchema !== undefined) {
+			const parsedData = v.safeParse(initialDataSchema, data);
 			if (!parsedData.success) {
 				throw new Error(
-					`[flue] ${label} requires creation data matching its initialDataSchema: ${parsedData.issues
+					`[flue] ${label} requires creation data matching its initialData schema: ${parsedData.issues
 						.map((issue) => issue.message)
 						.join('; ')}. Creation data rides the instance's first message ({ initialData, ... }).`,
 				);
@@ -332,7 +331,7 @@ export async function initializeRootHarness(
 		...(config.agentName === undefined ? {} : { agentName: config.agentName }),
 		initialData,
 	};
-	const first = renderAgentFunctionWithStructure(agent.agent, renderState);
+	const first = renderAgentFunctionWithStructure(agent, renderState);
 	const resolvedOptions: AgentRuntimeConfig = first.config;
 	let lastStructure: AgentRenderStructure = first.structure;
 	// The render composes the whole config: hooks validated every value when
@@ -434,9 +433,10 @@ export async function initializeRootHarness(
 		model: resolvedModel,
 		thinkingLevel: definition.thinkingLevel ?? config.agentConfig.thinkingLevel,
 		compaction: definition.compaction ?? config.agentConfig.compaction,
-		// Submission retry policy: a module export (not a hook) because the
-		// policy must be readable even when the render itself crashes.
-		durability: moduleBinding?.durability,
+		// Submission retry policy: binding config (not a hook) because the
+		// policy must be readable even when the render itself crashes — the
+		// runner that bound this agent decided it.
+		durability: resolveAgentDurability(config.agentName),
 	};
 	// Per-turn re-render: fresh closures over the latest state values, the
 	// identity-invariance guard, and a recomposed system prompt. The session
@@ -445,7 +445,7 @@ export async function initializeRootHarness(
 	// stays live). Resources (tools, skills, subagents) may change between
 	// renders — the session narrates the delta to the model.
 	const rerender: SessionRerender = () => {
-		const next = renderAgentFunctionWithStructure(agent.agent, renderState);
+		const next = renderAgentFunctionWithStructure(agent, renderState);
 		assertRenderStructureInvariance(lastStructure, next.structure);
 		lastStructure = next.structure;
 		return {
@@ -536,5 +536,5 @@ async function resolveSessionEnv(
 		const env = await sandbox.createSessionEnv({ id });
 		return { env, toolFactory: sandbox.tools };
 	}
-	throw new Error('[flue] Invalid sandbox option returned from defineAgent().');
+	throw new Error('[flue] Invalid sandbox option composed by the agent function.');
 }

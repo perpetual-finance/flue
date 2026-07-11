@@ -20,11 +20,11 @@ import {
 } from '../errors.ts';
 import { type FlueTraceCarrier, interceptExecution } from '../execution-interceptor.ts';
 import { getInternalSession } from '../session.ts';
-import type { AgentModuleValue, CallHandle, DeliveredMessage } from '../types.ts';
+import type { Agent, CallHandle, DeliveredMessage } from '../types.ts';
 import { type AttachmentStore, createAttachmentRef } from './attachment-store.ts';
 import type { DispatchInput } from './dispatch-queue.ts';
 import { generateAttemptId, generateSubmissionId } from './ids.ts';
-import { resolveAgentModuleBinding } from './registration.ts';
+import { resolveAgentInitialDataSchema } from './registration.ts';
 import { agentStreamPath } from './stream-offsets.ts';
 
 /**
@@ -185,8 +185,8 @@ export interface InstanceContactAdmission {
  * - `uid: null`: create only when fresh — an existing instance throws
  *   {@link AgentInstanceExistsError} with the existing uid in its details.
  *
- * Creating sends additionally validate `initialData` against the module's
- * `initialDataSchema` export (when declared). Everything here runs synchronously BEFORE anything
+ * Creating sends additionally validate `initialData` against the agent's
+ * `initialData` contract static (when declared). Everything here runs synchronously BEFORE anything
  * durable is admitted, so a failed condition or invalid creation leaves no
  * queued submission behind. The uid itself is minted at birth (inside
  * `initializeRootHarness`) — never here — so the durable submission payload
@@ -194,7 +194,7 @@ export interface InstanceContactAdmission {
  * read the recorded uid back after materialization for the receipt.
  */
 export async function admitInstanceContact(options: {
-	agent: AgentModuleValue;
+	agent: Agent;
 	id: string;
 	initialData: unknown;
 	uid: string | null | undefined;
@@ -233,13 +233,13 @@ export async function admitInstanceContact(options: {
 	}
 	if (exists) return { uid: reduced.uid, creating: false };
 
-	const schema = resolveAgentModuleBinding(options.agent)?.initialDataSchema;
+	const schema = resolveAgentInitialDataSchema(options.agent);
 	if (schema !== undefined) {
 		const parsed = v.safeParse(schema, options.initialData);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
 				reason:
-					`The agent requires creation data matching its initialDataSchema: ${parsed.issues
+					`The agent requires creation data matching its initialData schema: ${parsed.issues
 						.map((issue) => issue.message)
 						.join('; ')}. ` +
 					'Creation data rides the instance\'s first message ({ initialData, ... } beside the message).',
@@ -287,7 +287,7 @@ export function createDirectAgentSubmissionInput(options: {
  */
 export async function materializeAgentSubmissionSession(
 	ctx: FlueContextInternal,
-	agent: AgentModuleValue,
+	agent: Agent,
 	input: AgentSubmissionInput,
 	attachmentStore?: AttachmentStore,
 ): Promise<void> {
@@ -315,7 +315,7 @@ export async function materializeAgentSubmissionSession(
 }
 
 export function createAgentSubmissionSessionHandler(
-	agent: AgentModuleValue,
+	agent: Agent,
 	input: AgentSubmissionInput,
 	execute: (session: AgentSubmissionSession) => Promise<unknown> | unknown,
 ): (ctx: FlueContextInternal) => Promise<unknown> {
@@ -347,7 +347,7 @@ export function agentSubmissionDispatchId(input: AgentSubmissionInput): string |
 export async function reconcileInterruptedSubmission(
 	submissions: AgentSubmissionStore,
 	submission: AgentSubmission,
-	agent: AgentModuleValue,
+	agent: Agent,
 	createContext: (dispatchId: string | undefined) => FlueContextInternal,
 	lease?: { ownerId: string; leaseExpiresAt: number },
 	conversationWriter?: ConversationRecordWriter,
@@ -572,7 +572,7 @@ export interface ProcessSubmissionOptions {
 	/** The claimed submission to process. */
 	submission: AgentSubmission;
 	/** Resolve an agent definition by name. Must throw if absent. */
-	resolveAgent: (name: string) => AgentModuleValue;
+	resolveAgent: (name: string) => Agent;
 	/** Build a context for this submission. */
 	createContext: (dispatchId: string | undefined) => FlueContextInternal;
 	conversationWriter?: ConversationRecordWriter;
@@ -793,7 +793,7 @@ async function failInterruptedSubmission(
 	submissions: AgentSubmissionStore,
 	submission: AgentSubmission,
 	attempt: SubmissionAttemptRef,
-	agent: AgentModuleValue,
+	agent: Agent,
 	reason: AgentSubmissionInterruption['reason'],
 	createError: (interruptedTools?: ReadonlyArray<InterruptedToolCallRef>) => Error,
 	createContext: (dispatchId: string | undefined) => FlueContextInternal,
@@ -862,7 +862,7 @@ async function settleAbortedWithContext(
 	submissions: AgentSubmissionStore,
 	submission: AgentSubmission,
 	attempt: SubmissionAttemptRef,
-	agent: AgentModuleValue,
+	agent: Agent,
 	ctx: FlueContextInternal,
 	conversationWriter?: ConversationRecordWriter,
 ): Promise<void> {
@@ -1073,7 +1073,7 @@ function submissionAttemptRef(submission: AgentSubmission): SubmissionAttemptRef
 
 async function openAgentSubmissionSession(
 	ctx: FlueContextInternal,
-	agent: AgentModuleValue,
+	agent: Agent,
 	input: AgentSubmissionInput,
 ): Promise<AgentSubmissionSession> {
 	// The submission's delivered message rides into the harness so renders can

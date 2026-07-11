@@ -1,22 +1,26 @@
 import { describe, expect, it } from 'vitest';
+import type { UseAgentTransformAgent } from '../src/use-agent-transform.ts';
 import { transformUseAgentModule } from '../src/use-agent-transform.ts';
 
 const ID = '/project/src/agents/triage.ts';
 
-function transform(code: string) {
-	return transformUseAgentModule({ code, id: ID, filePath: ID, identity: 'triage' });
+function transform(code: string, agents: readonly UseAgentTransformAgent[]) {
+	return transformUseAgentModule({ code, id: ID, filePath: ID, agents });
 }
 
 describe('transformUseAgentModule', () => {
-	it('appends the binding call with the identity and only the present named exports', async () => {
+	it('appends one identity-binding call per agent, stamping the identity literal', async () => {
 		const result = await transform(
 			[
 				`'use agent';`,
-				`import { defineAgent } from '@flue/runtime';`,
-				`export default defineAgent(() => undefined);`,
-				`export const route = async (_c, next) => next();`,
-				`export const description = 'Triage agent';`,
+				`export function Triage() { return 'triage'; }`,
+				`export const Escalation = () => 'escalate';`,
+				`Escalation.agentName = 'escalation-bot';`,
 			].join('\n'),
+			[
+				{ exportName: 'Triage', identity: 'Triage' },
+				{ exportName: 'Escalation', identity: 'escalation-bot' },
+			],
 		);
 		expect(result).not.toBeNull();
 		expect(result?.code).toContain(
@@ -24,9 +28,11 @@ describe('transformUseAgentModule', () => {
 		);
 		expect(result?.code).toContain(`import * as __flue_agent_module__ from ${JSON.stringify(ID)};`);
 		expect(result?.code).toContain(
-			`__flue_bind_agent_module__(__flue_agent_module__.default, { identity: "triage", route: __flue_agent_module__.route, description: __flue_agent_module__.description });`,
+			`__flue_bind_agent_module__(__flue_agent_module__["Triage"], { identity: "Triage" });`,
 		);
-		expect(result?.code).not.toContain('attachments:');
+		expect(result?.code).toContain(
+			`__flue_bind_agent_module__(__flue_agent_module__["Escalation"], { identity: "escalation-bot" });`,
+		);
 		expect(result?.map).toBeDefined();
 		// The emitted map must be self-contained: source + original text, so
 		// composed sourcemaps never lose the authored module.
@@ -34,37 +40,25 @@ describe('transformUseAgentModule', () => {
 		expect(result?.map.sourcesContent?.[0]).toContain(`'use agent';`);
 	});
 
-	it('detects renamed export specifiers and export-from declarations', async () => {
+	it('binds default-exported agents through the namespace default member', async () => {
 		const result = await transform(
-			[
-				`'use agent';`,
-				`import { defineAgent } from '@flue/runtime';`,
-				`const authMiddleware = async (_c, next) => next();`,
-				`const agent = defineAgent(() => undefined);`,
-				`export { agent as default, authMiddleware as route };`,
-				`export { description } from './metadata.ts';`,
-			].join('\n'),
+			[`'use agent';`, `export default function Main() { return 'x'; }`].join('\n'),
+			[{ exportName: 'default', identity: 'Main' }],
 		);
-		expect(result?.code).toContain('route: __flue_agent_module__.route');
-		expect(result?.code).toContain('description: __flue_agent_module__.description');
-	});
-
-	it('throws with the directive location when a marked module has no default export', async () => {
-		await expect(
-			transform([`'use agent';`, `export const route = async (_c, next) => next();`].join('\n')),
-		).rejects.toThrow(`Agent module ${ID}:1:1 declares 'use agent' but has no default export`);
+		expect(result?.code).toContain(
+			`__flue_bind_agent_module__(__flue_agent_module__["default"], { identity: "Main" });`,
+		);
 	});
 
 	it('returns null when the directive text appears outside the directive prologue', async () => {
 		const result = await transform(
 			[
-				`import { defineAgent } from '@flue/runtime';`,
 				`const note = 'use agent';`,
-				`function agent() {`,
+				`export function Agent() {`,
 				`	return note;`,
 				`}`,
-				`export default defineAgent(agent);`,
 			].join('\n'),
+			[{ exportName: 'Agent', identity: 'Agent' }],
 		);
 		expect(result).toBeNull();
 	});

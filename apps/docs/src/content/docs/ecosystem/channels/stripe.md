@@ -27,7 +27,7 @@ application.
 import Stripe from 'stripe';
 import { createStripeChannel } from '@flue/stripe';
 import { dispatch, useModel } from '@flue/runtime';
-import billing from '../agents/billing.ts';
+import { Billing } from '../agents/billing.ts';
 
 export const client = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   httpClient: Stripe.createFetchHttpClient(),
@@ -43,7 +43,7 @@ export const channel = createStripeChannel({
       typeof session.customer === 'string' ? session.customer : session.customer?.id;
     if (!customerId) return;
 
-    await dispatch(billing, {
+    await dispatch(Billing, {
       id: customerId,
       message: {
         kind: 'signal',
@@ -111,7 +111,7 @@ Snapshot events are the default:
 import Stripe from 'stripe';
 import { createStripeChannel } from '@flue/stripe';
 import { defineTool, dispatch, useModel } from '@flue/runtime';
-import billing from '../agents/billing.ts';
+import { Billing } from '../agents/billing.ts';
 
 export const client = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   httpClient: Stripe.createFetchHttpClient(),
@@ -131,7 +131,7 @@ export const channel = createStripeChannel({
           typeof session.customer === 'string' ? session.customer : session.customer?.id;
         if (!customerId) return;
 
-        await dispatch(billing, {
+        await dispatch(Billing, {
           id: customerId,
           message: {
             kind: 'signal',
@@ -187,16 +187,14 @@ namespaces require it.
 
 ```ts title="src/agents/billing.ts"
 'use agent';
-import { type AgentProps, defineAgent, useModel, useTool } from '@flue/runtime';
+import { type AgentProps, useModel, useTool } from '@flue/runtime';
 import { retrieveCustomer } from '../channels/stripe.ts';
 
-function Billing({ id: customerId }: AgentProps) {
+export function Billing({ id: customerId }: AgentProps) {
   useModel('anthropic/claude-haiku-4-5');
   useTool(retrieveCustomer(customerId));
   return 'Review the completed Checkout event and summarize any billing follow-up that is needed.';
 }
-
-export default defineAgent(Billing);
 ```
 
 The model can invoke the lookup but cannot select another customer, account, or

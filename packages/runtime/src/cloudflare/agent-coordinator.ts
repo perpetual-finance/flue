@@ -93,7 +93,7 @@ interface CloudflareAgentPreparedCoordinator {
 interface CloudflareAgentRuntimeOptions {
 	readonly agents: ReadonlyArray<{
 		readonly name: string;
-		readonly definition: Parameters<typeof createAgentSubmissionSessionHandler>[0];
+		readonly agent: Parameters<typeof createAgentSubmissionSessionHandler>[0];
 	}>;
 	readonly createContext: (options: {
 		readonly executionStore: AgentExecutionStore;
@@ -405,7 +405,7 @@ class CloudflareAgentCoordinator {
 			for (const submission of await this.submissions.listUnreadySubmissions()) {
 				const agent = this.options.agents.find(
 					(record) => record.name === submission.input.agent,
-				)?.definition;
+				)?.agent;
 				if (!agent || submission.input.agent !== this.agentName || submission.input.id !== this.instance.name) {
 					console.error('[flue:submission-reconciliation]', {
 						agentName: this.agentName,
@@ -527,7 +527,7 @@ class CloudflareAgentCoordinator {
 
 	private async reconcileInterruptedSubmission(submission: AgentSubmission): Promise<void> {
 		const conversationWriter = await this.ensureConversationWriter();
-		const agent = this.options.agents.find((record) => record.name === this.agentName)?.definition;
+		const agent = this.options.agents.find((record) => record.name === this.agentName)?.agent;
 		if (!agent) throw new Error('[flue] Agent target unavailable during durable reconciliation.');
 		const replacement = await reconcileInterruptedSubmission(
 			this.submissions,
@@ -682,7 +682,7 @@ class CloudflareAgentCoordinator {
 			submissions: this.submissions,
 			submission,
 			resolveAgent: (name) => {
-				const agent = this.options.agents.find((record) => record.name === name)?.definition;
+				const agent = this.options.agents.find((record) => record.name === name)?.agent;
 				if (!agent) throw new Error('[flue] Agent target unavailable during durable processing.');
 				return agent;
 			},
@@ -720,7 +720,7 @@ class CloudflareAgentCoordinator {
 			initialData,
 			traceCarrier,
 		});
-		const agent = this.options.agents.find((record) => record.name === this.agentName)?.definition;
+		const agent = this.options.agents.find((record) => record.name === this.agentName)?.agent;
 		if (!agent) throw new Error('[flue] Agent target unavailable during durable admission.');
 		const contact = await admitInstanceContact({
 			agent,
@@ -767,7 +767,7 @@ class CloudflareAgentCoordinator {
 		if (input.agent !== this.agentName || input.id !== this.instance.name) {
 			return new Response('Invalid internal dispatch target.', { status: 400 });
 		}
-		const agent = this.options.agents.find((record) => record.name === this.agentName)?.definition;
+		const agent = this.options.agents.find((record) => record.name === this.agentName)?.agent;
 		if (!agent) return new Response('Dispatch target unavailable.', { status: 404 });
 		let contact: InstanceContactAdmission;
 		try {

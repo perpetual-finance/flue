@@ -78,20 +78,30 @@ registerProvider('flue-test', {
 }
 
 export const CF_ECHO_AGENT_MODULE = `'use agent';
-import { defineAgent, useModel } from '@flue/runtime';
-export default defineAgent(() => {
+import { useModel } from '@flue/runtime';
+export function Echo() {
 	useModel('flue-test/fake-model');
-});
-export const description = 'Echo agent';
+}
+Echo.agentName = 'echo';
+`;
+
+/** A second agent, distinct identity from {@link CF_ECHO_AGENT_MODULE}'s. */
+export const CF_WRITER_AGENT_MODULE = `'use agent';
+import { useModel } from '@flue/runtime';
+export function Writer() {
+	useModel('flue-test/fake-model');
+}
+Writer.agentName = 'writer';
 `;
 
 const CF_BASIC_APP_MODULE = `import { Hono } from 'hono';
+import { createAgentRouter } from '@flue/runtime/routing';
 import './test-model.ts';
-import echo from './agents/echo.ts';
+import { Echo } from './agents/echo.ts';
 
 const app = new Hono();
 app.get('/api/ping', (c) => c.text('pong'));
-app.route('/agents/echo', echo.route());
+app.route('/agents/echo', createAgentRouter(Echo));
 
 export default app;
 `;

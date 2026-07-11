@@ -27,7 +27,7 @@ bind that tool to the interaction's trusted destination.
 import { REST } from '@discordjs/rest';
 import { createDiscordChannel, type APIInteractionResponse } from '@flue/discord';
 import { dispatch } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 export const client = new REST({ version: '10' }).setToken(process.env.DISCORD_BOT_TOKEN!);
 
@@ -54,7 +54,7 @@ export const channel = createDiscordChannel({
       interaction.data.type === 1
         ? interaction.data.options?.find((option) => option.type === 3)?.value
         : undefined;
-    await dispatch(assistant, {
+    await dispatch(Assistant, {
       id: channel.instanceId(destination),
       message: {
         kind: 'signal',
@@ -256,21 +256,21 @@ the instance id:
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { postMessage } from '../channels/discord.ts';
 
-export const initialDataSchema = v.object({ channelId: v.string() });
+const initialData = v.object({ channelId: v.string() });
 
-function Assistant() {
+export function Assistant() {
   useModel('anthropic/claude-haiku-4-5');
-  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
+  const data = useInitialData<v.InferOutput<typeof initialData>>();
   if (!data) throw new Error('This agent is created by the Discord channel dispatch.');
   useTool(postMessage(data));
   return 'Post a concise answer to the bound Discord destination.';
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialData;
 ```
 
 The model selects message content. It does not select arbitrary Discord

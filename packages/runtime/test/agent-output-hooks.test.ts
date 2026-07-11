@@ -10,7 +10,6 @@ import {
 } from '@earendil-works/pi-ai/compat';
 import * as v from 'valibot';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineAgent } from '../src/agent-definition.ts';
 import { projectConversationUi } from '../src/conversation-projections.ts';
 import type { ConversationRecord } from '../src/conversation-records.ts';
 import {
@@ -388,7 +387,7 @@ describe('output hooks end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant),
+					agent: assistant,
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -453,7 +452,7 @@ describe('output hooks end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant),
+					agent: assistant,
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -502,7 +501,7 @@ describe('output hooks end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant),
+					agent: assistant,
 				},
 			],
 			createContext: makeFauxCreateContext(provider),

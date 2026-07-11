@@ -1,5 +1,5 @@
 'use agent';
-import { defineAgent, useModel, useTool } from '@flue/runtime';
+import { useModel, useTool } from '@flue/runtime';
 
 /**
  * The non-fatal case: the handler reports errors with `log.error` and keeps
@@ -7,7 +7,7 @@ import { defineAgent, useModel, useTool } from '@flue/runtime';
  * `error` attribute is present, a message otherwise — while the conversation
  * completes normally.
  */
-function Explicit() {
+export function Explicit() {
 	useModel('anthropic/claude-haiku-4-5');
 	useTool({
 		name: 'explicit',
@@ -33,5 +33,3 @@ function Explicit() {
 	});
 	return 'When asked to run the demo, call the `explicit` action and report its result.';
 }
-
-export default defineAgent(Explicit);

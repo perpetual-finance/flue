@@ -1,7 +1,7 @@
 import { createMessengerChannel, type MessengerConversationRef } from '@flue/messenger';
 import { defineTool, dispatch } from '@flue/runtime';
 import * as v from 'valibot';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { MessengerClient } from '../messenger-client.ts';
 
 export const client = new MessengerClient({
@@ -30,7 +30,7 @@ export const channel = createMessengerChannel({
 				const attachmentTypes = (event.message.attachments ?? []).map(
 					(attachment) => attachment.type,
 				);
-				await dispatch(assistant, {
+				await dispatch(Assistant, {
 					id: channel.instanceId(conversation),
 					// Recorded once when this event creates the instance; ignored after.
 					initialData: {

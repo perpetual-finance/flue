@@ -83,8 +83,8 @@ These are the things that aren't obvious from the spec or the example.
 - If the user is mid-task on an agent that this adapter is meant to plug
   into, finish that wiring. Otherwise share a small snippet showing how to
   wire it up — call `useSandbox(...)` once in the agent's function body, and
-  default-export the function wrapped in `defineAgent(...)` from a module
-  whose first statement is the `'use agent';` directive.
+  export the capitalized agent function from a module whose first statement
+  is the `'use agent';` directive.
 - Tell the user what commands to run next: any new deps you added, any env
   vars they need to set, and `flue run <path-to-the-agent-module> --message "..."`
   (or `vite dev` for the full application).

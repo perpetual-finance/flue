@@ -5,7 +5,7 @@ This example uses Chat SDK for bidirectional GitHub issue-comment messaging whil
 ```txt
 signed GitHub issue_comment webhook
   -> Chat SDK GitHub adapter
-  -> dispatch(assistant, ...)
+  -> dispatch(Assistant, ...)
   -> Flue agent tool
   -> bot.thread(threadId).post(...)
   -> fake local GitHub comment API

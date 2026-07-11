@@ -1,16 +1,15 @@
-import type { MiddlewareHandler } from 'hono';
 import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { defineAgent } from '../src/agent-definition.ts';
 import { useModel } from '../src/hooks/use-model.ts';
 import { configureFlueRuntime, resetFlueRuntimeForTests } from '../src/runtime/flue-app.ts';
 import {
 	__flueBindAgentModule,
+	createAgentRouter,
 	registerFlueAgents,
 	resetFlueAgentRegistrationForTests,
 } from '../src/runtime/registration.ts';
-import type { FunctionAgentDefinition } from '../src/types.ts';
+import type { Agent } from '../src/types.ts';
 import { cloudflareRuntime, nodeRuntime } from './helpers/runtime-config.ts';
 
 afterEach(() => {
@@ -18,17 +17,11 @@ afterEach(() => {
 	resetFlueAgentRegistrationForTests();
 });
 
-function boundAgent(
-	identity = 'triage',
-	metadata: {
-		route?: MiddlewareHandler;
-		description?: string;
-	} = {},
-): FunctionAgentDefinition {
-	const agent = defineAgent(() => {
+function boundAgent(identity = 'triage'): Agent {
+	const agent = () => {
 		useModel('anthropic/claude-haiku-4-5');
-	});
-	__flueBindAgentModule(agent, { identity, ...metadata });
+	};
+	__flueBindAgentModule(agent, { identity });
 	return agent;
 }
 
@@ -40,12 +33,15 @@ function promptRequest(url: string): Request {
 	});
 }
 
-describe('AgentDefinition.route()', () => {
-	it('throws a directive hint when the definition has no identity binding and no registration', () => {
-		const agent = defineAgent(() => {
-			useModel('anthropic/claude-haiku-4-5');
-		});
-		expect(() => agent.route()).toThrow("Add the 'use agent' directive");
+describe('createAgentRouter()', () => {
+	it('throws an identity hint when the agent has no binding, static, or name', () => {
+		// Passed inline (not bound to a variable), so the function has no
+		// inferred `.name` either — genuinely anonymous.
+		expect(() =>
+			createAgentRouter(() => {
+				useModel('anthropic/claude-haiku-4-5');
+			}),
+		).toThrow('could not resolve an identity');
 	});
 
 	it('is a pure factory: safe to call repeatedly and mount at several paths', async () => {
@@ -61,8 +57,8 @@ describe('AgentDefinition.route()', () => {
 		);
 
 		const app = new Hono();
-		app.route('/agents/triage', agent.route());
-		app.route('/other/mount', agent.route());
+		app.route('/agents/triage', createAgentRouter(agent));
+		app.route('/other/mount', createAgentRouter(agent));
 
 		const first = await app.fetch(promptRequest('http://localhost/agents/triage/cust-1'));
 		const second = await app.fetch(promptRequest('http://localhost/other/mount/cust-1'));
@@ -83,7 +79,7 @@ describe('AgentDefinition.route()', () => {
 			}),
 		);
 		const app = new Hono();
-		app.route('/api/agents/triage', agent.route());
+		app.route('/api/agents/triage', createAgentRouter(agent));
 
 		const response = await app.fetch(promptRequest('http://localhost/api/agents/triage/cust-1'));
 
@@ -97,11 +93,11 @@ describe('AgentDefinition.route()', () => {
 		expect(response.headers.get('stream-next-offset')).toBe('-1');
 	});
 
-	it('serves a definition registered by the bootstrap without a module binding', async () => {
-		const agent = defineAgent(() => {
+	it('serves an agent registered by the bootstrap without a module binding', async () => {
+		const agent = () => {
 			useModel('anthropic/claude-haiku-4-5');
-		});
-		registerFlueAgents([{ definition: agent, identity: 'support' }]);
+		};
+		registerFlueAgents([{ agent, identity: 'support' }]);
 		const createAgentAdmission = vi.fn((_agentName: string, _id: string) => async () => ({
 			submissionId: 'submission-1',
 			offset: '-1',
@@ -110,7 +106,7 @@ describe('AgentDefinition.route()', () => {
 			nodeRuntime({ createAgentAdmission }),
 		);
 		const app = new Hono();
-		app.route('/agents/support', agent.route());
+		app.route('/agents/support', createAgentRouter(agent));
 
 		const response = await app.fetch(promptRequest('http://localhost/agents/support/cust-9'));
 
@@ -126,7 +122,7 @@ describe('AgentDefinition.route()', () => {
 			}),
 		);
 		const app = new Hono();
-		app.route('/agents/triage', agent.route());
+		app.route('/agents/triage', createAgentRouter(agent));
 
 		const response = await app.fetch(
 			promptRequest('http://localhost/agents/triage/cust-1?wait=result'),
@@ -141,7 +137,7 @@ describe('AgentDefinition.route()', () => {
 		const agent = boundAgent();
 		configureFlueRuntime(nodeRuntime());
 		const app = new Hono();
-		app.route('/agents/triage', agent.route());
+		app.route('/agents/triage', createAgentRouter(agent));
 
 		const response = await app.fetch(
 			promptRequest('http://localhost/agents/triage/cust-1?wait=results'),
@@ -156,7 +152,7 @@ describe('AgentDefinition.route()', () => {
 		const agent = boundAgent();
 		configureFlueRuntime(nodeRuntime());
 		const app = new Hono();
-		app.route('/agents/triage', agent.route());
+		app.route('/agents/triage', createAgentRouter(agent));
 
 		const response = await app.fetch(new Request('http://localhost/agents/triage/cust-1'));
 
@@ -169,7 +165,7 @@ describe('AgentDefinition.route()', () => {
 		const agent = boundAgent();
 		configureFlueRuntime(nodeRuntime());
 		const app = new Hono();
-		app.route('/agents/triage', agent.route());
+		app.route('/agents/triage', createAgentRouter(agent));
 
 		const response = await app.fetch(
 			new Request('http://localhost/agents/triage/cust-1', { method: 'DELETE' }),
@@ -190,7 +186,7 @@ describe('AgentDefinition.route()', () => {
 		const agent = boundAgent();
 		configureFlueRuntime(nodeRuntime());
 		const app = new Hono();
-		app.route('/agents/triage', agent.route());
+		app.route('/agents/triage', createAgentRouter(agent));
 
 		const response = await app.fetch(promptRequest('http://localhost/agents/triage/%20'));
 
@@ -204,7 +200,7 @@ describe('AgentDefinition.route()', () => {
 		const abortAgentInstance = vi.fn(async (_name: string, _id: string) => true);
 		configureFlueRuntime(nodeRuntime({ abortAgentInstance }));
 		const app = new Hono();
-		app.route('/agents/triage', agent.route());
+		app.route('/agents/triage', createAgentRouter(agent));
 
 		const aborted = await app.fetch(
 			new Request('http://localhost/agents/triage/cust-1/abort', { method: 'POST' }),
@@ -220,120 +216,15 @@ describe('AgentDefinition.route()', () => {
 		expect(wrongMethod.headers.get('allow')).toBe('POST');
 	});
 
-	it('applies the module route middleware to prompt, stream, and abort routes', async () => {
-		const seen: string[] = [];
-		const agent = boundAgent('triage', {
-			route: async (c, next) => {
-				seen.push(`${c.req.method} ${new URL(c.req.url).pathname}`);
-				await next();
-				c.header('x-authored-middleware', 'ran');
-			},
-		});
-		configureFlueRuntime(
-			nodeRuntime({
-				createAgentAdmission: () => async () => ({ submissionId: 'submission-1', offset: '-1' }),
-				abortAgentInstance: async () => false,
-			}),
-		);
-		const app = new Hono();
-		app.route('/agents/triage', agent.route());
-
-		const prompt = await app.fetch(promptRequest('http://localhost/agents/triage/cust-1'));
-		expect(prompt.status).toBe(202);
-		expect(prompt.headers.get('x-authored-middleware')).toBe('ran');
-
-		await app.fetch(new Request('http://localhost/agents/triage/cust-1'));
-		await app.fetch(
-			new Request('http://localhost/agents/triage/cust-1/abort', { method: 'POST' }),
-		);
-
-		expect(seen).toEqual([
-			'POST /agents/triage/cust-1',
-			'GET /agents/triage/cust-1',
-			'POST /agents/triage/cust-1/abort',
-		]);
-	});
-
-	it('lets route middleware short-circuit without reaching the handler', async () => {
-		const createAgentAdmission = vi.fn();
-		const agent = boundAgent('triage', {
-			route: async (c) => c.json({ blocked: true }, 401),
-		});
-		configureFlueRuntime(nodeRuntime({ createAgentAdmission }));
-		const app = new Hono();
-		app.route('/agents/triage', agent.route());
-
-		const response = await app.fetch(promptRequest('http://localhost/agents/triage/cust-1'));
-
-		expect(response.status).toBe(401);
-		expect(await response.json()).toEqual({ blocked: true });
-		expect(createAgentAdmission).not.toHaveBeenCalled();
-	});
-
-	it('resolves metadata at request time, so a router built before a rebind sees the update', async () => {
-		const agent = boundAgent('triage');
-		configureFlueRuntime(
-			nodeRuntime({
-				createAgentAdmission: () => async () => ({ submissionId: 'submission-1', offset: '-1' }),
-			}),
-		);
-		const app = new Hono();
-		app.route('/agents/triage', agent.route());
-
-		// Dev-reload style re-evaluation binds middleware after mounting.
-		__flueBindAgentModule(agent, {
-			identity: 'triage',
-			route: async (c) => c.json({ blocked: true }, 401),
-		});
-
-		const response = await app.fetch(promptRequest('http://localhost/agents/triage/cust-1'));
-		expect(response.status).toBe(401);
-	});
-
 	describe('attachments route', () => {
 		it('serves the download endpoint on every mounted agent, no export required', async () => {
 			const agent = boundAgent();
 			configureFlueRuntime(nodeRuntime());
 			const app = new Hono();
-			app.route('/agents/triage', agent.route());
+			app.route('/agents/triage', createAgentRouter(agent));
 
 			// No stream exists yet, so the byte handler reports a missing
 			// stream — proof the endpoint exists without any opt-in.
-			const response = await app.fetch(
-				new Request('http://localhost/agents/triage/inst-1/attachments/att-1'),
-			);
-
-			expect(response.status).toBe(404);
-			const body = (await response.json()) as { error: { type: string } };
-			expect(body.error.type).toBe('stream_not_found');
-		});
-
-		it('wraps the download endpoint with the route middleware', async () => {
-			const agent = boundAgent('triage', {
-				route: async (c) => c.text('forbidden', 403),
-			});
-			configureFlueRuntime(nodeRuntime());
-			const app = new Hono();
-			app.route('/agents/triage', agent.route());
-
-			const response = await app.fetch(
-				new Request('http://localhost/agents/triage/inst-1/attachments/att-1'),
-			);
-
-			expect(response.status).toBe(403);
-			expect(await response.text()).toBe('forbidden');
-		});
-
-		it('reaches the byte handler when the route middleware calls next', async () => {
-			const agent = boundAgent('triage', {
-				route: async (_c, next) => {
-					await next();
-				},
-			});
-			configureFlueRuntime(nodeRuntime());
-			const app = new Hono();
-			app.route('/agents/triage', agent.route());
-
 			const response = await app.fetch(
 				new Request('http://localhost/agents/triage/inst-1/attachments/att-1'),
 			);
@@ -347,7 +238,7 @@ describe('AgentDefinition.route()', () => {
 			const agent = boundAgent();
 			configureFlueRuntime(nodeRuntime());
 			const app = new Hono();
-			app.route('/agents/triage', agent.route());
+			app.route('/agents/triage', createAgentRouter(agent));
 
 			const response = await app.fetch(
 				new Request('http://localhost/agents/triage/inst-1/attachments/att-1', {
@@ -372,7 +263,7 @@ describe('AgentDefinition.route()', () => {
 			);
 			configureFlueRuntime(cloudflareRuntime({ routeAgentRequest }));
 			const app = new Hono();
-			app.route('/agents/triage', agent.route());
+			app.route('/agents/triage', createAgentRouter(agent));
 
 			const urls = [
 				promptRequest('http://localhost/agents/triage/cust-1'),
@@ -410,7 +301,7 @@ describe('AgentDefinition.route()', () => {
 			);
 			configureFlueRuntime(cloudflareRuntime({ routeAgentRequest }));
 			const app = new Hono();
-			app.route('/api/assistants/desk', agent.route());
+			app.route('/api/assistants/desk', createAgentRouter(agent));
 
 			const abort = await app.fetch(
 				new Request('http://localhost/api/assistants/desk/case%3A8472/abort', {
@@ -436,7 +327,7 @@ describe('AgentDefinition.route()', () => {
 			const agent = boundAgent();
 			configureFlueRuntime(cloudflareRuntime({ routeAgentRequest: async () => null }));
 			const app = new Hono();
-			app.route('/agents/triage', agent.route());
+			app.route('/agents/triage', createAgentRouter(agent));
 
 			const response = await app.fetch(promptRequest('http://localhost/agents/triage/cust-1'));
 

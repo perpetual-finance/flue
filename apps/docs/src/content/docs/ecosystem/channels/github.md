@@ -26,7 +26,7 @@ application.
 import { Octokit } from '@octokit/rest';
 import { createGitHubChannel } from '@flue/github';
 import { dispatch } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 export const client = new Octokit({ auth: process.env.GITHUB_TOKEN });
 
@@ -41,7 +41,7 @@ export const channel = createGitHubChannel({
       issueNumber: issue.number,
     };
 
-    await dispatch(assistant, {
+    await dispatch(Assistant, {
       id: channel.instanceId(issueRef),
       // Recorded once when this event creates the instance; ignored after.
       initialData: {
@@ -121,7 +121,7 @@ import { createGitHubChannel } from '@flue/github';
 import { defineTool, dispatch } from '@flue/runtime';
 import { Octokit } from '@octokit/rest';
 import * as v from 'valibot';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 export const client = new Octokit({
   auth: process.env.GITHUB_TOKEN,
@@ -142,7 +142,7 @@ export const channel = createGitHubChannel({
         repo: repository.name,
         issueNumber: issue.number,
       };
-      await dispatch(assistant, {
+      await dispatch(Assistant, {
         id: channel.instanceId(issueRef),
         // Recorded once when this event creates the instance; ignored after.
         initialData: {
@@ -178,7 +178,7 @@ export const channel = createGitHubChannel({
         repo: repository.name,
         issueNumber: pull_request.number,
       };
-      await dispatch(assistant, {
+      await dispatch(Assistant, {
         id: channel.instanceId(issueRef),
         // Recorded once when this event creates the instance; ignored after.
         initialData: {
@@ -249,11 +249,11 @@ callback.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { commentOnIssue } from '../channels/github.ts';
 
-export const initialDataSchema = v.object({
+const initialData = v.object({
   owner: v.string(),
   repo: v.string(),
   issueNumber: v.number(),
@@ -261,20 +261,20 @@ export const initialDataSchema = v.object({
   title: v.string(),
 });
 
-function Assistant() {
+export function Assistant() {
   useModel('anthropic/claude-haiku-4-5');
-  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
+  const data = useInitialData<v.InferOutput<typeof initialData>>();
   if (!data) throw new Error('This agent is created by the GitHub channel dispatch.');
   useTool(commentOnIssue(data));
   return `Review the issue and post a concise triage comment when appropriate. "${data.title}" was opened by ${data.openedBy}.`;
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialData;
 ```
 
 `initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
-dispatch. The `initialDataSchema` export validates the dispatched `initialData` when the
+dispatch. The agent's `initialData` static validates the dispatched `initialData` when the
 instance is created; `useInitialData()` returns the parsed value on every
 render. Pull requests use their issue number for issue comments. The model
 selects the comment body; trusted code binds the repository and issue. The

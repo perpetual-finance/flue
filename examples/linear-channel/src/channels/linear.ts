@@ -6,7 +6,7 @@ import type {
 	EntityWebhookPayloadWithCommentData,
 } from '@linear/sdk/webhooks';
 import * as v from 'valibot';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 const organizationId = optionalEnv('LINEAR_ORGANIZATION_ID');
 const webhookId = optionalEnv('LINEAR_WEBHOOK_ID');
@@ -23,7 +23,7 @@ export const channel = createLinearChannel({
 		if (isCommentEvent(payload)) {
 			const comment = payload.data;
 			if (payload.action !== 'create' || !comment.issueId) return;
-			await dispatch(assistant, {
+			await dispatch(Assistant, {
 				id: channel.instanceId({
 					type: 'issue',
 					organizationId: payload.organizationId,
@@ -52,7 +52,7 @@ export const channel = createLinearChannel({
 		}
 
 		if (isAgentSessionEvent(payload)) {
-			await dispatch(assistant, {
+			await dispatch(Assistant, {
 				id: channel.instanceId({
 					type: 'agent-session',
 					organizationId: payload.organizationId,

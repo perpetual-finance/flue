@@ -4,22 +4,23 @@
  * Runtime providers are registered here too.
  */
 import { registerProvider } from '@flue/runtime';
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
-import compactionTest from './agents/compaction-test.ts';
-import fsSurfaceTest from './agents/fs-surface-test.ts';
-import fsTest from './agents/fs-test.ts';
-import hello from './agents/hello.ts';
-import localEnvSmoke from './agents/local-env-smoke.ts';
-import sessionTest from './agents/session-test.ts';
-import withAbort from './agents/with-abort.ts';
-import withImage from './agents/with-image.ts';
-import withRegisteredProvider from './agents/with-registered-provider.ts';
-import withRequest from './agents/with-request.ts';
-import withSandbox from './agents/with-sandbox.ts';
-import withSkill from './agents/with-skill.ts';
-import withSubagent from './agents/with-subagent.ts';
-import withThinking from './agents/with-thinking.ts';
-import withTools from './agents/with-tools.ts';
+import { CompactionTest } from './agents/compaction-test.ts';
+import { FsSurfaceTest } from './agents/fs-surface-test.ts';
+import { FsTest } from './agents/fs-test.ts';
+import { Hello } from './agents/hello.ts';
+import { LocalEnvSmoke } from './agents/local-env-smoke.ts';
+import { SessionTest } from './agents/session-test.ts';
+import { WithAbort } from './agents/with-abort.ts';
+import { WithImage } from './agents/with-image.ts';
+import { WithRegisteredProvider } from './agents/with-registered-provider.ts';
+import { WithRequest } from './agents/with-request.ts';
+import { WithSandbox } from './agents/with-sandbox.ts';
+import { WithSkill } from './agents/with-skill.ts';
+import { WithSubagent } from './agents/with-subagent.ts';
+import { WithThinking } from './agents/with-thinking.ts';
+import { WithTools } from './agents/with-tools.ts';
 
 // A brand-new provider ID for a local OpenAI-compatible server.
 // (The `ollama` provider registers itself inside
@@ -52,24 +53,41 @@ app.use('*', async (c, next) => {
 // Custom route outside Flue's agent API.
 app.get('/api/ping', (c) => c.json({ pong: true, at: new Date().toISOString() }));
 
-// Mount every agent explicitly. `.route()` is a pure router factory: the
-// mount path is user-chosen (these preserve the conventional
-// /agents/<file-basename> addresses), and per-agent middleware comes from
-// the module's own `route` named export.
-app.route('/agents/compaction-test', compactionTest.route());
-app.route('/agents/fs-surface-test', fsSurfaceTest.route());
-app.route('/agents/fs-test', fsTest.route());
-app.route('/agents/hello', hello.route());
-app.route('/agents/local-env-smoke', localEnvSmoke.route());
-app.route('/agents/session-test', sessionTest.route());
-app.route('/agents/with-abort', withAbort.route());
-app.route('/agents/with-image', withImage.route());
-app.route('/agents/with-registered-provider', withRegisteredProvider.route());
-app.route('/agents/with-request', withRequest.route());
-app.route('/agents/with-sandbox', withSandbox.route());
-app.route('/agents/with-skill', withSkill.route());
-app.route('/agents/with-subagent', withSubagent.route());
-app.route('/agents/with-thinking', withThinking.route());
-app.route('/agents/with-tools', withTools.route());
+// Per-agent middleware composes here, as plain Hono, before the mount it
+// applies to. This one logs every request bound for `with-request` and
+// requires an `authorization` header.
+app.use('/agents/with-request/*', async (c, next) => {
+	const request = c.req.raw;
+	console.log('[with-request] method:', request.method);
+	console.log('[with-request] url:', request.url);
+	console.log('[with-request] user-agent:', request.headers.get('user-agent'));
+	console.log('[with-request] raw body:', await request.clone().text());
+	const ip =
+		request.headers.get('cf-connecting-ip') ??
+		request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
+	console.log('[with-request] ip:', ip);
+	if (!request.headers.get('authorization')) return c.json({ error: 'unauthorized' }, 401);
+	await next();
+});
+
+// Mount every agent explicitly. `createAgentRouter(Fn)` builds a pure router:
+// the mount path is user-chosen (these preserve the conventional
+// /agents/<file-basename> addresses), and per-agent middleware composes
+// above, before the mount it applies to.
+app.route('/agents/compaction-test', createAgentRouter(CompactionTest));
+app.route('/agents/fs-surface-test', createAgentRouter(FsSurfaceTest));
+app.route('/agents/fs-test', createAgentRouter(FsTest));
+app.route('/agents/hello', createAgentRouter(Hello));
+app.route('/agents/local-env-smoke', createAgentRouter(LocalEnvSmoke));
+app.route('/agents/session-test', createAgentRouter(SessionTest));
+app.route('/agents/with-abort', createAgentRouter(WithAbort));
+app.route('/agents/with-image', createAgentRouter(WithImage));
+app.route('/agents/with-registered-provider', createAgentRouter(WithRegisteredProvider));
+app.route('/agents/with-request', createAgentRouter(WithRequest));
+app.route('/agents/with-sandbox', createAgentRouter(WithSandbox));
+app.route('/agents/with-skill', createAgentRouter(WithSkill));
+app.route('/agents/with-subagent', createAgentRouter(WithSubagent));
+app.route('/agents/with-thinking', createAgentRouter(WithThinking));
+app.route('/agents/with-tools', createAgentRouter(WithTools));
 
 export default app;

@@ -49,7 +49,7 @@ import {
 } from '@shopify/admin-api-client';
 import { createShopifyChannel, type JsonValue } from '@flue/shopify';
 import { defineTool, dispatch } from '@flue/runtime';
-import orders from '../agents/orders.ts';
+import { Orders } from '../agents/orders.ts';
 
 const SHOP_DOMAIN = process.env.SHOPIFY_SHOP_DOMAIN!;
 const ADMIN_API_VERSION = '2026-04';
@@ -89,7 +89,7 @@ export const channel = createShopifyChannel({
 
         const webhookId = c.req.header('x-shopify-webhook-id');
         const eventId = c.req.header('x-shopify-event-id');
-        await dispatch(orders, {
+        await dispatch(Orders, {
           id: orderInstanceId(shopDomain, order.id),
           // Recorded once when this event creates the instance; ignored after.
           initialData: {
@@ -246,17 +246,17 @@ Bind the trusted shop and order selected by application code:
 
 ```ts
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { retrieveOrder } from '../channels/shopify.ts';
 
-export const initialDataSchema = v.object({
+const initialDataSchema = v.object({
   shopDomain: v.string(),
   orderId: v.string(),
   orderName: v.string(),
 });
 
-function Orders() {
+export function Orders() {
 	useModel('anthropic/claude-haiku-4-5');
 	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the Shopify channel dispatch.');
@@ -267,17 +267,18 @@ function Orders() {
 	return `Review the newly created Shopify order ${data.orderName} and summarize any fulfillment or payment follow-up.`;
 }
 
-export default defineAgent(Orders);
+Orders.initialData = initialDataSchema;
 ```
 
-The `initialDataSchema` export validates the dispatched `initialData` when the
+The `initialData` static validates the dispatched `initialData` when the
 instance is created; `useInitialData()` returns the parsed value on every
 render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback
 needs no `app.ts` mounting. Add
-`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+`app.route('/agents/<name>', createAgentRouter(Orders))` (from
+`@flue/runtime/routing`) in `app.ts` only when the agent
 should also be reachable over HTTP directly.
 
 The model cannot choose another shop, token, URL, API version, or order id

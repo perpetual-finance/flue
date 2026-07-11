@@ -39,11 +39,13 @@ export interface CloudflareSandboxOptions {
  *
  * ```ts
  * import { getSandbox } from '@cloudflare/sandbox';
+ * import { env } from 'cloudflare:workers';
  * import { cloudflareSandbox } from '@flue/runtime/cloudflare';
  *
- * export default defineAgent(({ id, env }) => ({
- *   sandbox: cloudflareSandbox(getSandbox(env.Sandbox, id)),
- * }));
+ * export function MyAgent({ id }: AgentProps) {
+ *   useSandbox(cloudflareSandbox(getSandbox(env.Sandbox, id)));
+ *   return '…';
+ * }
  * ```
  */
 export function cloudflareSandbox(

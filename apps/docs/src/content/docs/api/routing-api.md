@@ -1,19 +1,20 @@
 ---
 title: Routing API
 description: Mount agent and channel routes in the authored app.ts route map.
-lastReviewedAt: 2026-07-07
+lastReviewedAt: 2026-07-11
 ---
 
 `app.ts` is the application's route map — the only required file. Its default export owns the entire request pipeline, and every route the application serves is mounted there explicitly. There is no framework router and no file-based routing: Flue provides mountable per-agent and per-channel sub-apps, and `app.ts` decides their URLs.
 
 ```ts title="src/app.ts"
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
-import triage from './agents/triage.ts';
+import { Triage } from './agents/triage.ts';
 import { channel as slack } from './channels/slack.ts';
 
 const app = new Hono();
 
-app.route('/agents/triage', triage.route());
+app.route('/agents/triage', createAgentRouter(Triage));
 app.route('/channels/slack', slack.route());
 app.get('/api/ping', (c) => c.text('pong'));
 
@@ -38,23 +39,28 @@ On Cloudflare, `env` contains bindings and `ctx` is the `ExecutionContext`. On N
 
 ## Registration comes from the scan, not from mounting
 
-An agent joins the application through the `'use agent'` directive, not through `.route()`. At build time, the `flue()` Vite plugin scans the source root for modules whose first statement is `'use agent'`; that scanned set **is** the application's agent registry, and the generated bootstrap imports and registers every marked module. Consequences:
+An agent joins the application through the `'use agent'` directive, not through `createAgentRouter()`. At build time, the `flue()` Vite plugin scans the source root for modules whose first statement is `'use agent'`; every exported capitalized function of a marked module is an agent, and that scanned set **is** the application's agent registry — the generated bootstrap imports and registers every scanned agent. Consequences:
 
-- `.route()` is a **pure router factory** over an already-registered definition: no side effects, safe to call twice, mountable at two URLs, or never called at all.
-- A dispatch-only agent needs no mount — the scan registered it, and `dispatch()` resolves it by definition.
-- Mounting an unmarked agent module fails: `.route()` throws with guidance to add the `'use agent'` directive.
-- Mounting the same definition twice is allowed: both mounts address the same identity and the same conversations at two URLs.
+- `createAgentRouter()` is a **pure router factory** over an already-registered agent: no registration side effects, safe to call twice, mountable at two URLs, or never called at all.
+- A dispatch-only agent needs no mount — the scan registered it, and `dispatch()` resolves it by function.
+- Mounting the same agent twice is allowed: both mounts address the same identity and the same conversations at two URLs.
 
-The agent's durable identity is the module's file basename (`src/agents/triage.ts` → `triage`), or its `export const name` literal override, injected by the build transform. Identity — not the mount path — keys durable storage: conversation streams on Node and the Durable Object class on Cloudflare. Re-mounting an agent at a different URL preserves its conversations; changing the identity (a file rename with no name pin, or an edit to the pin) is the storage-identity change. Duplicate identities among an app's agents are a build error.
+The agent's durable identity is the exported function's name (`export function Triage()` → `Triage`), or its `agentName` static literal override, stamped by the build transform so minification cannot corrupt it. Identity — not the mount path — keys durable storage: conversation streams on Node and the Durable Object class on Cloudflare. Re-mounting an agent at a different URL preserves its conversations; changing the identity (a function rename with no `agentName` pin, or an edit to the pin) is the storage-identity change. Duplicate identities among an app's agents are a build error.
 
-## `agent.route()`
+## `createAgentRouter(...)`
 
 ```ts
-// On AgentDefinition (returned by defineAgent):
-route(): Hono;
+import { createAgentRouter, type CreateAgentRouterOptions } from '@flue/runtime/routing';
+
+function createAgentRouter(agent: Agent, options?: CreateAgentRouterOptions): Hono;
+
+interface CreateAgentRouterOptions {
+  /** Submission retry policy for this agent — binding policy, decided by the runner. */
+  durability?: DurabilityConfig;
+}
 ```
 
-Builds the agent's mountable Hono sub-app. Routes, relative to wherever the caller mounts it:
+Builds the mountable Hono sub-app serving one agent's HTTP surface. The `agent` argument is the agent function itself; the router resolves its durable identity from the function and throws for an anonymous function with no `agentName` static. The returned Hono app has `.fetch`, so it also mounts in any fetch-based server framework. Routes, relative to wherever the caller mounts it:
 
 | Route                                | Purpose                                                                                          |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------ |
@@ -66,37 +72,29 @@ Builds the agent's mountable Hono sub-app. Routes, relative to wherever the call
 
 `:id` is the caller-chosen conversation id — the trailing URL segment. An empty id segment is rejected with `400 invalid_request`. Unsupported methods on known paths render the canonical `405 method_not_allowed` envelope with an `Allow` header.
 
-`route()` takes no options: the agent module's named exports are the single source of per-agent route configuration, carried onto the definition by the build transform.
+### `durability`
 
-### The module's named exports
-
-```ts title="src/agents/triage.ts"
-'use agent';
-import { type AgentRouteHandler, defineAgent, useModel } from '@flue/runtime';
-
-function Triage() {
-  useModel('...');
-  return '...';
-}
-
-export default defineAgent(Triage);
-
-export const route: AgentRouteHandler = async (c, next) => next(); // middleware on all routes
-export const description = 'Triage incoming bug reports.'; // static metadata
-```
-
-| Export        | Applied to                            | Meaning                                                                                                   |
-| ------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `route`       | Every route, attachments included     | Hono middleware. May authenticate and call `await next()`, or short-circuit with its own response.        |
-| `description` | —                                     | Static human-facing metadata for the agent.                                                               |
-
-Naming note: the `route` **named export** is middleware; the `.route()` **method** is the mount factory. They are related but distinct — `.route()` applies the `route` export automatically.
-
-Additional path-level middleware composes as plain Hono:
+The one option is binding policy: whoever runs the agent decides its submission retry policy, and the router is a binding site. `durability` (`maxAttempts`, `timeoutMs` — see [`DurabilityConfig`](/docs/api/agent-api/#durabilityconfig)) is recorded for the agent's identity when the router is created:
 
 ```ts
+app.route(
+  '/agents/triage',
+  createAgentRouter(IssueTriage, {
+    durability: { maxAttempts: 5, timeoutMs: 7_200_000 },
+  }),
+);
+```
+
+One policy per identity per process — a later binding for the same identity replaces the earlier one, so give two mounts of one agent the same value. The other binding sites, [`start()` entries](/docs/guide/scripts/#standalone-scripts-start) and [`flue run` flags](/docs/cli/run/), carry the same policy the same way.
+
+### Middleware is plain Hono
+
+There is no per-agent middleware export. Mounting is the exposure decision, and middleware composes in the host app, ordered before the mount — it then wraps every route the sub-app serves, attachment downloads included:
+
+```ts
+app.use('/agents/triage/*', requireUser);
 app.use('/agents/triage/*', rateLimit);
-app.route('/agents/triage', triage.route());
+app.route('/agents/triage', createAgentRouter(Triage));
 ```
 
 ### Wire behavior
@@ -133,7 +131,7 @@ For the `GET` stream views, see the [Streaming Protocol](/docs/api/streaming-pro
 route(): Hono;
 ```
 
-Builds a mountable Hono sub-app serving the channel's declared routes relative to the mount point. Like `agent.route()`, it is a pure factory with no registration side effects — mounting is what exposes the channel, and the mount path is yours:
+Builds a mountable Hono sub-app serving the channel's declared routes relative to the mount point. Like `createAgentRouter()`, it is a pure factory with no registration side effects — mounting is what exposes the channel, and the mount path is yours:
 
 ```ts
 app.route('/channels/slack', channel.route());

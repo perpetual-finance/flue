@@ -1,6 +1,6 @@
 import { defineTool, dispatch } from '@flue/runtime';
 import { createShopifyChannel, type JsonValue } from '@flue/shopify';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createShopifyClient, retrieveShopifyOrder } from '../shopify-client.ts';
 
 const ORDER_INSTANCE_PREFIX = 'shopify-order:';
@@ -43,7 +43,7 @@ export const channel = createShopifyChannel({
 				};
 				const eventId = c.req.header('x-shopify-event-id');
 				const webhookId = c.req.header('x-shopify-webhook-id');
-				await dispatch(assistant, {
+				await dispatch(Assistant, {
 					id: shopifyOrderInstanceId(ref),
 					// Recorded once when this event creates the instance; ignored after.
 					initialData: {

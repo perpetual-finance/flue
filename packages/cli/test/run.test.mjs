@@ -46,9 +46,10 @@ function createFixtureRoot() {
  * model context — lets tests observe conversation continuation.
  */
 function writeEchoAgent(root, name = 'hello') {
+	const fnName = name.charAt(0).toUpperCase() + name.slice(1);
 	fs.writeFileSync(
 		path.join(root, 'src', 'agents', `${name}.mjs`),
-		`import { defineAgent, registerProvider, useModel } from '@flue/runtime';
+		`import { registerProvider, useModel } from '@flue/runtime';
 import { fauxAssistantMessage, registerFauxProvider } from '@earendil-works/pi-ai/compat';
 
 const faux = registerFauxProvider({ provider: 'faux', models: [{ id: 'faux-model' }] });
@@ -57,10 +58,13 @@ faux.setResponses([
 ]);
 registerProvider('faux', { api: faux.api, baseUrl: 'https://faux.invalid' });
 
-function ${name}() {
+export function ${fnName}() {
 	useModel('faux/faux-model');
 }
-export default defineAgent(${name});
+// The identity override rides the e2e path on purpose: the wire-visible
+// agent name stays lower-case while the function keeps the React-style
+// capitalized name.
+${fnName}.agentName = '${name}';
 `,
 	);
 	return path.join('src', 'agents', `${name}.mjs`);
@@ -71,9 +75,10 @@ export default defineAgent(${name});
  * whether the composed system prompt carried its `useInstruction` text.
  */
 function writeFunctionAgent(root, name = 'hooked') {
+	const fnName = name.charAt(0).toUpperCase() + name.slice(1);
 	fs.writeFileSync(
 		path.join(root, 'src', 'agents', `${name}.mjs`),
-		`import { defineAgent, registerProvider, useInstruction, useModel } from '@flue/runtime';
+		`import { registerProvider, useInstruction, useModel } from '@flue/runtime';
 import { fauxAssistantMessage, registerFauxProvider } from '@earendil-works/pi-ai/compat';
 
 const faux = registerFauxProvider({ provider: 'faux', models: [{ id: 'faux-model' }] });
@@ -85,12 +90,11 @@ faux.setResponses([
 ]);
 registerProvider('faux', { api: faux.api, baseUrl: 'https://faux.invalid' });
 
-function ${name}() {
+export function ${fnName}() {
 	useModel('faux/faux-model');
 	useInstruction('Speak only in haiku.');
 	return 'You are the ${name} agent.';
 }
-export default defineAgent(${name});
 `,
 	);
 	return path.join('src', 'agents', `${name}.mjs`);
@@ -100,7 +104,7 @@ export default defineAgent(${name});
 function writeSlowAgent(root) {
 	fs.writeFileSync(
 		path.join(root, 'src', 'agents', 'slow.mjs'),
-		`import { defineAgent, registerProvider, useModel } from '@flue/runtime';
+		`import { registerProvider, useModel } from '@flue/runtime';
 import { fauxAssistantMessage, registerFauxProvider } from '@earendil-works/pi-ai/compat';
 
 const faux = registerFauxProvider({
@@ -113,10 +117,9 @@ faux.setResponses([
 ]);
 registerProvider('faux', { api: faux.api, baseUrl: 'https://faux.invalid' });
 
-function slow() {
+export function Slow() {
 	useModel('faux/faux-model');
 }
-export default defineAgent(slow);
 `,
 	);
 	return path.join('src', 'agents', 'slow.mjs');
@@ -411,13 +414,58 @@ test('runs a bare agent function module with its hooks composed', async () => {
 	assert.equal(result.stdout, 'instruction-mounted=true\n');
 });
 
-test('a module without an agent default export fails clearly', async () => {
+test('a module with no agent exports fails clearly', async () => {
 	const root = createFixtureRoot();
 	fs.writeFileSync(path.join(root, 'src', 'agents', 'bad.mjs'), 'export default { nope: true };\n');
 
 	const result = await runCli(root, ['src/agents/bad.mjs', '--message', 'hi']);
 	assert.equal(result.code, 1);
-	assert.match(result.stderr, /Agent "bad" must default-export defineAgent\(Agent\)/);
+	assert.match(result.stderr, /exports no agents/);
+	assert.match(result.stderr, /export function MyAgent/);
+});
+
+test('multi-agent modules run via --agent and fail without a selection', async () => {
+	const root = createFixtureRoot();
+	fs.writeFileSync(
+		path.join(root, 'src', 'agents', 'team.mjs'),
+		`import { registerProvider, useModel } from '@flue/runtime';
+import { fauxAssistantMessage, registerFauxProvider } from '@earendil-works/pi-ai/compat';
+
+const faux = registerFauxProvider({ provider: 'faux', models: [{ id: 'faux-model' }] });
+faux.setResponses([fauxAssistantMessage('reply from the team')]);
+registerProvider('faux', { api: faux.api, baseUrl: 'https://faux.invalid' });
+
+export function First() {
+	useModel('faux/faux-model');
+}
+export function Second() {
+	useModel('faux/faux-model');
+}
+`,
+	);
+
+	const picked = await runCli(root, [
+		'src/agents/team.mjs',
+		'--agent',
+		'Second',
+		'--message',
+		'hi',
+		'--json',
+	]);
+	assert.equal(picked.code, 0, picked.stderr);
+	assert.equal(JSON.parse(picked.stdout).agent, 'Second');
+
+	// Several agents, no default export, no --agent: fail listing the choices.
+	const unpicked = await runCli(root, ['src/agents/team.mjs', '--message', 'hi']);
+	assert.equal(unpicked.code, 1);
+	assert.match(unpicked.stderr, /exports 2 agents \(First, Second\)/);
+	assert.match(unpicked.stderr, /Pick one with --agent/);
+
+	// A selector that names nothing lists what exists.
+	const wrong = await runCli(root, ['src/agents/team.mjs', '--agent', 'Third', '--message', 'hi']);
+	assert.equal(wrong.code, 1);
+	assert.match(wrong.stderr, /does not match an exported function/);
+	assert.match(wrong.stderr, /First, Second/);
 });
 
 test('a module importing cloudflare:* APIs points at vite dev with the import chain', async () => {
@@ -434,8 +482,9 @@ export const onCloudflare = true;
 	fs.writeFileSync(
 		path.join(root, 'src', 'agents', 'cf.mjs'),
 		`import '../lib/platform.mjs';
-import { defineAgent } from '@flue/runtime';
-export default defineAgent(() => undefined);
+export function Cf() {
+	return undefined;
+}
 `,
 	);
 

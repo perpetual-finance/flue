@@ -6,12 +6,12 @@
  * the process cwd — run the server from this directory).
  */
 import { registerProvider } from '@flue/runtime';
-import { agent } from '@flue/runtime/routing';
+import { createAgentRouter } from '@flue/runtime/routing';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
-import assistant from './agents/assistant.ts';
-import demo from './agents/demo.ts';
-import helper from './agents/helper.ts';
+import { Assistant } from './agents/assistant.ts';
+import { Demo } from './agents/demo.ts';
+import { Helper } from './agents/helper.ts';
 
 // Wire the scripted (faux) model APIs the offline agents register in their
 // initializers; helper uses a real Anthropic model and needs no entry here.
@@ -26,9 +26,9 @@ registerProvider('react-chat-demo', {
 
 const app = new Hono();
 
-app.route('/api/agents/assistant', agent(assistant).route());
-app.route('/api/agents/demo', agent(demo).route());
-app.route('/api/agents/helper', agent(helper).route());
+app.route('/api/agents/assistant', createAgentRouter(Assistant));
+app.route('/api/agents/demo', createAgentRouter(Demo));
+app.route('/api/agents/helper', createAgentRouter(Helper));
 
 app.use('*', serveStatic({ root: './dist/client' }));
 app.get('*', serveStatic({ path: './dist/client/index.html' }));

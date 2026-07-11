@@ -1,15 +1,15 @@
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { getCustomerSummary } from '../channels/stripe.ts';
 
-export const initialDataSchema = v.object({
+const initialDataSchema = v.object({
 	customerId: v.string(),
 	accountId: v.optional(v.string()),
 	context: v.optional(v.string()),
 });
 
-function Assistant() {
+export function Assistant() {
 	useModel('anthropic/claude-haiku-4-5');
 	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the Stripe channel dispatch.');
@@ -17,4 +17,4 @@ function Assistant() {
 	return 'Review the completed Checkout event and summarize any billing follow-up that is needed.';
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialDataSchema;

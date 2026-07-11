@@ -43,7 +43,7 @@ import { getFlueRuntime } from './runtime/flue-app.ts';
 import { generateInstanceId } from './runtime/ids.ts';
 import { normalizeMessageInput } from './runtime/message-input.ts';
 import { agentStreamPath } from './runtime/stream-offsets.ts';
-import type { AgentDispatchRequest, AgentModuleValue } from './types.ts';
+import type { Agent, AgentDispatchRequest } from './types.ts';
 
 export interface InitOptions {
 	/**
@@ -141,17 +141,15 @@ export interface AgentInstanceHandle {
  * console.log(reply.text);
  * ```
  *
- * The `agent` argument must be a value default-exported by a registered
- * `'use agent'` module (the same contract as `dispatch()`). The runtime is
- * resolved when the handle is used, not when it is created, so `init()` at
- * module scope is safe.
+ * The `agent` argument is the agent function itself, registered with this
+ * app (the same contract as `dispatch()`). The runtime is resolved when the
+ * handle is used, not when it is created, so `init()` at module scope is
+ * safe.
  */
-export function init(agent: AgentModuleValue, options: InitOptions = {}): AgentInstanceHandle {
-	if (!isAgentDefinitionValue(agent)) {
+export function init(agent: Agent, options: InitOptions = {}): AgentInstanceHandle {
+	if (!isAgentFunction(agent)) {
 		throw new InvalidRequestError({
-			reason:
-				'init() requires an agent definition as its first argument. ' +
-				"Pass the default export of a 'use agent' module: init(agent, { id }).",
+			reason: 'init() requires an agent function as its first argument: init(agent, { id }).',
 		});
 	}
 	if (options.id !== undefined && (typeof options.id !== 'string' || options.id.trim() === '')) {
@@ -373,20 +371,19 @@ function requireRuntime(api: string): FlueRuntime {
 	return rt;
 }
 
-function resolveAgentName(rt: FlueRuntime, agent: AgentModuleValue, api: string): string {
-	const name = rt.agents.find((record) => record.definition === agent)?.name;
+function resolveAgentName(rt: FlueRuntime, agent: Agent, api: string): string {
+	const name = rt.agents.find((record) => record.agent === agent)?.name;
 	if (!name) {
 		throw new Error(
-			`[flue] ${api}() target agent definition is not a discovered default-exported agent in this built application.`,
+			`[flue] ${api}() target agent is not registered in this built application.`,
 		);
 	}
 	return name;
 }
 
-function isAgentDefinitionValue(value: unknown): value is AgentModuleValue {
-	// Twin: `assertAgentDefinitionValue` in registration.ts — keep in sync.
-	if (typeof value !== 'object' || value === null) return false;
-	return '__flueFunctionAgent' in value && value.__flueFunctionAgent === true;
+function isAgentFunction(value: unknown): value is Agent {
+	// Twin: `assertAgentFunction` in registration.ts — keep in sync.
+	return typeof value === 'function';
 }
 
 function throwIfAborted(signal?: AbortSignal): void {

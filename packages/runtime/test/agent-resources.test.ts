@@ -8,7 +8,6 @@ import {
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineAgent } from '../src/agent-definition.ts';
 import { useModel } from '../src/hooks/use-model.ts';
 import { usePersistentState } from '../src/hooks/use-persistent-state.ts';
 import { useSkill } from '../src/hooks/use-skill.ts';
@@ -274,7 +273,7 @@ describe('dynamic resources end to end (node coordinator, faux provider)', () =>
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant),
+					agent: assistant,
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -363,7 +362,7 @@ describe('dynamic resources end to end (node coordinator, faux provider)', () =>
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant),
+					agent: assistant,
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -410,11 +409,11 @@ describe('dynamic resources end to end (node coordinator, faux provider)', () =>
 			}
 			return 'Deploy test agent.';
 		}
-		const definition = defineAgent(assistant);
+		const agent = assistant;
 		const makeCoordinator = () =>
 			createNodeAgentCoordinator({
 				submissions: executionStore.submissions,
-				agents: [{ name: 'assistant', definition }],
+				agents: [{ name: 'assistant', agent }],
 				createContext: makeFauxCreateContext(provider),
 				conversationStreamStore,
 				attachmentStore,
@@ -495,7 +494,7 @@ describe('dynamic resources end to end (node coordinator, faux provider)', () =>
 		ctx.subscribeEvent((event) => {
 			events.push(event);
 		});
-		const harness = await ctx.initializeRootHarness(defineAgent(assistant));
+		const harness = await ctx.initializeRootHarness(assistant);
 		const session = await harness.session();
 
 		await session.prompt('Upgrade me.');

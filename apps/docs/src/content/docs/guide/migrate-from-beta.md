@@ -1,7 +1,7 @@
 ---
 title: Migrating from 1.0 Beta
 description: Upgrade an application from Flue 1.0.0-beta.x to the current release — build, routing, agents, tools, workflows, SDK, and deployment.
-lastReviewedAt: 2026-07-10
+lastReviewedAt: 2026-07-11
 ---
 
 This guide migrates an application from **Flue `1.0.0-beta.x`** to the current release line (published as `0.4.0-nightly.*`, the future `2.0.0`). It is written for working beta applications: every section pairs the beta API with its replacement, and the [checklist](#migration-checklist) at the end orders the work.
@@ -12,7 +12,7 @@ The release is a redesign, not an increment. Five conceptual changes drive almos
 | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `flue build` / `flue dev` CLI commands                         | [Vite](/docs/guide/vite-plugin/) with the `flue()` plugin — `vite dev` and `vite build` are the only commands.  |
 | Auto-mounted `flue()` router, discovery by directory           | [Explicit routing](/docs/guide/routing/) in `app.ts`; the [`'use agent'`](/docs/guide/use-agent/) scan registers agents. |
-| `defineAgent(async initializer => config)` with a config bag   | `defineAgent(AgentFunction)` — a synchronous function composing behavior with [Flue Hooks](/docs/api/agent-api/#flue-hooks). |
+| `defineAgent(async initializer => config)` with a config bag   | The agent **is** the function: an exported capitalized agent function composing behavior with [Flue Hooks](/docs/api/agent-api/#flue-hooks); `defineAgent` is gone entirely. |
 | Workflows (`defineWorkflow`, `invoke()`, runs, run events)     | Removed. Awaited [`init()` handles](/docs/guide/scripts/), [durable tools](/docs/guide/tools/#durable-tools), or your own orchestrator. |
 | Deployment-wide SDK client (`client.agents.*`, `client.runs.*`) | A [conversation-scoped client](/docs/sdk/client/): one client per conversation URL.                             |
 
@@ -48,7 +48,7 @@ export default defineConfig({
 
 On Cloudflare the plugin generates two inputs the Cloudflare plugin consumes — `.flue-vite/_entry.ts` (the Worker entry) and `.flue-vite.wrangler.jsonc` (your authored `wrangler.jsonc` merged with generated bindings). Add both to `.gitignore`. Build output, preview, and deploy belong to `@cloudflare/vite-plugin`; deploy against the config it emits into `dist/`.
 
-`flue run` remains for one-shot local execution, with new flags: `flue run <path> --message "..." [--id <id>] [--initial-data '<json>']`. The beta's workflow-oriented `--input` is gone with workflows.
+`flue run` remains for one-shot local execution, with new flags: `flue run <path> --message "..." [--agent <ExportName>] [--id <id>] [--initial-data '<json>'] [--max-attempts <n>] [--timeout <ms>]`. The beta's workflow-oriented `--input` is gone with workflows.
 
 ## Routing: the auto-router is gone
 
@@ -63,16 +63,17 @@ export default app;
 ```
 
 ```ts title="src/app.ts (now)"
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
-import triage from './agents/triage.ts';
+import { Triage } from './agents/triage.ts';
 
 const app = new Hono();
 app.use('/agents/*', requireUser);
-app.route('/agents/triage', triage.route()); // explicit, per agent
+app.route('/agents/triage', createAgentRouter(Triage)); // explicit, per agent
 export default app;
 ```
 
-- `agent.route()` is a pure router factory serving `POST /:id`, `GET|HEAD /:id`, `POST /:id/abort`, and `GET /:id/attachments/:attachmentId` relative to the mount. URL shapes are yours.
+- `createAgentRouter(fn)` is a pure router factory serving `POST /:id`, `GET|HEAD /:id`, `POST /:id/abort`, and `GET /:id/attachments/:attachmentId` relative to the mount. URL shapes are yours.
 - **Registration comes from the [`'use agent'` scan](/docs/guide/use-agent/), not the mount.** A dispatch-only agent stays unmounted and still works; mounting registers nothing.
 - Workflow routes (`POST /workflows/<name>`, `/runs/<runId>`) are gone with workflows, as are the `runs` module export and `WorkflowRouteHandler`/`WorkflowRunsHandler` types.
 
@@ -97,11 +98,9 @@ export default defineAgent(async ({ id, env }) => ({
 
 ```ts title="src/agents/support.ts (now)"
 'use agent';
-import { type AgentProps, defineAgent, useModel, useSandbox, useSkill, useSubagent, useTool } from '@flue/runtime';
+import { type AgentProps, useModel, useSandbox, useSkill, useSubagent, useTool } from '@flue/runtime';
 
-export const durability = { maxAttempts: 5 };
-
-function Support({ id }: AgentProps) {
+export function Support({ id }: AgentProps) {
   useModel('anthropic/claude-sonnet-4-6');
   useSandbox(myFactory, { cwd: '/workspace' });
   useTool(lookupOrder);
@@ -109,9 +108,9 @@ function Support({ id }: AgentProps) {
   useSubagent({ name: 'reviewer', description: '…', agent: Reviewer });
   return `Help with ticket ${id}.`;
 }
-
-export default defineAgent(Support);
 ```
+
+The agent **is** the exported function — there is no wrapper and no config bag. Durability moved out of the module entirely: it is binding policy, declared where the agent is run (`createAgentRouter(Support, { durability: { maxAttempts: 5 } })` at the mount, a `{ agent, durability }` entry in `start()`, or `flue run --max-attempts`).
 
 Field-by-field:
 
@@ -123,11 +122,11 @@ Field-by-field:
 | `skills`                         | [`useSkill()`](/docs/api/agent-api/#useskill) per skill.                                                                             |
 | `subagents` (profiles)           | [`useSubagent({ name, description, agent, model?, thinkingLevel? })`](/docs/api/agent-api/#usesubagent) — the delegate is an agent function, not a profile. |
 | `thinkingLevel`, `compaction`    | `useModel(model, { thinkingLevel, compaction })`.                                                                                    |
-| `sandbox`, `cwd`                 | [`useSandbox(factory, { cwd })`](/docs/api/agent-api/#usesandbox) — at most once, never conditional.                                  |
-| `durability`                     | `export const durability` — a module export, readable even when a render crashes.                                                    |
+| `sandbox`, `cwd`                 | [`useSandbox(factory, { cwd })`](/docs/api/agent-api/#usesandbox) — at most once per render.                                          |
+| `durability`                     | A binding option — `createAgentRouter(fn, { durability })`, a `start()` entry, or `flue run` flags. The runner decides; it lives outside the function, so it stays readable when a render crashes. |
 | `profile`                        | Removed — compose with custom hooks (plain functions calling hooks) instead.                                                          |
 | `actions`                        | Removed with Actions. Express reusable operations as tools.                                                                           |
-| `description` (config)           | `export const description`.                                                                                                          |
+| `description` (config)           | Deleted — no replacement.                                                                                                             |
 | initializer `ctx.id`             | `AgentProps` — the root agent function receives `{ id }`.                                                                             |
 | initializer `ctx.env`            | Platform imports (`import { env } from 'cloudflare:workers'`) or `process.env`; the initializer context is gone.                      |
 | `async` initializer              | The agent function **must be synchronous** — async work moves into tools, lifecycle hooks (`useAgentStart`/`useAgentFinish`), or resource factories such as the sandbox factory's `createSessionEnv()`. |
@@ -136,9 +135,9 @@ Rules that have no beta equivalent, because renders repeat:
 
 - The agent function re-renders before every model turn. **Resources** (`useTool`, `useSkill`, `useSubagent`) may be conditional — changes are announced to the model as `resources` signals. **Identity hooks** (`usePersistentState`, `useDataWriter`, `useSandbox`, lifecycle and response hooks) must be declared identically on every render.
 - `defineAgentProfile` is removed. A subagent is `{ name, description, agent }` where `agent` is a plain agent function rendered per delegation; `model`/`thinkingLevel` inherit from the parent unless overridden. Inside a delegate render, `usePersistentState`, `useSandbox`, `useModel`, and the lifecycle hooks throw.
-- Identity is the file basename, or an `export const name` **string-literal** override; identities are lower-kebab-case and unique per application. Renaming an agent file without a `name` pin is a storage-identity change.
+- Identity is the exported function's name, or an `fn.agentName = '...'` **string-literal** static override; PascalCase and lower-kebab-case are both valid, and identities are unique per application. Renaming an agent function without an `agentName` pin is a storage-identity change; renaming the file changes nothing.
 
-New capabilities you will likely reach for while migrating — durable per-instance state ([`usePersistentState`](/docs/api/agent-api/#usepersistentstate)), creation data ([`useInitialData`](/docs/api/agent-api/#useinitialdata) + `export const initialDataSchema`), the delivered-message cursor ([`useDelivery`](/docs/api/agent-api/#usedelivery)), self-dispatch ([`useDispatchMessage`](/docs/api/agent-api/#usedispatchmessage)), client-facing data parts ([`useDataWriter`](/docs/api/agent-api/#usedatawriter)), lifecycle seams ([`useAgentStart`](/docs/api/agent-api/#useagentstart)/[`useAgentFinish`](/docs/api/agent-api/#useagentfinish)), and response metadata ([`useResponseStart`/`useResponseFinish`](/docs/api/agent-api/#useresponsestart--useresponsefinish)).
+New capabilities you will likely reach for while migrating — durable per-instance state ([`usePersistentState`](/docs/api/agent-api/#usepersistentstate)), creation data ([`useInitialData`](/docs/api/agent-api/#useinitialdata) + the `initialData` schema static), the delivered-message cursor ([`useDelivery`](/docs/api/agent-api/#usedelivery)), self-dispatch ([`useDispatchMessage`](/docs/api/agent-api/#usedispatchmessage)), client-facing data parts ([`useDataWriter`](/docs/api/agent-api/#usedatawriter)), lifecycle seams ([`useAgentStart`](/docs/api/agent-api/#useagentstart)/[`useAgentFinish`](/docs/api/agent-api/#useagentfinish)), and response metadata ([`useResponseStart`/`useResponseFinish`](/docs/api/agent-api/#useresponsestart--useresponsefinish)).
 
 ## Tools
 
@@ -166,9 +165,9 @@ Import-attribute syntax (`with { type: 'skill' }` and friends) is **removed**; t
 
    ```ts
    import { init } from '@flue/runtime';
-   import summarizer from './agents/summarizer.ts';
+   import { Summarizer } from './agents/summarizer.ts';
 
-   const reply = await init(summarizer, { id: `summary-${caseId}` }).dispatch(text);
+   const reply = await init(Summarizer, { id: `summary-${caseId}` }).dispatch(text);
    return reply.data.summary;
    ```
 
@@ -176,13 +175,13 @@ Import-attribute syntax (`with { type: 'skill' }` and friends) is **removed**; t
 
 3. **Multi-step orchestration with its own durability, retries, and inspection** (what workflow runs gave you): an application-owned orchestrator. On Cloudflare, a [Cloudflare Workflow](https://developers.cloudflare.com/workflows/) whose steps call `init(...).dispatch(...)` — one agent send per step, the recorded step result standing in for the reply on re-execution — is the documented pattern; see [Scripts › On Cloudflare](/docs/guide/scripts/#on-cloudflare). Run inspection (`getRun()`) has no framework replacement: reconcile from your orchestrator's own state and from `submission_settled` observability events.
 
-In standalone Node scripts (cron jobs, CI, tests), boot the runtime first with `start()` from `@flue/runtime/node`, passing agent modules (`export const name` required for namespace entries) or `{ name, agent }` pairs; then `init()`/`dispatch()` work as they do in a server. See [Scripts](/docs/guide/scripts/).
+In standalone Node scripts (cron jobs, CI, tests), boot the runtime first with `start()` from `@flue/runtime/node`, passing agent functions (or `{ agent, name?, durability? }` entries); then `init()`/`dispatch()` work as they do in a server. See [Scripts](/docs/guide/scripts/).
 
 ## Dispatch and conditional sends
 
 `dispatch(agent, request)` keeps its shape with two changes:
 
-- The creation seed field is **`initialData`** (validated by the module's `initialDataSchema` export at creation, read with `useInitialData()`; ignored on sends that continue an existing instance). If your beta app abused the first message body to carry setup facts, move them here.
+- The creation seed field is **`initialData`** (validated by the agent's `initialData` schema static at creation, read with `useInitialData()`; ignored on sends that continue an existing instance). If your beta app abused the first message body to carry setup facts, move them here.
 - **`uid` send conditions**: omit to continue-or-create; pass a previous receipt's `uid` to continue only that incarnation (`AgentInstanceNotFoundError`/404 otherwise); pass `null` to create only (`AgentInstanceExistsError`/409 otherwise, carrying the existing uid). Conditions are checked at admission and create nothing on failure. `getAgentInstance(agent, id)` looks up `{ id, uid }` without sending.
 
 A bare string is user-message shorthand everywhere a message is accepted. `dispatch()` remains fire-and-forget at durable admission; the awaited form is the `init()` handle above.
@@ -237,20 +236,20 @@ Messages remain Flue-owned parts-based values; new part kinds (`data-*` from `us
 ## Cloudflare deployments
 
 - **`FlueRegistry` is gone.** The beta's deployment-wide registry DO indexed workflow runs; nothing replaces it. Append a `deleted_classes` migration for it, and for every `Flue<Name>Workflow` class.
-- Generated classes are per-agent only: `triage.ts` → class `FlueTriageAgent`, binding `FLUE_TRIAGE_AGENT`. Migration history stays user-authored — adding an agent is always the triple: the `'use agent'` file, the mount (unless dispatch-only), and a `new_sqlite_classes` entry. Renames use `renamed_classes` — but remember the [schema reset](#before-you-start-persisted-state-resets): a beta-era database is rejected even under a renamed class, so beta agents are usually retired (`deleted_classes`) in favor of fresh identities.
+- Generated classes are per-agent only: `export function Triage()` → class `FlueTriageAgent`, binding `FLUE_TRIAGE_AGENT` (one class per agent function; a file can carry several). Migration history stays user-authored — adding an agent is always the triple: the exported agent function in a `'use agent'` module, the mount (unless dispatch-only), and a `new_sqlite_classes` entry. Renames use `renamed_classes` — but remember the [schema reset](#before-you-start-persisted-state-resets): a beta-era database is rejected even under a renamed class, so beta agents are usually retired (`deleted_classes`) in favor of fresh identities.
 - Your authored `wrangler.jsonc` is never modified; the build merges it into `.flue-vite.wrangler.jsonc` and the deployable config lands in `dist/`. Deploy with `wrangler deploy --config dist/<worker>/wrangler.json`.
 - The generated entry exports every agent class plus your `app.ts` fetch handler; application-owned exports (your own DOs, Workflows) come from `cloudflare.ts`.
 
 ## CLI
 
-`flue init`, `flue add`, `flue update`, and `flue docs` remain. `flue dev` and `flue build` are removed (Vite owns both). `flue run <path>` executes one agent module directly — `--message`, `--id`, `--initial-data`, `--uid`/`--new`, `--json`.
+`flue init`, `flue add`, `flue update`, and `flue docs` remain. `flue dev` and `flue build` are removed (Vite owns both). `flue run <path>` executes one agent module directly — `--message`, `--agent` (select among several exports), `--id`, `--initial-data`, `--uid`/`--new`, `--max-attempts`/`--timeout` (durability for this run), `--json`.
 
 ## Migration checklist
 
 1. **Pins.** Replace `@flue/*@1.0.0-beta.x` with the current versions; add `@flue/vite`, `vite`, and (Cloudflare) `@cloudflare/vite-plugin`. Drop beta-era patches and vendored builds — re-verify each patched behavior against the new runtime before porting anything.
 2. **Build.** Author `vite.config.ts` (`flue()` before `cloudflare()`); move package scripts to `vite dev`/`vite build`; gitignore the generated files.
 3. **Routing.** Author explicit mounts in `app.ts`; delete `flue()` router usage; decide which agents are dispatch-only.
-4. **Agents.** Convert each initializer to a `'use agent'` module: hooks for behavior, module exports for supervisor config, `AgentProps` for the id, platform env instead of `ctx.env`. Convert profiles to `useSubagent` agent functions.
+4. **Agents.** Convert each initializer to an exported capitalized agent function in a `'use agent'` module: hooks for behavior, statics (`agentName`, `initialData`) for the contract, binding options for durability, `AgentProps` for the id, platform env instead of `ctx.env`. Convert profiles to `useSubagent` agent functions.
 5. **Tools.** Rename `run({ input })` to `run({ data })`; adopt `harness: true` where tools prompted sessions; consider `durable: true` for side-effect sequences.
 6. **Skills.** Delete import attributes; let `SKILL.md` imports package themselves; wrap other markdown with `defineSkill` where needed.
 7. **Workflows.** Replace each with the smallest fit: awaited `init()` handle, durable tool, or an application-owned orchestrator.

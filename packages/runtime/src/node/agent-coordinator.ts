@@ -29,7 +29,7 @@ import type { RuntimeActivityGate, RuntimeActivityLease } from '../runtime/runti
 import { agentStreamPath } from '../runtime/stream-offsets.ts';
 import { createSessionStorageKey } from '../session-identity.ts';
 import type {
-	AgentModuleValue,
+	Agent,
 	DeliveredMessage,
 	DispatchReceipt,
 } from '../types.ts';
@@ -113,7 +113,7 @@ export function createNodeDispatchQueue(coordinator: NodeAgentCoordinator): Disp
 
 export function createNodeAgentCoordinator(options: {
 	submissions: AgentSubmissionStore;
-	agents: ReadonlyArray<{ name: string; definition: AgentModuleValue }>;
+	agents: ReadonlyArray<{ name: string; agent: Agent }>;
 	createContext: CreateAgentContextFn;
 	conversationStreamStore?: ConversationStreamStore;
 	attachmentStore?: AttachmentStore;
@@ -224,7 +224,7 @@ export function createNodeAgentCoordinator(options: {
 
 	function materializeSubmissionConversation(
 		input: AgentSubmissionInput,
-		agent: AgentModuleValue,
+		agent: Agent,
 	): Promise<void> {
 		const path = agentStreamPath(input.agent, input.id);
 		const previous = conversationMaterializations.get(path) ?? Promise.resolve();
@@ -249,8 +249,8 @@ export function createNodeAgentCoordinator(options: {
 		return materialized;
 	}
 
-	function resolveAgent(name: string): AgentModuleValue {
-		const agent = agents.find((record) => record.name === name)?.definition;
+	function resolveAgent(name: string): Agent {
+		const agent = agents.find((record) => record.name === name)?.agent;
 		if (!agent) throw new Error(`[flue] submission target agent "${name}" has no agent definition.`);
 		return agent;
 	}
@@ -467,7 +467,7 @@ export function createNodeAgentCoordinator(options: {
 
 	async function reconcileUnreadySubmissions(): Promise<void> {
 		for (const submission of await submissions.listUnreadySubmissions()) {
-			const agent = agents.find((record) => record.name === submission.input.agent)?.definition;
+			const agent = agents.find((record) => record.name === submission.input.agent)?.agent;
 			if (!agent) {
 				console.error('[flue:submission-reconciliation]', {
 					submissionId: submission.submissionId,
@@ -519,7 +519,7 @@ export function createNodeAgentCoordinator(options: {
 			// session — exactly the corruption leases exist to prevent.
 			if (activeSubmissions.has(submission.submissionId)) continue;
 			const agentName = submission.input.agent;
-			const agent = agents.find((record) => record.name === agentName)?.definition;
+			const agent = agents.find((record) => record.name === agentName)?.agent;
 			if (!agent) {
 				console.error('[flue:submission-reconciliation]', {
 					submissionId: submission.submissionId,
@@ -575,7 +575,7 @@ export function createNodeAgentCoordinator(options: {
 			if (stopping) throw new Error('[flue] Coordinator is shutting down.');
 			const activityLease = activityGate?.enter();
 			try {
-				const agent = agents.find((record) => record.name === input.agent)?.definition;
+				const agent = agents.find((record) => record.name === input.agent)?.agent;
 				if (!agent) {
 					throw new Error(`[flue] dispatch target agent "${input.agent}" has no agent definition.`);
 				}
@@ -655,7 +655,7 @@ export function createNodeAgentCoordinator(options: {
 				const { traceCarrier, initialData, uid } = options;
 				if (stopping) throw new Error('[flue] Coordinator is shutting down.');
 				const activityLease = activityGate?.enter();
-				const agent = agents.find((record) => record.name === agentName)?.definition;
+				const agent = agents.find((record) => record.name === agentName)?.agent;
 				if (!agent) {
 					activityLease?.release();
 					throw new Error(`[flue] direct prompt target agent "${agentName}" has no agent definition.`);

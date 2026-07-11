@@ -9,7 +9,6 @@ import {
 } from '@earendil-works/pi-ai/compat';
 import * as v from 'valibot';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineAgent } from '../src/agent-definition.ts';
 import {
 	assertRenderStructureInvariance,
 	renderAgentFunctionWithStructure,
@@ -249,7 +248,7 @@ describe('useSandbox end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant),
+					agent: assistant,
 				},
 			],
 			createContext,
@@ -309,7 +308,7 @@ describe('useSandbox end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant),
+					agent: assistant,
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -365,7 +364,7 @@ describe('useSandbox end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant),
+					agent: assistant,
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -470,7 +469,7 @@ describe('useSandbox end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant),
+					agent: assistant,
 				},
 			],
 			createContext,
@@ -574,7 +573,7 @@ describe('conditional sandbox: turn-boundary swap (node coordinator, faux provid
 
 		const coordinator = createNodeAgentCoordinator({
 			submissions: executionStore.submissions,
-			agents: [{ name: 'assistant', definition: defineAgent(assistant) }],
+			agents: [{ name: 'assistant', agent: assistant }],
 			createContext,
 			conversationStreamStore,
 			attachmentStore,
@@ -647,7 +646,7 @@ describe('conditional sandbox: turn-boundary swap (node coordinator, faux provid
 
 		const coordinator = createNodeAgentCoordinator({
 			submissions: executionStore.submissions,
-			agents: [{ name: 'assistant', definition: defineAgent(assistant) }],
+			agents: [{ name: 'assistant', agent: assistant }],
 			createContext: makeFauxCreateContext(provider),
 			conversationStreamStore,
 			attachmentStore,
@@ -738,7 +737,7 @@ describe('conditional sandbox: turn-boundary swap (node coordinator, faux provid
 
 		const coordinator = createNodeAgentCoordinator({
 			submissions: executionStore.submissions,
-			agents: [{ name: 'assistant', definition: defineAgent(assistant) }],
+			agents: [{ name: 'assistant', agent: assistant }],
 			createContext,
 			conversationStreamStore,
 			attachmentStore,
@@ -808,7 +807,7 @@ describe('conditional sandbox: turn-boundary swap (node coordinator, faux provid
 		ctx.subscribeEvent((event) => {
 			events.push(event);
 		});
-		const harness = await ctx.initializeRootHarness(defineAgent(assistant));
+		const harness = await ctx.initializeRootHarness(assistant);
 		const session = await harness.session();
 
 		expect(harness.sandbox.cwd).toBe('/');

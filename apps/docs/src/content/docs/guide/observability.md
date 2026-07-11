@@ -42,8 +42,9 @@ Register `observe(...)` in your application entrypoint when you need telemetry a
 
 ```ts title="src/app.ts"
 import { observe } from '@flue/runtime';
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
-import triage from './agents/triage.ts';
+import { Triage } from './agents/triage.ts';
 
 observe((event) => {
   if (event.type === 'operation' && event.isError) {
@@ -60,7 +61,7 @@ observe((event) => {
 });
 
 const app = new Hono();
-app.route('/agents/triage', triage.route());
+app.route('/agents/triage', createAgentRouter(Triage));
 
 export default app;
 ```

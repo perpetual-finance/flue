@@ -6,7 +6,6 @@ import {
 } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-	defineAgent,
 	defineSkill,
 	SkillDefinitionValidationError,
 	useModel,
@@ -123,14 +122,14 @@ describe('defineSkill()', () => {
 			createDefaultEnv: async () => createEnv(),
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => {
+			() => {
 				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 				useSkill(review);
 				useSandbox({
 					createSessionEnv: async () => createEnv(),
 					tools: () => [],
 				});
-			}),
+			},
 		);
 		const session = await harness.session();
 
@@ -186,9 +185,9 @@ describe('defineSkill()', () => {
 			createDefaultEnv: async () => createEnv(readFileCalls),
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => {
+			() => {
 				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
-			}),
+			},
 		);
 		const session = await harness.session();
 
@@ -220,9 +219,9 @@ describe('defineSkill()', () => {
 			createDefaultEnv: async () => createEnv(),
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => {
+			() => {
 				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
-			}),
+			},
 		);
 		const session = await harness.session();
 

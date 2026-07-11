@@ -27,7 +27,7 @@ for Workspace Events is an optional section in the same channel module.
 ```ts title="src/channels/google-chat.ts (abridged)"
 import { createGoogleChatChannel } from '@flue/google-chat';
 import { dispatch } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createGoogleChatClient } from '../lib/google-chat-client.ts';
 
 export const client = createGoogleChatClient({
@@ -46,7 +46,7 @@ export const channel = createGoogleChatChannel({
       const ref = conversationFromPayload(payload);
       if (!ref) return;
 
-      await dispatch(assistant, {
+      await dispatch(Assistant, {
         id: channel.instanceId(ref),
         // Recorded once when this event creates the instance; ignored after.
         initialData: {
@@ -147,7 +147,7 @@ Configure only the surfaces your application handles. Omitting `interactions` or
 ```ts title="src/channels/google-chat.ts"
 import { createGoogleChatChannel, type GoogleChatConversationRef } from '@flue/google-chat';
 import { dispatch } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 export const channel = createGoogleChatChannel({
   interactions: {
@@ -162,7 +162,7 @@ export const channel = createGoogleChatChannel({
           const ref = conversationFromPayload(payload);
           if (!ref) return c.body(null, 200);
 
-          await dispatch(assistant, {
+          await dispatch(Assistant, {
             id: channel.instanceId(ref),
             // Recorded once when this event creates the instance; ignored after.
             initialData: {
@@ -336,27 +336,27 @@ parsing the instance id:
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { postMessage } from '../channels/google-chat.ts';
 
-export const initialDataSchema = v.object({
+const initialData = v.object({
   space: v.string(),
   thread: v.optional(v.string()),
 });
 
-function Assistant() {
+export function Assistant() {
   useModel('anthropic/claude-haiku-4-5');
-  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
+  const data = useInitialData<v.InferOutput<typeof initialData>>();
   if (!data) throw new Error('This agent is created by the Google Chat channel dispatch.');
   useTool(postMessage(data));
   return 'Reply concisely in the bound Google Chat conversation.';
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialData;
 ```
 
-The `initialDataSchema` export validates the dispatched `initialData` when the instance is
+The agent's `initialData` static validates the dispatched `initialData` when the instance is
 created; `useInitialData()` returns the parsed value on every render. The
 model selects only message text. It does not select arbitrary service
 accounts, spaces, threads, URLs, or REST operations.

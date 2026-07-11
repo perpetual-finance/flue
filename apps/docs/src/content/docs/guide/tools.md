@@ -53,16 +53,14 @@ Mount a tool with `useTool(...)` inside the agent function:
 
 ```ts title="src/agents/order-assistant.ts"
 'use agent';
-import { defineAgent, useModel, useTool } from '@flue/runtime';
+import { useModel, useTool } from '@flue/runtime';
 import { lookupOrderStatus } from '../shared/order-tools.ts';
 
-function OrderAssistant() {
+export function OrderAssistant() {
   useModel('anthropic/claude-haiku-4-5');
   useTool(lookupOrderStatus);
   return 'Help customers check the status of their orders.';
 }
-
-export default defineAgent(OrderAssistant);
 ```
 
 When this agent receives a request, the model can call `lookup_order_status` if it needs the current status before composing its answer. The call and returned text become part of the conversation context so the agent can continue working with the result.
@@ -137,11 +135,11 @@ For an agent that receives dispatched, per-customer events — a support-system 
 
 ```ts title="src/agents/customer-orders.ts"
 'use agent';
-import { defineAgent, useDelivery, useModel, useTool } from '@flue/runtime';
+import { useDelivery, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { orders } from '../shared/orders.ts';
 
-function CustomerOrders() {
+export function CustomerOrders() {
   useModel('anthropic/claude-haiku-4-5');
   const delivery = useDelivery();
   const customerId = delivery.kind === 'signal' ? delivery.attributes?.customerId : undefined;
@@ -158,8 +156,6 @@ function CustomerOrders() {
 
   return 'Help this customer check the status of their orders.';
 }
-
-export default defineAgent(CustomerOrders);
 ```
 
 In this example, the model may choose an order ID to look up, but it cannot choose the customer used in the query — `customerId` comes from the delivered signal's `attributes`, set by the trusted code that called `dispatch(...)`. Your route or dispatching code must still verify the caller before attaching that identifier; see [Agents](/docs/guide/building-agents/) and [Routing](/docs/guide/routing/).
@@ -214,20 +210,18 @@ An MCP server supplies remotely implemented tools. `connectMcpServer(...)` lists
 
 ```ts title="src/agents/inventory-assistant.ts"
 'use agent';
-import { connectMcpServer, defineAgent, useModel, useTool } from '@flue/runtime';
+import { connectMcpServer, useModel, useTool } from '@flue/runtime';
 
 const inventory = await connectMcpServer('inventory', {
   url: process.env.INVENTORY_MCP_URL!,
   headers: { Authorization: `Bearer ${process.env.INVENTORY_MCP_TOKEN}` },
 });
 
-function InventoryAssistant() {
+export function InventoryAssistant() {
   useModel('anthropic/claude-haiku-4-5');
   for (const tool of inventory.tools) useTool(tool);
   return 'Answer inventory questions using the inventory tools.';
 }
-
-export default defineAgent(InventoryAssistant);
 ```
 
 `inventory.tools` is a fixed array resolved once when the module loads, so looping over it mounts the same tools in the same order on every render — the same structural guarantee any other hook call needs. Flue prefixes each MCP tool's model-facing name with its connection name; for example, `lookup_item` from this server becomes `mcp__inventory__lookup_item`.

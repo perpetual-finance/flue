@@ -21,14 +21,14 @@ declare module 'virtual:flue/db' {
 }
 
 declare module 'virtual:flue/agents' {
-	export interface ScannedAgentModule {
-		/** Module identity (file basename); keys durable storage. */
+	export interface ScannedAgent {
+		/** Agent identity (exported function name or `agentName` override); keys durable storage. */
 		readonly identity: string;
-		/** The evaluated module namespace. */
-		readonly module: Record<string, unknown>;
+		/** The agent function (the module's evaluated export). */
+		readonly agent: unknown;
 	}
-	/** Scanned `'use agent'` modules, path-ordered. */
-	export const scannedAgentModules: readonly ScannedAgentModule[];
+	/** Scanned `'use agent'` agents, path-ordered. */
+	export const scannedAgents: readonly ScannedAgent[];
 }
 
 declare module 'virtual:flue/server' {

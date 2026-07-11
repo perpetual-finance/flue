@@ -63,7 +63,7 @@ dispatched message, event policy, and tool:
 import { createGoogleChatChannel, type GoogleChatConversationRef } from '@flue/google-chat';
 import { defineTool, dispatch } from '@flue/runtime';
 import * as v from 'valibot';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createGoogleChatClient } from '../lib/google-chat-client.ts';
 
 const appUrl = process.env.GOOGLE_CHAT_APP_URL!;
@@ -87,7 +87,7 @@ export const channel = createGoogleChatChannel({
         case 'APP_COMMAND': {
           const ref = conversationFromPayload(payload);
           if (!ref) return;
-          await dispatch(assistant, {
+          await dispatch(Assistant, {
             id: channel.instanceId(ref),
             // Recorded once when this event creates the instance; ignored after.
             initialData: {
@@ -219,16 +219,16 @@ facts stay on the signal's `attributes`.
 
 ```ts
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { postMessage } from '../channels/google-chat.ts';
 
-export const initialDataSchema = v.object({
+const initialDataSchema = v.object({
 	space: v.string(),
 	thread: v.optional(v.string()),
 });
 
-function Assistant() {
+export function Assistant() {
 	useModel('anthropic/claude-haiku-4-5');
 	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the Google Chat channel dispatch.');
@@ -236,17 +236,18 @@ function Assistant() {
 	return 'Reply concisely in the bound Google Chat conversation.';
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialDataSchema;
 ```
 
-The `initialDataSchema` export validates the dispatched `initialData` when the
+The `initialData` static validates the dispatched `initialData` when the
 instance is created; `useInitialData()` returns the parsed value on every
 render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback
 needs no `app.ts` mounting. Add
-`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+`app.route('/agents/<name>', createAgentRouter(Assistant))` (from
+`@flue/runtime/routing`) in `app.ts` only when the agent
 should also be reachable over HTTP directly.
 
 The channel-agent import cycle is supported only because imported bindings are

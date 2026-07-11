@@ -1,7 +1,7 @@
 import { defineTool, dispatch } from '@flue/runtime';
 import { createTwilioChannel } from '@flue/twilio';
 import * as v from 'valibot';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { TwilioClient } from '../twilio-client.ts';
 
 export const client = new TwilioClient({
@@ -35,7 +35,7 @@ export const channel = createTwilioChannel({
 				}
 			}
 		}
-		await dispatch(assistant, {
+		await dispatch(Assistant, {
 			id: channel.instanceId(conversation),
 			// Recorded once when this event creates the instance; ignored after.
 			initialData:

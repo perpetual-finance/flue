@@ -32,16 +32,23 @@ function importPath(filePath: string): string {
 export function generateCloudflareEntry(options: GenerateCloudflareEntryOptions): string {
 	const { appEntry, cloudflareEntry, agents } = options;
 
-	const agentVar = (index: number) => `__flue_agent_${index}__`;
+	// One import per module file; one entry (and one DO class) per agent.
+	const filePaths = [...new Set(agents.map((agent) => agent.filePath))];
+	const varByPath = new Map(
+		filePaths.map((filePath, index) => [filePath, `__flue_agent_module_${index}__`]),
+	);
+	const agentVar = (filePath: string) => varByPath.get(filePath) as string;
+	const agentAccess = (agent: AgentScanResult) =>
+		`${agentVar(agent.filePath)}[${JSON.stringify(agent.exportName)}]`;
 
-	const agentImports = agents
-		.map((agent, index) => `import * as ${agentVar(index)} from ${importPath(agent.filePath)};`)
+	const agentImports = filePaths
+		.map((filePath) => `import * as ${agentVar(filePath)} from ${importPath(filePath)};`)
 		.join('\n');
 
 	const scannedAgentEntries = agents
 		.map(
-			(agent, index) =>
-				`\t{ identity: ${JSON.stringify(agent.identity)}, module: ${agentVar(index)} },`,
+			(agent) =>
+				`\t{ identity: ${JSON.stringify(agent.identity)}, agent: ${agentAccess(agent)} },`,
 		)
 		.join('\n');
 
@@ -53,18 +60,19 @@ export function generateCloudflareEntry(options: GenerateCloudflareEntryOptions)
 		.join('\n');
 
 	const agentClassExports = agents
-		.map((agent, index) =>
+		.map((agent) =>
 			[
 				`export const ${agent.className} = createFlueAgentClass({`,
 				`\tAgentBase: Agent,`,
 				`\truntime: cloudflareAgents,`,
 				`\tclassName: ${JSON.stringify(agent.className)},`,
 				`\tagentName: ${JSON.stringify(agent.identity)},`,
-				// The `cloudflare` extension export is optional. Reflect.get keeps
+				// The `cloudflare` extension export is optional (per module — it
+				// applies to every agent the module exports). Reflect.get keeps
 				// identical semantics (undefined when absent) without the static
 				// namespace member access bundlers flag as IMPORT_IS_UNDEFINED on
 				// every agent module that does not declare the export.
-				`\textension: Reflect.get(${agentVar(index)}, 'cloudflare'),`,
+				`\textension: Reflect.get(${agentVar(agent.filePath)}, 'cloudflare'),`,
 				`});`,
 			].join('\n'),
 		)
@@ -121,26 +129,16 @@ if (!hasRegisteredProvider('cloudflare')) {
 }
 
 // ─── Registration ───────────────────────────────────────────────────────────
-// The scan IS the registration: every 'use agent' module joins the app.
-// \`.route()\` mounts in app.ts are pure routers over this set.
+// The scan IS the registration: every 'use agent' agent joins the app.
+// \`createAgentRouter()\` mounts in app.ts are pure routers over this set.
 
-const scannedAgentModules = [
+const registrations = [
 ${scannedAgentEntries}
 ];
-const registrations = scannedAgentModules.map(({ identity, module }) => ({
-	identity,
-	definition: module.default,
-	...(module.route !== undefined ? { route: module.route } : {}),
-	...(module.description !== undefined ? { description: module.description } : {}),
-	...(module.initialDataSchema !== undefined ? { initialDataSchema: module.initialDataSchema } : {}),
-	...(module.durability !== undefined ? { durability: module.durability } : {}),
-}));
 registerFlueAgents(registrations);
 const agents = registrations.map((registration) => ({
 	name: registration.identity,
-	definition: registration.definition,
-	...(registration.description !== undefined ? { description: registration.description } : {}),
-	...(registration.route !== undefined ? { route: registration.route } : {}),
+	agent: registration.agent,
 }));
 const agentIdentities = {
 ${agentIdentityEntries}

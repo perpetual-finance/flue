@@ -8,7 +8,6 @@ import {
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineAgent } from '../src/agent-definition.ts';
 import {
 	assertRenderStructureInvariance,
 	renderAgentFunctionWithStructure,
@@ -221,7 +220,7 @@ describe('useSkill end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant),
+					agent: assistant,
 				},
 			],
 			createContext: makeFauxCreateContext(provider),

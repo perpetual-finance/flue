@@ -1,17 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { renderAgentFunction } from '../src/hooks/render.ts';
-import { defineAgent, useModel } from '../src/index.ts';
+import { useModel } from '../src/index.ts';
 import type { FlueContextConfig } from '../src/internal.ts';
 import { createFlueContext, resolveModel } from '../src/internal.ts';
-import {
-	__flueBindAgentModule,
-	resetFlueAgentRegistrationForTests,
-} from '../src/runtime/registration.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
-
-afterEach(() => {
-	resetFlueAgentRegistrationForTests();
-});
 
 function createContext(overrides: Partial<FlueContextConfig> = {}) {
 	return createFlueContext({
@@ -25,13 +17,9 @@ function createContext(overrides: Partial<FlueContextConfig> = {}) {
 	});
 }
 
-describe('defineAgent()', () => {
-	it('rejects invalid input when it does not receive a capability function', () => {
-		expect(() => defineAgent(null as never)).toThrow('requires a function');
-	});
-
+describe('agent function initialization', () => {
 	it('rejects an initialization without a model', async () => {
-		await expect(createContext().initializeRootHarness(defineAgent(() => undefined))).rejects.toThrow(
+		await expect(createContext().initializeRootHarness(() => undefined)).rejects.toThrow(
 			"requires a model. Call useModel('provider-id/model-id')",
 		);
 	});
@@ -92,46 +80,5 @@ describe('useModel()', () => {
 		expect(config.model).toBe('anthropic/claude-haiku-4-5');
 		expect(config.thinkingLevel).toBe('high');
 		expect(config.compaction).toEqual({ reserveTokens: 2048 });
-	});
-});
-
-describe('`durability` module export (binding contract)', () => {
-	it('rejects durability with unknown fields', () => {
-		expect(() =>
-			__flueBindAgentModule(
-				defineAgent(() => undefined),
-				{ identity: 'triage', durability: { maxAttempts: 3, retries: 7 } as never },
-			),
-		).toThrow('durability received unknown field "retries"');
-	});
-
-	it('rejects durability with non-positive maxAttempts', () => {
-		expect(() =>
-			__flueBindAgentModule(
-				defineAgent(() => undefined),
-				{ identity: 'triage', durability: { maxAttempts: 0 } },
-			),
-		).toThrow('durability.maxAttempts must be a positive integer');
-	});
-
-	it('rejects durability with non-positive timeoutMs', () => {
-		expect(() =>
-			__flueBindAgentModule(
-				defineAgent(() => undefined),
-				{ identity: 'triage', durability: { timeoutMs: -1 } },
-			),
-		).toThrow('durability.timeoutMs must be a positive integer');
-	});
-
-	it('accepts a durability export when an agent module supplies it', async () => {
-		const agent = defineAgent(() => {
-			useModel('anthropic/claude-haiku-4-5');
-		});
-		__flueBindAgentModule(agent, {
-			identity: 'triage',
-			durability: { maxAttempts: 3, timeoutMs: 7_200_000 },
-		});
-		const harness = await createContext().initializeRootHarness(agent);
-		expect(harness).toBeDefined();
 	});
 });

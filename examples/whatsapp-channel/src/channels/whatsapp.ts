@@ -2,7 +2,7 @@ import { defineTool, dispatch } from '@flue/runtime';
 import { createWhatsAppChannel } from '@flue/whatsapp';
 import { WhatsAppClient } from '@kapso/whatsapp-cloud-api';
 import * as v from 'valibot';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import {
 	inboundConversationRef,
 	sendTextMessage,
@@ -37,7 +37,7 @@ export const channel = createWhatsAppChannel({
 								message.interactive.nfm_reply?.body ??
 								'');
 					const ref = inboundConversationRef(entry.id, value, message);
-					await dispatch(assistant, {
+					await dispatch(Assistant, {
 						id: channel.instanceId(ref),
 						// Recorded once when this event creates the instance; ignored after.
 						initialData: {

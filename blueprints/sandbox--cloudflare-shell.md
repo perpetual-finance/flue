@@ -356,7 +356,7 @@ belongs outside this adapter.
 ```ts
 'use agent';
 import { env } from 'cloudflare:workers';
-import { defineAgent, useModel, useSandbox } from '@flue/runtime';
+import { useModel, useSandbox } from '@flue/runtime';
 import { getDefaultWorkspace, getShellSandbox } from '../sandboxes/cloudflare-shell';
 
 interface Env {
@@ -365,18 +365,17 @@ interface Env {
 
 const { LOADER } = env as unknown as Env;
 
-function Assistant() {
+export function Assistant() {
   useModel('cloudflare/@cf/moonshotai/kimi-k2.6');
   useSandbox(getShellSandbox({ workspace: getDefaultWorkspace(), loader: LOADER }));
   return 'You explore and edit the mounted workspace with the file tools and the `code` tool.';
 }
-
-export default defineAgent(Assistant);
 ```
 
 The `'use agent'` directive at the top is what registers the module with
 the application. Mount the agent's HTTP surface explicitly in `app.ts`
-(`app.route('/agents/<name>', agent.route())`) if it needs an endpoint —
+(`app.route('/agents/<name>', createAgentRouter(Assistant))`, with
+`createAgentRouter` from `@flue/runtime/routing`) if it needs an endpoint —
 `dispatch()` needs no mount.
 
 ## Verify

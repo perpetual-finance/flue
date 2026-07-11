@@ -5,15 +5,16 @@ Not another SDK. Build autonomous agents with Flue's programmable TypeScript har
 ```ts
 // agents/triage.ts
 'use agent';
-import { defineAgent, useSandbox, useSkill, useTool, type AgentRouteHandler } from '@flue/runtime';
+import { useModel, useSandbox, useSkill, useTool } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
-import triage from '../skills/triage/SKILL.md' with { type: 'skill' };
-import verify from '../skills/verify/SKILL.md' with { type: 'skill' };
+import triage from '../skills/triage/SKILL.md';
+import verify from '../skills/verify/SKILL.md';
 import { openIssue, searchCode } from '../tools/github.ts';
 
-// Compose the complete harness your agent needs to do real work,
-// complete with virtual, local, or remote container sandbox.
-function Triage() {
+// The agent IS the function. Compose the complete harness it needs to do
+// real work, complete with virtual, local, or remote container sandbox.
+export function Triage() {
+  useModel('anthropic/claude-sonnet-4-6');
   useSandbox(local());
   useSkill(triage);
   useSkill(verify);
@@ -28,11 +29,6 @@ intentional, and attempt a fix.
 
 ...`;
 }
-
-// Expose (and protect) your agents over HTTP:
-export const route: AgentRouteHandler = async (_c, next) => next();
-
-export default defineAgent(Triage, { model: 'anthropic/claude-sonnet-4-6' });
 ```
 
 ## The framework for building the next generation of agents.

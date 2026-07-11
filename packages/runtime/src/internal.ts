@@ -85,7 +85,7 @@ export type {
 	NodeRuntime,
 } from './runtime/flue-app.ts';
 // `configureFlueRuntime` seeds the module-scoped config that mounted
-// `.route()` handlers read at request time. Called once per generated entry,
+// agent-router handlers read at request time. Called once per generated entry,
 // before the listener (Node) or `default.fetch` (Cloudflare) takes traffic.
 export { configureFlueRuntime } from './runtime/flue-app.ts';
 export type {
@@ -98,15 +98,18 @@ export {
 	handleAgentConversationRead,
 } from './runtime/handle-conversation-routes.ts';
 export { hasRegisteredProvider, resetProviderRuntime, resolveModel } from './runtime/providers.ts';
-// Identity registry consumed by the new generated bootstraps (the scanned
-// `'use agent'` set) and by unit tests mounting `AgentDefinition.route()`.
+// Identity registry consumed by the generated bootstraps (the scanned
+// `'use agent'` set), the CLI, and unit tests mounting createAgentRouter().
 export type { FlueAgentRegistration } from './runtime/registration.ts';
 export {
 	AGENT_IDENTITY_PATTERN,
+	bindAgentDurability,
 	getRegisteredFlueAgents,
 	registerFlueAgents,
 	resetFlueAgentRegistrationForTests,
-	resolveAgentModuleBinding,
+	resolveAgentDurability,
+	resolveAgentIdentity,
+	resolveAgentInitialDataSchema,
 } from './runtime/registration.ts';
 export type {
 	RuntimeActivityGate,

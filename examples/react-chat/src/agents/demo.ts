@@ -13,7 +13,7 @@ import {
 	fauxToolCall,
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
-import { defineAgent, useDataWriter, useModel, useTool } from '@flue/runtime';
+import { useDataWriter, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 
 // Scripted model so the demo runs fully offline. Module scope, not the agent
@@ -35,7 +35,7 @@ const openingTurn: Parameters<typeof faux.setResponses>[0][number] = () => {
 };
 faux.setResponses([openingTurn]);
 
-function Demo() {
+export function Demo() {
 	useModel('react-chat-demo/demo');
 	// A live progress card streamed to the client. `useDataWriter` returns a
 	// write-only function: the model never sees data parts, and repeated
@@ -65,5 +65,3 @@ function Demo() {
 	});
 	return 'When asked to run the demo, call the run_demo tool and report its result.';
 }
-
-export default defineAgent(Demo);

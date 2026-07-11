@@ -1,7 +1,7 @@
 ---
 title: Getting Started
 description: Set up a Flue project automatically or create your first agent manually.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-11
 ---
 
 import CopyPrompt from '../../../components/docs/CopyPrompt.astro';
@@ -63,18 +63,16 @@ For the Cloudflare target, also install `@cloudflare/vite-plugin` and add `cloud
 
 ### 3. Create your first agent module
 
-Create `src/agents/assistant.ts`. The `'use agent'` directive on the first line is what makes the module an agent of your application — the file basename becomes its identity, `assistant`. This example uses Claude, but you can choose any [supported model](https://pi.dev/models) and configure its provider credentials instead:
+Create `src/agents/assistant.ts`. The `'use agent'` directive on the first line marks the module for the build scan, and the exported capitalized function IS the agent — its name, `Assistant`, becomes its durable identity. This example uses Claude, but you can choose any [supported model](https://pi.dev/models) and configure its provider credentials instead:
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useModel } from '@flue/runtime';
+import { useModel } from '@flue/runtime';
 
-function Assistant() {
+export function Assistant() {
 	useModel('anthropic/claude-haiku-4-5');
 	return 'You are a helpful assistant. Keep replies short.';
 }
-
-export default defineAgent(Assistant);
 ```
 
 ### 4. Create the route map
@@ -82,12 +80,13 @@ export default defineAgent(Assistant);
 `src/app.ts` is the only file a Flue application requires: an ordinary [Hono](https://hono.dev/) app that mounts every route explicitly, including your agent's:
 
 ```ts title="src/app.ts"
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
-import assistant from './agents/assistant.ts';
+import { Assistant } from './agents/assistant.ts';
 
 const app = new Hono();
 
-app.route('/agents/assistant', assistant.route());
+app.route('/agents/assistant', createAgentRouter(Assistant));
 
 export default app;
 ```

@@ -7,15 +7,17 @@
  * agent route resolves the generated binding and forwards to that agent's
  * Durable Object via the Agents SDK; everything else is just a Hono app.
  *
- * Every route is mounted explicitly: `<agent>.route()` is a pure router
- * factory over an agent module marked with the `'use agent'` directive (the
- * scan of marked modules — not the mount — is what registers the agent, so a
- * dispatch-only agent needs no mount at all).
+ * Every route is mounted explicitly: `createAgentRouter(Fn)` is a pure
+ * router factory over an agent function exported from a module marked with
+ * the `'use agent'` directive (the scan of marked modules — not the mount —
+ * is what registers the agent, so a dispatch-only agent needs no mount at
+ * all).
  */
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
-import skillsFromGit from './agents/skills-from-git';
-import skillsFromR2 from './agents/skills-from-r2';
-import withCloudflareBinding from './agents/with-cloudflare-binding';
+import { SkillsFromGit } from './agents/skills-from-git';
+import { SkillsFromR2 } from './agents/skills-from-r2';
+import { WithCloudflareBinding } from './agents/with-cloudflare-binding';
 
 // ─── Cloudflare AI Gateway (optional) ───────────────────────────────────────
 // By default, every `cloudflare/...` model call is routed through
@@ -59,10 +61,10 @@ app.get('/api/ping', (c) => c.json({ pong: true, at: new Date().toISOString() })
 //   POST /:id            prompt (202 admission)
 //   GET|HEAD /:id        conversation stream
 //   POST /:id/abort      abort in-flight work
-// The mount path is yours to choose; the file basename (the agent's durable
+// The mount path is yours to choose; the agent function's name (its durable
 // identity) is what keys conversations and the Durable Object class.
-app.route('/agents/with-cloudflare-binding', withCloudflareBinding.route());
-app.route('/agents/skills-from-git', skillsFromGit.route());
-app.route('/agents/skills-from-r2', skillsFromR2.route());
+app.route('/agents/with-cloudflare-binding', createAgentRouter(WithCloudflareBinding));
+app.route('/agents/skills-from-git', createAgentRouter(SkillsFromGit));
+app.route('/agents/skills-from-r2', createAgentRouter(SkillsFromR2));
 
 export default app;

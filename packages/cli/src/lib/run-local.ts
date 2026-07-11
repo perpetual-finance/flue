@@ -49,6 +49,8 @@ interface LocalAgentRunReadyInfo {
 export interface LocalAgentRunOptions {
 	/** The `<path>` argument as the user typed it. */
 	modulePath: string;
+	/** Which exported agent to run, when the module exports several (--agent). */
+	agentExport?: string;
 	message: string;
 	/** Instance-creation data; the seed, consulted only when this send creates. */
 	initialData?: unknown;
@@ -57,6 +59,8 @@ export interface LocalAgentRunOptions {
 	 * `null` creates only when no instance exists; omit for unconditional.
 	 */
 	uid?: string | null;
+	/** Submission retry policy for this run — durability is the runner's call. */
+	durability?: { maxAttempts?: number; timeoutMs?: number };
 	/** Caller-chosen conversation id; a fresh ulid is minted when absent. */
 	conversationId?: string;
 	cwd?: string;
@@ -140,7 +144,7 @@ export function createLocalAgentRun(options: LocalAgentRunOptions): LocalAgentRu
 
 	async function start(): Promise<LocalAgentRunResult> {
 		const cwd = options.cwd ?? process.cwd();
-		const { agentPath, identity } = resolveAgentModule(cwd, options.modulePath);
+		const agentPath = resolveAgentModule(cwd, options.modulePath);
 		const conversationId = options.conversationId ?? ulid();
 
 		const { configPath, project } = await resolveRunProject(cwd);
@@ -163,9 +167,8 @@ export function createLocalAgentRun(options: LocalAgentRunOptions): LocalAgentRu
 			throwIfAborted(controller.signal);
 			session = await bootstrap.createFlueRunSession({
 				agentModulePath: agentPath,
-				// Fallback only: the bootstrap prefers the module's own
-				// `export const name` and reports the winner back.
-				identity,
+				...(options.agentExport !== undefined ? { agentExport: options.agentExport } : {}),
+				...(options.durability !== undefined ? { durability: options.durability } : {}),
 				...(project.db !== undefined
 					? {
 							dbModulePath: project.db,
@@ -207,22 +210,20 @@ export function createLocalAgentRun(options: LocalAgentRunOptions): LocalAgentRu
 
 // ─── Module-path resolution ─────────────────────────────────────────────────
 
-function resolveAgentModule(cwd: string, rawPath: string): { agentPath: string; identity: string } {
+function resolveAgentModule(cwd: string, rawPath: string): string {
 	const absolute = path.resolve(cwd, rawPath);
 	const exists = fs.existsSync(absolute) && fs.statSync(absolute).isFile();
 	if (!exists) {
 		if (!looksLikeModulePath(rawPath)) {
 			throw new Error(
 				`[flue] \`flue run\` takes a module path, not a name. ` +
-					`Pass the path of an agent module whose default export is defineAgent(...), ` +
+					`Pass the path of a module that exports an agent function, ` +
 					`e.g. \`flue run src/agents/${rawPath}.ts --message "..."\`.`,
 			);
 		}
 		throw new Error(`[flue] Agent module not found: ${rawPath}`);
 	}
-	const identity = path.basename(absolute, path.extname(absolute));
-	if (!identity) throw new Error(`[flue] Cannot derive an agent identity from: ${rawPath}`);
-	return { agentPath: absolute, identity };
+	return absolute;
 }
 
 function looksLikeModulePath(value: string): boolean {

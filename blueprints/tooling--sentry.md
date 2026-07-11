@@ -180,7 +180,8 @@ import './sentry.ts';
 Preserve the application's existing imports, middleware, routes, and default
 export. If there is no `app.ts`, create one that imports `./sentry.ts`, creates a
 Hono application, mounts each HTTP-reachable agent with
-`app.route('/agents/<name>', agent.route())`, and default-exports the app.
+`app.route('/agents/<name>', createAgentRouter(<AgentFn>))` (from
+`@flue/runtime/routing`), and default-exports the app.
 Install a direct `hono` dependency when authoring that file.
 
 `observe(...)` is isolate-local and receives every event from every agent the

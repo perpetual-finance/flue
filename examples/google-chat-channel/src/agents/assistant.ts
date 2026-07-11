@@ -1,14 +1,14 @@
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { postMessage } from '../channels/google-chat.ts';
 
-export const initialDataSchema = v.object({
+const initialDataSchema = v.object({
 	space: v.string(),
 	thread: v.optional(v.string()),
 });
 
-function Assistant() {
+export function Assistant() {
 	useModel('anthropic/claude-haiku-4-5');
 	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the Google Chat channel dispatch.');
@@ -16,4 +16,4 @@ function Assistant() {
 	return 'Reply concisely in the bound Google Chat conversation.';
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialDataSchema;

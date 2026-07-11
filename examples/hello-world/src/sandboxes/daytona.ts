@@ -9,10 +9,10 @@
  * ```typescript
  * 'use agent';
  * import { Daytona } from '@daytona/sdk';
- * import { defineAgent, useModel, useSandbox } from '@flue/runtime';
+ * import { useModel, useSandbox } from '@flue/runtime';
  * import { daytona } from './sandboxes/daytona';
  *
- * function MyAgent() {
+ * export function MyAgent() {
  *   useModel('anthropic/claude-sonnet-4-6');
  *   useSandbox({
  *     // Lazy: the expensive sandbox creation happens once, inside
@@ -25,7 +25,6 @@
  *   });
  *   return 'You have a Daytona sandbox.';
  * }
- * export default defineAgent(MyAgent);
  * ```
  */
 

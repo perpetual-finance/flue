@@ -1,148 +1,120 @@
-import type { MiddlewareHandler } from 'hono';
+import * as v from 'valibot';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { defineAgent } from '../src/agent-definition.ts';
 import { useModel } from '../src/hooks/use-model.ts';
 import {
 	__flueBindAgentModule,
+	AGENT_IDENTITY_PATTERN,
+	bindAgentDurability,
 	getRegisteredFlueAgents,
 	registerFlueAgents,
 	resetFlueAgentRegistrationForTests,
-	resolveAgentModuleBinding,
+	resolveAgentDurability,
+	resolveAgentIdentity,
+	resolveAgentInitialDataSchema,
 } from '../src/runtime/registration.ts';
-import type { FunctionAgentDefinition } from '../src/types.ts';
+import type { Agent } from '../src/types.ts';
 
 afterEach(() => {
 	resetFlueAgentRegistrationForTests();
 });
 
-function testAgent(): FunctionAgentDefinition {
-	return defineAgent(() => {
+function testAgent(): Agent {
+	return function TestAgent() {
 		useModel('anthropic/claude-haiku-4-5');
 		return 'Test agent.';
-	});
+	};
 }
 
 describe('registerFlueAgents()', () => {
-	it('registers the application agent set and resolves bindings by definition identity', () => {
+	it('registers the application agent set in order', () => {
 		const triage = testAgent();
 		const support = testAgent();
-		const route: MiddlewareHandler = async (_c, next) => next();
 
 		registerFlueAgents([
-			{ definition: triage, identity: 'triage', route, description: 'Triage agent' },
-			{ definition: support, identity: 'support' },
+			{ identity: 'triage', agent: triage },
+			{ identity: 'support', agent: support },
 		]);
 
 		expect(getRegisteredFlueAgents().map((record) => record.identity)).toEqual([
 			'triage',
 			'support',
 		]);
-		expect(resolveAgentModuleBinding(triage)).toMatchObject({
-			identity: 'triage',
-			route,
-			description: 'Triage agent',
-		});
-		expect(resolveAgentModuleBinding(support)).toMatchObject({ identity: 'support' });
+		expect(getRegisteredFlueAgents().map((record) => record.agent)).toEqual([triage, support]);
+	});
+
+	it('registration also binds identity, so resolveAgentIdentity works for unbound functions', () => {
+		const triage = testAgent();
+		registerFlueAgents([{ identity: 'triage', agent: triage }]);
+		expect(resolveAgentIdentity(triage)).toBe('triage');
 	});
 
 	it('replaces the previous registration wholesale when called again', () => {
 		const first = testAgent();
-		registerFlueAgents([{ definition: first, identity: 'first' }]);
+		registerFlueAgents([{ identity: 'first', agent: first }]);
 		const second = testAgent();
-		registerFlueAgents([{ definition: second, identity: 'second' }]);
+		registerFlueAgents([{ identity: 'second', agent: second }]);
 
 		expect(getRegisteredFlueAgents().map((record) => record.identity)).toEqual(['second']);
 	});
 
-	it('rejects a value that is not a defineAgent(...) product', () => {
+	it('rejects a value that is not a function', () => {
 		expect(() =>
-			registerFlueAgents([
-				{ definition: { initialize: () => ({}) } as unknown as FunctionAgentDefinition, identity: 'bogus' },
-			]),
-		).toThrow('Agent "bogus" must default-export defineAgent(Agent)');
+			registerFlueAgents([{ identity: 'bogus', agent: { initialize: () => ({}) } as never }]),
+		).toThrow('must be a function');
 	});
 
 	it('rejects duplicate identities', () => {
 		expect(() =>
 			registerFlueAgents([
-				{ definition: testAgent(), identity: 'triage' },
-				{ definition: testAgent(), identity: 'triage' },
+				{ identity: 'triage', agent: testAgent() },
+				{ identity: 'triage', agent: testAgent() },
 			]),
 		).toThrow('Duplicate agent identity "triage"');
 	});
 
-	it('rejects the same definition registered under two identities', () => {
+	it('rejects the same agent function registered under two identities', () => {
 		const shared = testAgent();
 		expect(() =>
 			registerFlueAgents([
-				{ definition: shared, identity: 'one' },
-				{ definition: shared, identity: 'two' },
+				{ identity: 'one', agent: shared },
+				{ identity: 'two', agent: shared },
 			]),
-		).toThrow('Agents "one" and "two" default-export the same agent definition value');
+		).toThrow('are the same function value');
 	});
 
-	it.each(['', 'bad:identity'])('rejects the invalid identity %j', (identity) => {
-		expect(() => registerFlueAgents([{ definition: testAgent(), identity }])).toThrow(
-			'must be non-empty and must not contain ":"',
-		);
+	it.each(['', 'bad:identity', '1leading-digit'])('rejects the invalid identity %j', (identity) => {
+		expect(() => registerFlueAgents([{ identity, agent: testAgent() }])).toThrow('is invalid');
 	});
 
-	it('rejects non-callable metadata middleware and empty descriptions', () => {
-		expect(() =>
-			registerFlueAgents([
-				{
-					definition: testAgent(),
-					identity: 'triage',
-					route: 'nope' as unknown as never,
-				},
-			]),
-		).toThrow('route export must be a callable Hono middleware value');
-		expect(() =>
-			registerFlueAgents([
-				{ definition: testAgent(), identity: 'triage', description: '   ' },
-			]),
-		).toThrow('description export must be a non-empty string');
-	});
-
-	it('rejects registering a definition under a different identity than its module binding', () => {
+	it('rejects registering an agent under a different identity than its module binding', () => {
 		const triage = testAgent();
 		__flueBindAgentModule(triage, { identity: 'triage' });
-		expect(() => registerFlueAgents([{ definition: triage, identity: 'renamed' }])).toThrow(
+		expect(() => registerFlueAgents([{ identity: 'renamed', agent: triage }])).toThrow(
 			'already bound to identity "triage"',
 		);
 	});
 });
 
 describe('__flueBindAgentModule()', () => {
-	it('binds identity and module metadata to the definition and returns it', () => {
+	it('binds identity to the function and returns it', () => {
 		const triage = testAgent();
-		const route: MiddlewareHandler = async (_c, next) => next();
 
-		const returned = __flueBindAgentModule(triage, {
-			identity: 'triage',
-			route,
-			description: 'Triage agent',
-		});
+		const returned = __flueBindAgentModule(triage, { identity: 'triage' });
 
 		expect(returned).toBe(triage);
-		expect(resolveAgentModuleBinding(triage)).toMatchObject({
-			identity: 'triage',
-			route,
-			description: 'Triage agent',
-		});
+		expect(resolveAgentIdentity(triage)).toBe('triage');
 	});
 
-	it('is idempotent for module re-evaluation: rebinding the same identity replaces metadata', () => {
+	it('is idempotent for module re-evaluation: rebinding the same identity is a no-op', () => {
 		const triage = testAgent();
 		__flueBindAgentModule(triage, { identity: 'triage' });
-		const route: MiddlewareHandler = async (_c, next) => next();
-		__flueBindAgentModule(triage, { identity: 'triage', route });
+		__flueBindAgentModule(triage, { identity: 'triage' });
 
-		expect(resolveAgentModuleBinding(triage)).toMatchObject({ identity: 'triage', route });
+		expect(resolveAgentIdentity(triage)).toBe('triage');
 	});
 
-	it('rejects rebinding one definition to a different identity', () => {
+	it('rejects rebinding one function to a different identity', () => {
 		const triage = testAgent();
 		__flueBindAgentModule(triage, { identity: 'triage' });
 		expect(() => __flueBindAgentModule(triage, { identity: 'other' })).toThrow(
@@ -151,13 +123,139 @@ describe('__flueBindAgentModule()', () => {
 	});
 
 	it('validates the identity charset', () => {
-		expect(() => __flueBindAgentModule(testAgent(), { identity: 'a:b' })).toThrow(
-			'must be non-empty and must not contain ":"',
+		expect(() => __flueBindAgentModule(testAgent(), { identity: 'a:b' })).toThrow('is invalid');
+	});
+
+	it('rejects a non-function value', () => {
+		expect(() => __flueBindAgentModule({} as never, { identity: 'triage' })).toThrow(
+			'must be a function',
 		);
 	});
 
-	it('does not add the module to the registered application set', () => {
+	it('does not add the function to the registered application set', () => {
 		__flueBindAgentModule(testAgent(), { identity: 'triage' });
 		expect(getRegisteredFlueAgents()).toEqual([]);
+	});
+});
+
+describe('AGENT_IDENTITY_PATTERN', () => {
+	it('accepts PascalCase function names', () => {
+		expect(AGENT_IDENTITY_PATTERN.test('IssueTriage')).toBe(true);
+	});
+
+	it('accepts kebab-case overrides', () => {
+		expect(AGENT_IDENTITY_PATTERN.test('issue-triage')).toBe(true);
+	});
+
+	it('rejects identities containing ":"', () => {
+		expect(AGENT_IDENTITY_PATTERN.test('bad:identity')).toBe(false);
+	});
+
+	it('rejects the empty string', () => {
+		expect(AGENT_IDENTITY_PATTERN.test('')).toBe(false);
+	});
+
+	it('rejects a leading digit', () => {
+		expect(AGENT_IDENTITY_PATTERN.test('1leading')).toBe(false);
+	});
+});
+
+describe('resolveAgentIdentity()', () => {
+	it('returns undefined for an anonymous, unbound function', () => {
+		expect(resolveAgentIdentity(() => undefined)).toBeUndefined();
+	});
+
+	it('falls back to the function name when there is no binding or static', () => {
+		function NamedAgent() {
+			return undefined;
+		}
+		expect(resolveAgentIdentity(NamedAgent)).toBe('NamedAgent');
+	});
+
+	it('prefers the agentName static over the function name', () => {
+		function NamedAgent() {
+			return undefined;
+		}
+		NamedAgent.agentName = 'renamed-agent';
+		expect(resolveAgentIdentity(NamedAgent)).toBe('renamed-agent');
+	});
+
+	it('rejects an agentName static that fails the identity pattern', () => {
+		function NamedAgent() {
+			return undefined;
+		}
+		NamedAgent.agentName = 'bad:identity';
+		expect(() => resolveAgentIdentity(NamedAgent)).toThrow('invalid agentName static');
+	});
+
+	it('prefers the build-stamped binding over the agentName static', () => {
+		function NamedAgent() {
+			return undefined;
+		}
+		NamedAgent.agentName = 'static-name';
+		__flueBindAgentModule(NamedAgent, { identity: 'bound-name' });
+		expect(resolveAgentIdentity(NamedAgent)).toBe('bound-name');
+	});
+});
+
+describe('resolveAgentInitialDataSchema()', () => {
+	it('returns undefined when the agent has no initialData static', () => {
+		expect(resolveAgentInitialDataSchema(testAgent())).toBeUndefined();
+	});
+
+	it('returns the schema when the initialData static is a valid Valibot schema', () => {
+		const agent = testAgent();
+		const schema = v.object({ issue: v.number() });
+		agent.initialData = schema;
+		expect(resolveAgentInitialDataSchema(agent)).toBe(schema);
+	});
+
+	it('rejects an initialData static that is not a Valibot schema', () => {
+		const agent = testAgent();
+		agent.initialData = { not: 'a schema' } as never;
+		expect(() => resolveAgentInitialDataSchema(agent)).toThrow('invalid initialData static');
+	});
+});
+
+describe('bindAgentDurability() / resolveAgentDurability()', () => {
+	it('records and resolves the durability policy for an identity', () => {
+		bindAgentDurability('triage', { maxAttempts: 3, timeoutMs: 7_200_000 });
+		expect(resolveAgentDurability('triage')).toEqual({ maxAttempts: 3, timeoutMs: 7_200_000 });
+	});
+
+	it('returns undefined for an identity with no bound durability', () => {
+		expect(resolveAgentDurability('unbound')).toBeUndefined();
+	});
+
+	it('returns undefined when given an undefined identity', () => {
+		expect(resolveAgentDurability(undefined)).toBeUndefined();
+	});
+
+	it('a later binding for the same identity replaces the earlier one', () => {
+		bindAgentDurability('triage', { maxAttempts: 1 });
+		bindAgentDurability('triage', { maxAttempts: 5 });
+		expect(resolveAgentDurability('triage')).toEqual({ maxAttempts: 5 });
+	});
+
+	it('rejects an invalid identity', () => {
+		expect(() => bindAgentDurability('bad:identity', { maxAttempts: 1 })).toThrow('is invalid');
+	});
+
+	it('rejects durability with unknown fields', () => {
+		expect(() =>
+			bindAgentDurability('triage', { maxAttempts: 3, retries: 7 } as never),
+		).toThrow('durability received unknown field "retries"');
+	});
+
+	it('rejects durability with non-positive maxAttempts', () => {
+		expect(() => bindAgentDurability('triage', { maxAttempts: 0 })).toThrow(
+			'durability.maxAttempts must be a positive integer',
+		);
+	});
+
+	it('rejects durability with non-positive timeoutMs', () => {
+		expect(() => bindAgentDurability('triage', { timeoutMs: -1 })).toThrow(
+			'durability.timeoutMs must be a positive integer',
+		);
 	});
 });

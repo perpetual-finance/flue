@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { useModel } from '../src/hooks/use-model.ts';
 import { useSandbox } from '../src/hooks/use-sandbox.ts';
-import { defineAgent } from '../src/index.ts';
 import { createFlueContext, resolveModel } from '../src/internal.ts';
 import { local } from '../src/node/index.ts';
 
@@ -28,12 +27,10 @@ describe('local()', () => {
 		try {
 			process.chdir(directory);
 			const harness = await createContext().initializeRootHarness(
-				defineAgent(
 					() => {
 						useModel('anthropic/claude-haiku-4-5');
 						useSandbox(local());
 					},
-				),
 			);
 
 			await expect(
@@ -54,10 +51,10 @@ describe('local()', () => {
 		try {
 			process.chdir(directory);
 			const harness = await createContext().initializeRootHarness(
-				defineAgent(() => {
+				() => {
 					useModel('anthropic/claude-haiku-4-5');
 					useSandbox(local(), { cwd: 'workspace' });
-				}),
+				},
 			);
 
 			await expect(
@@ -79,10 +76,10 @@ describe('local()', () => {
 		const directory = await mkdtemp(join(tmpdir(), 'flue-local-base-cwd-'));
 		await mkdir(join(directory, 'workspace'));
 		const harness = await createContext().initializeRootHarness(
-			defineAgent(() => {
+			() => {
 				useModel('anthropic/claude-haiku-4-5');
 				useSandbox(local({ cwd: directory }), { cwd: 'workspace' });
-			}),
+			},
 		);
 
 		await expect(
@@ -97,12 +94,10 @@ describe('local()', () => {
 
 	it('executes shell commands with bash when bash is available on the host', async () => {
 		const harness = await createContext().initializeRootHarness(
-			defineAgent(
 				() => {
 					useModel('anthropic/claude-haiku-4-5');
 					useSandbox(local());
 				},
-			),
 		);
 
 		// `$0` is the shell's own argv[0]: an absolute bash path under the
@@ -121,12 +116,10 @@ describe('local()', () => {
 		process.env.FLUE_LOCAL_TEST_SECRET = 'host-secret';
 		try {
 			const harness = await createContext().initializeRootHarness(
-				defineAgent(
 					() => {
 						useModel('anthropic/claude-haiku-4-5');
 						useSandbox(local());
 					},
-				),
 			);
 
 			await expect(
@@ -148,12 +141,10 @@ describe('local()', () => {
 
 	it('exposes explicit variables when local() receives env overrides', async () => {
 		const harness = await createContext().initializeRootHarness(
-			defineAgent(
 				() => {
 					useModel('anthropic/claude-haiku-4-5');
 					useSandbox(local({ env: { FLUE_LOCAL_TEST_EXPLICIT: 'available' } }));
 				},
-			),
 		);
 
 		await expect(
@@ -168,12 +159,10 @@ describe('local()', () => {
 		process.env.HOME = '/flue-test-home';
 		try {
 			const harness = await createContext().initializeRootHarness(
-				defineAgent(
 					() => {
 						useModel('anthropic/claude-haiku-4-5');
 						useSandbox(local({ env: { HOME: undefined } }));
 					},
-				),
 			);
 
 			await expect(
@@ -192,12 +181,10 @@ describe('local()', () => {
 		process.env.HOME = '/flue-test-home-before-init';
 		try {
 			const harness = await createContext().initializeRootHarness(
-				defineAgent(
 					() => {
 						useModel('anthropic/claude-haiku-4-5');
 						useSandbox(local());
 					},
-				),
 			);
 			process.env.HOME = '/flue-test-home-after-init';
 
@@ -214,7 +201,6 @@ describe('local()', () => {
 
 	it('layers per-command variables over sandbox variables when exec receives env overrides', async () => {
 		const harness = await createContext().initializeRootHarness(
-			defineAgent(
 				() => {
 					useModel('anthropic/claude-haiku-4-5');
 					useSandbox(
@@ -223,7 +209,6 @@ describe('local()', () => {
 						}),
 					);
 				},
-			),
 		);
 
 		await expect(
@@ -240,12 +225,10 @@ describe('local()', () => {
 
 	it('returns stdout stderr and exit code when a local command exits nonzero', async () => {
 		const harness = await createContext().initializeRootHarness(
-			defineAgent(
 				() => {
 					useModel('anthropic/claude-haiku-4-5');
 					useSandbox(local());
 				},
-			),
 		);
 
 		await expect(
@@ -258,12 +241,10 @@ describe('local()', () => {
 	it('creates parent directories when a filesystem write targets a nested path', async () => {
 		const directory = await mkdtemp(join(tmpdir(), 'flue-local-write-'));
 		const harness = await createContext().initializeRootHarness(
-			defineAgent(
 				() => {
 					useModel('anthropic/claude-haiku-4-5');
 					useSandbox(local({ cwd: directory }));
 				},
-			),
 		);
 
 		await harness.sandbox.writeFile('generated/nested/result.txt', 'written');
@@ -278,12 +259,10 @@ describe('local()', () => {
 		await writeFile(join(directory, 'target.txt'), 'hello');
 		await symlink(join(directory, 'target.txt'), join(directory, 'link.txt'));
 		const harness = await createContext().initializeRootHarness(
-			defineAgent(
 				() => {
 					useModel('anthropic/claude-haiku-4-5');
 					useSandbox(local({ cwd: directory }));
 				},
-			),
 		);
 
 		await expect(harness.sandbox.stat('link.txt')).resolves.toMatchObject({
@@ -303,12 +282,10 @@ describe('local()', () => {
 		const directory = await mkdtemp(join(tmpdir(), 'flue-local-abort-tree-'));
 		try {
 			const harness = await createContext().initializeRootHarness(
-				defineAgent(
 					() => {
 						useModel('anthropic/claude-haiku-4-5');
 						useSandbox(local({ cwd: directory }));
 					},
-				),
 			);
 			const controller = new AbortController();
 
@@ -343,12 +320,10 @@ describe('local()', () => {
 	it('rejects invalid env configuration when local() receives a non-record env value', async () => {
 		await expect(
 			createContext().initializeRootHarness(
-				defineAgent(
 					() => {
 						useModel('anthropic/claude-haiku-4-5');
 						useSandbox(local({ env: true as never }));
 					},
-				),
 			),
 		).rejects.toThrow('[flue] local() `env` must be a Record<string, string | undefined>.');
 	});

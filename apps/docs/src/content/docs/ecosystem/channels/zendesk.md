@@ -26,7 +26,7 @@ them; no community Zendesk SDK is installed.
 ```ts title="src/channels/zendesk.ts (abridged)"
 import { createZendeskChannel } from '@flue/zendesk';
 import { dispatch } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createZendeskClient } from '../zendesk-client.ts';
 
 export const client = createZendeskClient({
@@ -43,7 +43,7 @@ export const channel = createZendeskChannel({
     const ticketId = ticketIdFromEvent(payload.subject, payload.detail);
     if (!ticketId) return;
 
-    await dispatch(assistant, {
+    await dispatch(Assistant, {
       id: channel.instanceId({ accountId: payload.account_id, ticketId }),
       message: {
         kind: 'signal',
@@ -114,7 +114,7 @@ The webhook signing secret and outbound API token are separate credentials.
 ```ts title="src/channels/zendesk.ts"
 import { createZendeskChannel, type JsonValue, type ZendeskTicketRef } from '@flue/zendesk';
 import { defineTool, dispatch } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createZendeskClient } from '../zendesk-client.ts';
 
 const accountId = requiredEnv('ZENDESK_ACCOUNT_ID');
@@ -144,7 +144,7 @@ export const channel = createZendeskChannel({
           accountId: payload.account_id,
           ticketId,
         };
-        await dispatch(assistant, {
+        await dispatch(Assistant, {
           id: channel.instanceId(ticket),
           // Recorded once when this event creates the instance; ignored after.
           initialData: {
@@ -328,30 +328,30 @@ instead of being rounded.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { retrieveTicket } from '../channels/zendesk.ts';
 
-export const initialDataSchema = v.object({
+const initialData = v.object({
   accountId: v.string(),
   ticketId: v.string(),
 });
 
-function Assistant() {
+export function Assistant() {
   useModel('anthropic/claude-haiku-4-5');
-  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
+  const data = useInitialData<v.InferOutput<typeof initialData>>();
   if (!data) throw new Error('This agent is created by the Zendesk channel dispatch.');
   useTool(retrieveTicket(data));
   return 'Review the inbound Zendesk ticket event. Retrieve the current ticket when more context is needed.';
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialData;
 ```
 
 `initialData` is the instance's creation data: recorded once when the event creates
 the instance and ignored afterward, so the channel passes it on every
 dispatch. The agent reads it with `useInitialData()`, validated against the
-`initialDataSchema` export, instead of parsing the instance id.
+agent's `initialData` static, instead of parsing the instance id.
 
 The tool accepts no account, ticket id, API host, or credential from the model.
 `instanceId()` includes account and ticket identity because Zendesk resource

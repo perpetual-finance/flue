@@ -3,7 +3,7 @@ import {
 	createSalesforceMarketingCloudChannel,
 	type SalesforceMarketingCloudEvent,
 } from '@flue/salesforce';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import {
 	createSalesforceMarketingCloudClient,
 	type SalesforceMarketingCloudClient,
@@ -53,7 +53,7 @@ export const channel = createSalesforceMarketingCloudChannel({
 		}
 
 		for (const { event, ref } of usefulEvents) {
-			await dispatch(assistant, {
+			await dispatch(Assistant, {
 				id: emailEventInstanceId(ref),
 				// Recorded once when this event creates the instance; ignored after.
 				initialData: {

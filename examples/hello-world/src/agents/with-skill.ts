@@ -1,9 +1,9 @@
 'use agent';
-import { defineAgent, useModel, useSandbox, useTool } from '@flue/runtime';
+import { useModel, useSandbox, useTool } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 import * as v from 'valibot';
 
-function WithSkill() {
+export function WithSkill() {
 	useModel('anthropic/claude-sonnet-4-6');
 	useSandbox(local());
 	useTool({
@@ -21,5 +21,3 @@ function WithSkill() {
 	});
 	return 'When asked to run a demo, call the `greet-with-skill` tool and report its result.';
 }
-
-export default defineAgent(WithSkill);

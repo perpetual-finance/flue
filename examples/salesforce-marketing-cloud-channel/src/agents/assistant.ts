@@ -1,9 +1,9 @@
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { retrieveCallback } from '../channels/salesforce-marketing-cloud.ts';
 
-export const initialDataSchema = v.object({
+const initialDataSchema = v.object({
 	callbackId: v.string(),
 	mid: v.string(),
 	eid: v.string(),
@@ -13,7 +13,7 @@ export const initialDataSchema = v.object({
 	subscriberId: v.string(),
 });
 
-function Assistant() {
+export function Assistant() {
 	useModel('anthropic/claude-haiku-4-5');
 	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) {
@@ -25,4 +25,4 @@ function Assistant() {
 	return 'Review the inbound Salesforce Marketing Cloud email lifecycle event. Retrieve the configured ENS callback when callback status or delivery configuration is relevant.';
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialDataSchema;

@@ -1,7 +1,7 @@
 ---
 title: What is an agent?
 description: What an AI agent actually is, why a model alone isn't one, and what makes a Flue agent different.
-lastReviewedAt: 2026-07-07
+lastReviewedAt: 2026-07-11
 ---
 
 Ask ten people what an "AI agent" is and you'll get ten answers: a chatbot, a clever prompt, a workflow, a model with tools. But none of these fully capture it.
@@ -31,18 +31,16 @@ Flue's built-in agent harness gives you all of these pieces in TypeScript, ready
 ```ts
 // Example: src/agents/triage.ts
 'use agent';
-import { defineAgent, useModel, useSandbox, useSkill, useTool } from '@flue/runtime';
+import { useModel, useSandbox, useSkill, useTool } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
-function Triage() {
+export function Triage() {
 	useModel('anthropic/claude-sonnet-4-6');
 	useTool(tool); // what it can do
 	useSkill(skill); // expertise it can load on demand
 	useSandbox(local()); // where it runs, safely
 	return instructions; // who the agent is and how it works
 }
-
-export default defineAgent(Triage);
 ```
 
 Building an agent is really less about coding and more about building up the context that you provide your agent — choosing the model, instructions, tools, skills, and environment it runs in.
@@ -63,16 +61,16 @@ Some of the most popular agent harnesses today were designed for coding. Flue is
 
 ```ts
 // Compose the agent: its model, capabilities, and environment.
-function IssueTriage() {
+// The function IS the agent.
+export function IssueTriage() {
 	useModel('anthropic/claude-sonnet-4-6');
 	useTool(triageIssue); // an application-controlled capability the model can run
 	return instructions;
 }
-const agent = defineAgent(IssueTriage);
 
 // Drive it in code: mount its routes, dispatch events into its
 // conversations, or run it one-shot from the CLI.
-await dispatch(agent, {
+await dispatch(IssueTriage, {
 	id: issue.id,
 	message: { kind: 'signal', type: 'issue.opened', body: issue.summary },
 });

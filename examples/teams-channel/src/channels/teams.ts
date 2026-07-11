@@ -1,7 +1,7 @@
 import { defineTool, dispatch } from '@flue/runtime';
 import { createTeamsChannel } from '@flue/teams';
 import * as v from 'valibot';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createTeamsClient, type TeamsMessageRef } from '../lib/teams-client.ts';
 
 const appId = requiredEnv('TEAMS_APP_ID');
@@ -27,7 +27,7 @@ export const channel = createTeamsChannel({
 	async activities({ activity }) {
 		if (activity.type !== 'message' || !activity.text) return;
 		const destination = channel.destination(activity);
-		await dispatch(assistant, {
+		await dispatch(Assistant, {
 			id: channel.instanceId(destination),
 			// Recorded once when this event creates the instance; ignored after.
 			initialData: {

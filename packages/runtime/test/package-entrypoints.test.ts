@@ -22,7 +22,6 @@ describe('package entrypoints', () => {
 		expect(runtime).toMatchObject({
 			DelegationDepthExceededError: expect.any(Function),
 			connectMcpServer: expect.any(Function),
-			defineAgent: expect.any(Function),
 			createSandboxSessionEnv: expect.any(Function),
 			defineSkill: expect.any(Function),
 			defineTool: expect.any(Function),

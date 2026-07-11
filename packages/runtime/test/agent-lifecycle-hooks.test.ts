@@ -9,7 +9,6 @@ import {
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineAgent } from '../src/agent-definition.ts';
 import type { ConversationRecord } from '../src/conversation-records.ts';
 import {
 	createReducedInstanceState,
@@ -123,10 +122,10 @@ function makeCoordinator(
 		agents: [
 			{
 				name: 'assistant',
-				definition: defineAgent(() => {
+				agent: () => {
 					useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 					return assistant();
-				}),
+				},
 			},
 		],
 		createContext: makeFauxCreateContext(provider),
@@ -160,10 +159,10 @@ async function dispatchAndSettle(
 
 /** Run one direct submission through the session handler, outside the coordinator. */
 function makeDirectProcess(provider: FauxProviderRegistration, assistant: () => string) {
-	const agent = defineAgent(() => {
+	const agent = () => {
 		useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 		return assistant();
-	});
+	};
 	const input: AgentSubmissionInput = {
 		kind: 'direct',
 		submissionId: `direct:${crypto.randomUUID()}`,

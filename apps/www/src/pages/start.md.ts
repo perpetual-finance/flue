@@ -67,16 +67,17 @@ Before implementing, restate the chosen requirements to yourself as an implement
 2. Create or update the project in the requested directory using the selected source layout.
 3. Always create one minimal **agent module** matching the user's idea, keeping it closer to "hello world" than a production app.
    - Put it in the selected layout's immediate \`agents/\` directory, using a lower-kebab-case filename such as \`src/agents/hello-world.ts\`.
-   - Its first statement must be the \`'use agent';\` directive — that is how the module joins the application (the build scans for marked modules; the file basename becomes the agent's durable identity).
-   - Write it as a plain function that calls \`useModel('<exact model specifier>')\` first and returns its instruction as a string (\`<short purpose-specific instruction>\`), and default-export \`defineAgent(<the function>)\`.
+   - Its first statement must be the \`'use agent';\` directive — that is how the module joins the application (the build scans for marked modules; every exported function with a capitalized name is an agent, and the function's name becomes its durable identity).
+   - Write the agent as an exported capitalized plain function (for example \`export function HelloWorld() { ... }\`) that calls \`useModel('<exact model specifier>')\` first and returns its instruction as a string (\`<short purpose-specific instruction>\`). The function IS the agent — there is no wrapper to call.
    - For an \`agent + tool\` starter, call \`useTool({ name, description, harness: true, run: ({ harness }) => { ... } })\` inside the function and mention the tool in the returned instruction.
 4. Create \`app.ts\` at the source root — the application's route map and the only required entry file. Mount the agent explicitly:
    \`\`\`ts
+   import { createAgentRouter } from '@flue/runtime/routing';
    import { Hono } from 'hono';
-   import helloWorld from './agents/hello-world.ts';
+   import { HelloWorld } from './agents/hello-world.ts';
 
    const app = new Hono();
-   app.route('/agents/hello-world', helloWorld.route());
+   app.route('/agents/hello-world', createAgentRouter(HelloWorld));
 
    export default app;
    \`\`\`
@@ -88,7 +89,7 @@ Before implementing, restate the chosen requirements to yourself as an implement
 
    export default defineConfig({ plugins: [flue()] });
    \`\`\`
-   On Cloudflare, add \`cloudflare()\` from \`@cloudflare/vite-plugin\` after \`flue()\` and follow the Cloudflare deploy guide for \`wrangler.jsonc\` (each agent file needs a user-authored Durable Object migration entry for its generated \`Flue<PascalName>Agent\` class).
+   On Cloudflare, add \`cloudflare()\` from \`@cloudflare/vite-plugin\` after \`flue()\` and follow the Cloudflare deploy guide for \`wrangler.jsonc\` (each agent needs a user-authored Durable Object migration entry for its generated \`Flue<PascalName>Agent\` class).
 6. Optionally add \`flue.config.ts\` (default-export \`defineConfig({ ... })\` from \`@flue/runtime/config\`) when the project needs an explicit \`target\` or non-default \`app\`/\`db\` paths; the defaults above need none.
 7. Add \`tsconfig.json\` for TypeScript editor/typechecking support.
    - If no \`tsconfig.json\` exists, create this minimal one:
@@ -119,8 +120,8 @@ Before finishing, verify that the implementation matches the user's explicit cho
 
 - **Project location**: Files were created in the requested directory.
 - **Source layout**: Files use only the selected \`.flue\`, \`src\`, or root layout; \`app.ts\` sits at the selected source root.
-- **Agent module**: One agent module exists in the selected layout's \`agents/<name>.ts\`, starts with \`'use agent';\`, and default-exports \`defineAgent(...)\`.
-- **Routing**: \`app.ts\` mounts the agent via \`app.route('/agents/<name>', <agent>.route())\`; no route relies on file placement.
+- **Agent module**: One agent module exists in the selected layout's \`agents/<name>.ts\`, starts with \`'use agent';\`, and exports one capitalized agent function.
+- **Routing**: \`app.ts\` mounts the agent via \`app.route('/agents/<name>', createAgentRouter(<AgentFunction>))\`; no route relies on file placement.
 - **Build surface**: \`vite.config.ts\` includes \`flue()\` (plus \`cloudflare()\` only for the Cloudflare target), and \`dev\`/\`build\` scripts call \`vite dev\` / \`vite build\`.
 - **Deploy target**: Config and commands match the user's selected deploy target.
 - **LLM provider/model**: Model specifier is one of the suggested values, or an exact value from \`https://flueframework.com/models.json\` if the user requested another model.

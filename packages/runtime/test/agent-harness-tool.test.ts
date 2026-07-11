@@ -10,7 +10,6 @@ import {
 } from '@earendil-works/pi-ai/compat';
 import * as v from 'valibot';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { defineAgent } from '../src/agent-definition.ts';
 import type { Harness } from '../src/harness.ts';
 import { renderAgentFunctionWithStructure } from '../src/hooks/render.ts';
 import { useModel } from '../src/hooks/use-model.ts';
@@ -206,7 +205,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant),
+					agent: assistant,
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -293,7 +292,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant),
+					agent: assistant,
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -375,7 +374,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant),
+					agent: assistant,
 				},
 			],
 			createContext,
@@ -429,7 +428,7 @@ describe('harness tools end to end (node coordinator, faux provider)', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant),
+					agent: assistant,
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -510,7 +509,7 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 			provider,
 			createNoopSessionEnv({ exec }),
 		).initializeRootHarness(
-			defineAgent(assistant),
+			assistant,
 		);
 
 		await (await harness.session()).prompt('Delegate inspection.');
@@ -585,7 +584,7 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 			},
 		]);
 		const harness = await createDirectContext(provider, env).initializeRootHarness(
-			defineAgent(assistant),
+			assistant,
 		);
 
 		await (await harness.session()).prompt('Run shell.');
@@ -638,7 +637,7 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 			fauxAssistantMessage(fauxToolCall('wait_for_children', {}), { stopReason: 'toolUse' }),
 		]);
 		const harness = await createDirectContext(provider, env).initializeRootHarness(
-			defineAgent(assistant),
+			assistant,
 		);
 		const parent = await harness.session();
 
@@ -680,7 +679,7 @@ describe('harness tool delegation and lifecycle (ported from action-execution.te
 			fauxAssistantMessage('Done.'),
 		]);
 		const harness = await createDirectContext(provider).initializeRootHarness(
-			defineAgent(assistant),
+			assistant,
 		);
 
 		await (await harness.session()).prompt('Write the report.');

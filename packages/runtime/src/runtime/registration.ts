@@ -1,135 +1,116 @@
 /**
  * Agent identity registry and the mountable per-agent router.
  *
- * An agent's *identity* is the module-derived slug (`'use agent'` file
- * basename) that keys durable storage: conversation streams on Node
- * (`agentStreamPath(identity, id)`) and the Durable Object class on
- * Cloudflare. It generalizes the legacy wire name — the legacy generated
- * entry registered agents under exactly these filename-derived names — so
- * both routers drive the same name-keyed runtime machinery.
+ * THE AGENT IS THE FUNCTION. An agent's *identity* is the slug that keys
+ * durable storage: conversation streams on Node (`agentStreamPath(identity,
+ * id)`) and the Durable Object class on Cloudflare. It resolves from the
+ * function itself, in order:
  *
- * Two sources populate identity knowledge:
+ *   1. The build-stamped binding — the `'use agent'` transform injects
+ *      `__flueBindAgentModule(fn, { identity: '<literal>' })` per agent
+ *      export, capturing the source-level name (or its `agentName` static
+ *      override) before minification can touch identifiers.
+ *   2. The `agentName` static (`fn.agentName = 'issue-triage'`).
+ *   3. The function's own name (`fn.name`) — safe in plugin-less contexts
+ *      (`flue run`, unit tests, `start()` scripts) where no minifier runs.
  *
- *   1. {@link __flueBindAgentModule} — injected into each `'use agent'`
- *      module by the build transform; binds the module's identity and named
- *      exports (`route`, `description`, `initialDataSchema`, `durability`)
- *      to the definition at module-evaluation time.
- *   2. {@link registerFlueAgents} — called once by the generated bootstrap
- *      with the full scanned agent set; the app-membership registry.
+ * App membership comes from {@link registerFlueAgents}, called once by the
+ * generated bootstrap with the full scanned agent set (or by `start()` for
+ * standalone scripts). Durability is BINDING policy, not agent contract:
+ * whoever runs the agent decides it — `createAgentRouter(fn, { durability })`,
+ * a `start()` entry, or `flue run` flags — recorded per identity via
+ * {@link bindAgentDurability}.
  *
- * `AgentDefinition.route()` (built by {@link createAgentRouter}) is a pure
- * router factory over that knowledge: no side effects, callable any number of
- * times, mountable at any path. Handlers re-resolve identity, metadata, and
- * the runtime at request time, so mounting order relative to bootstrap
- * registration does not matter.
+ * {@link createAgentRouter} is a pure router factory: no side effects beyond
+ * recording its `durability` option, callable any number of times, mountable
+ * at any path. Handlers resolve the runtime at request time, so mounting
+ * order relative to bootstrap registration does not matter.
  */
 
-import type { MiddlewareHandler } from 'hono';
 import { Hono } from 'hono';
 import type * as v from 'valibot';
 import { assertDurability } from '../agent-tuning.ts';
 import { MethodNotAllowedError, toHttpResponse } from '../errors.ts';
 import { isValibotSchema } from '../schema.ts';
-import type { AgentModuleValue, DurabilityConfig } from '../types.ts';
+import type { Agent, DurabilityConfig } from '../types.ts';
 import {
 	assertAgentInstanceId,
 	executeAgentAbort,
 	executeAgentAttachmentRead,
 	executeAgentConversationRead,
 	executeAgentPrompt,
-	runAttachedMiddleware,
 	validated,
 } from './agent-routes.ts';
 import { getFlueRuntime } from './flue-app.ts';
 import { AgentMountRouteParamSchema, InvocationQuerySchema } from './schemas.ts';
 
 /**
- * MODULE-METADATA BINDING CONTRACT — consumed by the `@flue/vite`
- * `'use agent'` transform (Phase 3).
+ * IDENTITY BINDING CONTRACT — consumed by the `@flue/vite` `'use agent'`
+ * transform.
  *
- * For a marked module, the transform appends after the module body (using a
- * local reference to the default export and the module's own named exports):
+ * For every agent export of a marked module (each exported function with a
+ * capitalized name), the transform appends:
  *
  * ```ts
  * import { __flueBindAgentModule } from '@flue/runtime';
- * __flueBindAgentModule(<defaultExport>, {
- *   identity: '<identity slug>',        // required; non-empty, no ':'
- *   route,                              // only when the module exports it
- *   description,                        // only when the module exports it
- *   initialDataSchema,                  // only when the module exports it
- *   durability,                         // only when the module exports it
- * });
+ * __flueBindAgentModule(<namespace>.<ExportName>, { identity: '<literal>' });
  * ```
  *
- * `route` is middleware applied to every route the definition's `.route()`
- * serves — including attachment downloads — and `description` is static
- * human-facing metadata. `initialDataSchema` validates instance-creation
- * data at first contact, and `durability` is the submission retry policy —
- * supervisor-facing config that must be readable without rendering (the
- * policy governs render failure itself).
+ * The identity is the function's source-level name, or its `agentName`
+ * static override — resolved at build time and stamped as a string literal,
+ * so bundled (minified) builds keep the durable identity intact.
  */
-export interface AgentModuleBinding {
-	/** Module identity (file basename, or its `name` export). Keys durable storage; non-empty, no `:`. */
+export interface AgentIdentityBinding {
+	/** The agent's durable identity. Keys durable storage; non-empty, no `:`. */
 	identity: string;
-	/** Middleware applied to all of the agent's routes (module `route` export). */
-	route?: MiddlewareHandler;
-	/** Static description (module `description` export). */
-	description?: string;
-	/**
-	 * Valibot schema for instance-creation data (module `initialDataSchema`
-	 * export). Validated once, at the instance's first contact; a mismatch
-	 * (including absence, unless the schema accepts `undefined`) fails the
-	 * creating submission. The schema-parsed output is what gets recorded and
-	 * what `useInitialData()` returns.
-	 */
-	initialDataSchema?: v.GenericSchema;
-	/** Submission retry policy (module `durability` export). */
-	durability?: DurabilityConfig;
 }
 
-/** One registered agent: a definition joined to its identity and module metadata. */
-export interface FlueAgentRegistration extends AgentModuleBinding {
-	definition: AgentModuleValue;
+/** One registered agent: the function joined to its identity. */
+export interface FlueAgentRegistration extends AgentIdentityBinding {
+	agent: Agent;
 }
 
 /**
- * Agent identities are lower-kebab-case so the generated durable identifiers
- * (Durable Object class + binding names on Cloudflare, conversation storage
- * slugs on Node) remain predictable. Canonical copy — `@flue/vite`'s
- * agent-scan mirrors it for build-time enforcement.
+ * Agent identities key durable storage everywhere (Durable Object class +
+ * binding names on Cloudflare, conversation storage slugs on Node), so they
+ * are restricted to predictable identifier-ish shapes: PascalCase function
+ * names (`IssueTriage`) and kebab-case overrides (`issue-triage`) both
+ * match. Canonical copy — `@flue/vite`'s agent-scan mirrors it for
+ * build-time enforcement.
  */
-export const AGENT_IDENTITY_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+export const AGENT_IDENTITY_PATTERN = /^[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*$/;
 
-let moduleBindings = new WeakMap<AgentModuleValue, AgentModuleBinding>();
+let identityBindings = new WeakMap<Agent, AgentIdentityBinding>();
 let registeredAgents = new Map<string, FlueAgentRegistration>();
+let boundDurability = new Map<string, DurabilityConfig>();
 
 /**
- * Bind a module's identity and metadata to its default-exported definition.
+ * Bind a build-derived identity to an agent function.
  *
  * Not public API — the `'use agent'` build transform injects calls to this
- * (see {@link AgentModuleBinding} for the exact emitted shape). Idempotent
- * for the same definition/identity pair: re-evaluation of a module (dev
- * reload) replaces the metadata in place. Rebinding one definition to a
- * different identity is an authoring error and throws.
+ * (see {@link AgentIdentityBinding} for the exact emitted shape). Idempotent
+ * for the same function/identity pair: re-evaluation of a module (dev
+ * reload) rebinds in place. Rebinding one function to a different identity
+ * is an authoring error and throws.
  *
- * Returns the definition so the transform may also use it in expression
+ * Returns the function so the transform may also use it in expression
  * position.
  */
-export function __flueBindAgentModule<TDefinition extends AgentModuleValue>(
-	definition: TDefinition,
-	binding: AgentModuleBinding,
-): TDefinition {
-	assertAgentDefinitionValue(definition, binding?.identity ?? '(unknown)');
-	assertAgentModuleBinding(binding);
-	const existing = moduleBindings.get(definition);
+export function __flueBindAgentModule<TAgent extends Agent>(
+	agent: TAgent,
+	binding: AgentIdentityBinding,
+): TAgent {
+	assertAgentFunction(agent, binding?.identity ?? '(unknown)');
+	assertAgentIdentity(binding?.identity);
+	const existing = identityBindings.get(agent);
 	if (existing && existing.identity !== binding.identity) {
 		throw new Error(
-			`[flue] Agent definition is already bound to identity "${existing.identity}" and cannot be rebound as "${binding.identity}". ` +
-				'Each defineAgent(...) value carries exactly one module identity.',
+			`[flue] Agent function is already bound to identity "${existing.identity}" and cannot be rebound as "${binding.identity}". ` +
+				'Each agent function carries exactly one durable identity.',
 		);
 	}
-	moduleBindings.set(definition, { ...binding });
-	return definition;
+	identityBindings.set(agent, { identity: binding.identity });
+	return agent;
 }
 
 /**
@@ -143,45 +124,35 @@ export function registerFlueAgents(records: readonly FlueAgentRegistration[]): v
 	const next = new Map<string, FlueAgentRegistration>();
 	for (const record of records) {
 		const identity = record?.identity ?? '(unknown)';
-		assertAgentDefinitionValue(record?.definition, identity);
-		assertAgentModuleBinding(record);
+		assertAgentFunction(record?.agent, identity);
+		assertAgentIdentity(record?.identity);
 		const duplicateIdentity = next.get(record.identity);
 		if (duplicateIdentity) {
 			throw new Error(
 				`[flue] Duplicate agent identity "${record.identity}". ` +
-					'Agent identities derive from file basenames (or their `export const name` override) and must be unique.',
+					'Agent identities derive from function names (or their `agentName` static override) and must be unique.',
 			);
 		}
-		const duplicateDefinition = [...next.values()].find(
-			(existing) => existing.definition === record.definition,
-		);
-		if (duplicateDefinition) {
+		const duplicateAgent = [...next.values()].find((existing) => existing.agent === record.agent);
+		if (duplicateAgent) {
 			throw new Error(
-				`[flue] Agents "${duplicateDefinition.identity}" and "${record.identity}" default-export the same agent definition value. ` +
-					'Use distinct defineAgent(...) values for agent modules.',
+				`[flue] Agents "${duplicateAgent.identity}" and "${record.identity}" are the same function value. ` +
+					'Each registered agent must be a distinct function.',
 			);
 		}
-		const bound = moduleBindings.get(record.definition);
+		const bound = identityBindings.get(record.agent);
 		if (bound && bound.identity !== record.identity) {
 			throw new Error(
-				`[flue] Agent definition is already bound to identity "${bound.identity}" and cannot be registered as "${record.identity}".`,
+				`[flue] Agent function is already bound to identity "${bound.identity}" and cannot be registered as "${record.identity}".`,
 			);
 		}
-		next.set(record.identity, { ...record });
+		next.set(record.identity, { identity: record.identity, agent: record.agent });
 	}
 	registeredAgents = next;
-	// Registration also binds, so `.route()` works for definitions registered
-	// without the build transform (tests, hand-written bootstraps).
+	// Registration also binds, so identity resolution works for functions
+	// registered without the build transform (tests, `start()` scripts).
 	for (const record of next.values()) {
-		moduleBindings.set(record.definition, {
-			identity: record.identity,
-			...(record.route !== undefined ? { route: record.route } : {}),
-			...(record.description !== undefined ? { description: record.description } : {}),
-			...(record.initialDataSchema !== undefined
-				? { initialDataSchema: record.initialDataSchema }
-				: {}),
-			...(record.durability !== undefined ? { durability: record.durability } : {}),
-		});
+		identityBindings.set(record.agent, { identity: record.identity });
 	}
 }
 
@@ -191,28 +162,80 @@ export function getRegisteredFlueAgents(): readonly FlueAgentRegistration[] {
 }
 
 /**
- * Resolve a definition's identity and module metadata, preferring the
- * registered record (app membership) over the module binding.
+ * Resolve an agent function's durable identity: the build-stamped binding,
+ * else the `agentName` static, else the function's own name. Returns
+ * `undefined` for an anonymous, unbound function.
  */
-export function resolveAgentModuleBinding(
-	definition: AgentModuleValue,
-): AgentModuleBinding | undefined {
-	const binding = moduleBindings.get(definition);
-	if (!binding) return undefined;
-	const registered = registeredAgents.get(binding.identity);
-	if (registered && registered.definition === definition) return registered;
-	return binding;
+export function resolveAgentIdentity(agent: Agent): string | undefined {
+	const bound = identityBindings.get(agent)?.identity;
+	if (bound !== undefined) return bound;
+	if (agent.agentName !== undefined) {
+		if (typeof agent.agentName !== 'string' || !AGENT_IDENTITY_PATTERN.test(agent.agentName)) {
+			throw new Error(
+				`[flue] Agent "${agent.name || '(anonymous)'}" has an invalid agentName static ` +
+					`("${String(agent.agentName)}"). Agent identities must match ${AGENT_IDENTITY_PATTERN}.`,
+			);
+		}
+		return agent.agentName;
+	}
+	return agent.name === '' ? undefined : agent.name;
+}
+
+/**
+ * Record the submission retry policy for an agent identity. Durability is
+ * binding policy — the runner decides it, not the agent — so the binding
+ * sites write here: `createAgentRouter(fn, { durability })`, `start()`
+ * entries, and `flue run` flags. One policy per identity per process; a
+ * later binding for the same identity replaces the earlier one (mounting one
+ * agent twice with different policies is a configuration smell — give both
+ * mounts the same value).
+ */
+export function bindAgentDurability(identity: string, durability: DurabilityConfig): void {
+	assertAgentIdentity(identity);
+	assertDurability(durability, `[agent "${identity}"]`);
+	boundDurability.set(identity, durability);
+}
+
+/** The bound submission retry policy for an agent identity, if any. */
+export function resolveAgentDurability(identity: string | undefined): DurabilityConfig | undefined {
+	if (identity === undefined) return undefined;
+	return boundDurability.get(identity);
+}
+
+/**
+ * The agent's `initialData` contract static, shape-checked. Read directly
+ * off the function — the schema is intrinsic contract, so it needs no
+ * binding or registration to apply.
+ */
+export function resolveAgentInitialDataSchema(agent: Agent): v.GenericSchema | undefined {
+	if (agent.initialData === undefined) return undefined;
+	if (!isValibotSchema(agent.initialData)) {
+		throw new Error(
+			`[flue] Agent "${resolveAgentIdentity(agent) ?? agent.name}" has an invalid initialData static: ` +
+				'it must be a Valibot schema for the instance creation data.',
+		);
+	}
+	return agent.initialData;
 }
 
 export function resetFlueAgentRegistrationForTests(): void {
-	moduleBindings = new WeakMap();
+	identityBindings = new WeakMap();
 	registeredAgents = new Map();
+	boundDurability = new Map();
 }
 
 // ─── The mountable per-agent router ─────────────────────────────────────────
 
+export interface CreateAgentRouterOptions {
+	/**
+	 * Submission retry policy for this agent — binding policy, decided by the
+	 * runner. Recorded for the agent's identity when the router is created.
+	 */
+	durability?: DurabilityConfig;
+}
+
 /**
- * Build the mountable Hono sub-app behind `AgentDefinition.route()`.
+ * Build the mountable Hono sub-app serving one agent's HTTP surface.
  *
  * Routes, relative to wherever the caller mounts the sub-app:
  *
@@ -221,19 +244,25 @@ export function resetFlueAgentRegistrationForTests(): void {
  * - `POST /:id/abort` — abort in-flight/queued work
  * - `ALL /:id/attachments/:attachmentId` — attachment byte download
  *
- * The module's `route` export (middleware) wraps every route above —
- * mounting is the exposure decision, and `route` is the one auth point.
- * Handlers resolve identity/metadata and the runtime at request time and
- * dispatch through the same machinery as the legacy name-addressed router,
- * so both surfaces share storage keying and wire behavior.
+ * Mounting is the exposure decision; auth and other middleware compose in
+ * the host app (`app.use('/agents/triage/*', auth)`). The returned Hono app
+ * has `.fetch`, so it also mounts in any fetch-based server framework.
+ * Handlers resolve the runtime at request time, so creating the router
+ * before the bootstrap registers the scanned set is fine.
  */
-export function createAgentRouter(definition: AgentModuleValue): Hono {
-	// Fail fast at build/mount time when the module was never marked — but
-	// request-time resolution below stays authoritative, so calling `.route()`
-	// before the generated bootstrap registers the scanned set is fine.
-	requireBinding(definition);
+export function createAgentRouter(agent: Agent, options: CreateAgentRouterOptions = {}): Hono {
+	assertAgentFunction(agent, '(unresolved)');
+	const identity = resolveAgentIdentity(agent);
+	if (identity === undefined) {
+		throw new Error(
+			'[flue] createAgentRouter() could not resolve an identity for this agent: the function is ' +
+				'anonymous and carries no agentName static. Name the function (or assign ' +
+				"`fn.agentName = '<identity>'`).",
+		);
+	}
+	assertAgentIdentity(identity);
+	if (options.durability !== undefined) bindAgentDurability(identity, options.durability);
 
-	const resolve = () => requireBinding(definition);
 	const app = new Hono();
 
 	app.post(
@@ -241,69 +270,54 @@ export function createAgentRouter(definition: AgentModuleValue): Hono {
 		validated('param', AgentMountRouteParamSchema),
 		validated('query', InvocationQuerySchema),
 		async (c) => {
-			const binding = resolve();
 			const rt = requireRuntime();
 			const id = c.req.param('id') ?? '';
 			assertAgentInstanceId(id);
-			const request = c.req.raw.clone();
-			return runAttachedMiddleware(c, binding.route, () =>
-				executeAgentPrompt(rt, {
-					agentName: binding.identity,
-					instanceId: id,
-					request,
-					env: c.env,
-				}),
-			);
+			return executeAgentPrompt(rt, {
+				agentName: identity,
+				instanceId: id,
+				request: c.req.raw.clone(),
+				env: c.env,
+			});
 		},
 	);
 
 	// Abort all in-flight/queued work for an agent instance. A distinct
 	// (longer) path, so it never collides with the prompt/stream routes.
 	app.all('/:id/abort', async (c) => {
-		const binding = resolve();
 		const rt = requireRuntime();
 		if (c.req.method !== 'POST') {
 			throw new MethodNotAllowedError({ method: c.req.method, allowed: ['POST'] });
 		}
 		const id = c.req.param('id') ?? '';
 		assertAgentInstanceId(id);
-		const request = c.req.raw.clone();
-		return runAttachedMiddleware(c, binding.route, () =>
-			executeAgentAbort(rt, {
-				agentName: binding.identity,
-				instanceId: id,
-				request,
-				env: c.env,
-			}),
-		);
+		return executeAgentAbort(rt, {
+			agentName: identity,
+			instanceId: id,
+			request: c.req.raw.clone(),
+			env: c.env,
+		});
 	});
 
 	// Attachment byte download. A distinct (longer) path, so it never
 	// collides with the prompt/stream routes.
 	app.all('/:id/attachments/:attachmentId', async (c) => {
-		const binding = resolve();
 		const rt = requireRuntime();
 		if (c.req.method !== 'GET') {
 			throw new MethodNotAllowedError({ method: c.req.method, allowed: ['GET'] });
 		}
-		const id = c.req.param('id') ?? '';
-		const attachmentId = c.req.param('attachmentId') ?? '';
-		const request = c.req.raw.clone();
-		return runAttachedMiddleware(c, binding.route, () =>
-			executeAgentAttachmentRead(rt, {
-				agentName: binding.identity,
-				instanceId: id,
-				attachmentId,
-				request,
-				env: c.env,
-			}),
-		);
+		return executeAgentAttachmentRead(rt, {
+			agentName: identity,
+			instanceId: c.req.param('id') ?? '',
+			attachmentId: c.req.param('attachmentId') ?? '',
+			request: c.req.raw.clone(),
+			env: c.env,
+		});
 	});
 
 	// GET/HEAD stream reads, and the canonical 405 envelope for any other
 	// unmatched method (instead of Hono's default 404).
 	app.all('/:id', async (c) => {
-		const binding = resolve();
 		const rt = requireRuntime();
 		if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && c.req.method !== 'POST') {
 			throw new MethodNotAllowedError({
@@ -313,29 +327,17 @@ export function createAgentRouter(definition: AgentModuleValue): Hono {
 		}
 		const id = c.req.param('id') ?? '';
 		assertAgentInstanceId(id);
-		return runAttachedMiddleware(c, binding.route, () =>
-			executeAgentConversationRead(rt, {
-				agentName: binding.identity,
-				instanceId: id,
-				request: c.req.raw,
-				env: c.env,
-			}),
-		);
+		return executeAgentConversationRead(rt, {
+			agentName: identity,
+			instanceId: id,
+			request: c.req.raw,
+			env: c.env,
+		});
 	});
 
 	app.onError((err) => toHttpResponse(err));
 
 	return app;
-}
-
-function requireBinding(definition: AgentModuleValue): AgentModuleBinding {
-	const binding = resolveAgentModuleBinding(definition);
-	if (!binding) {
-		throw new Error(
-			"[flue] .route() requires an agent identity, and this definition has none. Add the 'use agent' directive as the first statement of the agent module so the build registers it (unit tests can use registerFlueAgents from @flue/runtime/internal).",
-		);
-	}
-	return binding;
 }
 
 function requireRuntime() {
@@ -349,60 +351,26 @@ function requireRuntime() {
 	return rt;
 }
 
-function assertAgentDefinitionValue(
-	value: unknown,
-	identity: string,
-): asserts value is AgentModuleValue {
-	// Twin: `isAgentDefinitionValue` in flue-app.ts — keep in sync.
-	if (typeof value === 'function') {
-		// A bare agent function is the likeliest authoring mistake: it
-		// carries no model. Point at the wrapper.
+function assertAgentFunction(value: unknown, identity: string): asserts value is Agent {
+	// Twin: `isAgentFunction` in flue-app.ts — keep in sync.
+	if (typeof value !== 'function') {
 		throw new Error(
-			`[flue] Agent "${identity}" default-exports a bare function. Wrap it: defineAgent(${value.name || 'Agent'}).`,
+			`[flue] Agent "${identity}" must be a function — the agent IS the function. ` +
+				'Export a capitalized function from a \'use agent\' module (there is no wrapper to call).',
 		);
 	}
-	const candidate = value as { __flueFunctionAgent?: unknown } | null;
-	const isFunctionAgent =
-		!!candidate && typeof candidate === 'object' && candidate.__flueFunctionAgent === true;
-	if (!isFunctionAgent) {
-		throw new Error(`[flue] Agent "${identity}" must default-export defineAgent(Agent).`);
-	}
-}
-
-function assertAgentModuleBinding(binding: AgentModuleBinding): void {
-	if (!binding || typeof binding !== 'object') {
-		throw new Error('[flue] Agent module binding must be an object.');
-	}
-	assertAgentIdentity(binding.identity);
-	if (binding.route !== undefined && typeof binding.route !== 'function') {
-		throw new Error(
-			`[flue] Agent "${binding.identity}" route export must be a callable Hono middleware value.`,
-		);
-	}
-	if (
-		binding.description !== undefined &&
-		(typeof binding.description !== 'string' || binding.description.trim().length === 0)
-	) {
-		throw new Error(
-			`[flue] Agent "${binding.identity}" description export must be a non-empty string.`,
-		);
-	}
-	if (binding.initialDataSchema !== undefined && !isValibotSchema(binding.initialDataSchema)) {
-		throw new Error(
-			`[flue] Agent "${binding.identity}" initialDataSchema export must be a Valibot schema for the instance creation data.`,
-		);
-	}
-	assertDurability(binding.durability, `[agent "${binding.identity}"]`);
 }
 
 /**
- * Identity charset, ported from the legacy filename-derived agent names:
- * non-empty, and no `:` (URL addressing reserves a single namespace segment).
+ * Identity charset: must match {@link AGENT_IDENTITY_PATTERN} — non-empty,
+ * identifier-ish (PascalCase function names and kebab-case overrides), and
+ * in particular no `:` (URL addressing reserves a single namespace segment).
  */
 function assertAgentIdentity(identity: unknown): asserts identity is string {
-	if (typeof identity !== 'string' || identity.length === 0 || identity.includes(':')) {
+	if (typeof identity !== 'string' || !AGENT_IDENTITY_PATTERN.test(identity)) {
 		throw new Error(
-			`[flue] Agent identity "${String(identity)}" is invalid. Agent identities must be non-empty and must not contain ":".`,
+			`[flue] Agent identity "${String(identity)}" is invalid. Agent identities must match ${AGENT_IDENTITY_PATTERN} ` +
+				'(a function name like "IssueTriage", or a kebab-case override like "issue-triage").',
 		);
 	}
 }

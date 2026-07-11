@@ -99,7 +99,7 @@ export function vercel(sandbox: VercelSandbox): SandboxFactory {
 }
 ```
 
-Pass an initialized Vercel `Sandbox` to `vercel(...)` and assign the returned factory to an agent's `sandbox` property. The adapter maps the provider's complete file stat, resolves relative paths from `/vercel/sandbox`, forwards a composed signal to command execution and output reads, propagates caller cancellation, and maps only `timeoutMs` cancellation to exit code 124.
+Pass an initialized Vercel `Sandbox` to `vercel(...)` and pass the returned factory to the agent's `useSandbox(...)` call. The adapter maps the provider's complete file stat, resolves relative paths from `/vercel/sandbox`, forwards a composed signal to command execution and output reads, propagates caller cancellation, and maps only `timeoutMs` cancellation to exit code 124.
 
 ## Configure
 
@@ -117,10 +117,10 @@ Pass an initialized Vercel `Sandbox` to `vercel(...)` and assign the returned fa
 
 ```ts
 import { Sandbox } from '@vercel/sandbox';
-import { defineAgent, useModel, useSandbox } from '@flue/runtime';
+import { useModel, useSandbox } from '@flue/runtime';
 import { vercel } from '../sandboxes/vercel';
 
-function Assistant() {
+export function Assistant() {
   useModel('anthropic/claude-sonnet-4-6');
   useSandbox({
     // Lazy, per the SandboxFactory contract: constructing this object is
@@ -132,8 +132,6 @@ function Assistant() {
     },
   });
 }
-
-const agent = defineAgent(Assistant);
 ```
 
 Keep Vercel authentication values in trusted application configuration and determine whether sandboxes should be fresh per job or reusable for stable agent identities.

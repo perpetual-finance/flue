@@ -7,7 +7,6 @@ import {
 import * as v from 'valibot';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
-	defineAgent,
 	defineTool,
 	type FlueExecutionContext,
 	type FlueExecutionOperation,
@@ -48,9 +47,9 @@ function createContext(provider: FauxProviderRegistration) {
 
 async function createSession(provider: FauxProviderRegistration) {
 	const harness = await createContext(provider).initializeRootHarness(
-		defineAgent(() => {
+		() => {
 			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
-		}),
+		},
 	);
 	return harness.session();
 }
@@ -252,9 +251,9 @@ describe('custom tools', () => {
 		});
 		try {
 			const harness = await context.initializeRootHarness(
-				defineAgent(() => {
+				() => {
 					useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
-				}),
+				},
 			);
 
 			await (await harness.session()).prompt('Check the directory.');
@@ -300,7 +299,7 @@ describe('custom tools', () => {
 		});
 		try {
 			const harness = await context.initializeRootHarness(
-				defineAgent(() => {
+				() => {
 					useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 					useTool(
 						defineTool({
@@ -310,7 +309,7 @@ describe('custom tools', () => {
 							run: async ({ data }) => data.limit,
 						}),
 					);
-				}),
+				},
 			);
 
 			await (await harness.session()).prompt('Look up values.');
@@ -357,7 +356,7 @@ describe('custom tools', () => {
 		});
 		try {
 			const harness = await context.initializeRootHarness(
-				defineAgent(() => {
+				() => {
 					useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 					useTool(
 						defineTool({
@@ -372,7 +371,7 @@ describe('custom tools', () => {
 							run: async () => 'unused',
 						}),
 					);
-				}),
+				},
 			);
 
 			await (await harness.session()).prompt('Look up values.');
@@ -415,7 +414,7 @@ describe('custom tools', () => {
 			events.push(event);
 		});
 		const harness = await context.initializeRootHarness(
-			defineAgent(() => {
+			() => {
 				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 				useTool(
 					defineTool({
@@ -425,7 +424,7 @@ describe('custom tools', () => {
 						run: async () => 'unused',
 					}),
 				);
-			}),
+			},
 		);
 
 		await (await harness.session()).prompt('Look up values.');
@@ -443,7 +442,7 @@ describe('custom tools', () => {
 
 		await expect(
 			createContext(provider).initializeRootHarness(
-				defineAgent(() => {
+				() => {
 					useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 					useTool({
 						name: 'lookup',
@@ -451,7 +450,7 @@ describe('custom tools', () => {
 						run: async () => 'ok',
 						parameters: undefined,
 					} as never);
-				}),
+				},
 			),
 		).rejects.toThrow(ToolLegacyDefinitionError);
 	});
@@ -481,7 +480,7 @@ describe('custom tools', () => {
 			},
 		]);
 		const harness = await createContext(provider).initializeRootHarness(
-			defineAgent(() => {
+			() => {
 				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 				useTool(
 					defineTool({
@@ -511,7 +510,7 @@ describe('custom tools', () => {
 						run: async () => undefined,
 					}),
 				);
-			}),
+			},
 		);
 
 		await (await harness.session()).prompt('Render values.');
@@ -541,7 +540,7 @@ describe('custom tools', () => {
 		});
 		try {
 			const harness = await createContext(provider).initializeRootHarness(
-				defineAgent(() => {
+				() => {
 					useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 					useTool(
 						defineTool({
@@ -550,7 +549,7 @@ describe('custom tools', () => {
 							run: async () => ({ found: true }),
 						}),
 					);
-				}),
+				},
 			);
 			const session = await harness.session();
 
@@ -584,7 +583,7 @@ describe('custom tools', () => {
 		});
 		try {
 			const harness = await context.initializeRootHarness(
-				defineAgent(() => {
+				() => {
 					useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 					useTool(
 						defineTool({
@@ -593,7 +592,7 @@ describe('custom tools', () => {
 							run: async () => ({ found: true }),
 						}),
 					);
-				}),
+				},
 			);
 
 			await (await harness.session()).prompt('Look up the value.');
@@ -638,10 +637,10 @@ describe('custom tools', () => {
 			run: async () => 'ok',
 		});
 		const harness = await createContext(provider).initializeRootHarness(
-			defineAgent(() => {
+			() => {
 				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 				useTool(lookupTool);
-			}),
+			},
 		);
 		const session = await harness.session();
 
@@ -681,10 +680,10 @@ describe('custom tools', () => {
 			},
 		});
 		const harness = await createContext(provider).initializeRootHarness(
-			defineAgent(() => {
+			() => {
 				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 				useTool(lookup);
-			}),
+			},
 		);
 		const session = await harness.session();
 
@@ -716,7 +715,7 @@ describe('custom tools', () => {
 	it('rejects duplicate custom tool names when active tools are assembled', async () => {
 		const provider = createProvider();
 		const harness = await createContext(provider).initializeRootHarness(
-			defineAgent(() => {
+			() => {
 				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 				useTool(
 					defineTool({
@@ -725,7 +724,7 @@ describe('custom tools', () => {
 						run: async () => 'ok',
 					}),
 				);
-			}),
+			},
 		);
 		const session = await harness.session();
 

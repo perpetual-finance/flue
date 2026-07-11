@@ -9,7 +9,6 @@ import {
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineAgent } from '../src/agent-definition.ts';
 import type { ConversationRecord } from '../src/conversation-records.ts';
 import {
 	createReducedInstanceState,
@@ -132,10 +131,10 @@ function setupDispatchHarness(
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(() => {
+					agent: () => {
 						useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 						return assistant();
-					}),
+					},
 				},
 			],
 			createContext: makeFauxCreateContext(provider),

@@ -1,9 +1,10 @@
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
-import withCustomBash from './agents/with-custom-bash.ts';
-import withImportedSkill from './agents/with-imported-skill.ts';
+import { WithCustomBash } from './agents/with-custom-bash.ts';
+import { WithImportedSkill } from './agents/with-imported-skill.ts';
 
 const app = new Hono();
-app.route('/agents/with-imported-skill', withImportedSkill.route());
-app.route('/agents/with-custom-bash', withCustomBash.route());
+app.route('/agents/with-imported-skill', createAgentRouter(WithImportedSkill));
+app.route('/agents/with-custom-bash', createAgentRouter(WithCustomBash));
 
 export default app;

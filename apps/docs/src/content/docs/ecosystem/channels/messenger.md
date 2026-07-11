@@ -21,7 +21,7 @@ The Facebook Messenger blueprint installs `@flue/messenger`, creates a project-o
 ```ts title="src/channels/messenger.ts (abridged)"
 import { createMessengerChannel } from '@flue/messenger';
 import { dispatch } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { MessengerClient } from '../messenger-client.ts';
 
 export const client = new MessengerClient({
@@ -43,7 +43,7 @@ export const channel = createMessengerChannel({
         const attachmentTypes = (event.message.attachments ?? []).map(
           (attachment) => attachment.type,
         );
-        await dispatch(assistant, {
+        await dispatch(Assistant, {
           id: channel.instanceId(conversation),
           // Recorded once when this event creates the instance; ignored after.
           initialData: {
@@ -124,7 +124,7 @@ an outbound Graph credential. Keep both in trusted server configuration.
 import { createMessengerChannel, type MessengerConversationRef } from '@flue/messenger';
 import { defineTool, dispatch } from '@flue/runtime';
 import * as v from 'valibot';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { MessengerClient } from '../messenger-client.ts';
 
 export const client = new MessengerClient({
@@ -153,7 +153,7 @@ export const channel = createMessengerChannel({
         const attachmentTypes = (event.message.attachments ?? []).map(
           (attachment) => attachment.type,
         );
-        await dispatch(assistant, {
+        await dispatch(Assistant, {
           id: channel.instanceId(conversation),
           // Recorded once when this event creates the instance; ignored after.
           initialData: {
@@ -204,11 +204,11 @@ id:
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { postMessage } from '../channels/messenger.ts';
 
-export const initialDataSchema = v.object({
+const initialData = v.object({
   pageId: v.string(),
   participant: v.variant('type', [
     v.object({ type: v.literal('page-scoped-id'), id: v.string() }),
@@ -216,15 +216,15 @@ export const initialDataSchema = v.object({
   ]),
 });
 
-function Assistant() {
+export function Assistant() {
   useModel('anthropic/claude-haiku-4-5');
-  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
+  const data = useInitialData<v.InferOutput<typeof initialData>>();
   if (!data) throw new Error('This agent is created by the Messenger channel dispatch.');
   useTool(postMessage(data));
   return 'Reply concisely in the bound Facebook Messenger conversation.';
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialData;
 ```
 
 ## Delivery behavior

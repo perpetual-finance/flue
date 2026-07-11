@@ -1,6 +1,6 @@
 import { getModel } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { defineAgent, ProviderRegistrationError, useModel } from '../src/index.ts';
+import { ProviderRegistrationError, useModel } from '../src/index.ts';
 import { createFlueContext, resolveModel } from '../src/internal.ts';
 import {
 	getProviderTelemetry,
@@ -73,9 +73,9 @@ describe('registerProvider()', () => {
 			apiKey: 'sk-capture',
 		});
 		const harness = await createContext().initializeRootHarness(
-			defineAgent(() => {
+			() => {
 				useModel('capture-http/capture-model');
-			}),
+			},
 		);
 		const session = await harness.session();
 
@@ -100,9 +100,9 @@ describe('registerProvider()', () => {
 			headers: { 'x-gateway-tenant': 'acme' },
 		});
 		const harness = await createContext().initializeRootHarness(
-			defineAgent(() => {
+			() => {
 				useModel('capture-auth/capture-model');
-			}),
+			},
 		);
 		const session = await harness.session();
 

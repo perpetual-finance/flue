@@ -40,7 +40,7 @@ client and fixed route:
 import Stripe from 'stripe';
 import { createStripeChannel } from '@flue/stripe';
 import { defineTool, dispatch } from '@flue/runtime';
-import billing from '../agents/billing.ts';
+import { Billing } from '../agents/billing.ts';
 
 export const client = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   httpClient: Stripe.createFetchHttpClient(),
@@ -62,7 +62,7 @@ export const channel = createStripeChannel({
             : session.customer?.id;
         if (!customerId) return;
 
-        await dispatch(billing, {
+        await dispatch(Billing, {
           id: customerId,
           // Recorded once when this event creates the instance; ignored after.
           initialData: { customerId },
@@ -147,15 +147,15 @@ Bind the trusted customer id inside the agent component:
 
 ```ts
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { retrieveCustomer } from '../channels/stripe.ts';
 
-export const initialDataSchema = v.object({
+const initialDataSchema = v.object({
 	customerId: v.string(),
 });
 
-function Billing() {
+export function Billing() {
 	useModel('anthropic/claude-haiku-4-5');
 	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the Stripe channel dispatch.');
@@ -163,17 +163,18 @@ function Billing() {
 	return 'Review the completed Checkout event and summarize any billing follow-up that is needed.';
 }
 
-export default defineAgent(Billing);
+Billing.initialData = initialDataSchema;
 ```
 
-The `initialDataSchema` export validates the dispatched `initialData` when the
+The `initialData` static validates the dispatched `initialData` when the
 instance is created; `useInitialData()` returns the parsed value on every
 render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback
 needs no `app.ts` mounting. Add
-`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+`app.route('/agents/<name>', createAgentRouter(Billing))` (from
+`@flue/runtime/routing`) in `app.ts` only when the agent
 should also be reachable over HTTP directly.
 
 The channel-agent import cycle is supported only because imported bindings are

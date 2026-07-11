@@ -21,7 +21,7 @@ The Twilio blueprint installs `@flue/twilio`, creates a project-owned Fetch clie
 ```ts title="src/channels/twilio.ts (abridged)"
 import { createTwilioChannel } from '@flue/twilio';
 import { dispatch } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { TwilioClient } from '../twilio-client.ts';
 
 export const client = new TwilioClient({
@@ -39,7 +39,7 @@ export const channel = createTwilioChannel({
   },
   async webhook({ payload, conversation }) {
     if (payload.OptOutType === 'STOP') return;
-    await dispatch(assistant, {
+    await dispatch(Assistant, {
       id: channel.instanceId(conversation),
       // Recorded once when this event creates the instance; ignored after.
       initialData:
@@ -134,7 +134,7 @@ The package rejects signed requests for another account or destination.
 import { createTwilioChannel } from '@flue/twilio';
 import { defineTool, dispatch } from '@flue/runtime';
 import * as v from 'valibot';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { TwilioClient } from '../twilio-client.ts';
 
 export const client = new TwilioClient({
@@ -168,7 +168,7 @@ export const channel = createTwilioChannel({
         }
       }
     }
-    await dispatch(assistant, {
+    await dispatch(Assistant, {
       id: channel.instanceId(conversation),
       // Recorded once when this event creates the instance; ignored after.
       initialData:
@@ -225,11 +225,11 @@ It carries the conversation ref fields the reply tool needs.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { postMessage } from '../channels/twilio.ts';
 
-export const initialDataSchema = v.variant('type', [
+const initialData = v.variant('type', [
   v.object({ type: v.literal('address'), address: v.string(), participant: v.string() }),
   v.object({
     type: v.literal('messaging-service'),
@@ -238,18 +238,18 @@ export const initialDataSchema = v.variant('type', [
   }),
 ]);
 
-function Assistant() {
+export function Assistant() {
   useModel('anthropic/claude-haiku-4-5');
-  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
+  const data = useInitialData<v.InferOutput<typeof initialData>>();
   if (!data) throw new Error('This agent is created by the Twilio channel dispatch.');
   useTool(postMessage(data));
   return 'Reply concisely in the bound Twilio conversation.';
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialData;
 ```
 
-The `initialDataSchema` export validates the dispatched `initialData` when the instance is
+The agent's `initialData` static validates the dispatched `initialData` when the instance is
 created; `useInitialData()` returns the parsed value on every render — the
 agent reads the conversation ref this way instead of parsing it from the
 instance id.

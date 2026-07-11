@@ -4,7 +4,6 @@ import {
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineAgent } from '../src/agent-definition.ts';
 import { InvalidRequestError, OperationFailedError } from '../src/errors.ts';
 import { useModel } from '../src/hooks/use-model.ts';
 import { dispatch } from '../src/index.ts';
@@ -36,17 +35,17 @@ function noopDispatchQueue(): DispatchQueue {
 
 /**
  * Configures the runtime with a single discovered agent named "moderator" and
- * returns its definition — the value dispatch() resolves back to that name.
+ * returns its function — the value dispatch() resolves back to that name.
  */
 function configureModerator(dispatchQueue: DispatchQueue = noopDispatchQueue()) {
-	const moderator = defineAgent(() => {
+	const moderator = () => {
 		useModel('anthropic/claude-haiku-4-5');
 		return 'Moderator agent.';
-	});
+	};
 	configureFlueRuntime({
 		...nodeRuntime(),
 		dispatchQueue,
-		agents: [agentRecord('moderator', { definition: moderator })],
+		agents: [agentRecord('moderator', { agent: moderator })],
 	});
 	return moderator;
 }
@@ -74,10 +73,10 @@ function createProvider(): FauxProviderRegistration {
 
 describe('dispatch()', () => {
 	it('rejects calls when the runtime has not been configured', async () => {
-		const moderator = defineAgent(() => {
+		const moderator = () => {
 			useModel('anthropic/claude-haiku-4-5');
 			return 'Moderator agent.';
-		});
+		};
 		await expect(
 			dispatch(moderator, {
 				id: 'guild:unconfigured',
@@ -119,10 +118,10 @@ describe('dispatch()', () => {
 	});
 
 	it('rejects an agent definition target when the built application cannot resolve its identity', async () => {
-		const localModerator = defineAgent(() => {
+		const localModerator = () => {
 			useModel('anthropic/claude-haiku-4-5');
 			return 'Moderator agent.';
-		});
+		};
 		configureFlueRuntime({
 			...nodeRuntime(),
 			dispatchQueue: noopDispatchQueue(),
@@ -134,7 +133,7 @@ describe('dispatch()', () => {
 				id: 'guild:local',
 				message: { kind: 'signal', type: 'flagged', body: 'report:local' },
 			}),
-		).rejects.toThrow('not a discovered default-exported agent');
+		).rejects.toThrow('target agent is not registered in this built application');
 	});
 
 	it('snapshots the delivered message when dispatch() admits a payload', async () => {
@@ -277,7 +276,7 @@ describe('dispatch()', () => {
 		);
 	});
 
-	it('rejects a non-definition first argument with a structured error', async () => {
+	it('rejects a non-function first argument with a structured error', async () => {
 		configureModerator();
 
 		// The removed named-string form: a plain request object as the first arg.
@@ -288,7 +287,7 @@ describe('dispatch()', () => {
 
 		expect(error).toBeInstanceOf(InvalidRequestError);
 		expect((error as InvalidRequestError).details).toContain(
-			'dispatch() requires an agent definition as its first argument',
+			'dispatch() requires an agent function as its first argument',
 		);
 	});
 
@@ -314,10 +313,10 @@ describe('dispatched session processing', () => {
 				errorMessage: 'Request was aborted',
 			}),
 		]);
-		const agent = defineAgent(() => {
+		const agent = () => {
 			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			return 'Moderator agent.';
-		});
+		};
 		const input: AgentSubmissionInput = {
 			kind: 'direct',
 			submissionId: 'direct:aborted-turn',
@@ -353,10 +352,10 @@ describe('dispatched session processing', () => {
 		provider.setResponses([
 			fauxAssistantMessage('', { stopReason: 'error', errorMessage: 'invalid_api_key' }),
 		]);
-		const agent = defineAgent(() => {
+		const agent = () => {
 			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			return 'Moderator agent.';
-		});
+		};
 		const input: AgentSubmissionInput = {
 			kind: 'direct',
 			submissionId: 'direct:error-turn',

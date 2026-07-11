@@ -23,7 +23,7 @@ The Slack blueprint installs `@flue/slack` and Slack's official `@slack/web-api`
 import { dispatch } from '@flue/runtime';
 import { createSlackChannel } from '@flue/slack';
 import { WebClient } from '@slack/web-api';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 export const client = new WebClient(process.env.SLACK_BOT_TOKEN);
 
@@ -34,7 +34,7 @@ export const channel = createSlackChannel({
     if (payload.event.type !== 'app_mention') return;
 
     const event = payload.event;
-    await dispatch(assistant, {
+    await dispatch(Assistant, {
       id: channel.instanceId({
         teamId: payload.team_id,
         channelId: event.channel,
@@ -96,7 +96,7 @@ verification is answered internally after signature verification.
 ```ts title="src/channels/slack.ts"
 import { dispatch } from '@flue/runtime';
 import { createSlackChannel } from '@flue/slack';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 export const channel = createSlackChannel({
   signingSecret: process.env.SLACK_SIGNING_SECRET!,
@@ -113,7 +113,7 @@ export const channel = createSlackChannel({
           channelId: event.channel,
           threadTs: event.thread_ts ?? event.ts,
         };
-        await dispatch(assistant, {
+        await dispatch(Assistant, {
           id: channel.instanceId(thread),
           // Recorded once when this event creates the instance; ignored after.
           initialData: {
@@ -257,27 +257,27 @@ them from the instance id:
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { replyInThread } from '../channels/slack.ts';
 
-export const initialDataSchema = v.object({
+const initialData = v.object({
   channelId: v.string(),
   threadTs: v.string(),
   startedBy: v.optional(v.string()),
   startedAt: v.pipe(v.string(), v.isoTimestamp()),
 });
 
-function Assistant() {
+export function Assistant() {
   useModel('anthropic/claude-haiku-4-5');
-  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
+  const data = useInitialData<v.InferOutput<typeof initialData>>();
   if (!data) throw new Error('This agent is created by the Slack channel dispatch.');
   useTool(replyInThread(data));
   const startedBy = data.startedBy ? ` by <@${data.startedBy}>` : '';
   return `Reply in the bound Slack thread when appropriate. This conversation was started${startedBy} at ${data.startedAt}.`;
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialData;
 ```
 
 `channel.parseInstanceId(id)` remains available as an escape hatch for routes

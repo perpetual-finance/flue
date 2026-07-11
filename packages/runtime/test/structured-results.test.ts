@@ -8,7 +8,7 @@ import {
 import * as v from 'valibot';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useSkill } from '../src/hooks/use-skill.ts';
-import { defineAgent, observe, ResultUnavailableError, useModel } from '../src/index.ts';
+import { observe, ResultUnavailableError, useModel } from '../src/index.ts';
 import { createFlueContext } from '../src/internal.ts';
 import type { FlueEvent, FlueObservation, FlueSession, Skill } from '../src/types.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
@@ -42,10 +42,10 @@ async function createSession(
 	});
 	if (options.onEvent) ctx.setEventCallback(options.onEvent);
 	const model = `${provider.getModel().provider}/${provider.getModel().id}`;
-	const agent = defineAgent(() => {
+	const agent = () => {
 		useModel(model);
 		for (const skill of options.skills ?? []) useSkill(skill);
-	});
+	};
 	const harness = await ctx.initializeRootHarness(agent);
 	return harness.session();
 }

@@ -45,7 +45,7 @@ export function e2b(sandbox: E2BSandbox): SandboxFactory {
 }
 ```
 
-Pass an initialized E2B `Sandbox` to `e2b(...)`, then assign the returned factory to an agent's `sandbox` property. Flue resolves workspace paths from `/home/user`, exposes E2B's files and commands through session operations, forwards command timeouts in milliseconds, and reports only the file metadata E2B exposes. E2B's direct remove API has no recursive or force controls, so the adapter rejects either option before deletion. Your application remains responsible for sandbox configuration and lifecycle.
+Pass an initialized E2B `Sandbox` to `e2b(...)`, then pass the returned factory to the agent's `useSandbox(...)` call. Flue resolves workspace paths from `/home/user`, exposes E2B's files and commands through session operations, forwards command timeouts in milliseconds, and reports only the file metadata E2B exposes. E2B's direct remove API has no recursive or force controls, so the adapter rejects either option before deletion. Your application remains responsible for sandbox configuration and lifecycle.
 
 ## Configure
 
@@ -63,10 +63,10 @@ Pass an initialized E2B `Sandbox` to `e2b(...)`, then assign the returned factor
 
 ```ts
 import { Sandbox } from 'e2b';
-import { defineAgent, useModel, useSandbox } from '@flue/runtime';
+import { useModel, useSandbox } from '@flue/runtime';
 import { e2b } from '../sandboxes/e2b';
 
-function Assistant() {
+export function Assistant() {
   useModel('anthropic/claude-sonnet-4-6');
   useSandbox({
     // Lazy, per the SandboxFactory contract: constructing this object is
@@ -78,8 +78,6 @@ function Assistant() {
     },
   });
 }
-
-const agent = defineAgent(Assistant);
 ```
 
 Select templates, timeouts, network access, secret exposure, and resource reuse through your application and provider policy. Flue adapts the active environment; it does not choose provider retention for you.

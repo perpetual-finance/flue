@@ -2,7 +2,7 @@ import { defineTool, dispatch } from '@flue/runtime';
 import { createSlackChannel } from '@flue/slack';
 import { WebClient } from '@slack/web-api';
 import * as v from 'valibot';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 export const client = new WebClient(requiredEnv('SLACK_BOT_TOKEN'));
 
@@ -21,7 +21,7 @@ export const channel = createSlackChannel({
 					channelId: event.channel,
 					threadTs: event.thread_ts ?? event.ts,
 				};
-				await dispatch(assistant, {
+				await dispatch(Assistant, {
 					id: channel.instanceId(thread),
 					// Recorded once when this event creates the instance; ignored after.
 					initialData: {

@@ -21,7 +21,7 @@ The Intercom blueprint installs `@flue/intercom` and the official `intercom-clie
 ```ts title="src/channels/intercom.ts (abridged)"
 import { createIntercomChannel, type IntercomConversationRef } from '@flue/intercom';
 import { dispatch } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createIntercomClient } from '../intercom-client.ts';
 
 export const client = createIntercomClient(process.env.INTERCOM_ACCESS_TOKEN!, { region: 'us' });
@@ -37,7 +37,7 @@ export const channel = createIntercomChannel({
       workspaceId: notification.app_id,
       conversationId,
     };
-    await dispatch(assistant, {
+    await dispatch(Assistant, {
       id: channel.instanceId(conversation),
       // Recorded once when this event creates the instance; ignored after.
       initialData: {
@@ -106,7 +106,7 @@ import {
   type JsonValue,
 } from '@flue/intercom';
 import { defineTool, dispatch } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createIntercomClient, type IntercomRegion } from '../intercom-client.ts';
 
 const workspaceId = requiredEnv('INTERCOM_WORKSPACE_ID');
@@ -130,7 +130,7 @@ export const channel = createIntercomChannel({
           workspaceId: notification.app_id,
           conversationId,
         };
-        await dispatch(assistant, {
+        await dispatch(Assistant, {
           id: channel.instanceId(conversation),
           // Recorded once when this event creates the instance; ignored after.
           initialData: {
@@ -268,24 +268,24 @@ official SDK supports it.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { retrieveConversation } from '../channels/intercom.ts';
 
-export const initialDataSchema = v.object({
+const initialData = v.object({
   workspaceId: v.string(),
   conversationId: v.string(),
 });
 
-function Assistant() {
+export function Assistant() {
   useModel('anthropic/claude-haiku-4-5');
-  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
+  const data = useInitialData<v.InferOutput<typeof initialData>>();
   if (!data) throw new Error('This agent is created by the Intercom channel dispatch.');
   useTool(retrieveConversation(data));
   return 'Help with the inbound Intercom conversation. Retrieve the current conversation when more context is needed.';
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialData;
 ```
 
 The tool retrieves only the conversation already selected from a verified

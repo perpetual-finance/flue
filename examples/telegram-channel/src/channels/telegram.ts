@@ -3,7 +3,7 @@ import { createTelegramChannel, type TelegramConversationRef } from '@flue/teleg
 import { Api } from 'grammy';
 import type { Message } from 'grammy/types';
 import * as v from 'valibot';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 export const client = new Api(requiredEnv('TELEGRAM_BOT_TOKEN'));
 
@@ -15,7 +15,7 @@ export const channel = createTelegramChannel({
 		const incoming = update.message ?? update.channel_post ?? update.business_message;
 		if (incoming) {
 			const conversation = conversationFromMessage(incoming);
-			await dispatch(assistant, {
+			await dispatch(Assistant, {
 				id: channel.instanceId(conversation),
 				// Recorded once when this event creates the instance; ignored after.
 				initialData: conversationData(conversation, incoming),
@@ -34,7 +34,7 @@ export const channel = createTelegramChannel({
 			await client.answerCallbackQuery(query.id);
 			if (!query.message) return;
 			const conversation = conversationFromMessage(query.message);
-			await dispatch(assistant, {
+			await dispatch(Assistant, {
 				id: channel.instanceId(conversation),
 				// Recorded once when this event creates the instance; ignored after.
 				initialData: conversationData(conversation, query.message),

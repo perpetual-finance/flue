@@ -139,11 +139,14 @@ describe('vite build (node target)', () => {
 		await expect(buildFixture(fixture)).rejects.toThrow(/No app entry found[\s\S]*Hono/);
 	});
 
-	it('fails with the duplicate-identity diagnostic when two agent files share a basename', async () => {
+	it('fails with the duplicate-identity diagnostic when two agents share an identity', async () => {
+		// Different basenames (and different directories) on purpose: identity
+		// derives from the exported function name / `agentName` override, not
+		// the file basename, so a basename collision is irrelevant here.
 		const files = basicNodeProjectFiles();
 		const fixture = fixtureOf({
 			...files,
-			'src/more/echo.ts': ECHO_AGENT_MODULE,
+			'src/more/duplicate.ts': ECHO_AGENT_MODULE,
 		});
 		await expect(buildFixture(fixture)).rejects.toThrow(/Duplicate agent identit/);
 	});

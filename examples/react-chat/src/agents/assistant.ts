@@ -1,11 +1,12 @@
 'use agent';
 import { fauxAssistantMessage, fauxText, registerFauxProvider } from '@earendil-works/pi-ai/compat';
-import { defineAgent, useModel } from '@flue/runtime';
+import { useModel } from '@flue/runtime';
 
-// The 'use agent' directive registers this module with the app (its file
-// basename is the durable identity); app.ts exposes it over HTTP by mounting
-// `agent(assistant).route()` at `/api/agents/assistant`. An optional `route`
-// named export would attach middleware (e.g. auth) to every mounted route.
+// The 'use agent' directive registers this module's exported agent functions
+// with the app (the function name is the durable identity); app.ts exposes
+// this one over HTTP by mounting `createAgentRouter(Assistant)` at
+// `/api/agents/assistant`. Middleware (e.g. auth) composes in app.ts with
+// plain Hono, before the mount it applies to.
 
 // The scripted (faux, keyless) model this offline example runs against.
 // Module scope, not the agent body: the agent function is a render that may
@@ -30,9 +31,7 @@ const echo: Parameters<typeof faux.setResponses>[0][number] = (context) => {
 };
 faux.setResponses([echo]);
 
-function Assistant() {
+export function Assistant() {
 	useModel('react-chat-example/assistant');
 	return 'Reply briefly and helpfully.';
 }
-
-export default defineAgent(Assistant);

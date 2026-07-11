@@ -4,7 +4,7 @@ import {
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineAgent, useModel, useSandbox } from '../src/index.ts';
+import { useModel, useSandbox } from '../src/index.ts';
 import type { FlueContextConfig } from '../src/internal.ts';
 import { createFlueContext, resolveModel } from '../src/internal.ts';
 import type { FlueEvent, SessionEnv } from '../src/types.ts';
@@ -260,7 +260,7 @@ describe('FlueContext', () => {
 	it('allows root harness initialization to retry after an earlier attempt fails', async () => {
 		let attempt = 0;
 		const ctx = createContext();
-		const agent = defineAgent(() => {
+		const agent = () => {
 			useModel('anthropic/claude-haiku-4-5');
 			useSandbox({
 				createSessionEnv: async () => {
@@ -270,7 +270,7 @@ describe('FlueContext', () => {
 				},
 			});
 			return undefined;
-		});
+		};
 
 		await expect(ctx.initializeRootHarness(agent)).rejects.toThrow('temporary sandbox failure');
 		await expect(ctx.initializeRootHarness(agent)).resolves.toMatchObject({
@@ -295,10 +295,10 @@ describe('session context discovery', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => {
+			() => {
 				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 				return 'Agent-specific review instructions.';
-			}),
+			},
 		);
 		const session = await harness.session();
 
@@ -360,9 +360,9 @@ describe('session context discovery', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => {
+			() => {
 				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
-			}),
+			},
 		);
 		const session = await harness.session();
 
@@ -393,7 +393,7 @@ describe('session context discovery', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => {
+			() => {
 				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 				useSandbox(
 					{
@@ -408,7 +408,7 @@ describe('session context discovery', () => {
 					},
 					{ cwd: 'workspace' },
 				);
-			}),
+			},
 		);
 		const session = await harness.session();
 
@@ -438,7 +438,7 @@ describe('session context discovery', () => {
 			events.push(event);
 		});
 		const harness = await ctx.initializeRootHarness(
-			defineAgent(() => {
+			() => {
 				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 				useSandbox(
 					{
@@ -456,7 +456,7 @@ describe('session context discovery', () => {
 					{ cwd: 'workspace' },
 				);
 				return undefined;
-			}),
+			},
 		);
 		const session = await harness.session();
 

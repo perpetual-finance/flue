@@ -29,20 +29,20 @@ function markdownImportsFixture(): Fixture {
 		// text, and userland builds the skill from it with defineSkill().
 		'src/prompts/playbook.md': 'Take notes.\n',
 		'src/agents/echo.ts': `'use agent';
-import { defineAgent, useInstruction, useModel, useSkill } from '@flue/runtime';
+import { useInstruction, useModel, useSkill } from '@flue/runtime';
 import explore from '../skills/explore/SKILL.md';
 import guide from '../guide.md';
-function echo() {
+export function Echo() {
 	useModel('flue-test/fake-model');
 	useSkill(explore);
 	useInstruction(guide);
 }
-export default defineAgent(echo);
 `,
 		'src/app.ts': `import { Hono } from 'hono';
 import { defineSkill } from '@flue/runtime';
+import { createAgentRouter } from '@flue/runtime/routing';
 import './test-model.ts';
-import echo from './agents/echo.ts';
+import { Echo } from './agents/echo.ts';
 import explore from './skills/explore/SKILL.md';
 import playbook from './prompts/playbook.md';
 import guide from './guide.md';
@@ -51,7 +51,7 @@ const notes = defineSkill({ name: 'notes', description: 'Note-taking playbook.',
 const app = new Hono();
 app.get('/api/guide', (c) => c.text(guide));
 app.get('/api/skill', (c) => c.json({ name: explore.name, notes: notes.name }));
-app.route('/agents/echo', echo.route());
+app.route('/agents/echo', createAgentRouter(Echo));
 export default app;
 `,
 	});
@@ -105,20 +105,20 @@ describe('markdown and skill imports through the outer Vite graph', () => {
 			'src/skills/explore/SKILL.md':
 				'---\nname: explore\ndescription: Explore a repository.\n---\nExplore carefully.\n',
 			'src/agents/echo.ts': `'use agent';
-import { defineAgent, useModel, useSkill } from '@flue/runtime';
+import { useModel, useSkill } from '@flue/runtime';
 import explore from '../skills/explore/SKILL.md' with { type: 'skill' };
-function echo() {
+export function Echo() {
 	useModel('flue-test/fake-model');
 	useSkill(explore);
 }
-export default defineAgent(echo);
 `,
 			'src/app.ts': `import { Hono } from 'hono';
+import { createAgentRouter } from '@flue/runtime/routing';
 import './test-model.ts';
-import echo from './agents/echo.ts';
+import { Echo } from './agents/echo.ts';
 
 const app = new Hono();
-app.route('/agents/echo', echo.route());
+app.route('/agents/echo', createAgentRouter(Echo));
 export default app;
 `,
 		});

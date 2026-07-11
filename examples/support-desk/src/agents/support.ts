@@ -1,5 +1,5 @@
 'use agent';
-import { defineAgent, useInstruction, useModel, usePersistentState, useTool } from '@flue/runtime';
+import { useInstruction, useModel, usePersistentState, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { guarded, useMachine } from '../machine.ts';
 import {
@@ -91,7 +91,7 @@ function useRetention({ active }: { active: () => boolean }) {
 	);
 }
 
-function Support() {
+export function Support() {
 	useModel('anthropic/claude-sonnet-5');
 	const machine = useMachine({
 		name: 'phase',
@@ -128,5 +128,3 @@ function Support() {
 		'commit: a refund is never issued in the same step it is proposed.'
 	);
 }
-
-export default defineAgent(Support);

@@ -9,7 +9,6 @@ import {
 } from '@earendil-works/pi-ai/compat';
 import * as v from 'valibot';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineAgent } from '../src/agent-definition.ts';
 import { useDataWriter } from '../src/hooks/use-data-writer.ts';
 import { useModel } from '../src/hooks/use-model.ts';
 import { useResponseFinish } from '../src/hooks/use-response-finish.ts';
@@ -86,10 +85,10 @@ async function setupCoordinator(
 		agents: [
 			{
 				name: 'assistant',
-				definition: defineAgent(() => {
+				agent: () => {
 					useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 					return assistant();
-				}),
+				},
 			},
 		],
 		createContext: makeFauxCreateContext(provider),

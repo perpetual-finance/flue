@@ -10,7 +10,6 @@ import {
 } from '@earendil-works/pi-ai/compat';
 import * as v from 'valibot';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { defineAgent } from '../src/agent-definition.ts';
 import type { AgentExecutionStore } from '../src/agent-execution-store.ts';
 import type { ConversationRecord } from '../src/conversation-records.ts';
 import { useAgentStart } from '../src/hooks/use-agent-start.ts';
@@ -29,7 +28,7 @@ import type { CreateAgentContextFn } from '../src/runtime/handle-agent.ts';
 import { handleAgentConversationRead } from '../src/runtime/handle-conversation-routes.ts';
 import { generateSessionAffinityKey } from '../src/runtime/ids.ts';
 import {
-	__flueBindAgentModule,
+	bindAgentDurability,
 	resetFlueAgentRegistrationForTests,
 } from '../src/runtime/registration.ts';
 import { agentStreamPath } from '../src/runtime/stream-offsets.ts';
@@ -170,13 +169,13 @@ async function createRealCoordinator(
 	const adapter = sqlite(dbPath);
 	await adapter.migrate?.();
 	const { executionStore, conversationStreamStore, attachmentStore } = await adapter.connect();
-	const agent = defineAgent(() => {
+	const agent = () => {
 		useModel(REAL_MODEL);
 		return 'Assistant agent.';
-	});
+	};
 	const coordinator = createNodeAgentCoordinator({
 		submissions: executionStore.submissions,
-		agents: [{ name: 'assistant', definition: agent }],
+		agents: [{ name: 'assistant', agent }],
 		createContext: makeRealCreateContext(),
 		conversationStreamStore,
 		attachmentStore,
@@ -193,16 +192,16 @@ async function createFauxCoordinator(
 	const adapter = sqlite(dbPath);
 	await adapter.migrate?.();
 	const { executionStore, conversationStreamStore, attachmentStore } = await adapter.connect();
-	const agent = defineAgent(() => {
+	const agent = () => {
 		useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 		return 'Assistant agent.';
-	});
+	};
 	if (durability !== undefined) {
-		__flueBindAgentModule(agent, { identity: 'assistant', durability });
+		bindAgentDurability('assistant', durability);
 	}
 	const coordinator = createNodeAgentCoordinator({
 		submissions: executionStore.submissions,
-		agents: [{ name: 'assistant', definition: agent }],
+		agents: [{ name: 'assistant', agent }],
 		createContext: makeFauxCreateContext(provider),
 		conversationStreamStore,
 		attachmentStore,
@@ -560,10 +559,10 @@ describe('NodeAgentCoordinator', () => {
 				submissions: executionStore.submissions,
 				agents: [{
 					name: 'assistant',
-					definition: defineAgent(() => {
+					agent: () => {
 						useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 						return 'Assistant agent.';
-					}),
+					},
 				}],
 				createContext: makeFauxCreateContext(provider),
 				conversationStreamStore: failingStore,
@@ -760,10 +759,10 @@ describe('NodeAgentCoordinator', () => {
 				submissions: executionStore.submissions,
 				agents: [{
 					name: 'assistant',
-					definition: defineAgent(() => {
+					agent: () => {
 						useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 						return 'Assistant agent.';
-					}),
+					},
 				}],
 				createContext: makeFauxCreateContext(provider),
 				conversationStreamStore,
@@ -813,10 +812,10 @@ describe('NodeAgentCoordinator', () => {
 				submissions: executionStore.submissions,
 				agents: [{
 					name: 'assistant',
-					definition: defineAgent(() => {
+					agent: () => {
 						useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 						return Assistant();
-					}),
+					},
 				}],
 				createContext: makeFauxCreateContext(provider),
 				conversationStreamStore,
@@ -873,10 +872,10 @@ describe('NodeAgentCoordinator', () => {
 				submissions: executionStore.submissions,
 				agents: [{
 					name: 'assistant',
-					definition: defineAgent(() => {
+					agent: () => {
 						useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 						return Assistant();
-					}),
+					},
 				}],
 				createContext: makeFauxCreateContext(provider),
 				conversationStreamStore,
@@ -935,10 +934,10 @@ describe('NodeAgentCoordinator', () => {
 				submissions: executionStore.submissions,
 				agents: [{
 					name: 'assistant',
-					definition: defineAgent(() => {
+					agent: () => {
 						useModel(model);
 						return Assistant();
-					}),
+					},
 				}],
 				createContext: makeFauxCreateContext(provider),
 				conversationStreamStore,
@@ -1443,10 +1442,10 @@ describe('NodeAgentCoordinator', () => {
 				agents: [
 					{
 						name: 'assistant',
-						definition: defineAgent(() => {
+						agent: () => {
 							useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 							return Assistant();
-						}),
+						},
 					},
 				],
 				createContext: makeFauxCreateContext(provider),
@@ -1778,7 +1777,7 @@ describe('NodeAgentCoordinator', () => {
 				signalHostStarted = resolve;
 			});
 			let hostGateArmed = true;
-			const agent = defineAgent(() => {
+			const agent = () => {
 				useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 				useAgentStart(async () => {
 					if (!hostGateArmed) return;
@@ -1787,13 +1786,13 @@ describe('NodeAgentCoordinator', () => {
 					await hostGate;
 				});
 				return 'Assistant agent.';
-			});
+			};
 			const adapter = sqlite(dbPath);
 			await adapter.migrate?.();
 			const { executionStore, conversationStreamStore, attachmentStore } = await adapter.connect();
 			const coordinator = createNodeAgentCoordinator({
 				submissions: executionStore.submissions,
-				agents: [{ name: 'assistant', definition: agent }],
+				agents: [{ name: 'assistant', agent }],
 				createContext: makeFauxCreateContext(provider),
 				conversationStreamStore,
 				attachmentStore,

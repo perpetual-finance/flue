@@ -12,7 +12,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { flue } from '../src/index.ts';
 import {
 	basicCloudflareProjectFiles,
-	CF_ECHO_AGENT_MODULE,
+	CF_WRITER_AGENT_MODULE,
 	cloudflareWranglerJson,
 	type FakeModelServer,
 	startFakeModelServer,
@@ -95,14 +95,15 @@ function generatedInputSnapshots(root: string) {
 }
 
 const WRITER_APP_MODULE = `import { Hono } from 'hono';
+import { createAgentRouter } from '@flue/runtime/routing';
 import './test-model.ts';
-import echo from './agents/echo.ts';
-import writer from './agents/writer.ts';
+import { Echo } from './agents/echo.ts';
+import { Writer } from './agents/writer.ts';
 
 const app = new Hono();
 app.get('/api/ping', (c) => c.text('pong'));
-app.route('/agents/echo', echo.route());
-app.route('/agents/writer', writer.route());
+app.route('/agents/echo', createAgentRouter(Echo));
+app.route('/agents/writer', createAgentRouter(Writer));
 
 export default app;
 `;
@@ -165,7 +166,7 @@ describe('vite dev (cloudflare target)', () => {
 		// Agent add — the documented triple: agent file + app.ts mount +
 		// user-authored migration tag. flue regenerates entry + wrangler and
 		// the sibling picks the new config up (config-watch restart).
-		fixture.write('src/agents/writer.ts', CF_ECHO_AGENT_MODULE);
+		fixture.write('src/agents/writer.ts', CF_WRITER_AGENT_MODULE);
 		fixture.write(
 			'wrangler.jsonc',
 			cloudflareWranglerJson({

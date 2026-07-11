@@ -16,14 +16,12 @@ The scheduled agent is an ordinary agent module. It needs no mount in `app.ts` �
 
 ```ts title="src/agents/daily-summary.ts"
 'use agent';
-import { defineAgent, useModel } from '@flue/runtime';
+import { useModel } from '@flue/runtime';
 
-function DailySummary() {
+export function DailySummary() {
   useModel('anthropic/claude-haiku-4-5');
   return 'When triggered, review recent activity and report a concise daily summary.';
 }
-
-export default defineAgent(DailySummary);
 ```
 
 Reach for a [harness tool](/docs/guide/tools/#harness-tools) instead of plain instructions when the scheduled work needs application-controlled steps — reading a data source, writing a report, calling an external API — that should behave the same way on every occurrence.
@@ -40,16 +38,16 @@ Add a [Cron Trigger](https://developers.cloudflare.com/workers/configuration/cro
 }
 ```
 
-Then import the agent's default export and dispatch to it from `src/cloudflare.ts`:
+Then import the agent function and dispatch to it from `src/cloudflare.ts`:
 
 ```ts title="src/cloudflare.ts"
 import { dispatch, useModel } from '@flue/runtime';
-import dailySummary from './agents/daily-summary.ts';
+import { DailySummary } from './agents/daily-summary.ts';
 
 export default {
   async scheduled(controller: ScheduledController) {
     const scheduledAt = new Date(controller.scheduledTime).toISOString();
-    await dispatch(dailySummary, {
+    await dispatch(DailySummary, {
       id: 'daily-summary',
       message: {
         kind: 'signal',
@@ -74,7 +72,7 @@ Node.js does not include a built-in cron scheduler, so choose an ecosystem optio
 import { dispatch, useModel } from '@flue/runtime';
 import { Cron } from 'croner';
 import { Hono } from 'hono';
-import dailySummary from './agents/daily-summary.ts';
+import { DailySummary } from './agents/daily-summary.ts';
 
 const app = new Hono();
 
@@ -86,7 +84,7 @@ new Cron(
     catch: (error) => console.error('Scheduled agent admission failed', error),
   },
   async () => {
-    await dispatch(dailySummary, {
+    await dispatch(DailySummary, {
       id: 'daily-summary',
       message: {
         kind: 'signal',

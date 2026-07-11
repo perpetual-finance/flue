@@ -7,7 +7,6 @@ import {
 import { Bash, InMemoryFs } from 'just-bash';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AgentRunError, init } from '../src/agent-client.ts';
-import { defineAgent } from '../src/agent-definition.ts';
 import { createFlueContext } from '../src/client.ts';
 import { createCloudflareAgentRuntime } from '../src/cloudflare/agent-coordinator.ts';
 import { createCloudflareWorkerConfig } from '../src/cloudflare/worker-config.ts';
@@ -21,11 +20,11 @@ import {
 	resolveModel,
 } from '../src/runtime/providers.ts';
 import {
-	__flueBindAgentModule,
+	bindAgentDurability,
 	resetFlueAgentRegistrationForTests,
 } from '../src/runtime/registration.ts';
 import { bashFactoryToSessionEnv } from '../src/sandbox.ts';
-import type { AgentModuleValue } from '../src/types.ts';
+import type { Agent } from '../src/types.ts';
 
 /**
  * End-to-end: the awaited `init()` handle on the Cloudflare target.
@@ -111,9 +110,9 @@ async function createDefaultEnv() {
  * Seed the process runtime exactly as the generated Cloudflare entry does,
  * with per-instance Durable Object stand-ins created on first contact.
  */
-function seedCloudflareRuntime(agentName: string, definition: AgentModuleValue) {
+function seedCloudflareRuntime(agentName: string, agent: Agent) {
 	const coordinator = createCloudflareAgentRuntime({
-		agents: [{ name: agentName, definition: definition as never }],
+		agents: [{ name: agentName, agent }],
 		createContext: ({ instance, agentName: name, request, initialEventIndex, dispatchId }) =>
 			createFlueContext({
 				id: instance.name,
@@ -156,7 +155,7 @@ function seedCloudflareRuntime(agentName: string, definition: AgentModuleValue) 
 
 	configureFlueRuntime({
 		target: 'cloudflare',
-		agents: [{ name: agentName, definition }],
+		agents: [{ name: agentName, agent }],
 		...createCloudflareWorkerConfig({
 			env: { AGENT_DO: 'do-binding-token' },
 			agentIdentities: { [agentName]: { bindingName: 'AGENT_DO', className: 'FlueTestAgent' } },
@@ -179,7 +178,7 @@ describe('init() on the Cloudflare target', () => {
 			deliveries.push(`${delivery.kind}:${delivery.body}`);
 			return 'Produce the report when triggered.';
 		}
-		const reporter = defineAgent(Reporter);
+		const reporter = Reporter;
 		seedCloudflareRuntime('reporter', reporter);
 
 		const agent = init(reporter, { id: 'nightly-1' });
@@ -193,10 +192,10 @@ describe('init() on the Cloudflare target', () => {
 	it('pins the contacted incarnation and rehydrates the 409 as a typed error', async () => {
 		const { provider, model } = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('one'), fauxAssistantMessage('two')]);
-		const echo = defineAgent(() => {
+		const echo = () => {
 			useModel(model);
 			return 'Reply.';
-		});
+		};
 		seedCloudflareRuntime('echo', echo);
 
 		const agent = init(echo, { id: 'pin-1', uid: null });
@@ -227,11 +226,11 @@ describe('init() on the Cloudflare target', () => {
 				throw new Error('provider exploded');
 			},
 		]);
-		const doomed = defineAgent(() => {
+		const doomed = () => {
 			useModel(model);
 			return 'Reply.';
-		});
-		__flueBindAgentModule(doomed, { identity: 'doomed', durability: { maxAttempts: 1 } });
+		};
+		bindAgentDurability('doomed', { maxAttempts: 1 });
 		seedCloudflareRuntime('doomed', doomed);
 
 		const error = await init(doomed, { id: 'fail-1' })
@@ -249,10 +248,10 @@ describe('init() on the Cloudflare target', () => {
 	it('streams projected chunks to onEvent while awaiting', async () => {
 		const { provider, model } = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('streamed')]);
-		const echo = defineAgent(() => {
+		const echo = () => {
 			useModel(model);
 			return 'Reply.';
-		});
+		};
 		seedCloudflareRuntime('echo', echo);
 
 		const seen: string[] = [];
@@ -282,10 +281,10 @@ describe('init() on the Cloudflare target', () => {
 				return fauxAssistantMessage('unreachable');
 			},
 		]);
-		const sleeper = defineAgent(() => {
+		const sleeper = () => {
 			useModel(model);
 			return 'Reply.';
-		});
+		};
 		seedCloudflareRuntime('sleeper', sleeper);
 
 		const controller = new AbortController();

@@ -1,20 +1,20 @@
 ---
 title: flue run
 description: Reference for running one agent module locally from the command line, without a server.
-lastReviewedAt: 2026-07-07
+lastReviewedAt: 2026-07-11
 ---
 
 ## Synopsis
 
 ```bash
-flue run <path> --message <text> [--id <conversation-id>] [--initial-data <json>] [--uid <uid> | --new] [--env <path>] [--json]
+flue run <path> --message <text> [--agent <ExportName>] [--id <conversation-id>] [--initial-data <json>] [--uid <uid> | --new] [--max-attempts <n>] [--timeout <ms>] [--env <path>] [--json]
 ```
 
 ## Description
 
 `flue run` executes one agent module locally under Node.js, delivers one `kind: 'user'` message into a conversation, streams the agent's activity to stderr, prints the final assistant reply to stdout, and exits. Execution is transport-free: the command compiles the module from disk itself, binds no port, and never starts an HTTP listener. It does not load `app.ts`, channels, or any HTTP composition — only the agent module (and whatever it imports).
 
-`<path>` is the path of an agent module whose default export is `defineAgent(...)`, resolved from the current working directory. The agent's identity is the module's `export const name` when declared, else the file basename (`src/agents/triage.ts` runs as `triage`) — the same identity a `'use agent'` build would assign, so `flue run` shares conversation storage keys with the deployed application when both use the same database. The module does not need the `'use agent'` directive to be runnable here.
+`<path>` is the path of an agent module, resolved from the current working directory. Its agents are the exported functions with capitalized names — the same rule the `'use agent'` build scan applies. Without `--agent`, the command runs the module's single agent export, or its default export when several are exported; `--agent <ExportName>` selects one explicitly. The selected agent's identity is its `agentName` static when assigned, else the function's own name (`export function Triage()` runs as `Triage`) — the same identity a `'use agent'` build would assign, so `flue run` shares conversation storage keys with the deployed application when both use the same database. The file basename plays no part, and the module does not need the `'use agent'` directive to be runnable here.
 
 The run drives the same durable submission path as a deployed server: the message is durably admitted, processed, and settled, so `--id` continuations and recovery semantics match production behavior.
 
@@ -25,10 +25,13 @@ The run drives the same durable submission path as a deployed server: the messag
 | Option             | Default                        | Description                                                                       |
 | ------------------ | ------------------------------ | --------------------------------------------------------------------------------- |
 | `--message <text>` | Required                       | The user message submitted to the agent.                                          |
+| `--agent <name>`   | The single agent export, or `default` | Which exported agent to run when the module exports several.                |
 | `--id <id>`        | A fresh ULID, printed          | Conversation id to create or continue. Reuse an id to continue that conversation. |
 | `--initial-data <json>` | —                               | Instance-creation data (JSON). The seed, used only when this run creates the conversation; read it with `useInitialData()`. Rejected together with `--uid` (the condition forbids creation, so the seed could never apply). |
 | `--uid <uid>`      | —                               | Continue only the conversation incarnation with this uid (printed by the creating run, in the meta rows and the `--json` envelope). Rejects when that incarnation no longer exists. Rejected together with `--new` or `--initial-data`. |
 | `--new`            | `false`                        | Create only: rejects when the conversation id already exists (the error names its uid). Rejected together with `--uid`.                                                                                              |
+| `--max-attempts <n>` | `10`                         | Submission retry budget for this run — durability is binding policy, and here the `flue run` invocation is the binding. |
+| `--timeout <ms>`   | `3600000`                      | Submission timeout for this run, in milliseconds.                                 |
 | `--json`           | `false`                        | Print a JSON result envelope to stdout instead of the reply text.                 |
 | `--env <path>`     | `<project>/.env`, when present | Select one alternate `.env`-format file, loaded before the run. Shell values win. |
 
@@ -57,7 +60,7 @@ With `--json`, stdout receives one JSON object:
 ```json
 {
   "id": "ticket-4821",
-  "agent": "support",
+  "agent": "Support",
   "submissionId": "f6654bff-d6ce-40d1-97a5-a150a7af6779",
   "outcome": "completed",
   "message": "The final assistant reply text.",
@@ -65,7 +68,7 @@ With `--json`, stdout receives one JSON object:
 }
 ```
 
-`id` is the conversation id, `agent` the module identity, `submissionId` the durable submission this run admitted, `outcome` always `"completed"` (failed and aborted runs print no envelope), `message` the final reply text, and `uid` the contacted instance's uid — minted on a creating run, echoed on a continuing one, omitted for instances created before uids shipped.
+`id` is the conversation id, `agent` the resolved agent identity, `submissionId` the durable submission this run admitted, `outcome` always `"completed"` (failed and aborted runs print no envelope), `message` the final reply text, and `uid` the contacted instance's uid — minted on a creating run, echoed on a continuing one, omitted for instances created before uids shipped.
 
 ## Exit codes
 
@@ -104,4 +107,6 @@ flue run src/agents/hello.ts --message "Run the demo." --json | jq -r .message
 flue run src/agents/triage.ts --id issue-17307 --initial-data '{"issue": 17307}' --message "Triage."
 flue run src/agents/triage.ts --id issue-17307 --uid inst_01KW8Z3F9G6QK8P8V7YV5RJXWQ --message "Re-check."
 flue run src/agents/triage.ts --id issue-17307 --new --message "Triage."
+flue run src/agents/support.ts --agent Escalation --message "Assess this case."
+flue run src/agents/triage.ts --max-attempts 5 --timeout 7200000 --message "Triage."
 ```

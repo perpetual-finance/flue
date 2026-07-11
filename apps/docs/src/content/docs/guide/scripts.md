@@ -1,7 +1,7 @@
 ---
 title: Scripts
 description: Drive agents from plain Node scripts, cron jobs, and tests with start() and init().
-lastReviewedAt: 2026-07-08
+lastReviewedAt: 2026-07-11
 ---
 
 Sometimes you are not answering traffic — you are running a script: a nightly job, a CI step, a one-off migration, a test. For that, Flue gives you a programmatic client for agents. `init(agent)` addresses an agent instance; `await agent.dispatch(...)` sends it a message exactly as any other delivery would — a bare string is shorthand for a user message — waits for the run to settle, and returns the reply.
@@ -15,10 +15,10 @@ Inside a running Flue app (a cron callback in `app.ts`, a route handler), the ru
 ```ts title="src/app.ts"
 import { init } from '@flue/runtime';
 import { Cron } from 'croner';
-import reporter from './agents/reporter.ts';
+import { Reporter } from './agents/reporter.ts';
 
 new Cron('7 3 * * *', async () => {
-  const agent = init(reporter, { id: `nightly-${new Date().toISOString().slice(0, 10)}` });
+  const agent = init(Reporter, { id: `nightly-${new Date().toISOString().slice(0, 10)}` });
   const reply = await agent.dispatch('You have been triggered. Produce the nightly report.');
   console.log(reply.text);
 });
@@ -33,7 +33,7 @@ The handle works in a deployed Worker too — the awaited send admits the messag
 ```ts title="src/workflows.ts"
 import { init } from '@flue/runtime';
 import { WorkflowEntrypoint } from 'cloudflare:workers';
-import reviewer from './agents/reviewer.ts';
+import { Reviewer } from './agents/reviewer.ts';
 
 export class NightlyReview extends WorkflowEntrypoint {
   async run(event, step) {
@@ -42,7 +42,7 @@ export class NightlyReview extends WorkflowEntrypoint {
     // Once this step completes, the workflow engine never re-runs it — the
     // reply is recorded in the workflow's own history.
     const review = await step.do('agent review', async () => {
-      const agent = init(reviewer, { id: `nightly-${event.payload.date}` });
+      const agent = init(Reviewer, { id: `nightly-${event.payload.date}` });
       const reply = await agent.dispatch(`Review these findings:\n${findings}`);
       return { text: reply.text, data: reply.data };
     });
@@ -63,25 +63,25 @@ Outside a Flue server — `node ./scripts/nightly.ts` — boot the runtime first
 ```ts title="scripts/nightly.ts"
 import { init } from '@flue/runtime';
 import { sqlite, start } from '@flue/runtime/node';
-import * as reporter from '../src/agents/reporter.ts';
+import { Reporter } from '../src/agents/reporter.ts';
 
 await using flue = await start({
-  agents: [reporter], // the whole agent module is the registration
+  agents: [Reporter], // the function IS the agent
   db: sqlite('./nightly.db'), // omit for in-memory (nothing survives exit)
 });
 
-const agent = init(reporter.default, { id: `nightly-${new Date().toISOString().slice(0, 10)}` });
+const agent = init(Reporter, { id: `nightly-${new Date().toISOString().slice(0, 10)}` });
 const reply = await agent.dispatch('You have been triggered. Produce the nightly report.');
 console.log(reply.text);
 ```
 
 Run it with `node --env-file=.env scripts/nightly.ts` (provider API keys come from the environment; a bare script loads `.env` itself). Without `await using`, call `await flue.stop()` when done.
 
-An `import * as` module entry reads the same optional exports a `'use agent'` build does — `description`, `initialDataSchema`, `durability` — with one difference: **`export const name` is required**, because a namespace object cannot know its own filename, so there is no basename to fall back on (and `start()` never invents names — the identity keys durable storage, and a positional `agent-1` would silently reassign conversations when the array is edited). Agents defined inline (tests, one-off scripts) use `{ name, agent, initialDataSchema?, durability? }` entries instead:
+Entries are agent functions: the identity resolves from the function itself (its `agentName` static, else the function's name), exactly as a `'use agent'` build would resolve it — `start()` never invents names, because the identity keys durable storage, and a positional `agent-1` would silently reassign conversations when the array is edited. When the bare function isn't enough, pass a `{ agent, name?, durability? }` entry: `name` overrides the identity (required for anonymous inline functions in tests), and `durability` sets the submission retry policy — binding policy, decided by the runner:
 
 ```ts
 await using flue = await start({
-  agents: [{ name: 'reporter', agent: defineAgent(Reporter) }],
+  agents: [{ agent: Reporter, durability: { maxAttempts: 5 } }],
 });
 ```
 
@@ -125,7 +125,7 @@ The `await` itself is deliberately not durable. If the process dies mid-await, t
 import { registerFauxProvider } from '@earendil-works/pi-ai/compat';
 import { init, registerProvider } from '@flue/runtime';
 import { start } from '@flue/runtime/node';
-import reporter from '../src/agents/reporter.ts';
+import { Reporter } from '../src/agents/reporter.ts';
 
 test('produces a report on trigger', async () => {
   const faux = registerFauxProvider({ provider: 'faux', models: [{ id: 'faux-model' }] });
@@ -134,8 +134,8 @@ test('produces a report on trigger', async () => {
     /* scripted turns */
   ]);
 
-  await using flue = await start({ agents: [{ name: 'reporter', agent: reporter }] });
-  const reply = await init(reporter).dispatch('You have been triggered.');
+  await using flue = await start({ agents: [Reporter] });
+  const reply = await init(Reporter).dispatch('You have been triggered.');
   expect(reply.text).toContain('# Nightly Report');
 });
 ```

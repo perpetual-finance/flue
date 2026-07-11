@@ -12,7 +12,7 @@ Read local instructions and detect the package manager. Inspect `package.json`, 
 
 Ask which agent and which observable behavior should form the starter eval when that is not clear from the project. Do not invent a product requirement merely to produce a passing case.
 
-The primary agent used below must already be mounted on an HTTP route by the application's `app.ts` (`app.route('/agents/<name>', agent.route())`). Do not mount an unauthenticated agent route without confirming that exposing the agent is appropriate. When the application protects its routes, preserve that boundary and configure the SDK client with the required token or headers.
+The primary agent used below must already be mounted on an HTTP route by the application's `app.ts` (`app.route('/agents/<name>', createAgentRouter(<AgentFn>))`). Do not mount an unauthenticated agent route without confirming that exposing the agent is appropriate. When the application protects its routes, preserve that boundary and configure the SDK client with the required token or headers.
 
 ## Install dependencies
 
@@ -61,7 +61,7 @@ import { createHarness, type SimpleToolCallRecord } from 'vitest-evals';
 export interface FlueAgentHarnessOptions {
   /**
    * Absolute URL where the agent's routes are mounted (wherever the
-   * application's app.ts mounts `agent.route()`). Each eval case runs in a
+   * application's app.ts mounts `createAgentRouter(...)`). Each eval case runs in a
    * fresh conversation at `<agentUrl>/eval-<uuid>`.
    */
   agentUrl: string;
@@ -155,7 +155,7 @@ export function createFlueAgentHarness(options: FlueAgentHarnessOptions) {
 }
 ```
 
-Agent prompts are fire-and-forget: `send()` admits the prompt and `wait()` only awaits completion, so the following `history()` snapshot — read after `wait()` resolves — contains the completed messages and tool activity for that fresh conversation. The `agentUrl` is the agent's mount URL, taken from where the application's `app.ts` mounts `agent.route()` — derive it from the route map, not from the agent's name. The harness opens a new conversation for every `run(...)` by appending a fresh id to that mount URL; reuse a conversation id only inside an application-specific harness for a case that intentionally evaluates conversation memory.
+Agent prompts are fire-and-forget: `send()` admits the prompt and `wait()` only awaits completion, so the following `history()` snapshot — read after `wait()` resolves — contains the completed messages and tool activity for that fresh conversation. The `agentUrl` is the agent's mount URL, taken from where the application's `app.ts` mounts the agent's router (`createAgentRouter(...)`) — derive it from the route map, not from the agent's name. The harness opens a new conversation for every `run(...)` by appending a fresh id to that mount URL; reuse a conversation id only inside an application-specific harness for a case that intentionally evaluates conversation memory.
 
 Do not remove the abort signal or derive tool calls from runtime-internal events. Preserve output, token usage, cost, and tool activity unless project-specific data policy requires omitting them.
 

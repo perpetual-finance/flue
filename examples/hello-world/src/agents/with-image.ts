@@ -1,11 +1,11 @@
 'use agent';
-import { defineAgent, useModel, useTool } from '@flue/runtime';
+import { useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 
 const TEST_PNG_BASE64 =
 	'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
 
-function WithImage() {
+export function WithImage() {
 	useModel('anthropic/claude-sonnet-4-6');
 	useTool({
 		name: 'image-test',
@@ -23,5 +23,3 @@ function WithImage() {
 	});
 	return 'When asked to run a demo, call the `image-test` tool and report its result.';
 }
-
-export default defineAgent(WithImage);

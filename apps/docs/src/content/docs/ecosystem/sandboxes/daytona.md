@@ -45,7 +45,7 @@ export function daytona(sandbox: DaytonaSandbox): SandboxFactory {
 }
 ```
 
-Pass an initialized Daytona `Sandbox` to `daytona(...)`, then assign the returned factory to an agent's `sandbox` property. Flue uses the provider's working directory as the workspace root, exposes Daytona filesystem and process operations through the session, preserves Daytona's available file metadata, and rounds millisecond command deadlines up to the SDK's whole-second timeout. Daytona supports recursive deletion but not force semantics, so the adapter rejects `force` before deletion. Your application remains responsible for sandbox creation and lifecycle.
+Pass an initialized Daytona `Sandbox` to `daytona(...)`, then pass the returned factory to the agent's `useSandbox(...)` call. Flue uses the provider's working directory as the workspace root, exposes Daytona filesystem and process operations through the session, preserves Daytona's available file metadata, and rounds millisecond command deadlines up to the SDK's whole-second timeout. Daytona supports recursive deletion but not force semantics, so the adapter rejects `force` before deletion. Your application remains responsible for sandbox creation and lifecycle.
 
 ## Configure
 
@@ -64,10 +64,10 @@ The generated adapter expects your application to create and own the Daytona san
 
 ```ts
 import { Daytona } from '@daytona/sdk';
-import { defineAgent, useModel, useSandbox } from '@flue/runtime';
+import { useModel, useSandbox } from '@flue/runtime';
 import { daytona } from '../sandboxes/daytona';
 
-function Assistant() {
+export function Assistant() {
   useModel('anthropic/claude-sonnet-4-6');
   useSandbox({
     // Lazy, per the SandboxFactory contract: constructing this object is
@@ -80,10 +80,8 @@ function Assistant() {
     },
   });
 }
-
-const agent = defineAgent(Assistant);
 ```
 
-Configure images, snapshots, regions, environment variables, and volumes through the Daytona SDK before passing the sandbox to `daytona(...)`. For a narrower working directory, configure `cwd` on the agent definition; Flue resolves it once against the adapter's provider-owned base directory during `init()`.
+Configure images, snapshots, regions, environment variables, and volumes through the Daytona SDK before passing the sandbox to `daytona(...)`. For a narrower working directory, configure `cwd` on the agent's `useSandbox(...)` call; Flue resolves it once against the adapter's provider-owned base directory during `init()`.
 
 See [Sandboxes](/docs/guide/sandboxes/#remote-sandboxes), [Sandbox Adapter API](/docs/api/sandbox-api/), and [Daytona's TypeScript SDK reference](https://www.daytona.io/docs/en/typescript-sdk/daytona/).

@@ -58,11 +58,12 @@ function handoffProjectRoot(): string {
 		'handoff-proof/src/test-model.ts': cloudflareTestModelModule(1),
 		'handoff-proof/src/agents/echo.ts': CF_ECHO_AGENT_MODULE,
 		'handoff-proof/src/app.ts': `import { Hono } from 'hono';
+import { createAgentRouter } from '@flue/runtime/routing';
 import './test-model.ts';
-import echo from './agents/echo.ts';
+import { Echo } from './agents/echo.ts';
 const app = new Hono();
 app.get('/api/ping', (c) => c.text('pong'));
-app.route('/agents/echo', echo.route());
+app.route('/agents/echo', createAgentRouter(Echo));
 export default app;
 `,
 	});

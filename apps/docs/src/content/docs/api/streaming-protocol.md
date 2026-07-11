@@ -8,7 +8,7 @@ Flue serves each agent conversation as a Durable Streams read at the conversatio
 
 ## Stream routes
 
-Relative to wherever `app.ts` mounts the agent's `.route()`:
+Relative to wherever `app.ts` mounts the agent's router (`createAgentRouter(...)`):
 
 | Route                              | Purpose                                      |
 | ---------------------------------- | -------------------------------------------- |

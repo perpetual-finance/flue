@@ -7,10 +7,11 @@
 	"name": "cloudflare",
 	"compatibility_date": "2026-06-01",
 	"compatibility_flags": ["nodejs_compat"],
-	// Migration history is user-authored: adding an agent = new file + mount +
-	// a migration tag for its generated class (`Flue<PascalName>Agent`, derived
-	// from the file basename). Renaming an agent FILE is a storage-identity
-	// change — express it with wrangler-native `renamed_classes`.
+	// Migration history is user-authored: adding an agent = new exported
+	// function + mount + a migration tag for its generated class
+	// (`Flue<PascalName>Agent`, derived from the agent function's name).
+	// Renaming an agent FUNCTION is a storage-identity change — express it
+	// with wrangler-native `renamed_classes`.
 	"migrations": [
 		{
 			"tag": "flue-class-FlueWithCloudflareBindingAgent",

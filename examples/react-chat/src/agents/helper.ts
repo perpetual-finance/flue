@@ -8,7 +8,6 @@
  * Requires `ANTHROPIC_API_KEY` in the environment.
  */
 import {
-	defineAgent,
 	useDataWriter,
 	useModel,
 	useResponseStart,
@@ -27,7 +26,7 @@ function pretendForecast(city: string): { tempC: number; condition: string } {
 	return { tempC: 8 + (hash % 22), condition: conditions[hash % conditions.length] as string };
 }
 
-function Helper() {
+export function Helper() {
 	useModel(MODEL, { thinkingLevel: 'low' });
 	// Message metadata is agent-authored: the demo UI reads `timestamp` for its
 	// relative "time ago" label and `model` for the footer.
@@ -79,5 +78,3 @@ function Helper() {
 
 	return 'You are a helpful assistant. When a question involves arithmetic, use the calculator tool rather than computing it yourself. When asked about the weather, use the get_weather tool. When asked for a poem, delegate to the "poet" subagent via the task tool. Keep answers concise.';
 }
-
-export default defineAgent(Helper);

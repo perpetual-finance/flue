@@ -23,13 +23,12 @@ A model specifier is the unique string Flue uses to refer to a specific model ac
 Use a model specifier to choose an agent's model with `useModel()`:
 
 ```ts title="src/agents/assistant.ts"
-import { defineAgent, useModel } from '@flue/runtime';
+'use agent';
+import { useModel } from '@flue/runtime';
 
-function Assistant() {
+export function Assistant() {
   useModel('anthropic/claude-sonnet-4-6');
 }
-
-export default defineAgent(Assistant);
 ```
 
 Model specifiers can also be supplied by reusable profiles and subagents, or used to override the default model for an individual prompt, skill, or task operation. Responses report the selected model as `{ provider, id }`, preserving the provider ID and model ID from this specifier. See [Agents](/docs/guide/building-agents/), [Subagents](/docs/guide/subagents/), and the [Agent API](/docs/api/agent-api/) for those API-specific behaviors.
@@ -50,13 +49,12 @@ Reasoning effort controls how much additional reasoning Flue requests from a mod
 Set the ordinary reasoning effort for an agent alongside its model, in `useModel()`'s options:
 
 ```ts title="src/agents/reviewer.ts"
-import { defineAgent, useModel } from '@flue/runtime';
+'use agent';
+import { useModel } from '@flue/runtime';
 
-function Reviewer() {
+export function Reviewer() {
   useModel('anthropic/claude-sonnet-4-6', { thinkingLevel: 'high' });
 }
-
-export default defineAgent(Reviewer);
 ```
 
 Like a model specifier, `thinkingLevel` can be supplied by a reusable profile or overridden for an individual prompt, skill, or task operation. If no level is configured, Flue uses `'medium'`.
@@ -101,8 +99,9 @@ Use `registerProvider(...)` in `src/app.ts` when a built-in provider should reta
 
 ```ts title="src/app.ts"
 import { registerProvider } from '@flue/runtime';
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
-import assistant from './agents/assistant.ts';
+import { Assistant } from './agents/assistant.ts';
 
 if (process.env.ANTHROPIC_GATEWAY_URL) {
   registerProvider('anthropic', {
@@ -112,7 +111,7 @@ if (process.env.ANTHROPIC_GATEWAY_URL) {
 }
 
 const app = new Hono();
-app.route('/agents/assistant', assistant.route());
+app.route('/agents/assistant', createAgentRouter(Assistant));
 
 export default app;
 ```
@@ -127,8 +126,9 @@ For example, you can register a local Ollama server through its OpenAI-compatibl
 
 ```ts title="src/app.ts"
 import { registerProvider } from '@flue/runtime';
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
-import localAssistant from './agents/local-assistant.ts';
+import { LocalAssistant } from './agents/local-assistant.ts';
 
 registerProvider('ollama', {
   api: 'openai-completions',
@@ -136,7 +136,7 @@ registerProvider('ollama', {
 });
 
 const app = new Hono();
-app.route('/agents/local-assistant', localAssistant.route());
+app.route('/agents/local-assistant', createAgentRouter(LocalAssistant));
 
 export default app;
 ```
@@ -144,13 +144,12 @@ export default app;
 The registered provider ID is now available anywhere you select a model:
 
 ```ts title="src/agents/local-assistant.ts"
-import { defineAgent, useModel } from '@flue/runtime';
+'use agent';
+import { useModel } from '@flue/runtime';
 
-function LocalAssistant() {
+export function LocalAssistant() {
   useModel('ollama/llama3.1:8b');
 }
-
-export default defineAgent(LocalAssistant);
 ```
 
 A provider registration can also supply authentication, headers, and model metadata when your endpoint requires them. Most OpenAI-compatible services can use the built-in `openai-completions` protocol shown above. For an endpoint with a different wire protocol, advanced integrations can import `registerApiProvider(...)` from `@flue/runtime` and use it to register that protocol before registering a provider ID for it.
@@ -164,13 +163,12 @@ For applications built for the Cloudflare target, Flue provides the `cloudflare/
 Everything after `cloudflare/` is passed as the model ID to `env.AI.run(...)`. Use Workers AI model IDs such as `@cf/moonshotai/kimi-k2.6`, or a binding-supported AI Gateway model ID such as `openai/gpt-5.5` when your Worker should reach that model through Cloudflare's binding and gateway path. Use `openai/gpt-5.5` without the `cloudflare/` prefix only when you intend to use Flue's direct OpenAI provider and its credentials.
 
 ```ts title="src/agents/assistant.ts"
-import { defineAgent, useModel } from '@flue/runtime';
+'use agent';
+import { useModel } from '@flue/runtime';
 
-function Assistant() {
+export function Assistant() {
   useModel('cloudflare/@cf/moonshotai/kimi-k2.6');
 }
-
-export default defineAgent(Assistant);
 ```
 
 Declare an `AI` binding in your project's Wrangler configuration:
@@ -193,8 +191,9 @@ By default, Flue routes `cloudflare/...` binding calls through Cloudflare AI Gat
 ```ts title="src/app.ts"
 import { env } from 'cloudflare:workers';
 import { registerProvider } from '@flue/runtime';
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
-import assistant from './agents/assistant.ts';
+import { Assistant } from './agents/assistant.ts';
 
 registerProvider('cloudflare', {
   api: 'cloudflare-ai-binding',
@@ -208,7 +207,7 @@ registerProvider('cloudflare', {
 });
 
 const app = new Hono();
-app.route('/agents/assistant', assistant.route());
+app.route('/agents/assistant', createAgentRouter(Assistant));
 
 export default app;
 ```

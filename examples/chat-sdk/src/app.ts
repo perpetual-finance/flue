@@ -1,13 +1,13 @@
 import { registerProvider } from '@flue/runtime';
 import { Hono } from 'hono';
-import assistant from './agents/assistant.ts';
+import { Assistant } from './agents/assistant.ts';
 import { bot, registerChatHandlers } from './chat.ts';
 
 registerProvider('chat-sdk-example', {
 	api: 'chat-sdk-example',
 	baseUrl: '',
 });
-registerChatHandlers(assistant);
+registerChatHandlers(Assistant);
 
 const app = new Hono();
 const outboundComments: Array<{ issueNumber: number; body: string }> = [];
@@ -42,9 +42,9 @@ app.get('/test/outbound-comments', (c) => c.json(outboundComments));
 
 // The assistant agent is intentionally NOT mounted: it is dispatch-only.
 // The use-agent directive (via the build-time scan) is what registers an
-// agent with the app, so `dispatch(assistant, ...)` in chat.ts reaches it
+// agent with the app, so `dispatch(Assistant, ...)` in chat.ts reaches it
 // with no HTTP route at all. Mounting would be one extra line —
-// `app.route('/agents/assistant', assistant.route())` — but this webhook
-// pipeline never exposes the agent over HTTP, so it stays private.
+// `app.route('/agents/assistant', createAgentRouter(Assistant))` — but this
+// webhook pipeline never exposes the agent over HTTP, so it stays private.
 
 export default app;

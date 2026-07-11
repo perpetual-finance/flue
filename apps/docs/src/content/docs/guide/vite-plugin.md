@@ -1,7 +1,7 @@
 ---
 title: Vite plugin
 description: Build, develop, and deploy Flue applications with the flue() Vite plugin.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-11
 ---
 
 Flue deploys as a [Vite](https://vite.dev/) plugin. Adding `flue()` from `@flue/vite` to `vite.config.ts` makes a Vite project a Flue application: `vite dev` serves it and `vite build` produces the deployable artifact. There are no framework-owned dev or build commands — Vite's are the only ones.
@@ -28,8 +28,8 @@ export default defineConfig({
 The plugin does three jobs on both targets:
 
 1. **Resolves the project.** It discovers [`flue.config.ts`](/docs/reference/configuration/) and locates your entry modules (`app.ts` required; `db.ts` and `cloudflare.ts` optional).
-2. **Scans for agents.** The [`'use agent'`](/docs/guide/use-agent/) scan over your source root defines the application's agent set, and the generated server bootstrap registers every scanned module.
-3. **Transforms agent modules.** The build injects each marked module's identity and binds its named exports (`route`, `description`, `initialDataSchema`, `durability`) onto the definition.
+2. **Scans for agents.** The [`'use agent'`](/docs/guide/use-agent/) scan over your source root defines the application's agent set — every exported capitalized function of a marked module — and the generated server bootstrap registers every scanned agent.
+3. **Transforms agent modules.** The build stamps each agent's identity (the function name, or its `agentName` static override) as a string literal bound to the function, so a minified production bundle cannot corrupt the durable identity.
 
 ## Plugin options
 
@@ -54,7 +54,7 @@ When `target` is unset, `flue()` inspects the resolved Vite plugin array: if `@c
 
 `vite dev` loads `app.ts` through Vite's module graph and serves it on Vite's own server (default port `5173`). Everything Vite gives you applies: instant reload on edits, `--port`, environment handling. Flue additionally:
 
-- watches for `'use agent'` changes — adding, removing, or renaming a marked module updates the registered agent set without a manual restart;
+- watches for `'use agent'` changes — adding or removing a marked module, or adding and removing agent exports, updates the registered agent set without a manual restart;
 - restarts the dev server when `flue.config.*` changes;
 - loads your project's `.env` file set (`.env`, `.env.local`, `.env.<mode>`, `.env.<mode>.local`) into the application's environment, shell-exported values winning — model-provider keys work without a shell export;
 - applies permissive dev CORS defaults (reflected origin with credentials, plus the durable-stream coordination headers) so a separately served SPA can talk to it. Deployed servers keep CORS as an application concern.
@@ -78,7 +78,7 @@ The built server listens on port `3000` by default; set `PORT` to change it. It 
 
 On Cloudflare, `flue()` cooperates with the official `@cloudflare/vite-plugin`, which owns workerd dev, build output, preview, and deploy. Flue's job is generating the Worker inputs the sibling plugin consumes:
 
-- **`.flue-vite/_entry.ts`** — the generated Worker entry. It imports your `app.ts` (and `cloudflare.ts` when present), registers the scanned agent set, and exports one Durable Object class per `'use agent'` module.
+- **`.flue-vite/_entry.ts`** — the generated Worker entry. It imports your `app.ts` (and `cloudflare.ts` when present), registers the scanned agent set, and exports one Durable Object class per agent (a `'use agent'` module with several agent exports produces several classes).
 - **`.flue-vite.wrangler.jsonc`** — your authored `wrangler.jsonc` merged with Flue's contributions: `main` (the generated entry) and one Durable Object binding per agent. Everything else in your wrangler config passes through untouched. Your authored file is never modified.
 
 Add both generated paths to `.gitignore`:
@@ -94,8 +94,8 @@ Add both generated paths to `.gitignore`:
 
 Durable Object **migration history stays user-authored** in your `wrangler.jsonc`. Flue generates classes and bindings but never writes migrations, because migration history is an ordered, append-only record of your deployments. Adding an agent is therefore always a triple:
 
-1. **the file** — `src/agents/triage.ts` with `'use agent'`;
-2. **the mount** — `app.route('/agents/triage', triage.route())` in `app.ts` (skip for dispatch-only agents);
+1. **the agent** — an exported `Triage` function in a `'use agent'` module;
+2. **the mount** — `app.route('/agents/triage', createAgentRouter(Triage))` in `app.ts` (skip for dispatch-only agents);
 3. **the migration tag** — a new entry in `wrangler.jsonc` for the generated class:
 
 ```jsonc title="wrangler.jsonc"
@@ -107,11 +107,11 @@ Durable Object **migration history stays user-authored** in your `wrangler.jsonc
 }
 ```
 
-Class names derive from agent identities (`triage.ts` → `FlueTriageAgent`; an `export const name` literal overrides the basename), so an identity change — renaming a file with no name pin, or editing the pin itself — is a storage-identity change expressed with wrangler-native `renamed_classes`, and removing an agent needs a `deleted_classes` entry. See [Cloudflare](/docs/guide/targets/cloudflare/) for the full migration reference.
+Class names derive from agent identities (`Triage` → `FlueTriageAgent`; an `agentName` static literal overrides the function name), so an identity change — renaming the function with no `agentName` pin, or editing the pin itself — is a storage-identity change expressed with wrangler-native `renamed_classes`, and removing an agent needs a `deleted_classes` entry. Renaming or moving the file changes nothing. See [Cloudflare](/docs/guide/targets/cloudflare/) for the full migration reference.
 
 ### Development
 
-`vite dev` runs your Worker in workerd via the Cloudflare plugin, with the same permissive dev CORS defaults as the Node target (Vite's middleware stack applies them before workerd sees the request). Flue keeps the generated inputs fresh: marked-set changes (adding or removing a `'use agent'` file) and authored `wrangler.jsonc` edits regenerate the entry and merged config, and the Cloudflare plugin picks them up. Writes are content-aware — editing an agent's body regenerates nothing, so there are no restart loops. `vite preview` and deployment come from the Cloudflare plugin; see [Deploy on Cloudflare](/docs/ecosystem/deploy/cloudflare/).
+`vite dev` runs your Worker in workerd via the Cloudflare plugin, with the same permissive dev CORS defaults as the Node target (Vite's middleware stack applies them before workerd sees the request). Flue keeps the generated inputs fresh: agent-set changes (adding or removing a `'use agent'` file, or an agent export within one) and authored `wrangler.jsonc` edits regenerate the entry and merged config, and the Cloudflare plugin picks them up. Writes are content-aware — editing an agent's body regenerates nothing, so there are no restart loops. `vite preview` and deployment come from the Cloudflare plugin; see [Deploy on Cloudflare](/docs/ecosystem/deploy/cloudflare/).
 
 ## What the plugin does not do
 

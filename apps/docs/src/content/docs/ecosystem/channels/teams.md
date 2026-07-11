@@ -25,14 +25,14 @@ Microsoft's Node-oriented hosting SDKs.
 ```ts title="src/channels/teams.ts (abridged)"
 import { dispatch } from '@flue/runtime';
 import { createTeamsChannel } from '@flue/teams';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 export const channel = createTeamsChannel({
   appId: process.env.TEAMS_APP_ID!,
   tenantId: process.env.TEAMS_TENANT_ID!,
   async activities({ activity }) {
     if (activity.type !== 'message' || !activity.text) return;
-    await dispatch(assistant, {
+    await dispatch(Assistant, {
       id: channel.instanceId(channel.destination(activity)),
       message: {
         kind: 'signal',
@@ -98,7 +98,7 @@ must receive all channel or group-chat messages.
 import { defineTool, dispatch } from '@flue/runtime';
 import { createTeamsChannel } from '@flue/teams';
 import * as v from 'valibot';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createTeamsClient, type TeamsMessageRef } from '../lib/teams-client.ts';
 
 const appId = process.env.TEAMS_APP_ID!;
@@ -120,7 +120,7 @@ export const channel = createTeamsChannel({
       case 'message': {
         if (!activity.text) return;
         const destination = channel.destination(activity);
-        await dispatch(assistant, {
+        await dispatch(Assistant, {
           id: channel.instanceId(destination),
           // Recorded once when this event creates the instance; ignored after.
           initialData: {
@@ -183,26 +183,26 @@ any non-2xx response, so return a 2xx once the work is safely admitted.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { postMessage } from '../channels/teams.ts';
 
-export const initialDataSchema = v.object({
+const initialData = v.object({
   serviceUrl: v.string(),
   conversationId: v.string(),
   botId: v.string(),
   threadId: v.optional(v.string()),
 });
 
-function Assistant() {
+export function Assistant() {
   useModel('anthropic/claude-haiku-4-5');
-  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
+  const data = useInitialData<v.InferOutput<typeof initialData>>();
   if (!data) throw new Error('This agent is created by the Microsoft Teams channel dispatch.');
   useTool(postMessage(data));
   return 'Reply concisely in the bound Microsoft Teams conversation.';
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialData;
 ```
 
 The model selects only message text. Trusted code binds the Connector service

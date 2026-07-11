@@ -28,6 +28,14 @@ function fixtureOf(files: Record<string, string>): Fixture {
 	return fixture;
 }
 
+/** A second agent, distinct identity from {@link ECHO_AGENT_MODULE}'s, for the agent-add test below. */
+const WRITER_AGENT_MODULE = `'use agent';
+import { useModel } from '@flue/runtime';
+export function Writer() {
+	useModel('flue-test/fake-model');
+}
+`;
+
 async function startDev(fixture: Fixture) {
 	const port = await getAvailablePort();
 	const errors: string[] = [];
@@ -103,18 +111,19 @@ describe('vite dev (node target)', () => {
 
 		// Agent add: a new 'use agent' file joins the marked set and its mount
 		// admits prompts after the watcher-driven regeneration.
-		fixture.write('src/agents/writer.ts', ECHO_AGENT_MODULE);
+		fixture.write('src/agents/writer.ts', WRITER_AGENT_MODULE);
 		fixture.write(
 			'src/app.ts',
 			[
 				`import { Hono } from 'hono';`,
+				`import { createAgentRouter } from '@flue/runtime/routing';`,
 				`import './test-model.ts';`,
-				`import echo from './agents/echo.ts';`,
-				`import writer from './agents/writer.ts';`,
+				`import { Echo } from './agents/echo.ts';`,
+				`import { Writer } from './agents/writer.ts';`,
 				`const app = new Hono();`,
 				`app.get('/api/ping', (c) => c.text('pong-v3'));`,
-				`app.route('/agents/echo', echo.route());`,
-				`app.route('/agents/writer', writer.route());`,
+				`app.route('/agents/echo', createAgentRouter(Echo));`,
+				`app.route('/agents/writer', createAgentRouter(Writer));`,
 				`export default app;`,
 				'',
 			].join('\n'),
@@ -232,14 +241,15 @@ describe('vite dev (node target)', () => {
 				'.env': 'FLUE_TEST_DOTENV=from-dotenv\nFLUE_TEST_SHELL_WINS=from-dotenv\n',
 				'src/app.ts': [
 					`import { Hono } from 'hono';`,
+					`import { createAgentRouter } from '@flue/runtime/routing';`,
 					`import './test-model.ts';`,
-					`import echo from './agents/echo.ts';`,
+					`import { Echo } from './agents/echo.ts';`,
 					`const app = new Hono();`,
 					`app.get('/api/ping', (c) => c.text('pong'));`,
 					`app.get('/api/env', (c) =>`,
 					`\tc.json({ dotenv: process.env.FLUE_TEST_DOTENV, shell: process.env.FLUE_TEST_SHELL_WINS }),`,
 					`);`,
-					`app.route('/agents/echo', echo.route());`,
+					`app.route('/agents/echo', createAgentRouter(Echo));`,
 					`export default app;`,
 					'',
 				].join('\n'),

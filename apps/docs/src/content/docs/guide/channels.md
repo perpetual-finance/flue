@@ -138,7 +138,7 @@ application events are handled before the callback:
 ```ts title="src/channels/slack.ts"
 import { dispatch } from '@flue/runtime';
 import { createSlackChannel } from '@flue/slack';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 export const channel = createSlackChannel({
   signingSecret: process.env.SLACK_SIGNING_SECRET!,
@@ -150,7 +150,7 @@ export const channel = createSlackChannel({
     switch (payload.event.type) {
       case 'app_mention': {
         const event = payload.event;
-        await dispatch(assistant, {
+        await dispatch(Assistant, {
           id: channel.instanceId({
             teamId: payload.team_id,
             channelId: event.channel,
@@ -205,7 +205,7 @@ a continuing agent:
 
 ```ts
 if (payload.type === 'event_callback' && payload.event.type === 'app_mention') {
-  await dispatch(assistant, {
+  await dispatch(Assistant, {
     id: channel.instanceId(thread),
     message: {
       kind: 'signal',

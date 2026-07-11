@@ -5,7 +5,7 @@ import {
 } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it } from 'vitest';
 import { renderAgentFunction } from '../src/hooks/render.ts';
-import { type AgentProps, defineAgent, useModel, useSubagent, useTool } from '../src/index.ts';
+import { type AgentProps, useModel, useSubagent, useTool } from '../src/index.ts';
 import { createFlueContext } from '../src/internal.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
 
@@ -32,11 +32,11 @@ describe('AgentProps', () => {
 			},
 		]);
 		const seen: string[] = [];
-		const agent = defineAgent(({ id }: AgentProps) => {
+		const agent = ({ id }: AgentProps) => {
 			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			seen.push(id);
 			return `You are bound to ${id}.`;
-		});
+		};
 		const ctx = createFlueContext({
 			id: 'slack:C123:1701.42',
 			env: {},
@@ -73,7 +73,7 @@ describe('AgentProps', () => {
 		const provider = createProvider();
 		provider.setResponses([fauxAssistantMessage('ok')]);
 		let delegateArgCount: number | undefined;
-		const agent = defineAgent(({ id }: AgentProps) => {
+		const agent = ({ id }: AgentProps) => {
 			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			useSubagent({
 				name: 'worker',
@@ -89,7 +89,7 @@ describe('AgentProps', () => {
 				run: () => 'ok',
 			});
 			return `Root for ${id}.`;
-		});
+		};
 		const ctx = createFlueContext({
 			id: 'isolation-check',
 			env: {},

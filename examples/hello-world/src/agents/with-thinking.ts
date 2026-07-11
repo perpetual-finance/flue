@@ -1,8 +1,8 @@
 'use agent';
-import { defineAgent, useModel, useTool } from '@flue/runtime';
+import { useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 
-function WithThinking() {
+export function WithThinking() {
 	useModel('anthropic/claude-haiku-4-5', { thinkingLevel: 'low' });
 	useTool({
 		name: 'thinking-test',
@@ -24,5 +24,3 @@ function WithThinking() {
 	});
 	return 'When asked to run a demo, call the `thinking-test` tool and report its result.';
 }
-
-export default defineAgent(WithThinking);

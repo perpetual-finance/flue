@@ -16,7 +16,6 @@ declare module '@earendil-works/pi-agent-core' {
 	}
 }
 
-import type { Hono, MiddlewareHandler } from 'hono';
 import type * as v from 'valibot';
 import type { ToolDefinition } from './tool-types.ts';
 
@@ -31,8 +30,6 @@ export type {
 } from './tool-types.ts';
 
 export type { ThinkingLevel };
-
-export type AgentRouteHandler = MiddlewareHandler;
 
 /**
  * One attachment on a `kind: 'user'` {@link DeliveredMessage}. Mirrors pi-ai's
@@ -462,9 +459,9 @@ export interface AgentRuntimeConfig {
  * that teaches the model who it is and how to work. Return nothing for a
  * tools-only body. The author owns the formatting (headings included).
  *
- * An agent is an agent function that declares its model with `useModel()` —
- * `defineAgent(Agent)` — and a delegate is an agent function on the `task`
- * catalog — `useSubagent({ name, description, agent: Delegate })`. Shared behavior is
+ * An agent is an agent function that declares its model with `useModel()`,
+ * and a delegate is an agent function on the `task` catalog —
+ * `useSubagent({ name, description, agent: Delegate })`. Shared behavior is
  * composed with custom hooks: plain functions that call `useTool()`,
  * `useInstruction()`, and the other hooks, and may return values to the
  * agent body.
@@ -505,11 +502,10 @@ export type AgentFunction<TProps = void> = TProps extends void
  *
  * ```ts
  * // dispatch(support, { id: `order-${orderId}`, message: {...} })
- * function Assistant({ id }: AgentProps) {
+ * export function Assistant({ id }: AgentProps) {
  *   useTool(lookupOrder(id.replace(/^order-/, '')));
  *   return 'Handle support for the one order this instance is bound to.';
  * }
- * export default defineAgent(Assistant);
  * ```
  *
  * When the id encodes several structured facts, don't parse them back out of
@@ -528,38 +524,50 @@ export interface AgentProps {
 }
 
 /**
- * The value `defineAgent(Agent)` returns: an addressable agent whose
- * behavior is the agent function, re-rendered by the runtime as state
- * changes. Default-export it from a `'use agent'` module.
+ * The contract statics an agent function may carry — the parts of the agent
+ * the platform reads WITHOUT running the function. Both are optional, both
+ * are plain properties assigned after the declaration (the `PropTypes`
+ * pattern):
  *
  * ```ts
- * 'use agent';
- * function Support() {
- *   useModel('anthropic/claude-sonnet-4-6');
- *   const [phase] = usePersistentState('phase', 'gathering');
- *   useGatheringPhase({ ... });
- *   return 'Operator-facing support agent. Work only from verified evidence.';
+ * export function IssueTriage() {
+ *   useModel('anthropic/claude-opus-4-6');
+ *   return 'Triage the bound issue.';
  * }
- * export default defineAgent(Support);
+ * IssueTriage.agentName = 'issue-triage';
+ * IssueTriage.initialData = v.object({ issue: v.pipe(v.number(), v.integer()) });
  * ```
  */
-export interface FunctionAgentDefinition {
-	__flueFunctionAgent: true;
-	agent: AgentFunction<AgentProps>;
+export interface AgentStatics {
 	/**
-	 * Hono router serving this agent's HTTP surface. May be mounted multiple
-	 * times, including mounting the same agent at two paths (same identity,
-	 * same conversations). Requires the module to carry the `'use agent'`
-	 * directive (which binds the agent's identity); throws otherwise.
+	 * The agent's durable identity — keys conversation storage everywhere and
+	 * the Durable Object class on Cloudflare. Defaults to the function's own
+	 * name (`fn.name`, captured at build time in `'use agent'` modules so
+	 * minification can't corrupt it). Assign this static to decouple the
+	 * durable identity from the source-level function name. Must be a string
+	 * literal in `'use agent'` modules: build targets derive durable
+	 * identifiers from it before any user code runs.
 	 */
-	route(): Hono;
+	agentName?: string;
+	/**
+	 * Valibot schema for instance-creation data. Validated once, at the
+	 * instance's first contact, synchronously before anything durable is
+	 * admitted; a mismatch (including absence, unless the schema accepts
+	 * `undefined`) rejects the creating send. The schema-parsed output is what
+	 * gets recorded and what `useInitialData()` returns.
+	 */
+	initialData?: v.GenericSchema;
 }
 
 /**
- * A value accepted wherever an agent is addressed: the default export of a
- * `'use agent'` module — a {@link FunctionAgentDefinition}.
+ * An agent: an agent function, addressable anywhere an agent is expected
+ * (`init()`, `dispatch()`, `createAgentRouter()`, `start()`). The function IS
+ * the agent — behavior comes from its body (hooks + returned instructions),
+ * and its contract rides as optional statics ({@link AgentStatics}). In a
+ * `'use agent'` module, every exported function with a capitalized name is
+ * an agent.
  */
-export type AgentModuleValue = FunctionAgentDefinition;
+export type Agent = AgentFunction<AgentProps> & AgentStatics;
 
 // ─── Flue Event Context ────────────────────────────────────────────────────
 

@@ -1,7 +1,8 @@
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
-import serviceStatus from './agents/service-status.ts';
+import { ServiceStatus } from './agents/service-status.ts';
 
 const app = new Hono();
-app.route('/agents/service-status', serviceStatus.route());
+app.route('/agents/service-status', createAgentRouter(ServiceStatus));
 
 export default app;

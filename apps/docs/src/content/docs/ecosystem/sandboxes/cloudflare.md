@@ -20,7 +20,7 @@ Cloudflare Sandbox is a Cloudflare target integration rather than a generated ad
 ```ts title="src/agents/coding-agent.ts (excerpt)"
 'use agent';
 import { env } from 'cloudflare:workers';
-import { type AgentProps, defineAgent, useModel, useSandbox } from '@flue/runtime';
+import { type AgentProps, useModel, useSandbox } from '@flue/runtime';
 import { cloudflareSandbox } from '@flue/runtime/cloudflare';
 import { getSandbox } from '@cloudflare/sandbox';
 
@@ -28,13 +28,11 @@ interface Env {
   Sandbox: DurableObjectNamespace;
 }
 
-function CodingAgent({ id }: AgentProps) {
+export function CodingAgent({ id }: AgentProps) {
   useModel('anthropic/claude-opus-4-7');
   const { Sandbox } = env as unknown as Env;
   useSandbox(cloudflareSandbox(getSandbox(Sandbox, id)));
 }
-
-export default defineAgent(CodingAgent);
 ```
 
 The blueprint also exports `Sandbox` from the source-root `cloudflare.ts`, adds its Durable Object binding, a new migration entry, and its container declaration to `wrangler.jsonc`, and creates a project-root `Dockerfile` whose image tag matches the installed package version. Agent shell and file operations run in the container-backed sandbox keyed by the agent instance id. Cloudflare's direct delete API does not expose recursive or force controls, so `cloudflareSandbox()` rejects either option before mutation. A Node-targeted project must migrate to the Cloudflare target before using this integration.
@@ -62,20 +60,18 @@ Declare the sandbox binding in Wrangler configuration, then wrap the RPC stub re
 ```ts
 import { env } from 'cloudflare:workers';
 import { getSandbox } from '@cloudflare/sandbox';
-import { type AgentProps, defineAgent, useModel, useSandbox } from '@flue/runtime';
+import { type AgentProps, useModel, useSandbox } from '@flue/runtime';
 import { cloudflareSandbox } from '@flue/runtime/cloudflare';
 
 interface Env {
   Sandbox: DurableObjectNamespace;
 }
 
-function Assistant({ id }: AgentProps) {
+export function Assistant({ id }: AgentProps) {
   useModel('anthropic/claude-sonnet-4-6');
   const { Sandbox } = env as unknown as Env;
   useSandbox(cloudflareSandbox(getSandbox(Sandbox, id)), { cwd: '/workspace' });
 }
-
-export default defineAgent(Assistant);
 ```
 
 ## Choose this integration when

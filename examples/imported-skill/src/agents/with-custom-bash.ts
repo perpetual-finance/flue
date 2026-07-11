@@ -1,8 +1,8 @@
 'use agent';
-import { bash, defineAgent, useModel, useSandbox, useTool } from '@flue/runtime';
+import { bash, useModel, useSandbox, useTool } from '@flue/runtime';
 import { Bash, InMemoryFs } from 'just-bash';
 
-function WithCustomBash() {
+export function WithCustomBash() {
 	useModel('anthropic/claude-haiku-4-5');
 	const fs = new InMemoryFs();
 	useSandbox(bash(() => new Bash({ fs })));
@@ -17,5 +17,3 @@ function WithCustomBash() {
 	});
 	return 'When asked to run the demo, call the `prove-custom-bash` action and report its result.';
 }
-
-export default defineAgent(WithCustomBash);

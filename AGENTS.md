@@ -5,12 +5,12 @@ Framework where projects containing agents are built into deployable server arti
 ## Terminology
 
 ```
-Capability                    — a plain function; Flue Hooks in its body attach tools, instructions, and
-                                state, and its returned string is its instruction
-Agent definition              — one `defineAgent(Capability, config)` value
-Agent module                  — a source file whose first statement is the `'use agent'` directive and
-                                that default-exports an agent definition; the file basename is the
-                                agent's durable identity
+Agent                         — a capitalized, exported plain function; Flue Hooks in its body attach
+                                tools, instructions, and state, and its returned string is its
+                                instruction; the function name (or its `agentName` string-literal
+                                static) is the agent's durable identity
+Agent module                  — a source file whose first statement is the `'use agent'` directive;
+                                every capitalized exported function in it is an agent
 └─ AgentInstance              — URL `<id>`; the agent's durable identity, independent of authoring
    └─ Harness                 — runtime-initialized agent environment; defaults to name `"default"`
       └─ Session              — one `harness.session(name?)`; defaults to `"default"`
@@ -20,7 +20,7 @@ Agent module                  — a source file whose first statement is the `'u
 
 There are no workflows or runs: conversations are the only durable unit, and a bounded code job is a tool with `harness: true` (`useTool({ ..., harness: true, run: ({ harness }) => ... })` — `run` receives `harness`, the interface to the sandbox and to models). Direct HTTP agent prompts and dispatched agent inputs operate within persistent sessions and must not be described as runs; `dispatch(...)` is identified by `dispatchId`.
 
-Routing is explicit: `app.ts` is the application's route map, mounting each HTTP-reachable agent (`app.route('/agents/<name>', agent.route())`) and channel (`app.route('/channels/<x>', channel.route())`). Registration comes from the `'use agent'` scan, not from mounting; `.route()` is a pure router factory.
+Routing is explicit: `app.ts` is the application's route map, mounting each HTTP-reachable agent (`app.route('/agents/<name>', createAgentRouter(AgentFn))`) and channel (`app.route('/channels/<x>', channel.route())`). Registration comes from the `'use agent'` scan, not from mounting; `createAgentRouter` is a pure router factory, and middleware composes in `app.ts` with plain Hono before the mount.
 
 Use `harness` as the variable name for the harness a `harness: true` tool's `run({ harness })` receives. Agent instances have ids; harnesses and sessions have names; operations have generated ids.
 

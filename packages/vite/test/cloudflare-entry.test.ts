@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { agentBindingName, agentClassName } from '../src/agent-scan.ts';
 import { generateCloudflareEntry } from '../src/cloudflare-entry.ts';
 
-function scanned(identity: string, filePath: string) {
+function scanned(identity: string, filePath: string, exportName = identity) {
 	return {
 		identity,
+		exportName,
 		filePath,
 		className: agentClassName(identity),
 		bindingName: agentBindingName(identity),
@@ -17,24 +18,30 @@ describe('generateCloudflareEntry()', () => {
 			appEntry: '/proj/src/app.ts',
 			cloudflareEntry: undefined,
 			agents: [
-				scanned('echo', '/proj/src/agents/echo.ts'),
-				scanned('triage-bot', '/proj/src/agents/triage-bot.ts'),
+				scanned('Echo', '/proj/src/agents/echo.ts'),
+				scanned('triage-bot', '/proj/src/agents/triage-bot.ts', 'Triage'),
 			],
 		});
 
 		// User app + agent module imports by absolute path.
 		expect(entry).toContain(`import userApp from "/proj/src/app.ts";`);
-		expect(entry).toContain(`import * as __flue_agent_0__ from "/proj/src/agents/echo.ts";`);
-		expect(entry).toContain(`import * as __flue_agent_1__ from "/proj/src/agents/triage-bot.ts";`);
+		expect(entry).toContain(
+			`import * as __flue_agent_module_0__ from "/proj/src/agents/echo.ts";`,
+		);
+		expect(entry).toContain(
+			`import * as __flue_agent_module_1__ from "/proj/src/agents/triage-bot.ts";`,
+		);
 
-		// The scan IS the registration.
-		expect(entry).toContain(`{ identity: "echo", module: __flue_agent_0__ },`);
-		expect(entry).toContain(`{ identity: "triage-bot", module: __flue_agent_1__ },`);
+		// The scan IS the registration — one entry per agent export.
+		expect(entry).toContain(`{ identity: "Echo", agent: __flue_agent_module_0__["Echo"] },`);
+		expect(entry).toContain(
+			`{ identity: "triage-bot", agent: __flue_agent_module_1__["Triage"] },`,
+		);
 		expect(entry).toContain('registerFlueAgents(registrations);');
 
 		// Identity → Durable Object binding join (name(identity) → binding).
 		expect(entry).toContain(
-			`"echo": { bindingName: "FLUE_ECHO_AGENT", className: "FlueEchoAgent" },`,
+			`"Echo": { bindingName: "FLUE_ECHO_AGENT", className: "FlueEchoAgent" },`,
 		);
 		expect(entry).toContain(
 			`"triage-bot": { bindingName: "FLUE_TRIAGE_BOT_AGENT", className: "FlueTriageBotAgent" },`,
@@ -43,11 +50,11 @@ describe('generateCloudflareEntry()', () => {
 		// One exported DO class per scanned agent, built by the shared factory
 		// with the module's cloudflare extension export. Reflect.get, not a
 		// static member access: the export is optional, and a direct
-		// `__flue_agent_0__.cloudflare` makes bundlers warn (IMPORT_IS_UNDEFINED)
-		// for every agent module without it.
+		// `__flue_agent_module_0__.cloudflare` makes bundlers warn
+		// (IMPORT_IS_UNDEFINED) for every agent module without it.
 		expect(entry).toContain('export const FlueEchoAgent = createFlueAgentClass({');
 		expect(entry).toContain('export const FlueTriageBotAgent = createFlueAgentClass({');
-		expect(entry).toContain("extension: Reflect.get(__flue_agent_0__, 'cloudflare'),");
+		expect(entry).toContain("extension: Reflect.get(__flue_agent_module_0__, 'cloudflare'),");
 
 		// Runtime seed carries only the conversation-era config shape.
 		expect(entry).toContain(`target: 'cloudflare',`);
@@ -59,20 +66,41 @@ describe('generateCloudflareEntry()', () => {
 		expect(entry).not.toContain('export * from');
 	});
 
+	it('emits one import per module file and one DO class per agent export', () => {
+		const entry = generateCloudflareEntry({
+			appEntry: '/proj/src/app.ts',
+			cloudflareEntry: undefined,
+			agents: [
+				scanned('Zeta', '/proj/src/agents/team.ts', 'Zeta'),
+				scanned('Alpha', '/proj/src/agents/team.ts', 'Alpha'),
+			],
+		});
+
+		// One namespace import for the shared file.
+		expect(entry).toContain(`import * as __flue_agent_module_0__ from "/proj/src/agents/team.ts";`);
+		expect(entry).not.toContain('__flue_agent_module_1__');
+
+		// Two registrations and two DO classes off the same namespace.
+		expect(entry).toContain(`{ identity: "Zeta", agent: __flue_agent_module_0__["Zeta"] },`);
+		expect(entry).toContain(`{ identity: "Alpha", agent: __flue_agent_module_0__["Alpha"] },`);
+		expect(entry).toContain('export const FlueZetaAgent = createFlueAgentClass({');
+		expect(entry).toContain('export const FlueAlphaAgent = createFlueAgentClass({');
+	});
+
 	it('composes cloudflare.ts handlers with the fetch-must-not-exist validation', () => {
 		const entry = generateCloudflareEntry({
 			appEntry: '/proj/src/app.ts',
 			cloudflareEntry: '/proj/src/cloudflare.ts',
-			agents: [scanned('echo', '/proj/src/agents/echo.ts')],
+			agents: [scanned('Echo', '/proj/src/agents/echo.ts')],
 		});
 
-		expect(entry).toContain(
-			`import * as userCloudflareModule from "/proj/src/cloudflare.ts";`,
-		);
+		expect(entry).toContain(`import * as userCloudflareModule from "/proj/src/cloudflare.ts";`);
 		expect(entry).toContain(`export * from "/proj/src/cloudflare.ts";`);
 		expect(entry).toContain('const userCloudflare = userCloudflareModule;');
 		// Reserved-name and shape validation with the legacy-parity messages.
-		expect(entry).toContain('conflicts with a Flue-generated Worker export. Rename the authored export.');
+		expect(entry).toContain(
+			'conflicts with a Flue-generated Worker export. Rename the authored export.',
+		);
 		expect(entry).toContain(
 			`throw new Error('[flue] cloudflare.ts default export must be an object containing non-HTTP Worker handlers.');`,
 		);
@@ -88,9 +116,11 @@ describe('generateCloudflareEntry()', () => {
 		const entry = generateCloudflareEntry({
 			appEntry: 'C:\\proj\\src\\app.ts',
 			cloudflareEntry: undefined,
-			agents: [scanned('echo', 'C:\\proj\\src\\agents\\echo.ts')],
+			agents: [scanned('Echo', 'C:\\proj\\src\\agents\\echo.ts')],
 		});
 		expect(entry).toContain(`import userApp from "C:/proj/src/app.ts";`);
-		expect(entry).toContain(`import * as __flue_agent_0__ from "C:/proj/src/agents/echo.ts";`);
+		expect(entry).toContain(
+			`import * as __flue_agent_module_0__ from "C:/proj/src/agents/echo.ts";`,
+		);
 	});
 });

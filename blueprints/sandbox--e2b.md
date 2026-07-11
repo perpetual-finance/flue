@@ -55,10 +55,10 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  * ```typescript
  * 'use agent';
  * import { Sandbox } from 'e2b';
- * import { defineAgent, useModel, useSandbox } from '@flue/runtime';
+ * import { useModel, useSandbox } from '@flue/runtime';
  * import { e2b } from './sandboxes/e2b';
  *
- * function Assistant() {
+ * export function Assistant() {
  *   useModel('anthropic/claude-sonnet-4-6');
  *   useSandbox({
  *     // Lazy, per the SandboxFactory contract: constructing this object is
@@ -72,7 +72,6 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  *   });
  *   return 'You are a helpful assistant with a full sandbox.';
  * }
- * export default defineAgent(Assistant);
  * ```
  */
 import { createSandboxSessionEnv, SandboxOperationUnsupportedError } from '@flue/runtime';
@@ -244,10 +243,10 @@ share this snippet so they can wire it up themselves.
 ```ts
 'use agent';
 import { Sandbox } from 'e2b';
-import { defineAgent, useModel, useSandbox } from '@flue/runtime';
+import { useModel, useSandbox } from '@flue/runtime';
 import { e2b } from '../sandboxes/e2b'; // adjust path to match the user's layout
 
-function Assistant() {
+export function Assistant() {
 	useModel('anthropic/claude-sonnet-4-6');
 	useSandbox({
 		// Lazy, per the SandboxFactory contract: constructing this object is
@@ -261,12 +260,11 @@ function Assistant() {
 	});
 	return 'You are a helpful assistant with a full sandbox.';
 }
-
-export default defineAgent(Assistant);
 ```
 
 The `'use agent'` directive at the top is what registers the module with
-the application. Mount `agent.route()` in `app.ts` only if the agent needs
+the application. Mount `createAgentRouter(...)` (from `@flue/runtime/routing`) in
+`app.ts` only if the agent needs
 an HTTP endpoint — `flue run` and `dispatch()` work without a mount.
 
 Tip: if the user runs many short-lived agents off the same prepared

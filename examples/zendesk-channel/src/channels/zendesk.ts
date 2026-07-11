@@ -1,6 +1,6 @@
 import { defineTool, dispatch } from '@flue/runtime';
 import { createZendeskChannel, type JsonValue, type ZendeskTicketRef } from '@flue/zendesk';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createZendeskClient } from '../zendesk-client.ts';
 
 const accountId = requiredEnv('ZENDESK_ACCOUNT_ID');
@@ -30,7 +30,7 @@ export const channel = createZendeskChannel({
 					accountId: payload.account_id,
 					ticketId,
 				};
-				await dispatch(assistant, {
+				await dispatch(Assistant, {
 					id: channel.instanceId(ticket),
 					// Recorded once when this event creates the instance; ignored after.
 					initialData: {

@@ -1,10 +1,10 @@
 import { type FlueObservation, observe } from '@flue/runtime';
-import { agent } from '@flue/runtime/routing';
+import { createAgentRouter } from '@flue/runtime/routing';
 import { braintrustFlueObserver, initLogger } from 'braintrust';
 import { Hono } from 'hono';
-import prompt from './agents/prompt.ts';
-import task from './agents/task.ts';
-import tools from './agents/tools.ts';
+import { Prompt } from './agents/prompt.ts';
+import { Task } from './agents/task.ts';
+import { Tools } from './agents/tools.ts';
 
 const apiKey = process.env.BRAINTRUST_API_KEY;
 
@@ -44,8 +44,8 @@ function compatibleEvent(event: FlueObservation): unknown {
 }
 
 const app = new Hono();
-app.route('/agents/prompt', agent(prompt).route());
-app.route('/agents/tools', agent(tools).route());
-app.route('/agents/task', agent(task).route());
+app.route('/agents/prompt', createAgentRouter(Prompt));
+app.route('/agents/tools', createAgentRouter(Tools));
+app.route('/agents/task', createAgentRouter(Task));
 
 export default app;

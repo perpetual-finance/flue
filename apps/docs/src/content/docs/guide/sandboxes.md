@@ -42,16 +42,14 @@ On the Node.js target, use `local()` when an agent should operate directly on th
 
 ```ts title="src/agents/repository-reviewer.ts"
 'use agent';
-import { defineAgent, useModel, useSandbox } from '@flue/runtime';
+import { useModel, useSandbox } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
-function RepositoryReviewer() {
+export function RepositoryReviewer() {
   useModel('anthropic/claude-sonnet-4-6');
   useSandbox(local(), { cwd: '/srv/checkouts/catalog-service' });
   return 'Inspect the requested change and run only relevant validation.';
 }
-
-export default defineAgent(RepositoryReviewer);
 ```
 
 `local()` makes host files and installed commands reachable through the agent's workspace capabilities. It does not provide isolation between model-directed work and the host machine.
@@ -79,7 +77,7 @@ An agent can start in the virtual sandbox and attach a real environment only whe
 ```ts title="src/agents/support-desk.ts"
 'use agent';
 import { env } from 'cloudflare:workers';
-import { type AgentProps, defineAgent, useModel, usePersistentState, useSandbox, useTool } from '@flue/runtime';
+import { type AgentProps, useModel, usePersistentState, useSandbox, useTool } from '@flue/runtime';
 import { cloudflareSandbox } from '@flue/runtime/cloudflare';
 import { getSandbox } from '@cloudflare/sandbox';
 
@@ -87,7 +85,7 @@ interface Env {
   Sandbox: DurableObjectNamespace;
 }
 
-function SupportDesk({ id }: AgentProps) {
+export function SupportDesk({ id }: AgentProps) {
   useModel('anthropic/claude-sonnet-4-6');
   const [sandboxEnabled, setSandboxEnabled] = usePersistentState('sandboxEnabled', false);
 
@@ -105,8 +103,6 @@ function SupportDesk({ id }: AgentProps) {
 
   return 'Answer support requests directly when you can. For anything needing real investigation, call enable_sandbox first.';
 }
-
-export default defineAgent(SupportDesk);
 ```
 
 The swap lands at the next turn boundary: the model calls `enable_sandbox`, and by its very next step the workspace is attached — same response, no extra round-trip. The runtime announces every swap to the model with a single `environment` signal that restates the complete current state (working directory, tools, skills, agents), so the agent always knows exactly what it has after the ground moved (see [Dynamic resources](/docs/api/agent-api/#dynamic-resources)). Persistent state replays durably, so every later submission re-evaluates the same condition and re-attaches the same declaration; sandbox adapters key their durable resources on the agent's instance id, so the agent gets the same workspace back each time.

@@ -187,7 +187,7 @@ import {
   type ZendeskTicketRef,
 } from '@flue/zendesk';
 import { defineTool, dispatch } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createZendeskClient } from '../zendesk-client.ts';
 
 const accountId = requiredEnv('ZENDESK_ACCOUNT_ID');
@@ -216,7 +216,7 @@ export const channel = createZendeskChannel({
           accountId: payload.account_id,
           ticketId,
         };
-        await dispatch(assistant, {
+        await dispatch(Assistant, {
           id: channel.instanceId(ticket),
           // Recorded once when this event creates the instance; ignored after.
           initialData: {
@@ -345,16 +345,16 @@ Bind the account and ticket selected by verified application code:
 
 ```ts
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { retrieveTicket } from '../channels/zendesk.ts';
 
-export const initialDataSchema = v.object({
+const initialDataSchema = v.object({
 	accountId: v.string(),
 	ticketId: v.string(),
 });
 
-function Assistant() {
+export function Assistant() {
 	useModel('anthropic/claude-haiku-4-5');
 	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the Zendesk channel dispatch.');
@@ -362,17 +362,18 @@ function Assistant() {
 	return 'Review the inbound Zendesk ticket event. Retrieve the current ticket when more context is needed.';
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialDataSchema;
 ```
 
-The `initialDataSchema` export validates the dispatched `initialData` when the
+The `initialData` static validates the dispatched `initialData` when the
 instance is created; `useInitialData()` returns the parsed value on every
 render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback
 needs no `app.ts` mounting. Add
-`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+`app.route('/agents/<name>', createAgentRouter(Assistant))` (from
+`@flue/runtime/routing`) in `app.ts` only when the agent
 should also be reachable over HTTP directly.
 
 The tool accepts no account, ticket id, subdomain, token, or API host from the

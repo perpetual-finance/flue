@@ -7,7 +7,7 @@ import {
 } from '@flue/discord';
 import { defineTool, dispatch } from '@flue/runtime';
 import * as v from 'valibot';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 export const client = new REST({ version: '10' }).setToken(requiredEnv('DISCORD_BOT_TOKEN'));
 
@@ -37,7 +37,7 @@ export const channel = createDiscordChannel({
 				? interaction.data.options?.find((option) => option.type === 3)?.value
 				: undefined;
 		const channelName = interaction.channel?.name ?? undefined;
-		await dispatch(assistant, {
+		await dispatch(Assistant, {
 			id: channel.instanceId(destination),
 			// Recorded once when this event creates the instance; ignored after.
 			initialData: {

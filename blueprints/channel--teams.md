@@ -59,7 +59,7 @@ message, event policy, and tool:
 import { defineTool, dispatch } from '@flue/runtime';
 import * as v from 'valibot';
 import { createTeamsChannel } from '@flue/teams';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createTeamsClient, type TeamsMessageRef } from '../lib/teams-client.ts';
 
 const appId = process.env.TEAMS_APP_ID!;
@@ -79,7 +79,7 @@ export const channel = createTeamsChannel({
   async activities({ activity }) {
     if (activity.type !== 'message' || !activity.text) return;
     const destination = channel.destination(activity);
-    await dispatch(assistant, {
+    await dispatch(Assistant, {
       id: channel.instanceId(destination),
       // Recorded once when this event creates the instance; ignored after.
       initialData: {
@@ -160,11 +160,11 @@ conversation's display name. Per-message facts stay on the signal's
 
 ```ts
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { postMessage } from '../channels/teams.ts';
 
-export const initialDataSchema = v.object({
+const initialDataSchema = v.object({
 	serviceUrl: v.string(),
 	conversationId: v.string(),
 	botId: v.string(),
@@ -172,7 +172,7 @@ export const initialDataSchema = v.object({
 	conversationName: v.optional(v.string()),
 });
 
-function Assistant() {
+export function Assistant() {
 	useModel('anthropic/claude-haiku-4-5');
 	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the Microsoft Teams channel dispatch.');
@@ -181,17 +181,18 @@ function Assistant() {
 	return `Reply concisely in the bound Microsoft Teams conversation${conversationName}.`;
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialDataSchema;
 ```
 
-The `initialDataSchema` export validates the dispatched `initialData` when the
+The `initialData` static validates the dispatched `initialData` when the
 instance is created; `useInitialData()` returns the parsed value on every
 render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback
 needs no `app.ts` mounting. Add
-`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+`app.route('/agents/<name>', createAgentRouter(Assistant))` (from
+`@flue/runtime/routing`) in `app.ts` only when the agent
 should also be reachable over HTTP directly.
 
 The channel-agent import cycle is supported only because imported bindings are

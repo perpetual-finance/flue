@@ -62,24 +62,23 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  * @example Existing VM (most common)
  * ```typescript
  * 'use agent';
- * import { defineAgent, useModel, useSandbox } from '@flue/runtime';
+ * import { useModel, useSandbox } from '@flue/runtime';
  * import { exedev } from './sandboxes/exedev';
  *
- * function Assistant() {
+ * export function Assistant() {
  *   useModel('anthropic/claude-sonnet-4-6');
  *   useSandbox(exedev({ host: 'maple-dune.exe.xyz' }));
  *   return 'You are a helpful assistant with a full sandbox.';
  * }
- * export default defineAgent(Assistant);
  * ```
  *
  * @example Create a VM before wrapping it
  * ```typescript
  * 'use agent';
- * import { defineAgent, useModel, useSandbox } from '@flue/runtime';
+ * import { useModel, useSandbox } from '@flue/runtime';
  * import { createExeVm, exedev } from './sandboxes/exedev';
  *
- * function Assistant() {
+ * export function Assistant() {
  *   useModel('anthropic/claude-sonnet-4-6');
  *   useSandbox({
  *     // Lazy, per the SandboxFactory contract: constructing this object is
@@ -92,7 +91,6 @@ Write this file verbatim. Do not "improve" it — it conforms to the published
  *   });
  *   return 'You are a helpful assistant with a full sandbox.';
  * }
- * export default defineAgent(Assistant);
  * ```
  */
 import {
@@ -739,20 +737,19 @@ hostname before wiring the adapter.
 
 ```ts
 'use agent';
-import { defineAgent, useModel, useSandbox } from "@flue/runtime";
+import { useModel, useSandbox } from "@flue/runtime";
 import { exedev } from "../sandboxes/exedev";
 
-function Assistant() {
+export function Assistant() {
 	useModel("anthropic/claude-sonnet-4-6");
 	useSandbox(exedev({ host: process.env.EXE_VM_HOST }));
 	return "You are a helpful assistant with a full sandbox.";
 }
-
-export default defineAgent(Assistant);
 ```
 
 The `'use agent'` directive at the top is what registers the module with
-the application. Mount `agent.route()` in `app.ts` only if the agent needs
+the application. Mount `createAgentRouter(...)` (from `@flue/runtime/routing`) in
+`app.ts` only if the agent needs
 an HTTP endpoint — `flue run` and `dispatch()` work without a mount.
 
 ### Fresh VM
@@ -763,10 +760,10 @@ VM and passes it to `exedev(...)`.
 
 ```ts
 'use agent';
-import { defineAgent, useModel, useSandbox } from "@flue/runtime";
+import { useModel, useSandbox } from "@flue/runtime";
 import { createExeVm, exedev } from "../sandboxes/exedev";
 
-function Assistant() {
+export function Assistant() {
 	useModel("anthropic/claude-sonnet-4-6");
 	useSandbox({
 		async createSessionEnv(options) {
@@ -776,8 +773,6 @@ function Assistant() {
 	});
 	return "You are a helpful assistant with a full sandbox.";
 }
-
-export default defineAgent(Assistant);
 ```
 
 ### Cloned VM
@@ -788,10 +783,10 @@ token needs `rm` permission.
 
 ```ts
 'use agent';
-import { defineAgent, useModel, useSandbox } from "@flue/runtime";
+import { useModel, useSandbox } from "@flue/runtime";
 import { cloneExeVm, exedev } from "../sandboxes/exedev";
 
-function Assistant() {
+export function Assistant() {
 	useModel("anthropic/claude-sonnet-4-6");
 	useSandbox({
 		async createSessionEnv(options) {
@@ -804,8 +799,6 @@ function Assistant() {
 	});
 	return "You are a helpful assistant with a full sandbox.";
 }
-
-export default defineAgent(Assistant);
 ```
 
 ## Verify

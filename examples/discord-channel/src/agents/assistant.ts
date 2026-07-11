@@ -1,14 +1,14 @@
 'use agent';
-import { defineAgent, useAgentFinish, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useAgentFinish, useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { postMessage } from '../channels/discord.ts';
 
-export const initialDataSchema = v.object({
+const initialDataSchema = v.object({
 	channelId: v.string(),
 	channelName: v.optional(v.string()),
 });
 
-function Assistant() {
+export function Assistant() {
 	useModel('anthropic/claude-haiku-4-5');
 	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the Discord channel dispatch.');
@@ -33,4 +33,4 @@ function Assistant() {
 	return `Post a concise answer to the bound Discord destination${channelName}.`;
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialDataSchema;

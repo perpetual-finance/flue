@@ -1,10 +1,10 @@
 'use agent';
-import { defineAgent, useModel, useSandbox, useTool } from '@flue/runtime';
+import { useModel, useSandbox, useTool } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
 const sentinelKey = '__FLUE_LOCAL_SMOKE_SENTINEL__';
 
-function LocalEnvSmoke() {
+export function LocalEnvSmoke() {
 	useModel('anthropic/claude-haiku-4-5');
 	useSandbox(local({ env: { CUSTOM_VAR: 'visible-to-sandbox' } }));
 	useTool({
@@ -40,5 +40,3 @@ function LocalEnvSmoke() {
 	});
 	return 'When asked to run a demo, call the `local-env-smoke` tool and report its result.';
 }
-
-export default defineAgent(LocalEnvSmoke);

@@ -134,7 +134,7 @@ guide/targets/node -- Node.js
 guide/tools -- Tools
   Give agents application capabilities through custom tools and MCP servers.
 guide/use-agent -- 'use agent'
-  The module directive that gives an agent its identity and registers it with the application.
+  The module directive that marks agent functions for the build scan and gives each its durable identity.
 guide/vite-plugin -- Vite plugin
   Build, develop, and deploy Flue applications with the flue() Vite plugin.
 introduction/why-flue -- Why Flue?

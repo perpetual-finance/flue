@@ -1,10 +1,11 @@
 import { dispatch } from '@flue/runtime';
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Cron } from 'croner';
 import { Hono } from 'hono';
-import scheduledAgent from './agents/scheduled.ts';
+import { Scheduled } from './agents/scheduled.ts';
 
 const app = new Hono();
-app.route('/agents/scheduled', scheduledAgent.route());
+app.route('/agents/scheduled', createAgentRouter(Scheduled));
 
 // A plain in-process cron (croner) delivers a durable schedule signal to a
 // persistent agent instance. `dispatch()` resolves the agent by definition —
@@ -18,7 +19,7 @@ new Cron(
 		catch: (error) => console.error('Scheduled agent admission failed', error),
 	},
 	async () => {
-		await dispatch(scheduledAgent, {
+		await dispatch(Scheduled, {
 			id: 'daily-summary',
 			message: {
 				kind: 'signal',

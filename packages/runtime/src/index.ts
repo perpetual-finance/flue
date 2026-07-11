@@ -21,7 +21,6 @@ export {
 	type InitOptions,
 	init,
 } from './agent-client.ts';
-export { defineAgent } from './agent-definition.ts';
 // The live conversation projection protocol (`init().dispatch`'s onEvent, the
 // SDK's updates view). The canonical record schema stays internal.
 export type { ConversationStreamChunk } from './conversation-public.ts';
@@ -101,18 +100,18 @@ export {
 	registerApiProvider,
 	registerProvider,
 } from './runtime/providers.ts';
-export type { AgentModuleBinding } from './runtime/registration.ts';
+export type { AgentIdentityBinding } from './runtime/registration.ts';
 export { __flueBindAgentModule } from './runtime/registration.ts';
 export { bash, createSandboxSessionEnv, type SandboxApi } from './sandbox.ts';
 export { type DefineSkillOptions, defineSkill } from './skill-definition.ts';
 export { defineTool } from './tool.ts';
 export type {
+	Agent,
 	AgentDispatchRequest,
 	AgentFunction,
-	AgentModuleValue,
 	AgentProps,
-	AgentRouteHandler,
 	AgentRuntimeConfig,
+	AgentStatics,
 	AttachedAgentEvent,
 	BashFactory,
 	BashLike,
@@ -130,7 +129,6 @@ export type {
 	FlueHarness,
 	FlueLogger,
 	FlueObservation,
-		FunctionAgentDefinition,
 	LlmAssistantMessage,
 	LlmImageContent,
 	LlmMessage,

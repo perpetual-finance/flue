@@ -14,13 +14,13 @@ Declare `useSubagent(...)` inside the agent function that should be able to dele
 
 ```ts title="src/agents/support-assistant.ts"
 'use agent';
-import { defineAgent, useModel, useSubagent } from '@flue/runtime';
+import { useModel, useSubagent } from '@flue/runtime';
 
 function IssueClassifier() {
   return 'Return the likely product area and urgency for the reported issue.';
 }
 
-function SupportAssistant() {
+export function SupportAssistant() {
   useModel('anthropic/claude-sonnet-4-6');
   useSubagent({
     name: 'issue_classifier',
@@ -29,11 +29,9 @@ function SupportAssistant() {
   });
   return 'Help resolve support requests. Delegate classification when it helps your answer.';
 }
-
-export default defineAgent(SupportAssistant);
 ```
 
-In this example, `support-assistant` can delegate work to `issue_classifier`. `agent` is the function that defines the delegate's whole world — Flue renders it fresh, in its own frame, at the moment the model delegates to it. It does not define another agent at `/agents/issue_classifier/:id`.
+In this example, `SupportAssistant` can delegate work to `issue_classifier`. `agent` is the function that defines the delegate's whole world — Flue renders it fresh, in its own frame, at the moment the model delegates to it. It does not define another agent at `/agents/issue_classifier/:id`.
 
 `description` is shown to the parent model alongside the delegate's name on the built-in `task` tool, so write it as delegation guidance: a short statement of what the subagent is good for.
 

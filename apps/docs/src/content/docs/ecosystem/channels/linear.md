@@ -25,7 +25,7 @@ tool.
 import { createLinearChannel } from '@flue/linear';
 import { dispatch } from '@flue/runtime';
 import { LinearClient } from '@linear/sdk';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 export const client = new LinearClient({
   apiKey: process.env.LINEAR_API_KEY!,
@@ -37,7 +37,7 @@ export const channel = createLinearChannel({
     if (payload.type !== 'Comment' || !('body' in payload.data)) return;
     const comment = payload.data;
     if (payload.action !== 'create' || !comment.issueId) return;
-    await dispatch(assistant, {
+    await dispatch(Assistant, {
       id: channel.instanceId({
         type: 'issue',
         organizationId: payload.organizationId,
@@ -109,7 +109,7 @@ import type {
   AgentSessionEventWebhookPayload,
   EntityWebhookPayloadWithCommentData,
 } from '@linear/sdk/webhooks';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 const organizationId = process.env.LINEAR_ORGANIZATION_ID;
 
@@ -126,7 +126,7 @@ export const channel = createLinearChannel({
     if (isCommentEvent(payload)) {
       const comment = payload.data;
       if (payload.action !== 'create' || !comment.issueId) return;
-      await dispatch(assistant, {
+      await dispatch(Assistant, {
         id: channel.instanceId({
           type: 'issue',
           organizationId: payload.organizationId,
@@ -155,7 +155,7 @@ export const channel = createLinearChannel({
     }
 
     if (isAgentSessionEvent(payload)) {
-      await dispatch(assistant, {
+      await dispatch(Assistant, {
         id: channel.instanceId({
           type: 'agent-session',
           organizationId: payload.organizationId,
@@ -247,11 +247,11 @@ the signal's `attributes`.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { postMessage } from '../channels/linear.ts';
 
-export const initialDataSchema = v.variant('type', [
+const initialData = v.variant('type', [
   v.object({
     type: v.literal('agent-session'),
     agentSessionId: v.string(),
@@ -265,19 +265,19 @@ export const initialDataSchema = v.variant('type', [
   }),
 ]);
 
-function Assistant() {
+export function Assistant() {
   useModel('anthropic/claude-haiku-4-5');
-  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
+  const data = useInitialData<v.InferOutput<typeof initialData>>();
   if (!data) throw new Error('This agent is created by the Linear channel dispatch.');
   useTool(postMessage(data));
   const issueTitle = data.issueTitle ? ` on "${data.issueTitle}"` : '';
   return `Reply concisely in the bound Linear conversation${issueTitle}.`;
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialData;
 ```
 
-The `initialDataSchema` export validates the dispatched `initialData` when the instance is
+The agent's `initialData` static validates the dispatched `initialData` when the instance is
 created; `useInitialData()` returns the parsed value on every render.
 
 ## Resource webhooks

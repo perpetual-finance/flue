@@ -1,6 +1,6 @@
 import { createResendChannel } from '@flue/resend';
 import { defineTool, dispatch, type JsonValue } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createResendClient } from '../resend-client.ts';
 
 const EMAIL_INSTANCE_PREFIX = 'resend-email:';
@@ -15,7 +15,7 @@ export const channel = createResendChannel({
 	async webhook({ event, delivery }) {
 		switch (event.type) {
 			case 'email.received': {
-				await dispatch(assistant, {
+				await dispatch(Assistant, {
 					id: emailInstanceId(event.data.email_id),
 					// Recorded once when this event creates the instance; ignored after.
 					initialData: {

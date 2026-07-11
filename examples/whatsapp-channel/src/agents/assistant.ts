@@ -1,10 +1,10 @@
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { postMessage } from '../channels/whatsapp.ts';
 import type { WhatsAppSendRef } from '../whatsapp-client.ts';
 
-export const initialDataSchema = v.object({
+const initialDataSchema = v.object({
 	phoneNumberId: v.string(),
 	destination: v.optional(
 		v.union([
@@ -16,7 +16,7 @@ export const initialDataSchema = v.object({
 	contactName: v.optional(v.string()),
 });
 
-function Assistant() {
+export function Assistant() {
 	useModel('anthropic/claude-haiku-4-5');
 	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the WhatsApp channel dispatch.');
@@ -33,4 +33,4 @@ function Assistant() {
 	return `Reply concisely in the bound WhatsApp conversation${contactName}.`;
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialDataSchema;

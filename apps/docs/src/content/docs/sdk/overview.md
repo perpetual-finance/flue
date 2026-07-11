@@ -6,7 +6,7 @@ lastReviewedAt: 2026-07-02
 
 The client SDK is exported from `@flue/sdk`. Use it from applications that consume deployed Flue agents.
 
-A client addresses exactly one agent conversation by URL. The framework does not know where an application mounts its agents — the application's route map (`app.ts`) does — so the URL is wherever the agent's `.route()` is mounted, plus a caller-chosen conversation id:
+A client addresses exactly one agent conversation by URL. The framework does not know where an application mounts its agents — the application's route map (`app.ts`) does — so the URL is wherever the agent's router (`createAgentRouter(...)`) is mounted, plus a caller-chosen conversation id:
 
 ```ts
 import { createFlueClient } from '@flue/sdk';

@@ -13,7 +13,7 @@ const conversation = createFlueClient({
 });
 ```
 
-A client addresses exactly one agent conversation by URL: wherever the application mounts the agent's `.route()` (its `app.ts` route map decides that) plus the caller-chosen conversation id. Starting a new conversation is constructing a client with a fresh id appended to the mount URL — ids are caller-chosen, and the conversation is created on the first admitted message.
+A client addresses exactly one agent conversation by URL: wherever the application mounts the agent's router (`createAgentRouter(...)` — its `app.ts` route map decides that) plus the caller-chosen conversation id. Starting a new conversation is constructing a client with a fresh id appended to the mount URL — ids are caller-chosen, and the conversation is created on the first admitted message.
 
 In a browser, `url` may be relative to `location.origin`. This is the usual same-origin setup:
 
@@ -81,7 +81,7 @@ Sends are fire-and-forget: a message is delivered into the living conversation a
 | Field     | Type               | Description                                     |
 | --------- | ------------------ | ----------------------------------------------- |
 | `message` | `DeliveredMessage` | The message delivered into the agent's session. |
-| `initialData` | `unknown`      | Instance-creation data — the seed, consulted only when this send creates the conversation: validated against the agent's `initialDataSchema` export (when declared) and recorded once; the agent reads it with `useInitialData()`. Ignored when the send continues an existing conversation (pair with `uid: null` to error instead). |
+| `initialData` | `unknown`      | Instance-creation data — the seed, consulted only when this send creates the conversation: validated against the agent's `initialData` static (when declared) and recorded once; the agent reads it with `useInitialData()`. Ignored when the send continues an existing conversation (pair with `uid: null` to error instead). |
 | `uid`     | `string \| null`   | Send condition — the instance uid played as an ETag. Omit to continue-or-create unconditionally; pass a previous send's `uid` to continue only that incarnation (rejects with `404` otherwise); pass `null` to create only when no conversation exists yet (rejects with `409`, naming the existing uid, otherwise). |
 | `signal`  | `AbortSignal`      | Cancel the in-flight HTTP request.              |
 
@@ -216,6 +216,6 @@ Returns one materialized conversation snapshot. The snapshot includes its opaque
 attachmentUrl(attachmentId: string): string;
 ```
 
-Returns the absolute URL for one `file` part's attachment bytes (`<url>/attachments/<attachmentId>`), suitable as an `<img>`/`<a>` source. The download endpoint is opt-in per agent — the agent module must export `attachments` middleware; without it the URL returns `404`.
+Returns the absolute URL for one `file` part's attachment bytes (`<url>/attachments/<attachmentId>`), suitable as an `<img>`/`<a>` source. The download endpoint is served by the agent's router (`createAgentRouter(...)`) alongside its other conversation routes.
 
 You rarely need to call this: for durably recorded attachments, `history()` and `observe()` fill each `file` part's `url` field with this value already.

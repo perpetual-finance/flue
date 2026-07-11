@@ -62,8 +62,9 @@ const app = new Hono();
 // Mount every route explicitly. An agent module starts with the
 // 'use agent' directive; create one and mount it here:
 //
-//   import assistant from './agents/assistant.ts';
-//   app.route('/agents/assistant', assistant.route());
+//   import { createAgentRouter } from '@flue/runtime/routing';
+//   import { Assistant } from './agents/assistant.ts';
+//   app.route('/agents/assistant', createAgentRouter(Assistant));
 
 export default app;
 ```

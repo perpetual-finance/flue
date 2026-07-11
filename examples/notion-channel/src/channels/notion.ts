@@ -1,6 +1,6 @@
 import { createNotionChannel } from '@flue/notion';
 import { defineTool, dispatch } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createNotionClient } from '../notion-client.ts';
 
 const PAGE_INSTANCE_PREFIX = 'notion-page:';
@@ -32,7 +32,7 @@ export const channel = createNotionChannel({
 			case 'page.locked':
 			case 'page.unlocked':
 			case 'page.undeleted': {
-				await dispatch(assistant, {
+				await dispatch(Assistant, {
 					id: pageInstanceId(event.entity.id),
 					// Recorded once when this event creates the instance; ignored after.
 					initialData: {

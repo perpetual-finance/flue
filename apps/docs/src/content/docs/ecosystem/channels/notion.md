@@ -27,7 +27,7 @@ wires that tool into an agent. It may also add `"node"` to a restrictive
 import { Client } from '@notionhq/client';
 import { createNotionChannel } from '@flue/notion';
 import { dispatch, useModel } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 export const client = new Client({ auth: process.env.NOTION_TOKEN! });
 
@@ -36,7 +36,7 @@ export const channel = createNotionChannel({
   async webhook({ event }) {
     if (event.type !== 'page.content_updated') return;
 
-    await dispatch(assistant, {
+    await dispatch(Assistant, {
       id: `notion-page:${encodeURIComponent(event.entity.id)}`,
       message: {
         kind: 'signal',
@@ -108,7 +108,7 @@ is a type dependency and does not add Node code to a Worker bundle. If
 import { Client } from '@notionhq/client';
 import { createNotionChannel } from '@flue/notion';
 import { defineTool, dispatch, useModel } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 const PAGE_INSTANCE_PREFIX = 'notion-page:';
 
@@ -148,7 +148,7 @@ export const channel = createNotionChannel({
       case 'page.undeleted':
       case 'page.locked':
       case 'page.unlocked': {
-        await dispatch(assistant, {
+        await dispatch(Assistant, {
           id: pageInstanceId(event.entity.id),
           message: {
             kind: 'signal',
@@ -222,17 +222,15 @@ when one agent can cross credential domains.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { type AgentProps, defineAgent, useModel, useTool } from '@flue/runtime';
+import { type AgentProps, useModel, useTool } from '@flue/runtime';
 import { pageIdFromInstanceId, retrievePage } from '../channels/notion.ts';
 
-function Assistant({ id }: AgentProps) {
+export function Assistant({ id }: AgentProps) {
   useModel('anthropic/claude-haiku-4-5');
   const pageId = pageIdFromInstanceId(id);
   useTool(retrievePage(pageId));
   return 'Review the Notion page change. Retrieve the current page when its properties are needed.';
 }
-
-export default defineAgent(Assistant);
 ```
 
 The model can request the current page summary, but it cannot select another

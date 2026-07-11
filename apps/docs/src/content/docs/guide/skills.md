@@ -33,20 +33,18 @@ Import your skills directly — any import that resolves to a file named `SKILL.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useModel, useSkill } from '@flue/runtime';
+import { useModel, useSkill } from '@flue/runtime';
 import review from '../skills/review/SKILL.md';
 import triage from '../skills/triage/SKILL.md';
 import investigate from '../skills/investigate/SKILL.md';
 
-function Assistant() {
+export function Assistant() {
   useModel('anthropic/claude-sonnet-4-6');
   useSkill(review);
   useSkill(triage);
   useSkill(investigate);
   return 'Use the skills below as needed to complete the request.';
 }
-
-export default defineAgent(Assistant);
 ```
 
 Each import produces a skill reference and includes that skill directory in the application build. Mounting a reference with `useSkill(...)` makes the skill available to this agent by its declared name. A skill mounted on every render is cataloged in the system prompt; a skill may also be mounted conditionally (`if (pro) useSkill(refundsSkill)`) — when it appears or disappears, the runtime announces the change to the model in the conversation while the prompt's catalog stays frozen (see [Dynamic resources](/docs/api/agent-api/#dynamic-resources)).

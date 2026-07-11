@@ -132,16 +132,14 @@ The short version, for your reference:
 
    ```ts
    'use agent';
-   import { defineAgent, useModel, useSandbox } from '@flue/runtime';
+   import { useModel, useSandbox } from '@flue/runtime';
    import { cloudflareSandboxFactory } from '../cloudflare-sandbox'; // your own module — see note above
 
-   function Assistant() {
+   export function Assistant() {
      useModel('anthropic/claude-opus-4-7');
      useSandbox(cloudflareSandboxFactory);
      return 'You are a helpful assistant with a full sandbox.';
    }
-
-   export default defineAgent(Assistant);
    ```
 
    `cloudflareSandboxFactory` above stands in for whatever `SandboxFactory`
@@ -149,9 +147,10 @@ The short version, for your reference:
    `cloudflareSandbox(getSandbox(env.Sandbox, id))` wherever it has access to
    those bindings. The wrapper itself is provided by
    `@flue/runtime/cloudflare`, so no project-owned adapter file is needed.
-   The `'use agent'` directive is what registers the agent; mount
-   `agent.route()` in `app.ts`
-   (`app.route('/agents/<name>', agent.route())`) if it needs an HTTP
+   The `'use agent'` directive is what registers the agent; mount its
+   router in `app.ts`
+   (`app.route('/agents/<name>', createAgentRouter(Assistant))`, with
+   `createAgentRouter` from `@flue/runtime/routing`) if it needs an HTTP
    endpoint.
 
 6. Tell the user to put local variables in `.dev.vars` or `.env` and run

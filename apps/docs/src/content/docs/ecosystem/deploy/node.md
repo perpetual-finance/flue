@@ -47,18 +47,16 @@ And the scripts:
 
 ### 2. Create your first agent
 
-An agent module is an ordinary TypeScript file plus one line: the `'use agent'` directive. The directive is how an agent joins the application — the build scans your source root for marked modules, and the file basename becomes the agent's durable identity (an `export const name` literal overrides it).
+An agent module is an ordinary TypeScript file plus one line: the `'use agent'` directive. The directive is how an agent joins the application — the build scans your source root for marked modules, every exported function with a capitalized name is an agent, and the function's name becomes the agent's durable identity (an optional `Translator.agentName = '...'` string-literal static overrides it).
 
 ```typescript title="src/agents/translator.ts"
 'use agent';
-import { defineAgent, useModel } from '@flue/runtime';
+import { useModel } from '@flue/runtime';
 
-function Translator() {
+export function Translator() {
   useModel('openai/gpt-5.5');
   return 'Translate the user message into the requested language. Reply with the translation only.';
 }
-
-export default defineAgent(Translator);
 ```
 
 By default the agent receives a virtual sandbox powered by [just-bash](https://github.com/vercel-labs/just-bash) — no container needed.
@@ -68,18 +66,19 @@ By default the agent receives a virtual sandbox powered by [just-bash](https://g
 `app.ts` is the only required file. Its default export owns the request pipeline, and every route is mounted explicitly — `app.ts` IS the routing table:
 
 ```typescript title="src/app.ts"
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
-import translator from './agents/translator.ts';
+import { Translator } from './agents/translator.ts';
 
 const app = new Hono();
 
-app.route('/agents/translator', translator.route());
+app.route('/agents/translator', createAgentRouter(Translator));
 app.get('/api/ping', (c) => c.text('pong'));
 
 export default app;
 ```
 
-`translator.route()` is a pure router factory: the mount path is yours to choose, and per-agent middleware comes from the module's own `route` named export (export Hono middleware from the agent file to authenticate requests before they reach the agent). See the [Routing API](/docs/api/routing-api/).
+`createAgentRouter(Translator)` is a pure router factory: the mount path is yours to choose, and per-agent middleware is plain Hono at the mount (`app.use('/agents/translator/*', <middleware>)` before the `app.route(...)` line) to authenticate requests before they reach the agent. See the [Routing API](/docs/api/routing-api/).
 
 ### 4. Add your API key
 
@@ -140,10 +139,10 @@ For structured, schema-validated work inside the conversation, give the agent a 
 
 ```typescript title="src/agents/reporter.ts"
 'use agent';
-import { defineAgent, useModel, useTool } from '@flue/runtime';
+import { useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 
-function Reporter() {
+export function Reporter() {
   useModel('openai/gpt-5.5');
   useTool({
     name: 'compile-report',
@@ -159,8 +158,6 @@ function Reporter() {
   });
   return 'When asked for a report, call the `compile-report` tool.';
 }
-
-export default defineAgent(Reporter);
 ```
 
 Drive it with `flue run src/agents/reporter.ts --message "Compile the weekly report."`, a `dispatch()` from server code, or the SDK.
@@ -171,13 +168,13 @@ Drive it with `flue run src/agents/reporter.ts --message "Compile the weekly rep
 
 ```typescript title="src/agents/reporter.ts"
 'use agent';
-import { defineAgent, useModel, useSubagent } from '@flue/runtime';
+import { useModel, useSubagent } from '@flue/runtime';
 
 function Analyst() {
   return 'Focus on quantitative insights, trends, and actionable takeaways.';
 }
 
-function Reporter() {
+export function Reporter() {
   useSubagent({
     name: 'analyst',
     description: 'Analyzes metrics for quantitative insights and actionable takeaways.',
@@ -185,8 +182,6 @@ function Reporter() {
   });
   return 'Delegate metric analysis to the `analyst` subagent via a task.';
 }
-
-export default defineAgent(Reporter);
 ```
 
 ## Sandbox context
@@ -229,16 +224,14 @@ Env exposure is opt-in. By default only shell essentials (`PATH`, `HOME`, locale
 
 ```typescript title="src/agents/reviewer.ts"
 'use agent';
-import { defineAgent, useModel, useSandbox } from '@flue/runtime';
+import { useModel, useSandbox } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
-function Reviewer() {
+export function Reviewer() {
   useModel('anthropic/claude-sonnet-4-6');
   useSandbox(local());
   return 'Review the codebase and identify potential issues in the area the user names.';
 }
-
-export default defineAgent(Reviewer);
 ```
 
 The agent reads, searches, and modifies files via its built-in tools — read, write, edit, grep, glob, bash. Anything on `$PATH` (`git`, `npm`, `gh`, `docker`) is reachable from the bash tool. Env vars are opt-in via `local({ env: { ... } })` — pass `process.env.GH_TOKEN`, `process.env.NPM_TOKEN`, etc. into the sandbox for the binaries that need them.

@@ -1,5 +1,5 @@
 'use agent';
-import { defineAgent, useModel } from '@flue/runtime';
+import { useModel } from '@flue/runtime';
 
 /**
  * The terminal-failure case: this agent function throws when it renders, so
@@ -7,9 +7,7 @@ import { defineAgent, useModel } from '@flue/runtime';
  * the failure as a Sentry exception (via the `submission_settled` event with
  * outcome `failed`, plus the failed operation's `operation` event).
  */
-function Boom(): string {
+export function Boom(): string {
 	useModel('anthropic/claude-haiku-4-5');
 	throw new Error('intentional explosion for the Sentry demo');
 }
-
-export default defineAgent(Boom);

@@ -274,7 +274,7 @@ function assertAgentInstruction(value: unknown): asserts value is string | undef
 	}
 	if (value !== undefined && typeof value !== 'string') {
 		throw new Error(
-			'[flue] An agent returns its instruction string (or nothing). Model and settings belong in defineAgent(Agent, { model, ... }); everything else is composed with hooks in the body.',
+			'[flue] An agent returns its instruction string (or nothing). Everything else — model, sandbox, tools — is composed with hooks in the body.',
 		);
 	}
 }

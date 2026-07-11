@@ -1,11 +1,11 @@
 'use agent';
-import { defineAgent, useModel, useTool } from '@flue/runtime';
+import { useModel, useTool } from '@flue/runtime';
 
 /**
  * The success case: logs at info level and returns a value. Produces no
  * Sentry traffic — only `log.error` and terminal failures are captured.
  */
-function Hello() {
+export function Hello() {
 	useModel('anthropic/claude-haiku-4-5');
 	useTool({
 		name: 'hello',
@@ -17,5 +17,3 @@ function Hello() {
 	});
 	return 'When asked to run the demo, call the `hello` action and report its result.';
 }
-
-export default defineAgent(Hello);

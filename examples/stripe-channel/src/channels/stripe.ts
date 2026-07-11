@@ -1,7 +1,7 @@
 import { defineTool, dispatch, type JsonValue } from '@flue/runtime';
 import { createStripeChannel } from '@flue/stripe';
 import type Stripe from 'stripe';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createStripeClient, stripeRequestOptions } from '../stripe-client.ts';
 
 export interface StripeCustomerRef {
@@ -30,7 +30,7 @@ export const channel = createStripeChannel({
 					...(event.account ? { accountId: event.account } : {}),
 					...(event.context ? { context: event.context } : {}),
 				};
-				await dispatch(assistant, {
+				await dispatch(Assistant, {
 					id: stripeCustomerInstanceId(customer),
 					// Recorded once when this event creates the instance; ignored after.
 					initialData: customer,

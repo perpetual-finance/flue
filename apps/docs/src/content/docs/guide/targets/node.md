@@ -1,7 +1,7 @@
 ---
 title: Node.js
 description: Understand the Node.js-specific runtime behavior and APIs for Flue applications.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-11
 ---
 
 The Node.js target builds your agents as a standard Node.js server. The built server runs anywhere Node runs: a local machine, a container, a VM, a CI runner, or a managed hosting service. Node is also the target where agents can operate directly on the host filesystem and shell through `local()`.
@@ -41,15 +41,13 @@ Node is the only target with the built-in `local()` sandbox factory. It gives an
 
 ```ts title="src/agents/repository-reviewer.ts"
 'use agent';
-import { defineAgent, useModel, useSandbox } from '@flue/runtime';
+import { useModel, useSandbox } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 
-function RepositoryReviewer() {
+export function RepositoryReviewer() {
   useModel('anthropic/claude-sonnet-4-6');
   useSandbox(local());
 }
-
-export default defineAgent(RepositoryReviewer);
 ```
 
 `local()` uses `process.cwd()` as the working directory by default. Shell commands run through the host shell via `child_process`, and file operations read and write the real filesystem.
@@ -57,7 +55,7 @@ export default defineAgent(RepositoryReviewer);
 Only shell-essential environment variables are exposed to the agent's shell by default. API keys, tokens, and credentials are deliberately excluded. Pass specific values through `env` when a command needs them:
 
 ```ts
-function RepositoryReviewer() {
+export function RepositoryReviewer() {
   useModel('anthropic/claude-sonnet-4-6');
   useSandbox(
     local({
@@ -65,8 +63,6 @@ function RepositoryReviewer() {
     }),
   );
 }
-
-const reviewer = defineAgent(RepositoryReviewer);
 ```
 
 Passing `env: { ...process.env }` exposes the full host environment to the model's shell. Do this only in trusted environments.
@@ -104,7 +100,7 @@ import { local } from '@flue/runtime/node';
 function local(options?: LocalSandboxOptions): SandboxFactory;
 ```
 
-Creates a sandbox factory that binds directly to the host filesystem and shell. Pass it to `defineAgent(...)` through the `sandbox` option.
+Creates a sandbox factory that binds directly to the host filesystem and shell. Attach it in the agent function with `useSandbox(local())`.
 
 **`LocalSandboxOptions`:**
 

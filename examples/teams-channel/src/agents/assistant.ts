@@ -1,9 +1,9 @@
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { postMessage } from '../channels/teams.ts';
 
-export const initialDataSchema = v.object({
+const initialDataSchema = v.object({
 	serviceUrl: v.string(),
 	conversationId: v.string(),
 	botId: v.string(),
@@ -11,7 +11,7 @@ export const initialDataSchema = v.object({
 	conversationName: v.optional(v.string()),
 });
 
-function Assistant() {
+export function Assistant() {
 	useModel('anthropic/claude-haiku-4-5');
 	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the Microsoft Teams channel dispatch.');
@@ -20,4 +20,4 @@ function Assistant() {
 	return `Reply concisely in the bound Microsoft Teams conversation${conversationName}.`;
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialDataSchema;

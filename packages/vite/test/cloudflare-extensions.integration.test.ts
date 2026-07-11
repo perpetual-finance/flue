@@ -58,15 +58,16 @@ function extensionFixture(cloudflareSource: string): Fixture {
 		'src/agents/echo.ts': CF_ECHO_AGENT_MODULE,
 		'src/cloudflare.ts': cloudflareSource,
 		'src/app.ts': `import { Hono } from 'hono';
+import { createAgentRouter } from '@flue/runtime/routing';
 import './test-model.ts';
-import echo from './agents/echo.ts';
+import { Echo } from './agents/echo.ts';
 
 const app = new Hono();
 app.get('/counter', async (c) => {
 	const count = await c.env.Counter.getByName('default').increment();
 	return c.json({ count });
 });
-app.route('/agents/echo', echo.route());
+app.route('/agents/echo', createAgentRouter(Echo));
 
 export default app;
 `,

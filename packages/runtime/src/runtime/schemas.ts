@@ -112,5 +112,5 @@ export function parseDeliveredInput(value: unknown): {
 export const InvocationQuerySchema = v.object({
 	wait: v.optional(v.literal('result')),
 });
-/** Param contract for the mounted `AgentDefinition.route()` sub-app (`/:id`). */
+/** Param contract for the mounted `createAgentRouter()` sub-app (`/:id`). */
 export const AgentMountRouteParamSchema = v.object({ id: v.string() });

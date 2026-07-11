@@ -8,7 +8,6 @@ import {
 } from '@earendil-works/pi-ai/compat';
 import * as v from 'valibot';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineAgent } from '../src/agent-definition.ts';
 import type { ConversationRecord } from '../src/conversation-records.ts';
 import { useInitialData } from '../src/hooks/use-initial-data.ts';
 import { useModel } from '../src/hooks/use-model.ts';
@@ -17,10 +16,7 @@ import { createNodeAgentCoordinator } from '../src/node/agent-coordinator.ts';
 import { sqlite } from '../src/node/agent-execution-store.ts';
 import { readInstanceInfoFromStream } from '../src/runtime/flue-app.ts';
 import type { CreateAgentContextFn } from '../src/runtime/handle-agent.ts';
-import {
-	__flueBindAgentModule,
-	resetFlueAgentRegistrationForTests,
-} from '../src/runtime/registration.ts';
+import { resetFlueAgentRegistrationForTests } from '../src/runtime/registration.ts';
 import type { DeliveredMessage } from '../src/types.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
 
@@ -96,11 +92,11 @@ function dispatchInput(overrides: Partial<DispatchInput> & { dispatchId: string 
 }
 
 function makeAgent(provider: FauxProviderRegistration, onRender?: () => void) {
-	return defineAgent(() => {
+	return () => {
 		useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 		onRender?.();
 		return 'Base.';
-	});
+	};
 }
 
 describe('conditional sends (uid)', () => {
@@ -108,7 +104,7 @@ describe('conditional sends (uid)', () => {
 		const provider = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('one'), fauxAssistantMessage('two')]);
 		const { coordinator, conversationStreamStore } = await createRig(provider, [
-			{ name: 'assistant', definition: makeAgent(provider) },
+			{ name: 'assistant', agent: makeAgent(provider) },
 		]);
 
 		const created = await coordinator.admitDispatch(
@@ -146,7 +142,7 @@ describe('conditional sends (uid)', () => {
 		provider.setResponses([fauxAssistantMessage('one'), fauxAssistantMessage('two')]);
 		let renders = 0;
 		const { coordinator } = await createRig(provider, [
-			{ name: 'assistant', definition: makeAgent(provider, () => renders++) },
+			{ name: 'assistant', agent: makeAgent(provider, () => renders++) },
 		]);
 
 		const created = await coordinator.admitDispatch(
@@ -167,7 +163,7 @@ describe('conditional sends (uid)', () => {
 		const provider = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('one')]);
 		const { coordinator, executionStore } = await createRig(provider, [
-			{ name: 'assistant', definition: makeAgent(provider) },
+			{ name: 'assistant', agent: makeAgent(provider) },
 		]);
 
 		// Condition on an instance that does not exist at all.
@@ -196,7 +192,7 @@ describe('conditional sends (uid)', () => {
 		const provider = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('one')]);
 		const { coordinator, executionStore } = await createRig(provider, [
-			{ name: 'assistant', definition: makeAgent(provider) },
+			{ name: 'assistant', agent: makeAgent(provider) },
 		]);
 
 		const created = await coordinator.admitDispatch(
@@ -221,7 +217,7 @@ describe('conditional sends (uid)', () => {
 		const provider = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('one')]);
 		const { coordinator, executionStore } = await createRig(provider, [
-			{ name: 'assistant', definition: makeAgent(provider) },
+			{ name: 'assistant', agent: makeAgent(provider) },
 		]);
 
 		await expect(
@@ -241,13 +237,13 @@ describe('conditional sends (uid)', () => {
 		provider.setResponses([fauxAssistantMessage('one'), fauxAssistantMessage('two')]);
 		const input = v.optional(v.object({ issue: v.number() }));
 		const seen: unknown[] = [];
-		const agent = defineAgent(() => {
+		const agent = () => {
 			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 			seen.push(useInitialData<v.InferOutput<typeof input>>());
 			return 'Base.';
-		});
-		__flueBindAgentModule(agent, { identity: 'assistant', initialDataSchema: input });
-		const { coordinator } = await createRig(provider, [{ name: 'assistant', definition: agent }]);
+		};
+		agent.initialData = input;
+		const { coordinator } = await createRig(provider, [{ name: 'assistant', agent }]);
 
 		const created = await coordinator.admitDispatch(
 			dispatchInput({ dispatchId: 'dispatch:create-1', initialData: { issue: 7 } }),

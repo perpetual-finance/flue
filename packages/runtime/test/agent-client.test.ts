@@ -6,7 +6,6 @@ import {
 import * as v from 'valibot';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AgentRunError, init } from '../src/agent-client.ts';
-import { defineAgent } from '../src/agent-definition.ts';
 import { InvalidRequestError } from '../src/errors.ts';
 import { useAgentFinish } from '../src/hooks/use-agent-finish.ts';
 import { useAgentStart } from '../src/hooks/use-agent-start.ts';
@@ -17,6 +16,7 @@ import { useResponseFinish } from '../src/hooks/use-response-finish.ts';
 import { type Flue, start } from '../src/node/start.ts';
 import { resetFlueRuntimeForTests } from '../src/runtime/flue-app.ts';
 import { registerProvider, resetProviderRuntime } from '../src/runtime/providers.ts';
+import type { Agent } from '../src/types.ts';
 
 const providers: FauxProviderRegistration[] = [];
 const started: Flue[] = [];
@@ -54,25 +54,20 @@ async function startFlue(...agents: Parameters<typeof start>[0]['agents']) {
 }
 
 describe('start() + init(): the scripted client', () => {
-	it('accepts a whole agent-module namespace as an entry, reading the policy exports', async () => {
+	it('accepts a StartAgentConfig entry with a durability policy and an initialData static', async () => {
 		const { provider, model } = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('Seeded.')]);
 
 		let seenData: unknown;
-		const agentModule = {
-			default: defineAgent(() => {
-				useModel(model);
-				seenData = useInitialData<{ date: string }>();
-				return 'Reply.';
-			}),
-			name: 'module-seeded',
-			description: 'Module-entry agent.',
-			initialDataSchema: v.object({ date: v.string() }),
-			durability: { maxAttempts: 2 },
+		const agent = () => {
+			useModel(model);
+			seenData = useInitialData<{ date: string }>();
+			return 'Reply.';
 		};
+		agent.initialData = v.object({ date: v.string() });
 
-		await startFlue(agentModule);
-		const reply = await init(agentModule.default).dispatch({
+		await startFlue({ agent, name: 'module-seeded', durability: { maxAttempts: 2 } });
+		const reply = await init(agent).dispatch({
 			message: 'Go.',
 			initialData: { date: '2026-07-09' },
 		});
@@ -80,26 +75,23 @@ describe('start() + init(): the scripted client', () => {
 		expect(seenData).toEqual({ date: '2026-07-09' });
 	});
 
-	it('rejects a module entry without a name export', async () => {
-		const anonymous = {
-			default: defineAgent(() => {
-				useModel('faux/faux-model');
+	it('rejects an anonymous agents entry with no resolvable identity', async () => {
+		// Passed inline (not bound to a variable), so the function has no
+		// inferred `.name` either — genuinely anonymous.
+		await expect(
+			start({
+				agents: [
+					() => {
+						useModel('faux/faux-model');
+					},
+				],
 			}),
-		};
-		await expect(start({ agents: [anonymous as never] })).rejects.toThrow(
-			'add `export const name =',
-		);
+		).rejects.toThrow('could not resolve an identity');
 	});
 
-	it('rejects a module entry whose name export is not lower-kebab-case', async () => {
-		const badName = {
-			default: defineAgent(() => {
-				useModel('faux/faux-model');
-			}),
-			name: 'Not_Kebab',
-		};
-		await expect(start({ agents: [badName as never] })).rejects.toThrow(
-			'add `export const name =',
+	it('rejects an entry that is neither an agent function nor a { agent } record', async () => {
+		await expect(start({ agents: [{} as never] })).rejects.toThrow(
+			'must be agent functions or { agent, name?, durability? } records',
 		);
 	});
 
@@ -122,7 +114,7 @@ describe('start() + init(): the scripted client', () => {
 			});
 			return 'Produce the report when triggered.';
 		}
-		const reporter = defineAgent(Reporter);
+		const reporter = Reporter;
 
 		await startFlue({ name: 'reporter', agent: reporter });
 		const agent = init(reporter);
@@ -150,12 +142,12 @@ describe('start() + init(): the scripted client', () => {
 			seenData = useInitialData<{ date: string }>();
 			return 'Reply.';
 		}
-		const seeded = defineAgent(Seeded);
+		const seeded: Agent = Seeded;
+		seeded.initialData = v.object({ date: v.string() });
 
 		await startFlue({
 			name: 'seeded',
 			agent: seeded,
-			initialDataSchema: v.object({ date: v.string() }),
 		});
 		const reply = await init(seeded).dispatch({
 			message: 'Go.',
@@ -168,10 +160,10 @@ describe('start() + init(): the scripted client', () => {
 	it('pins the contacted incarnation: create-only handles continue across sends', async () => {
 		const { provider, model } = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('one'), fauxAssistantMessage('two')]);
-		const echo = defineAgent(() => {
+		const echo = () => {
 			useModel(model);
 			return 'Reply.';
-		});
+		};
 
 		await startFlue({ name: 'echo', agent: echo });
 		const agent = init(echo, { id: 'pin-1', uid: null });
@@ -196,7 +188,7 @@ describe('start() + init(): the scripted client', () => {
 			});
 			return 'Reply.';
 		}
-		const doomed = defineAgent(Doomed);
+		const doomed = Doomed;
 
 		await startFlue({ name: 'doomed', agent: doomed });
 		const error = await init(doomed)
@@ -224,7 +216,7 @@ describe('start() + init(): the scripted client', () => {
 			deliveries.push(`${delivery.kind}:${delivery.body}`);
 			return 'Reply.';
 		}
-		const listener = defineAgent(Listener);
+		const listener = Listener;
 
 		await startFlue({ name: 'listener', agent: listener });
 		const agent = init(listener, { id: 'dispatch-1' });
@@ -252,10 +244,10 @@ describe('start() + init(): the scripted client', () => {
 				throw new Error('provider exploded');
 			},
 		]);
-		const echo = defineAgent(() => {
+		const echo = () => {
 			useModel(model);
 			return 'Reply.';
-		});
+		};
 
 		await startFlue({ name: 'echo', agent: echo, durability: { maxAttempts: 1 } });
 		const error = await init(echo, { id: 'dispatch-fail-1' })
@@ -274,10 +266,10 @@ describe('start() + init(): the scripted client', () => {
 	it('streams projected chunks to onEvent while awaiting', async () => {
 		const { provider, model } = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('streamed')]);
-		const echo = defineAgent(() => {
+		const echo = () => {
 			useModel(model);
 			return 'Reply.';
-		});
+		};
 
 		await startFlue({ name: 'echo', agent: echo });
 		const seen: string[] = [];
@@ -288,10 +280,10 @@ describe('start() + init(): the scripted client', () => {
 
 	it('guards: start() refuses a configured process; unstarted init() throws with guidance', async () => {
 		const { model } = createFauxProvider();
-		const echo = defineAgent(() => {
+		const echo = () => {
 			useModel(model);
 			return 'Reply.';
-		});
+		};
 
 		await expect(init(echo).dispatch('Go.')).rejects.toThrow(
 			/before the Flue runtime was configured/,
@@ -306,10 +298,10 @@ describe('start() + init(): the scripted client', () => {
 	it('init() validates its arguments eagerly', async () => {
 		expect(() => init({} as never)).toThrow(InvalidRequestError);
 		const { model } = createFauxProvider();
-		const echo = defineAgent(() => {
+		const echo = () => {
 			useModel(model);
 			return 'Reply.';
-		});
+		};
 		expect(() => init(echo, { id: ' ' })).toThrow(/non-empty string instance id/);
 		// The payload is the top-level dispatch request 1:1 — a bare message
 		// object or a smuggled id/uid fails loudly with the corrected form.

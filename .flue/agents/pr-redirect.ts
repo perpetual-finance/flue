@@ -32,7 +32,7 @@
  * this paragraph before adding any secret to the sandbox.
  */
 
-import { defineAgent, type FlueHarness, useSandbox, useTool } from '@flue/runtime';
+import { type FlueHarness, useModel, useSandbox, useTool } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 import * as v from 'valibot';
 import {
@@ -65,7 +65,9 @@ const TRIAGE_LABEL = 'triage';
 
 const ghToken = process.env.GITHUB_TOKEN;
 
-function PrRedirect() {
+export function PrRedirect() {
+	useModel('anthropic/claude-opus-4-6');
+
 	// Validate both tokens before any model spend: the render runs at
 	// initialization, ahead of the first model call. The privileged token
 	// stays outside the sandbox allowlist and is read only by lib/github.ts.
@@ -203,8 +205,6 @@ function PrRedirect() {
 When asked to redirect a pull request, call \`redirect_pr\` with its number, then report the outcome in one sentence: the action taken and the destination URL. If no PR number is given, ask for one instead of guessing.`;
 }
 
-export default defineAgent(PrRedirect, { model: 'anthropic/claude-opus-4-6' });
-
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface PrDetails {
@@ -251,7 +251,7 @@ async function fetchPullRequest(harness: FlueHarness, prNumber: number): Promise
 	// strings (title, body, branch name) never reach a shell parser.
 	const fields =
 		'number,title,body,author,headRefName,headRepository,headRepositoryOwner,url,baseRefName,files,changedFiles';
-	const result = await harness.shell(`gh pr view ${prNumber} --json ${fields}`);
+	const result = await harness.sandbox.exec(`gh pr view ${prNumber} --json ${fields}`);
 	if (result.exitCode !== 0) {
 		throw new Error(`gh pr view ${prNumber} failed: ${result.stderr}`);
 	}
@@ -362,7 +362,7 @@ async function searchIssues(
 	const cmd = `gh search issues --repo ${shellEscape(repo)} --state open --limit 10 ${shellEscape(
 		query,
 	)} --json number,title,url,body`;
-	const result = await harness.shell(cmd);
+	const result = await harness.sandbox.exec(cmd);
 	if (result.exitCode !== 0) {
 		// Search failures shouldn't crash the pipeline — log and move on.
 		log.warn('gh search issues failed', { query, stderr: result.stderr });
@@ -399,7 +399,7 @@ async function searchDiscussions(
 		}
 	}`;
 	const cmd = `gh api graphql -f query=${shellEscape(graphql)} -f q=${shellEscape(ghQuery)}`;
-	const result = await harness.shell(cmd);
+	const result = await harness.sandbox.exec(cmd);
 	if (result.exitCode !== 0) {
 		log.warn('gh api graphql (discussion search) failed', { query, stderr: result.stderr });
 		return [];

@@ -7,8 +7,8 @@ tool mounting.
 
 ## What it demonstrates
 
-- **Everything is a hook.** `src/agents/support.ts`'s `Support` function is
-  itself the agent function — the one `defineAgent(Support)` registers, whose
+- **Everything is a hook.** `src/agents/support.ts`'s exported `Support`
+  function is itself the agent — the `'use agent'` scan registers it, and its
   `useModel()` call gives it a model. `useGathering`, `useDrafting`,
   `useCommitting`, `useDone`, and `useRetention` are custom hooks it calls. Each is a plain sync function:
   `useTool()` calls in its body attach tools, and `useInstruction()` calls

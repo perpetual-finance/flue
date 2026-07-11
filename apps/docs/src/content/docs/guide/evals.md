@@ -24,7 +24,7 @@ In addition to ordinary Vitest assertions and case tables, `vitest-evals` suppor
 
 ### Write an eval
 
-Use `describeEval(...)` to bind the Flue harness to a suite. The harness addresses the agent by its mount URL — wherever your `app.ts` mounted `agent.route()`:
+Use `describeEval(...)` to bind the Flue harness to a suite. The harness addresses the agent by its mount URL — wherever your `app.ts` mounted the agent's router (`createAgentRouter(...)`):
 
 ```ts title="src/evals/service-health.eval.ts"
 import { expect } from 'vitest';

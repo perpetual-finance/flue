@@ -1,7 +1,7 @@
 ---
 title: Cloudflare
 description: Understand the Cloudflare-specific runtime behavior and APIs for Flue applications.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-11
 ---
 
 The Cloudflare target builds your agents for the Cloudflare platform. Each agent runs inside its own Durable Object class, using the Agents SDK, Workers AI, Cloudflare Sandbox, Cloudflare Shell, and other Worker primitives where appropriate. Durable Objects give each agent conversation its own persistent state, durable execution, and global addressability out of the box.
@@ -10,14 +10,14 @@ The build is owned by Vite: `flue()` plus the official `@cloudflare/vite-plugin`
 
 ## Generated Durable Objects
 
-Flue generates a Durable Object class and a Wrangler binding for each [`'use agent'`](/docs/guide/use-agent/) module found by the scan. Both derive from the agent's identity — the file basename, or its [`export const name` override](/docs/guide/use-agent/#1-identity):
+Flue generates a Durable Object class and a Wrangler binding for each agent found by the [`'use agent'`](/docs/guide/use-agent/) scan — one per exported agent function, so a module with several agents produces several classes. Both derive from the agent's identity — the exported function's name, or its [`agentName` static override](/docs/guide/use-agent/#2-identity):
 
 ```txt
-src/agents/support-chat.ts   ->  FlueSupportChatAgent
-                                 env.FLUE_SUPPORT_CHAT_AGENT
+export function SupportChat() {…}   ->  FlueSupportChatAgent
+                                        env.FLUE_SUPPORT_CHAT_AGENT
 ```
 
-The class name is how Cloudflare identifies the Durable Object in migrations. The binding is how your application code accesses the Durable Object namespace at runtime through `env`. Because both come from the identity, renaming an agent file is a storage-identity change unless `export const name` pins the identity — see [Managing migrations](#managing-migrations).
+Camel boundaries split in the binding name, so `SupportChat` yields `FLUE_SUPPORT_CHAT_AGENT` (never `FLUE_SUPPORTCHAT_AGENT`); a kebab-case `agentName` like `support-chat` generates the same pair. The class name is how Cloudflare identifies the Durable Object in migrations. The binding is how your application code accesses the Durable Object namespace at runtime through `env`. Because both come from the identity, renaming the agent function is a storage-identity change unless `agentName` pins the identity — renaming the file changes nothing; see [Managing migrations](#managing-migrations).
 
 Canonical agent conversation streams, immutable attachments, and accepted submissions are stored in the owning Durable Object's SQLite storage automatically. The Cloudflare target does not use `db.ts`; a source-root `db.ts` is rejected at build time.
 
@@ -49,7 +49,7 @@ Flue generates the Durable Object classes and bindings, but your `wrangler.jsonc
 
 ### Managing migrations
 
-Migration history stays user-authored — Flue never writes it, because it is an ordered, append-only record of your deployments. Adding an agent is always a triple: the `'use agent'` file, the mount in `app.ts` (unless dispatch-only), and a new migration entry with a unique tag:
+Migration history stays user-authored — Flue never writes it, because it is an ordered, append-only record of your deployments. Adding an agent is always a triple: the exported agent function in a `'use agent'` module, the mount in `app.ts` (unless dispatch-only), and a new migration entry with a unique tag:
 
 ```jsonc
 {
@@ -73,7 +73,7 @@ For example, if you remove an agent that was previously deployed, append a `dele
 }
 ```
 
-Similarly, use `renamed_classes` when a deployed class changes its name — which for Flue agents means the agent's **file** was renamed:
+Similarly, use `renamed_classes` when a deployed class changes its name — which for Flue agents means the agent's **identity** changed: the function was renamed, or its `agentName` pin was edited:
 
 ```jsonc
 {
@@ -147,9 +147,9 @@ const response = await env.AGENT_APP.fetch(new Request(url));
 [Workers AI](https://developers.cloudflare.com/workers-ai/) lets you run AI models directly on Cloudflare's infrastructure without managing API keys or external provider accounts. Flue connects to Workers AI automatically on the Cloudflare target, so using a Workers AI model is as simple as specifying the model name:
 
 ```ts
-function Assistant() {}
-
-export default defineAgent(Assistant);
+export function Assistant() {
+  useModel('cloudflare/@cf/moonshotai/kimi-k2.6');
+}
 ```
 
 No API key is needed. Authorization and billing follow the Worker account, including the [Workers AI free tier](https://developers.cloudflare.com/workers-ai/platform/pricing/).
@@ -166,15 +166,13 @@ To customize the gateway, disable it, or target a named gateway, re-register the
 'use agent';
 import { getSandbox } from '@cloudflare/sandbox';
 import { env } from 'cloudflare:workers';
-import { type AgentProps, defineAgent, useModel, useSandbox } from '@flue/runtime';
+import { type AgentProps, useModel, useSandbox } from '@flue/runtime';
 import { cloudflareSandbox } from '@flue/runtime/cloudflare';
 
-function Assistant({ id }: AgentProps) {
+export function Assistant({ id }: AgentProps) {
   useModel('anthropic/claude-sonnet-4-6');
   useSandbox(cloudflareSandbox(getSandbox(env.Sandbox, id)), { cwd: '/workspace' });
 }
-
-export default defineAgent(Assistant);
 ```
 
 See [Cloudflare Sandbox](/docs/ecosystem/sandboxes/cloudflare/) for container configuration and lifecycle guidance.
@@ -205,12 +203,12 @@ Flue owns each generated Durable Object class. When an agent needs access to nat
 
 ```ts
 'use agent';
-import { defineAgent, useModel } from '@flue/runtime';
+import { useModel } from '@flue/runtime';
 import { extend } from '@flue/runtime/cloudflare';
 
-function Assistant() {}
-
-export default defineAgent(Assistant);
+export function Assistant() {
+  useModel('anthropic/claude-sonnet-4-6');
+}
 
 export const cloudflare = extend({
   base: (Base) =>
@@ -226,7 +224,7 @@ export const cloudflare = extend({
 });
 ```
 
-`base` receives the Agents SDK `Agent` base class. Flue applies it before defining the final generated Durable Object subclass, so your authored methods and lifecycle hooks are available on the generated class.
+`base` receives the Agents SDK `Agent` base class. Flue applies it before defining the final generated Durable Object subclass, so your authored methods and lifecycle hooks are available on the generated class. The `cloudflare` export is per-module: when a marked file exports several agents, the extension applies to every generated class in that file.
 
 `wrap` receives the final generated class and may return a prototype-preserving constructor wrapper. Use it for integrations like Sentry that instrument the class without replacing its prototype:
 
@@ -273,7 +271,7 @@ export default {
 
 Use `app.ts` for custom HTTP routes and middleware. `cloudflare.ts` must not define a default `fetch` handler because Flue keeps HTTP composition in `app.ts`.
 
-Use `cloudflare.ts` for Worker-level events such as inbound email, queues, or cron handlers that are not owned by a specific generated agent class. To deliver scheduled input to an agent from one of these handlers, import the agent's default export and call `dispatch(agent, { id, message })` — dispatch needs no mount and bypasses HTTP middleware. See [Schedules](/docs/guide/schedules/) for a Cron Trigger example.
+Use `cloudflare.ts` for Worker-level events such as inbound email, queues, or cron handlers that are not owned by a specific generated agent class. To deliver scheduled input to an agent from one of these handlers, import the agent function and call `dispatch(Agent, { id, message })` — dispatch needs no mount and bypasses HTTP middleware. See [Schedules](/docs/guide/schedules/) for a Cron Trigger example.
 
 ## Reference
 

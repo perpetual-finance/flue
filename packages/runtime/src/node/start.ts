@@ -12,51 +12,40 @@
 
 import type { PersistenceAdapter } from '../agent-execution-store.ts';
 import { getFlueRuntime } from '../runtime/flue-app.ts';
-import { AGENT_IDENTITY_PATTERN, type FlueAgentRegistration } from '../runtime/registration.ts';
+import {
+	bindAgentDurability,
+	type FlueAgentRegistration,
+	resolveAgentIdentity,
+} from '../runtime/registration.ts';
+import type { Agent, DurabilityConfig } from '../types.ts';
 import { sqlite } from './agent-execution-store.ts';
 import { assembleNodeAgentRuntime, connectPersistenceAdapter } from './assemble.ts';
 
-export interface StartAgent {
-	/** Registered identity (lower-kebab-case); keys durable conversation storage. */
-	name: string;
-	description?: string;
-	/** The agent — a `defineAgent(...)` value. */
-	agent: FlueAgentRegistration['definition'];
-	/**
-	 * Valibot schema for instance-creation data — the programmatic analog of
-	 * the agent module's `initialDataSchema` export.
-	 */
-	initialDataSchema?: FlueAgentRegistration['initialDataSchema'];
-	/** Submission retry policy — the analog of the module's `durability` export. */
-	durability?: FlueAgentRegistration['durability'];
-}
-
 /**
- * A whole agent module as a `start()` entry: `import * as reporter from
- * './agents/reporter.ts'` and pass the namespace. The module's exports carry
- * the registration exactly as a `'use agent'` build reads them — with one
- * difference: `export const name` is REQUIRED here, because a namespace
- * object cannot know its own filename, so there is no basename to fall back
- * on.
+ * A configured `start()` entry, for when the bare function isn't enough:
+ * an identity override (inline/anonymous functions in tests), or binding
+ * policy the runner decides (durability).
  */
-export interface StartAgentModule {
-	/** The agent — the module's default export (`defineAgent(...)`). */
-	default: FlueAgentRegistration['definition'];
-	/** The identity — the module's `export const name` (lower-kebab-case). */
-	name: string;
-	description?: string;
-	/** Route middleware, honored if the caller mounts `agent.route()` itself. */
-	route?: FlueAgentRegistration['route'];
-	initialDataSchema?: FlueAgentRegistration['initialDataSchema'];
-	durability?: FlueAgentRegistration['durability'];
+export interface StartAgentConfig {
+	/** The agent function. */
+	agent: Agent;
+	/**
+	 * Identity override; keys durable conversation storage. Defaults to the
+	 * agent's own identity (its `agentName` static, else the function name).
+	 * NEVER inferred positionally — positional names would silently reassign
+	 * conversations when the agents array is reordered.
+	 */
+	name?: string;
+	/** Submission retry policy — binding policy, decided by the runner. */
+	durability?: DurabilityConfig;
 }
 
-export type StartAgentEntry = StartAgent | StartAgentModule;
+export type StartAgentEntry = Agent | StartAgentConfig;
 
 export interface StartOptions {
 	/**
-	 * The agents this runtime serves: `{ name, agent, ... }` entries for
-	 * inline definitions, or whole agent-module namespaces (`import * as`).
+	 * The agents this runtime serves: agent functions, or
+	 * `{ agent, name?, durability? }` entries when the binding needs config.
 	 */
 	agents: readonly StartAgentEntry[];
 	/**
@@ -89,18 +78,14 @@ export interface Flue {
  * ```ts
  * import { init } from '@flue/runtime';
  * import { sqlite, start } from '@flue/runtime/node';
- * import * as reporter from '../src/agents/reporter.ts';
+ * import { Reporter } from '../src/agents/reporter.ts';
  *
  * await using flue = await start({
- *   // The whole module is the registration: its `name`, `description`,
- *   // `initialDataSchema`, and `durability` exports carry the config
- *   // (`export const name` is required for this form). Inline agents
- *   // use `{ name, agent }` entries instead.
- *   agents: [reporter],
+ *   agents: [Reporter], // the function IS the agent
  *   db: sqlite('./nightly.db'), // omit for in-memory
  * });
  *
- * const agent = init(reporter.default, { id: `nightly-${date}` });
+ * const agent = init(Reporter, { id: `nightly-${date}` });
  * const reply = await agent.dispatch('You have been triggered. Produce the nightly report.');
  * console.log(reply.text);
  * ```
@@ -118,9 +103,7 @@ export async function start(options: StartOptions): Promise<Flue> {
 		);
 	}
 	if (!Array.isArray(options?.agents) || options.agents.length === 0) {
-		throw new Error(
-			'[flue] start() requires at least one agent: start({ agents: [{ name, agent }] }).',
-		);
+		throw new Error('[flue] start() requires at least one agent: start({ agents: [MyAgent] }).');
 	}
 	const registrations: FlueAgentRegistration[] = options.agents.map((record) =>
 		normalizeStartAgentEntry(record),
@@ -145,47 +128,27 @@ export async function start(options: StartOptions): Promise<Flue> {
 }
 
 function normalizeStartAgentEntry(record: StartAgentEntry): FlueAgentRegistration {
-	if (!record || typeof record !== 'object') {
-		throw new Error('[flue] start() agents entries must be objects.');
+	if (typeof record === 'function') {
+		return { identity: requireIdentity(record, undefined), agent: record };
 	}
-	if ('agent' in record) {
-		if (typeof record.name !== 'string' || record.name.trim() === '') {
-			throw new Error('[flue] start() agents entries require a non-empty string `name`.');
-		}
-		return {
-			identity: record.name,
-			definition: record.agent,
-			...(record.description !== undefined ? { description: record.description } : {}),
-			...(record.initialDataSchema !== undefined
-				? { initialDataSchema: record.initialDataSchema }
-				: {}),
-			...(record.durability !== undefined ? { durability: record.durability } : {}),
-		};
+	if (!record || typeof record !== 'object' || typeof record.agent !== 'function') {
+		throw new Error(
+			'[flue] start() agents entries must be agent functions or { agent, name?, durability? } records.',
+		);
 	}
-	if ('default' in record) {
-		// A module namespace has no filename, so the identity cannot fall back
-		// to a basename the way the build scan's does: the name export is
-		// mandatory. NEVER auto-name (agent-1, ...) — the identity keys durable
-		// storage, and positional names silently reassign conversations when
-		// the agents array is reordered.
-		if (typeof record.name !== 'string' || !AGENT_IDENTITY_PATTERN.test(record.name)) {
-			throw new Error(
-				'[flue] start() module entries require the agent module to declare its identity: ' +
-					"add `export const name = '<lower-kebab-case>'` to the module, or use the { name, agent } entry form.",
-			);
-		}
-		return {
-			identity: record.name,
-			definition: record.default,
-			...(record.description !== undefined ? { description: record.description } : {}),
-			...(record.route !== undefined ? { route: record.route } : {}),
-			...(record.initialDataSchema !== undefined
-				? { initialDataSchema: record.initialDataSchema }
-				: {}),
-			...(record.durability !== undefined ? { durability: record.durability } : {}),
-		};
+	const identity = requireIdentity(record.agent, record.name);
+	if (record.durability !== undefined) bindAgentDurability(identity, record.durability);
+	return { identity, agent: record.agent };
+}
+
+function requireIdentity(agent: Agent, override: string | undefined): string {
+	const identity = override ?? resolveAgentIdentity(agent);
+	if (identity === undefined) {
+		throw new Error(
+			'[flue] start() could not resolve an identity for an agents entry: the function is ' +
+				'anonymous and carries no agentName static. Name the function, assign ' +
+				"`fn.agentName = '<identity>'`, or use the { agent, name } entry form.",
+		);
 	}
-	throw new Error(
-		'[flue] start() agents entries must be { name, agent } records or agent-module namespaces (import * as agent).',
-	);
+	return identity;
 }

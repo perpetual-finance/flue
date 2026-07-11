@@ -14,7 +14,6 @@ import {
 } from '@earendil-works/pi-ai/compat';
 import * as v from 'valibot';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineAgent } from '../src/agent-definition.ts';
 import { toolStepRecordId } from '../src/conversation-records.ts';
 import { useModel } from '../src/hooks/use-model.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
@@ -115,10 +114,10 @@ async function createCoordinatorWithAgent(
 		agents: [
 			{
 				name: 'assistant',
-				definition: defineAgent(() => {
+				agent: () => {
 					useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 					return agentFn();
-				}),
+				},
 			},
 		],
 		createContext: makeFauxCreateContext(provider),

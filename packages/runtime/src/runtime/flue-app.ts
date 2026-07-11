@@ -1,9 +1,8 @@
-import type { MiddlewareHandler } from 'hono';
 import type { ConversationRecord } from '../conversation-records.ts';
 import { configureErrorRendering, InvalidRequestError } from '../errors.ts';
 import type {
+	Agent,
 	AgentDispatchRequest,
-	AgentModuleValue,
 	DispatchReceipt,
 	NamedAgentDispatchRequest,
 } from '../types.ts';
@@ -18,9 +17,7 @@ import { agentStreamPath } from './stream-offsets.ts';
 
 export interface AgentRecord {
 	name: string;
-	definition: AgentModuleValue;
-	description?: string;
-	route?: MiddlewareHandler;
+	agent: Agent;
 }
 
 interface RuntimeBase {
@@ -67,8 +64,8 @@ export type FlueRuntime = NodeRuntime | CloudflareRuntime;
  * `dispatchId` identifies delivery. To await the settled reply, use the
  * `init()` handle instead.
  *
- * The `agent` argument must be a value default-exported by exactly one
- * registered `'use agent'` module.
+ * The `agent` argument is the agent function itself, registered with this
+ * app (an export of a `'use agent'` module, or a `start()` entry).
  *
  * Delivery durability depends on the generated target. Node uses a
  * process-lifetime in-memory queue by default. Cloudflare durably admits work
@@ -77,7 +74,7 @@ export type FlueRuntime = NodeRuntime | CloudflareRuntime;
  * external side effects to be idempotent.
  */
 export async function dispatch(
-	agent: AgentModuleValue,
+	agent: Agent,
 	request: AgentDispatchRequest,
 ): Promise<DispatchReceipt> {
 	const rt = runtimeConfig;
@@ -87,11 +84,11 @@ export async function dispatch(
 				'This usually means it was used outside a Flue-built server entry.',
 		);
 	}
-	if (!isAgentDefinitionValue(agent)) {
+	if (!isAgentFunction(agent)) {
 		throw new InvalidRequestError({
 			reason:
-				'dispatch() requires an agent definition as its first argument. ' +
-				"Pass the default export of a 'use agent' module: dispatch(agent, { id, message }).",
+				'dispatch() requires an agent function as its first argument: ' +
+				'dispatch(agent, { id, message }).',
 		});
 	}
 	return enqueueDispatch({
@@ -123,7 +120,7 @@ export interface AgentInstanceInfo {
  * a send without attempting one first.
  */
 export async function getAgentInstance(
-	agent: AgentModuleValue,
+	agent: Agent,
 	id: string,
 ): Promise<AgentInstanceInfo | null> {
 	const rt = runtimeConfig;
@@ -133,20 +130,20 @@ export async function getAgentInstance(
 				'This usually means it was used outside a Flue-built server entry.',
 		);
 	}
-	if (!isAgentDefinitionValue(agent)) {
+	if (!isAgentFunction(agent)) {
 		throw new InvalidRequestError({
 			reason:
-				'getAgentInstance() requires an agent definition as its first argument. ' +
-				"Pass the default export of a 'use agent' module: getAgentInstance(agent, id).",
+				'getAgentInstance() requires an agent function as its first argument: ' +
+				'getAgentInstance(agent, id).',
 		});
 	}
 	if (typeof id !== 'string' || id.trim() === '') {
 		throw new Error('[flue] getAgentInstance() requires a non-empty instance id.');
 	}
-	const name = rt.agents.find((record) => record.definition === agent)?.name;
+	const name = rt.agents.find((record) => record.agent === agent)?.name;
 	if (!name) {
 		throw new Error(
-			'[flue] getAgentInstance() target agent definition is not a discovered default-exported agent in this built application.',
+			'[flue] getAgentInstance() target agent is not registered in this built application.',
 		);
 	}
 	if (rt.target === 'cloudflare') return rt.instanceInfo(name, id);
@@ -177,23 +174,20 @@ export async function readInstanceInfoFromStream(
 	return { id: instanceId };
 }
 
-function isAgentDefinitionValue(value: unknown): value is AgentModuleValue {
-	// Twin: `assertAgentDefinitionValue` in registration.ts — keep in sync.
-	if (typeof value !== 'object' || value === null) return false;
-	return '__flueFunctionAgent' in value && value.__flueFunctionAgent === true;
+function isAgentFunction(value: unknown): value is Agent {
+	// Twin: `assertAgentFunction` in registration.ts — keep in sync.
+	return typeof value === 'function';
 }
 
 function resolveAgentDefinitionDispatchRequest(
-	agent: AgentModuleValue,
+	agent: Agent,
 	request: AgentDispatchRequest | undefined,
 	rt: FlueRuntime,
 ): NamedAgentDispatchRequest {
 	if (!request) throw new Error('[flue] dispatch(agent, request) requires a dispatch request.');
-	const name = rt.agents.find((record) => record.definition === agent)?.name;
+	const name = rt.agents.find((record) => record.agent === agent)?.name;
 	if (!name) {
-		throw new Error(
-			'[flue] dispatch() target agent definition is not a discovered default-exported agent in this built application.',
-		);
+		throw new Error('[flue] dispatch() target agent is not registered in this built application.');
 	}
 	return {
 		agent: name,

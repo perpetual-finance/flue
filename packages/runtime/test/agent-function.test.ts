@@ -4,7 +4,6 @@ import {
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineAgent } from '../src/agent-definition.ts';
 import { InvalidRequestError } from '../src/errors.ts';
 import {
 	assertRenderStructureInvariance,
@@ -17,17 +16,17 @@ import { usePersistentState } from '../src/hooks/use-persistent-state.ts';
 import { useTool } from '../src/hooks/use-tool.ts';
 import { dispatch } from '../src/index.ts';
 import { configureFlueRuntime, createFlueContext, type DispatchInput } from '../src/internal.ts';
-import { agent as agentRouteHelper } from '../src/routing.ts';
 import {
 	type AgentSubmissionInput,
 	createAgentSubmissionSessionHandler,
 } from '../src/runtime/agent-submissions.ts';
 import { resetFlueRuntimeForTests } from '../src/runtime/flue-app.ts';
 import {
+	createAgentRouter,
 	registerFlueAgents,
 	resetFlueAgentRegistrationForTests,
 } from '../src/runtime/registration.ts';
-import type { FunctionAgentDefinition } from '../src/types.ts';
+import type { Agent } from '../src/types.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
 import { agentRecord, nodeRuntime } from './helpers/runtime-config.ts';
 
@@ -49,7 +48,7 @@ function createProvider(): FauxProviderRegistration {
 
 /** Run one user prompt through a full submission and return the model-visible system prompt. */
 async function processPromptCapturingSystemPrompt(
-	agent: FunctionAgentDefinition,
+	agent: Agent,
 	provider: FauxProviderRegistration,
 ): Promise<string> {
 	let systemPrompt: string | undefined;
@@ -96,7 +95,7 @@ describe('function agents (Flue Hooks)', () => {
 			return 'Base identity instruction.';
 		}
 
-		const systemPrompt = await processPromptCapturingSystemPrompt(defineAgent(Writer), provider);
+		const systemPrompt = await processPromptCapturingSystemPrompt(Writer, provider);
 
 		const base = systemPrompt.indexOf('Base identity instruction.');
 		const first = systemPrompt.indexOf('First contribution.');
@@ -118,16 +117,16 @@ describe('function agents (Flue Hooks)', () => {
 			return 'Base.';
 		}
 
-		const systemPrompt = await processPromptCapturingSystemPrompt(defineAgent(Writer), provider);
+		const systemPrompt = await processPromptCapturingSystemPrompt(Writer, provider);
 
 		expect(systemPrompt).toContain('Write in the house voice.');
 	});
 
 	it('resolves a registered function agent through dispatch()', async () => {
 		const admitted: DispatchInput[] = [];
-		const moderator = defineAgent(() => {
+		const moderator = () => {
 			useModel(MODEL);
-		});
+		};
 		configureFlueRuntime({
 			...nodeRuntime(),
 			dispatchQueue: {
@@ -136,7 +135,7 @@ describe('function agents (Flue Hooks)', () => {
 					return { dispatchId: input.dispatchId, acceptedAt: input.acceptedAt };
 				},
 			},
-			agents: [agentRecord('moderator', { definition: moderator })],
+			agents: [agentRecord('moderator', { agent: moderator })],
 		});
 
 		await dispatch(moderator, {
@@ -158,34 +157,12 @@ describe('function agents (Flue Hooks)', () => {
 		expect(error).toBeInstanceOf(InvalidRequestError);
 	});
 
-	it('registers function agents and rejects invalid module values', () => {
-		const writer = defineAgent(() => 'Writer.');
-		expect(() => registerFlueAgents([{ identity: 'writer', definition: writer }])).not.toThrow();
-		expect(() => registerFlueAgents([{ identity: 'broken', definition: {} as never }])).toThrow(
-			'must default-export defineAgent(Agent)',
+	it('registers function agents and rejects non-function values', () => {
+		const writer = () => 'Writer.';
+		expect(() => registerFlueAgents([{ identity: 'writer', agent: writer }])).not.toThrow();
+		expect(() => registerFlueAgents([{ identity: 'broken', agent: {} as never }])).toThrow(
+			'must be a function',
 		);
-	});
-
-	it('rejects a bare capability function module value with a wrap hint', () => {
-		function Support() {
-			return 'Support.';
-		}
-		expect(() =>
-			registerFlueAgents([{ identity: 'support', definition: Support as never }]),
-		).toThrow('defineAgent(Support)');
-	});
-});
-
-describe('defineAgent(Capability)', () => {
-	it('requires a function', () => {
-		expect(() => defineAgent('not a function' as never)).toThrow('requires a function');
-	});
-
-	it('produces a frozen, marked value with a route factory', () => {
-		const agent = defineAgent(() => 'x');
-		expect(agent.__flueFunctionAgent).toBe(true);
-		expect(Object.isFrozen(agent)).toBe(true);
-		expect(typeof agent.route).toBe('function');
 	});
 });
 
@@ -416,11 +393,12 @@ describe('assertRenderStructureInvariance()', () => {
 	});
 });
 
-describe('agent() routing helper', () => {
-	it('builds a mountable router for a registered function agent', async () => {
-		const writer = defineAgent(() => 'Writer.');
-		registerFlueAgents([{ identity: 'writer', definition: writer }]);
-		const router = agentRouteHelper(writer).route();
+describe('createAgentRouter()', () => {
+	it('builds a mountable router for a named function agent', async () => {
+		function Writer() {
+			return 'Writer.';
+		}
+		const router = createAgentRouter(Writer);
 		// No runtime configured: hitting a route fails with the runtime error,
 		// which proves resolution reached the handler (mounting itself worked).
 		const response = await router.fetch(
@@ -429,10 +407,11 @@ describe('agent() routing helper', () => {
 		expect(response.status).toBeGreaterThanOrEqual(400);
 	});
 
-	it('rejects values that are not agent module exports', () => {
-		expect(() => agentRouteHelper({} as never)).toThrow("requires a 'use agent' module");
-		expect(() => agentRouteHelper((() => 'bare') as never)).toThrow(
-			"requires a 'use agent' module",
-		);
+	it('rejects values that are not agent functions', () => {
+		expect(() => createAgentRouter({} as never)).toThrow('must be a function');
+	});
+
+	it('rejects an anonymous function with no resolvable identity', () => {
+		expect(() => createAgentRouter(() => 'bare')).toThrow('could not resolve an identity');
 	});
 });

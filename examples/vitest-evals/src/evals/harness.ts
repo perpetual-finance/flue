@@ -5,7 +5,7 @@ import { createHarness, type SimpleToolCallRecord } from 'vitest-evals';
 export interface FlueAgentHarnessOptions {
 	/**
 	 * Absolute URL where the agent's routes are mounted (wherever the
-	 * application's app.ts mounts `agent.route()`). Each eval case runs in a
+	 * application's app.ts mounts `createAgentRouter(...)`). Each eval case runs in a
 	 * fresh conversation at `<agentUrl>/eval-<uuid>`.
 	 */
 	agentUrl: string;

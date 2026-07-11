@@ -22,7 +22,7 @@ The Resend blueprint installs `@flue/resend` and the official `resend` SDK, adds
 import { createResendChannel } from '@flue/resend';
 import { dispatch, useModel } from '@flue/runtime';
 import { Resend } from 'resend';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 export const client = new Resend(process.env.RESEND_API_KEY!);
 
@@ -31,7 +31,7 @@ export const channel = createResendChannel({
   webhookSecret: process.env.RESEND_WEBHOOK_SECRET!,
   async webhook({ event, delivery }) {
     if (event.type !== 'email.received') return;
-    await dispatch(assistant, {
+    await dispatch(Assistant, {
       id: emailInstanceId(event.data.email_id),
       message: {
         kind: 'signal',
@@ -95,7 +95,7 @@ bundle.
 import { createResendChannel } from '@flue/resend';
 import { defineTool, dispatch, useModel } from '@flue/runtime';
 import { Resend } from 'resend';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 const EMAIL_INSTANCE_PREFIX = 'resend-email:';
 
@@ -109,7 +109,7 @@ export const channel = createResendChannel({
   async webhook({ event, delivery }) {
     switch (event.type) {
       case 'email.received': {
-        await dispatch(assistant, {
+        await dispatch(Assistant, {
           id: emailInstanceId(event.data.email_id),
           message: {
             kind: 'signal',
@@ -198,17 +198,15 @@ or durable storage.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { type AgentProps, defineAgent, useModel, useTool } from '@flue/runtime';
+import { type AgentProps, useModel, useTool } from '@flue/runtime';
 import { emailIdFromInstanceId, retrieveReceivedEmail } from '../channels/resend.ts';
 
-function Assistant({ id }: AgentProps) {
+export function Assistant({ id }: AgentProps) {
   useModel('anthropic/claude-haiku-4-5');
   const emailId = emailIdFromInstanceId(id);
   useTool(retrieveReceivedEmail(emailId));
   return 'Review the inbound support email. Retrieve the complete email when its body or headers are needed.';
 }
-
-export default defineAgent(Assistant);
 ```
 
 The model can retrieve only the email already bound by trusted application

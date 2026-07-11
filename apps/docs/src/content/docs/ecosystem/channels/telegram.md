@@ -24,7 +24,7 @@ exports, and modifies the selected agent to bind the generated message tool.
 import { createTelegramChannel } from '@flue/telegram';
 import { dispatch } from '@flue/runtime';
 import { Api } from 'grammy';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 export const client = new Api(process.env.TELEGRAM_BOT_TOKEN!);
 
@@ -34,7 +34,7 @@ export const channel = createTelegramChannel({
     const incoming = update.message ?? update.channel_post ?? update.business_message;
     if (!incoming) return;
     const conversation = conversationFromMessage(incoming);
-    await dispatch(assistant, {
+    await dispatch(Assistant, {
       id: channel.instanceId(conversation),
       // Recorded once when this event creates the instance; ignored after.
       initialData: conversationData(conversation, incoming),
@@ -122,7 +122,7 @@ import { defineTool, dispatch } from '@flue/runtime';
 import { Api } from 'grammy';
 import type { Message } from 'grammy/types';
 import * as v from 'valibot';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 export const client = new Api(process.env.TELEGRAM_BOT_TOKEN!);
 
@@ -134,7 +134,7 @@ export const channel = createTelegramChannel({
     const incoming = update.message ?? update.channel_post ?? update.business_message;
     if (incoming) {
       const conversation = conversationFromMessage(incoming);
-      await dispatch(assistant, {
+      await dispatch(Assistant, {
         id: channel.instanceId(conversation),
         // Recorded once when this event creates the instance; ignored after.
         initialData: conversationData(conversation, incoming),
@@ -153,7 +153,7 @@ export const channel = createTelegramChannel({
       await client.answerCallbackQuery(query.id);
       if (!query.message) return;
       const conversation = conversationFromMessage(query.message);
-      await dispatch(assistant, {
+      await dispatch(Assistant, {
         id: channel.instanceId(conversation),
         // Recorded once when this event creates the instance; ignored after.
         initialData: conversationData(conversation, query.message),
@@ -253,7 +253,7 @@ id:
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { postMessage } from '../channels/telegram.ts';
 
@@ -272,18 +272,18 @@ const businessChatData = v.object({
   directMessagesTopicId: v.optional(v.number()),
   chatTitle: v.optional(v.string()),
 });
-export const initialDataSchema = v.variant('type', [chatData, businessChatData]);
+const initialData = v.variant('type', [chatData, businessChatData]);
 
-function Assistant() {
+export function Assistant() {
   useModel('anthropic/claude-haiku-4-5');
-  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
+  const data = useInitialData<v.InferOutput<typeof initialData>>();
   if (!data) throw new Error('This agent is created by the Telegram channel dispatch.');
   useTool(postMessage(data));
   const chatTitle = data.chatTitle ? ` ("${data.chatTitle}")` : '';
   return `Reply concisely in the bound Telegram conversation${chatTitle}.`;
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialData;
 ```
 
 Trusted code binds the chat, business connection, and optional topic. The model

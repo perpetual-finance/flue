@@ -27,7 +27,7 @@ selected orders agent to bind a generated Admin GraphQL tool. It also adds
 import { createAdminApiClient } from '@shopify/admin-api-client';
 import { createShopifyChannel } from '@flue/shopify';
 import { dispatch, useModel } from '@flue/runtime';
-import orders from '../agents/orders.ts';
+import { Orders } from '../agents/orders.ts';
 
 const SHOP_DOMAIN = process.env.SHOPIFY_SHOP_DOMAIN!;
 
@@ -49,7 +49,7 @@ export const channel = createShopifyChannel({
 
     const order = parseOrderCreatedPayload(payload);
     if (!order) return c.json({ error: 'Unsupported orders/create payload.' }, 400);
-    await dispatch(orders, {
+    await dispatch(Orders, {
       id: orderInstanceId(shopDomain, order.id),
       message: {
         kind: 'signal',
@@ -114,7 +114,7 @@ requirement and does not add Node runtime code to a Worker.
 import { type ClientResponse, createAdminApiClient } from '@shopify/admin-api-client';
 import { createShopifyChannel, type JsonValue } from '@flue/shopify';
 import { defineTool, dispatch, useModel } from '@flue/runtime';
-import orders from '../agents/orders.ts';
+import { Orders } from '../agents/orders.ts';
 
 const SHOP_DOMAIN = process.env.SHOPIFY_SHOP_DOMAIN!;
 const ADMIN_API_VERSION = '2026-04';
@@ -154,7 +154,7 @@ export const channel = createShopifyChannel({
 
         const webhookId = c.req.header('x-shopify-webhook-id');
         const eventId = c.req.header('x-shopify-event-id');
-        await dispatch(orders, {
+        await dispatch(Orders, {
           id: orderInstanceId(shopDomain, order.id),
           message: {
             kind: 'signal',
@@ -293,10 +293,10 @@ string through `Number`.
 
 ```ts title="src/agents/orders.ts"
 'use agent';
-import { type AgentProps, defineAgent, useModel, useTool } from '@flue/runtime';
+import { type AgentProps, useModel, useTool } from '@flue/runtime';
 import { orderRefFromInstanceId, retrieveOrder } from '../channels/shopify.ts';
 
-function Orders({ id }: AgentProps) {
+export function Orders({ id }: AgentProps) {
   useModel('anthropic/claude-haiku-4-5');
   const { shopDomain, orderId } = orderRefFromInstanceId(id);
   if (shopDomain !== process.env.SHOPIFY_SHOP_DOMAIN) {
@@ -305,8 +305,6 @@ function Orders({ id }: AgentProps) {
   useTool(retrieveOrder(orderId));
   return 'Review the newly created Shopify order and summarize any fulfillment or payment follow-up.';
 }
-
-export default defineAgent(Orders);
 ```
 
 The local `shopify-order:` id includes shop and order identity because Shopify

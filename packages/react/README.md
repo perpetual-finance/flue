@@ -10,7 +10,7 @@ Requires React 18 or later. For examples, see the [React guide](https://fluefram
 
 ## `useFlueAgent()`
 
-A hook observes one agent conversation, addressed by URL: wherever the application's `app.ts` mounts the agent's routes (`app.route('/agents/triage', triage.route())`) plus a caller-chosen conversation id. Starting a new conversation is rendering the hook with a fresh id appended to the mount URL.
+A hook observes one agent conversation, addressed by URL: wherever the application's `app.ts` mounts the agent's routes (`app.route('/agents/triage', createAgentRouter(Triage))`) plus a caller-chosen conversation id. Starting a new conversation is rendering the hook with a fresh id appended to the mount URL.
 
 ```tsx
 import { useFlueAgent } from '@flue/react';

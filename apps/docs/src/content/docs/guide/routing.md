@@ -1,19 +1,20 @@
 ---
 title: Routing
 description: Mount agents, channels, and custom routes explicitly in app.ts.
-lastReviewedAt: 2026-07-02
+lastReviewedAt: 2026-07-11
 ---
 
 `src/app.ts` is your application's route map — and the only file a Flue project requires. It default-exports an ordinary [Hono](https://hono.dev/) application, and every URL your application serves is mounted there explicitly. Flue does not generate routes from filenames or directory conventions: if a route exists, `app.ts` put it there.
 
 ```ts title="src/app.ts"
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
-import triage from './agents/triage.ts';
+import { Triage } from './agents/triage.ts';
 import { channel as slack } from './channels/slack.ts';
 
 const app = new Hono();
 
-app.route('/agents/triage', triage.route());
+app.route('/agents/triage', createAgentRouter(Triage));
 app.route('/channels/slack', slack.route());
 app.get('/api/ping', (c) => c.text('pong'));
 
@@ -26,7 +27,7 @@ URL shapes are yours. `/agents/triage` is a convention, not a requirement — mo
 
 ## Mount an agent
 
-`agent.route()` returns a mountable Hono sub-app for one agent module. Relative to wherever you mount it, the sub-app serves:
+`createAgentRouter(agent, options?)` — from `@flue/runtime/routing` — returns a mountable Hono sub-app for one agent function. Relative to wherever you mount it, the sub-app serves:
 
 | Route                                | Behavior                                                                      |
 | ------------------------------------ | ----------------------------------------------------------------------------- |
@@ -35,85 +36,83 @@ URL shapes are yours. `/agents/triage` is a convention, not a requirement — mo
 | `POST /:id/abort`                    | Abort in-flight and queued work for the conversation.                         |
 | `GET /:id/attachments/:attachmentId` | Attachment byte download.                                                     |
 
-`:id` is the caller-chosen conversation id. A conversation URL is therefore the mount path plus an id: mounting `triage.route()` at `/agents/triage` makes `/agents/triage/ticket-8472` one continuing conversation.
+`:id` is the caller-chosen conversation id. A conversation URL is therefore the mount path plus an id: mounting `createAgentRouter(Triage)` at `/agents/triage` makes `/agents/triage/ticket-8472` one continuing conversation.
 
-`.route()` is a **pure router factory**. It has no side effects, so calling it twice, mounting the same agent at two URLs, or never calling it at all are all fine. Both mounts of one agent share the same identity and the same conversations.
+`createAgentRouter()` is a **pure router factory**. It has no registration side effects, so calling it twice, mounting the same agent at two URLs, or never calling it at all are all fine. Both mounts of one agent share the same identity and the same conversations. The returned Hono app has `.fetch`, so it also mounts in any fetch-based server framework.
+
+Mounting is the **exposure decision**: an agent has an HTTP surface exactly where — and only where — `app.ts` gives it one.
 
 ### Registration comes from the scan, not the mount
 
-Mounting is not what makes an agent exist. The [`'use agent'` directive](/docs/guide/use-agent/) does: the build scans your source for marked modules, and that scanned set is the application's agent registry on both targets. `.route()` only builds an HTTP surface over an already-registered agent.
+Mounting is not what makes an agent exist. The [`'use agent'` directive](/docs/guide/use-agent/) does: the build scans your source for marked modules, and each exported capitalized function in them is a registered agent. That scanned set is the application's agent registry on both targets. `createAgentRouter()` only builds an HTTP surface over an already-registered agent.
 
 Two consequences:
 
-- **An unmarked agent cannot be mounted.** Calling `.route()` on a definition whose module lacks the directive fails with an error telling you to add `'use agent'`.
+- **An unregistered function cannot serve requests.** The router resolves the agent's identity from the function; requests to a mount for a function the scan never registered fail rather than invent an agent.
 - **A dispatch-only agent needs no mount at all.** An agent that only receives input through [`dispatch(...)`](/docs/guide/building-agents/#dispatch) is registered by the scan and simply never appears in `app.ts`. It has no HTTP surface, but its conversations are as durable as any other agent's.
 
-## Per-agent middleware: the `route` export
+### Durability: the binding decides
 
-An agent module configures its own routes through optional named exports. The build transform carries them onto the definition, so `triage.route()` in `app.ts` is fully configured by the agent file alone:
-
-```ts title="src/agents/triage.ts"
-'use agent';
-import { type AgentProps, type AgentRouteHandler, defineAgent, useModel } from '@flue/runtime';
-import { authenticate } from '../auth.ts';
-
-// Middleware applied to every route `.route()` serves for this agent.
-export const route: AgentRouteHandler = async (c, next) => {
-  const principal = await authenticate(c.req.header('authorization'));
-  if (!principal) return c.json({ error: 'Unauthorized' }, 401);
-  if (!principal.ticketIds.includes(c.req.param('id'))) return c.notFound();
-  await next();
-};
-
-function Triage({ id }: AgentProps) {
-  useModel('anthropic/claude-haiku-4-5');
-  return `Help with support ticket ${id}.`;
-}
-
-export default defineAgent(Triage);
-```
-
-| Named export  | Meaning                                                                                                             |
-| ------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `route`       | Hono middleware applied to every route `.route()` serves, including attachment downloads. Call `next()` to allow; return a response to deny. |
-| `description` | Optional static human-facing description of the agent.                                                             |
-
-A naming adjacency to keep straight: the **`route` named export** is middleware _inside_ the agent module, while the **`.route()` method** is the mount factory called _from `app.ts`_. The export configures what the method serves.
-
-Middleware that isn't specific to one agent composes as plain Hono, ordered before the mount:
+Submission retry policy is not part of the agent — it belongs to whoever runs the agent. The router is one of those binding sites:
 
 ```ts title="src/app.ts"
-app.use('/agents/*', requireUser);
-app.route('/agents/triage', triage.route());
+app.route(
+  '/agents/triage',
+  createAgentRouter(IssueTriage, {
+    durability: { maxAttempts: 5, timeoutMs: 7_200_000 },
+  }),
+);
 ```
+
+`durability` (`maxAttempts`, `timeoutMs`) is recorded for the agent's identity when the router is created. The other binding sites — [`start()` entries](/docs/guide/scripts/#standalone-scripts-start) and [`flue run` flags](/docs/cli/run/) — carry the same policy for the same reason: it must be readable even when a render crashes, so it lives entirely outside the function. An agent author who wants to *suggest* a policy exports a plain object and the binding spreads it — no framework blessing involved. One policy per identity per process; mounting one agent twice with different policies is a configuration smell — give both mounts the same value.
+
+## Middleware is plain Hono
+
+There is no per-agent middleware export. Auth and other middleware compose in the host app, ordered before the mount:
+
+```ts title="src/app.ts"
+import { createAgentRouter } from '@flue/runtime/routing';
+import { authenticate } from './auth.ts';
+
+app.use('/agents/triage/*', async (c, next) => {
+  const principal = await authenticate(c.req.header('authorization'));
+  if (!principal) return c.json({ error: 'Unauthorized' }, 401);
+  const id = c.req.path.split('/')[3]; // the conversation id segment under the mount
+  if (!id || !principal.ticketIds.includes(id)) return c.notFound();
+  await next();
+});
+app.route('/agents/triage', createAgentRouter(Triage));
+```
+
+Everything Hono gives you applies: shared middleware over a prefix (`app.use('/agents/*', requireUser)`), per-mount guards like the one above, rate limits, logging. The middleware wraps every route the sub-app serves, attachment downloads included, because it runs before the mount matches.
 
 ## Mount a directory of agents
 
-Per-route mounting keeps the route map explicit, but nothing stops you from generating it. Vite's `import.meta.glob` recovers directory-style mounting in userland — one agent per file under `src/agents/`, mounted by basename:
+Per-route mounting keeps the route map explicit, but nothing stops you from generating it. Vite's `import.meta.glob` recovers directory-style mounting in userland — enumerate the agent modules and mount each exported agent:
 
 ```ts title="src/app.ts"
-import type { AgentDefinition } from '@flue/runtime';
+import type { Agent } from '@flue/runtime';
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 
 const app = new Hono();
 
-const agents = import.meta.glob<AgentDefinition>('./agents/*.ts', {
-  import: 'default',
-  eager: true,
-});
-for (const [path, agent] of Object.entries(agents)) {
-  const name = path.split('/').at(-1)!.replace(/\.ts$/, '');
-  app.route(`/agents/${name}`, agent.route());
+const modules = import.meta.glob<Record<string, Agent>>('./agents/*.ts', { eager: true });
+for (const mod of Object.values(modules)) {
+  for (const [exportName, agent] of Object.entries(mod)) {
+    if (typeof agent !== 'function' || !/^[A-Z]/.test(exportName)) continue; // agents are the capitalized exports
+    app.route(`/agents/${agent.agentName ?? exportName}`, createAgentRouter(agent));
+  }
 }
 
 export default app;
 ```
 
-This is exactly as capable as hand-written mounts because it _is_ hand-written mounting — the glob only enumerates the files. Skip the glob (or filter it) for agents that should stay dispatch-only.
+This is exactly as capable as hand-written mounts because it _is_ hand-written mounting — the glob only enumerates the modules. Skip the glob (or filter it) for agents that should stay dispatch-only.
 
 ## Mount a channel
 
-Channel objects expose the same `.route()` factory. It serves the provider's declared routes relative to the mount point:
+Channel objects expose their own `.route()` factory — a separate API from the agent router. It serves the provider's declared routes relative to the mount point:
 
 ```ts title="src/app.ts"
 import { channel as slack } from './channels/slack.ts';
@@ -129,16 +128,16 @@ The channel package declares its route suffixes (`/events`, `/webhook`, `/intera
 Anything else your service needs is an ordinary Hono route. A common pattern accepts an external event, verifies it in application code, and delivers it to an agent without exposing a prompt route for that event source:
 
 ```ts title="src/app.ts"
-import { dispatch, useModel } from '@flue/runtime';
+import { dispatch } from '@flue/runtime';
 import { Hono } from 'hono';
-import supportAssistant from './agents/support-assistant.ts';
+import { SupportAssistant } from './agents/support-assistant.ts';
 import { parseVerifiedSupportComment } from './support-webhooks.ts';
 
 const app = new Hono();
 
 app.post('/webhooks/support-comments', async (c) => {
   const event = await parseVerifiedSupportComment(c.req.raw);
-  const receipt = await dispatch(supportAssistant, {
+  const receipt = await dispatch(SupportAssistant, {
     id: event.ticketId,
     message: {
       kind: 'signal',
@@ -154,14 +153,14 @@ app.post('/webhooks/support-comments', async (c) => {
 export default app;
 ```
 
-The webhook route belongs to your application: it decides which requests are valid and which agent conversation receives the accepted message. `dispatch(...)` resolves the agent by its imported definition — no mount required.
+The webhook route belongs to your application: it decides which requests are valid and which agent conversation receives the accepted message. `dispatch(...)` resolves the agent by the imported function — no mount required.
 
 ## Prefixes and larger applications
 
 Because `app.ts` owns every path, prefixing Flue routes is just choosing mount paths:
 
 ```ts title="src/app.ts"
-app.route('/api/agents/triage', triage.route());
+app.route('/api/agents/triage', createAgentRouter(Triage));
 app.route('/api/channels/slack', slack.route());
 app.get('/health', (c) => c.json({ ok: true }));
 ```
@@ -170,7 +169,7 @@ Clients are unaffected by how you arrange this — an SDK or React client addres
 
 ## Authorize the conversation, not just the caller
 
-Use broad middleware for requirements shared by a group of routes, such as requiring an authenticated user. When access depends on the selected resource, check that too: an agent's `route` middleware should verify that the caller may access the conversation named by `:id`, as in the triage example above. A conversation id is an identifier, not a credential.
+Use broad middleware for requirements shared by a group of routes, such as requiring an authenticated user. When access depends on the selected resource, check that too: the middleware in front of an agent's mount should verify that the caller may access the conversation named by `:id`, as in the triage example above. A conversation id is an identifier, not a credential.
 
 ## Next steps
 

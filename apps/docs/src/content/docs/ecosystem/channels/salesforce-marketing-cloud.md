@@ -27,7 +27,7 @@ Marketing Cloud Engagement ENS, not generic Salesforce APIs.
 ```ts title="src/channels/salesforce-marketing-cloud.ts (abridged)"
 import { createSalesforceMarketingCloudChannel } from '@flue/salesforce';
 import { dispatch, useModel } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createSalesforceMarketingCloudClient } from '../salesforce-marketing-cloud-client.ts';
 import { emailEventInstanceId, emailRefFromEvent } from '../salesforce-marketing-cloud-email.ts';
 
@@ -49,7 +49,7 @@ export const channel = createSalesforceMarketingCloudChannel({
       usefulEvents.push({ event, ref });
     }
     for (const { event, ref } of usefulEvents) {
-      await dispatch(assistant, {
+      await dispatch(Assistant, {
         id: emailEventInstanceId(ref),
         message: {
           kind: 'signal',
@@ -125,7 +125,7 @@ import {
   type SalesforceMarketingCloudEvent,
 } from '@flue/salesforce';
 import { defineTool, dispatch, useModel } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createSalesforceMarketingCloudClient } from '../salesforce-marketing-cloud-client.ts';
 import {
   emailEventInstanceId,
@@ -172,7 +172,7 @@ export const channel = createSalesforceMarketingCloudChannel({
     }
 
     for (const { event, ref } of usefulEvents) {
-      await dispatch(assistant, {
+      await dispatch(Assistant, {
         id: emailEventInstanceId(ref),
         message: {
           kind: 'signal',
@@ -313,18 +313,16 @@ remain application-owned.
 
 ```ts title="src/agents/assistant.ts"
 'use agent';
-import { type AgentProps, defineAgent, useModel, useTool } from '@flue/runtime';
+import { type AgentProps, useModel, useTool } from '@flue/runtime';
 import { retrieveCallback } from '../channels/salesforce-marketing-cloud.ts';
 import { parseEmailEventInstanceId } from '../salesforce-marketing-cloud-email.ts';
 
-function Assistant({ id }: AgentProps) {
+export function Assistant({ id }: AgentProps) {
   useModel('anthropic/claude-haiku-4-5');
   const email = parseEmailEventInstanceId(id);
   useTool(retrieveCallback(email));
   return 'Review the inbound Salesforce Marketing Cloud email lifecycle event. Retrieve the configured ENS callback when callback status or delivery configuration is relevant.';
 }
-
-export default defineAgent(Assistant);
 ```
 
 The tool accepts no tenant origin, callback id, access token, or resource id

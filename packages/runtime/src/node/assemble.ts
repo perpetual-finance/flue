@@ -135,9 +135,7 @@ export async function assembleNodeAgentRuntime(
 
 	const agents: AgentRecord[] = options.agents.map((registration) => ({
 		name: registration.identity,
-		definition: registration.definition,
-		...(registration.description !== undefined ? { description: registration.description } : {}),
-		...(registration.route !== undefined ? { route: registration.route } : {}),
+		agent: registration.agent,
 	}));
 
 	const activityGate = createRuntimeActivityGate();

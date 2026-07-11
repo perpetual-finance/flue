@@ -26,7 +26,7 @@ The generated harness:
 - records response text, model usage, costs, and tool calls in the normalized eval result;
 - supports local servers and deployed applications through `FLUE_BASE_URL`.
 
-The blueprint does not mount an agent automatically. Confirm that `app.ts` mounts the agent's `.route()` and that its authentication middleware is appropriate before evaluating it over HTTP.
+The blueprint does not mount an agent automatically. Confirm that `app.ts` mounts the agent with `createAgentRouter(...)` and that its authentication middleware is appropriate before evaluating it over HTTP.
 
 ## Run evals
 

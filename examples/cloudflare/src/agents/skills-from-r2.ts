@@ -18,7 +18,7 @@
  * then read the verdict from the conversation stream: GET /agents/skills-from-r2/<id>
  */
 import { env } from 'cloudflare:workers';
-import { defineAgent, defineTool, useModel, useSandbox, useTool } from '@flue/runtime';
+import { defineTool, useModel, useSandbox, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import {
 	getDefaultWorkspace,
@@ -59,7 +59,7 @@ const checkSpam = defineTool({
 	},
 });
 
-function SkillsFromR2() {
+export function SkillsFromR2() {
 	useModel('cloudflare/@cf/moonshotai/kimi-k2.6');
 	// Lazy, per the SandboxFactory contract: constructing this object (and the
 	// inner `getShellSandbox()` factory it wraps) is cheap; the expensive R2
@@ -83,5 +83,3 @@ function SkillsFromR2() {
 	useTool(checkSpam);
 	return 'When asked whether a message is spam, call the check_spam tool with the message text and report its verdict.';
 }
-
-export default defineAgent(SkillsFromR2);

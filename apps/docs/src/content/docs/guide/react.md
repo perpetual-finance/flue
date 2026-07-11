@@ -12,9 +12,9 @@ lastReviewedAt: 2026-07-02
 pnpm add @flue/react @flue/sdk
 ```
 
-No provider or app-level setup is required. A hook addresses one conversation by URL: wherever your application's `app.ts` mounts the agent's routes (`app.route('/agents/support-assistant', supportAssistant.route())`) plus a caller-chosen conversation id. Starting a new conversation is rendering the hook with a fresh id appended to the mount URL.
+No provider or app-level setup is required. A hook addresses one conversation by URL: wherever your application's `app.ts` mounts the agent's routes (`app.route('/agents/support-assistant', createAgentRouter(SupportAssistant))`) plus a caller-chosen conversation id. Starting a new conversation is rendering the hook with a fresh id appended to the mount URL.
 
-The agent must be mounted in `app.ts` for the browser to reach it, and its `route` middleware export decides who may access which conversation. See [Routing](/docs/guide/routing/) to mount and protect the agent's routes, including for cross-origin applications.
+The agent must be mounted in `app.ts` for the browser to reach it, and the middleware you attach at that mount decides who may access which conversation. See [Routing](/docs/guide/routing/) to mount and protect the agent's routes, including for cross-origin applications.
 
 ## Build an agent conversation
 
@@ -67,7 +67,7 @@ The `url` here assumes `app.ts` mounted the agent at `/api/agents/support-assist
 
 `sendMessage()` adds the user message immediately and resolves when the server admits the prompt, not when generation finishes. The stream then reconciles that optimistic message with its durable copy without changing its transcript position. Use `status` to distinguish connection, submission, streaming, and error states. `historyReady` becomes `true` once the requested durable history has loaded as one coherent snapshot; it remains `true` through later live reconnects.
 
-Messages are Flue-owned `FlueConversationMessage` values with a parts-based shape: `text`, `reasoning`, `dynamic-tool`, and `file`. Validated structured tool output is preserved on the `dynamic-tool` part's `output`, so applications can render custom tool interfaces without a separate data-event channel. These are Flue's own types — they are not AI SDK types, and `@flue/react` neither depends on `ai` at runtime nor implements its transport protocol. Durable `file` parts carry a ready-to-use `url` for attachment bytes (served through the agent's opt-in `attachments` endpoint); optimistic uploads carry a local `data:` preview.
+Messages are Flue-owned `FlueConversationMessage` values with a parts-based shape: `text`, `reasoning`, `dynamic-tool`, and `file`. Validated structured tool output is preserved on the `dynamic-tool` part's `output`, so applications can render custom tool interfaces without a separate data-event channel. These are Flue's own types — they are not AI SDK types, and `@flue/react` neither depends on `ai` at runtime nor implements its transport protocol. Durable `file` parts carry a ready-to-use `url` for attachment bytes (served through the agent router's attachments endpoint); optimistic uploads carry a local `data:` preview.
 
 The hook uses the SDK's materialized `observe()` layer: it loads the complete canonical snapshot, publishes it atomically in durable order, and continues from that exact checkpoint through reconnects and canonical resets. Consumers do not need to coordinate the snapshot and live updates or sort `messages`. Live updates default to SSE, falling back to Durable Streams long-polling (`live: 'long-poll'` selects it explicitly). For a single point-in-time read with no live updates, use the SDK client's `history()` directly instead. Partial text and reasoning are best-effort while streaming; the completed canonical assistant message is authoritative.
 

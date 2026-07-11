@@ -44,9 +44,10 @@ export type CreateFlueClientOptions = HttpClientOptions;
  *
  * The framework does not know where an application mounts its agents — the
  * application's route map (app.ts) does. A client therefore addresses exactly
- * one conversation by URL: wherever the agent's `.route()` is mounted plus the
- * caller-chosen conversation id. Starting a new conversation is constructing a
- * client with a fresh id appended to the mount URL.
+ * one conversation by URL: wherever the agent's router
+ * (`createAgentRouter(...)`) is mounted plus the caller-chosen conversation
+ * id. Starting a new conversation is constructing a client with a fresh id
+ * appended to the mount URL.
  */
 export interface FlueClient {
 	/** The fully resolved conversation URL this client addresses. */

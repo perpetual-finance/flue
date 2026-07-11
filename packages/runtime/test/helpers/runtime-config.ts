@@ -1,4 +1,3 @@
-import { defineAgent } from '../../src/agent-definition.ts';
 import { useModel } from '../../src/hooks/use-model.ts';
 import { sqlite } from '../../src/node/agent-execution-store.ts';
 import type {
@@ -6,25 +5,23 @@ import type {
 	CloudflareRuntime,
 	NodeRuntime,
 } from '../../src/runtime/flue-app.ts';
-import type { AgentModuleValue } from '../../src/types.ts';
+import type { Agent } from '../../src/types.ts';
+
+function defaultAgent(): Agent {
+	return function DefaultTestAgent() {
+		useModel('anthropic/claude-haiku-4-5');
+	};
+}
 
 export function agentRecord(
 	name: string,
 	options: {
-		definition?: AgentModuleValue;
-		description?: string;
-		route?: AgentRecord['route'];
+		agent?: Agent;
 	} = {},
 ): AgentRecord {
 	return {
 		name,
-		definition:
-			options.definition ??
-			defineAgent(() => {
-				useModel('anthropic/claude-haiku-4-5');
-			}),
-		...(options.description === undefined ? {} : { description: options.description }),
-		...(options.route === undefined ? {} : { route: options.route }),
+		agent: options.agent ?? defaultAgent(),
 	};
 }
 

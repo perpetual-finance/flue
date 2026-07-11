@@ -1,5 +1,5 @@
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { postMessage } from '../channels/telegram.ts';
 
@@ -18,9 +18,9 @@ const businessChatData = v.object({
 	directMessagesTopicId: v.optional(v.number()),
 	chatTitle: v.optional(v.string()),
 });
-export const initialDataSchema = v.variant('type', [chatData, businessChatData]);
+const initialDataSchema = v.variant('type', [chatData, businessChatData]);
 
-function Assistant() {
+export function Assistant() {
 	useModel('anthropic/claude-haiku-4-5');
 	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) throw new Error('This agent is created by the Telegram channel dispatch.');
@@ -29,4 +29,4 @@ function Assistant() {
 	return `Reply concisely in the bound Telegram conversation${chatTitle}.`;
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialDataSchema;

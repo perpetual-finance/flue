@@ -20,18 +20,20 @@
  * created: no Hono app, no listener, no channels.
  */
 
-import type { DeliveredMessage, FunctionAgentDefinition } from '@flue/runtime';
+import type { Agent, DeliveredMessage, DurabilityConfig } from '@flue/runtime';
 import {
 	AGENT_IDENTITY_PATTERN,
 	type AssembledNodeAgentRuntime,
 	agentStreamPath,
 	assembleNodeAgentRuntime,
+	bindAgentDurability,
 	type ConversationStreamChunk,
 	connectPersistenceAdapter,
 	createInstrumentationOwner,
 	observeSubmissionSettlement,
 	type PersistenceAdapter,
 	readSubmissionReply,
+	resolveAgentIdentity,
 	runWithInstrumentationOwner,
 } from '@flue/runtime/internal';
 import { sqlite } from '@flue/runtime/node';
@@ -40,11 +42,15 @@ export interface FlueRunSessionOptions {
 	/** Absolute path of the agent module; imported via {@link loadModule}. */
 	agentModulePath: string;
 	/**
-	 * Fallback agent identity (the file basename). The module's own
-	 * `export const name` wins when declared; the resolved identity keys
-	 * durable conversation storage and is exposed on {@link FlueRunSession}.
+	 * Which exported agent to run (`--agent`). Without it: the module's single
+	 * agent export, or its default export when several are exported.
 	 */
-	identity: string;
+	agentExport?: string;
+	/**
+	 * Submission retry policy for this run. Durability is binding policy — the
+	 * runner (here: the `flue run` invocation) decides it, not the agent.
+	 */
+	durability?: DurabilityConfig;
 	/** Absolute path of the project's db entry, when one resolved. */
 	dbModulePath?: string;
 	/** Display name for the db entry in diagnostics (e.g. `src/db.ts`). */
@@ -94,7 +100,7 @@ export interface FlueRunOutcome {
 }
 
 export interface FlueRunSession {
-	/** The resolved agent identity: the module's `name` export, else the file basename. */
+	/** The resolved identity: the agent's `agentName` static, else its function name. */
 	readonly identity: string;
 	/** Submit one message to a conversation and wait for settlement. */
 	submit(
@@ -106,21 +112,79 @@ export interface FlueRunSession {
 	close(): Promise<void>;
 }
 
+/** Whether an exported binding's name marks it as an agent (A–Z first char). */
+function isCapitalized(name: string): boolean {
+	const first = name.charCodeAt(0);
+	return first >= 65 && first <= 90;
+}
+
 /**
- * The module's `export const name` wins over the basename-derived fallback —
- * `flue run` skips the build scan, so the override is read off the evaluated
- * namespace instead (same precedence, different mechanism).
+ * The module's agent exports, mirroring the build scan's rule on the
+ * evaluated namespace: exported functions with capitalized names (the
+ * function's own name decides for the `default` slot).
  */
-function resolveRunIdentity(agentModule: Record<string, unknown>, fallback: string): string {
-	const nameExport = agentModule.name;
-	if (nameExport === undefined) return fallback;
-	if (typeof nameExport !== 'string' || !AGENT_IDENTITY_PATTERN.test(nameExport)) {
+function listAgentExports(agentModule: Record<string, unknown>): string[] {
+	return Object.keys(agentModule).filter((key) => {
+		const value = agentModule[key];
+		if (typeof value !== 'function') return false;
+		return key === 'default' ? isCapitalized(value.name ?? '') : isCapitalized(key);
+	});
+}
+
+/**
+ * Pick the agent to run: `--agent <name>` when given; else the module's
+ * single agent export; else its default export; else fail listing the
+ * choices. `flue run` skips the build scan, so the selection mirrors the
+ * scan's capitalized-exported-function rule on the evaluated namespace.
+ */
+function selectRunAgent(
+	agentModule: Record<string, unknown>,
+	agentExport: string | undefined,
+	modulePath: string,
+): Agent {
+	if (agentExport !== undefined) {
+		const candidate = agentModule[agentExport];
+		if (typeof candidate !== 'function') {
+			const available = listAgentExports(agentModule);
+			throw new Error(
+				`[flue] --agent ${JSON.stringify(agentExport)} does not match an exported function of ${modulePath}.` +
+					(available.length > 0 ? ` Exported agents: ${available.join(', ')}.` : ''),
+			);
+		}
+		return candidate as Agent;
+	}
+	const candidates = listAgentExports(agentModule);
+	if (candidates.length === 0) {
 		throw new Error(
-			`[flue] The agent module's \`name\` export is its durable identity and must be a ` +
-				`lower-kebab-case string; got ${JSON.stringify(nameExport)}.`,
+			`[flue] ${modulePath} exports no agents. Export a capitalized agent function, ` +
+				`e.g. \`export function MyAgent() { … }\`.`,
 		);
 	}
-	return nameExport;
+	const chosen = candidates.length === 1 ? candidates[0] : 'default';
+	if (chosen === undefined || !candidates.includes(chosen)) {
+		throw new Error(
+			`[flue] ${modulePath} exports ${candidates.length} agents (${candidates.join(', ')}). ` +
+				`Pick one with --agent <name>.`,
+		);
+	}
+	return agentModule[chosen] as Agent;
+}
+
+/**
+ * The agent's durable identity, read off the function: the `agentName`
+ * static, else the function's own name (safe here — `flue run` never
+ * minifies user modules).
+ */
+function resolveRunIdentity(agent: Agent): string {
+	const identity = resolveAgentIdentity(agent);
+	if (identity === undefined || identity === 'default' || !AGENT_IDENTITY_PATTERN.test(identity)) {
+		throw new Error(
+			`[flue] Cannot derive a durable identity for this agent (resolved ${JSON.stringify(identity)}). ` +
+				`Name the exported function (e.g. \`export function MyAgent() { … }\`) or assign ` +
+				`\`MyAgent.agentName = '<identity>'\`; identities must match ${AGENT_IDENTITY_PATTERN}.`,
+		);
+	}
+	return identity;
 }
 
 export async function createFlueRunSession(
@@ -137,8 +201,9 @@ export async function createFlueRunSession(
 		// mirroring the generated Node entry's startup.
 		return await runWithInstrumentationOwner(instrumentationOwner, async () => {
 			const agentModule = await options.loadModule(options.agentModulePath);
-			const definition = agentModule.default as FunctionAgentDefinition;
-			const identity = resolveRunIdentity(agentModule, options.identity);
+			const agent = selectRunAgent(agentModule, options.agentExport, options.agentModulePath);
+			const identity = resolveRunIdentity(agent);
+			if (options.durability !== undefined) bindAgentDurability(identity, options.durability);
 
 			const dbSource = options.dbSource ?? 'db.ts';
 			let adapter: PersistenceAdapter;
@@ -161,20 +226,8 @@ export async function createFlueRunSession(
 			// The shared runtime assembly the generated Node entry and `start()`
 			// use: registration, coordinator, dispatch queue, runtime seed, and
 			// startup reconciliation (the run.db persists across invocations).
-			const agentRegistration = {
-				identity,
-				definition,
-				...(agentModule.route !== undefined ? { route: agentModule.route } : {}),
-				...(agentModule.description !== undefined
-					? { description: agentModule.description }
-					: {}),
-				...(agentModule.initialDataSchema !== undefined
-					? { initialDataSchema: agentModule.initialDataSchema }
-					: {}),
-				...(agentModule.durability !== undefined ? { durability: agentModule.durability } : {}),
-			} as Parameters<typeof assembleNodeAgentRuntime>[0]['agents'][number];
 			const runtime = await assembleNodeAgentRuntime({
-				agents: [agentRegistration],
+				agents: [{ identity, agent }],
 				adapter,
 				stores,
 				env: runtimeEnv,

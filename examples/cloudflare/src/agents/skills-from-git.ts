@@ -17,7 +17,7 @@
 import { env } from 'cloudflare:workers';
 import { WorkspaceFileSystem } from '@cloudflare/shell';
 import { createGit } from '@cloudflare/shell/git';
-import { defineAgent, useModel, useSandbox } from '@flue/runtime';
+import { useModel, useSandbox } from '@flue/runtime';
 import { getDefaultWorkspace, getShellSandbox } from '../sandboxes/cloudflare-shell';
 
 interface Env {
@@ -28,7 +28,7 @@ const HYDRATION_SENTINEL = '/.hydrated';
 const TARGET_REPO = 'https://github.com/FredKSchott/vinext-starter';
 const CLONE_DIR = '/repo';
 
-function SkillsFromGit() {
+export function SkillsFromGit() {
 	useModel('cloudflare/@cf/moonshotai/kimi-k2.6');
 	// Lazy, per the SandboxFactory contract: constructing this object (and the
 	// inner `getShellSandbox()` factory it wraps) is cheap; the expensive git
@@ -59,5 +59,3 @@ function SkillsFromGit() {
 		'before answering — never answer from assumption.'
 	);
 }
-
-export default defineAgent(SkillsFromGit);

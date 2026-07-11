@@ -9,16 +9,16 @@
  * persistence adapter (`virtual:flue/db`), and the scanned `'use agent'` set
  * (`virtual:flue/agents`).
  *
- * The registered agent set comes from the scan — `.route()` mounts in app.ts
- * are pure routers over it. There are no workflows and no channel-handler
- * registry on this surface: mounting is the dispatch.
+ * The registered agent set comes from the scan — `createAgentRouter()`
+ * mounts in app.ts are pure routers over it. There are no workflows and no
+ * channel-handler registry on this surface: mounting is the dispatch.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { format } from 'node:util';
-import { scannedAgentModules } from 'virtual:flue/agents';
+import { scannedAgents } from 'virtual:flue/agents';
 import userApp from 'virtual:flue/app';
 import userPersistenceAdapter from 'virtual:flue/db';
-import type { FunctionAgentDefinition } from '@flue/runtime';
+import type { Agent } from '@flue/runtime';
 import type {
 	AssembledNodeAgentRuntime,
 	FlueAgentRegistration,
@@ -76,28 +76,12 @@ export interface FlueNodeServer {
 
 type ConsoleMethod = 'log' | 'info' | 'debug' | 'warn' | 'error';
 
-/** Build the identity-keyed registration records from the scanned modules. */
+/** Build the identity-keyed registration records from the scanned agent set. */
 function createAgentRegistrations(): FlueAgentRegistration[] {
-	return scannedAgentModules.map(({ identity, module }) => {
-		const registration: FlueAgentRegistration = {
-			identity,
-			definition: module.default as FunctionAgentDefinition,
-		};
-		if (module.route !== undefined) {
-			registration.route = module.route as FlueAgentRegistration['route'];
-		}
-		if (module.initialDataSchema !== undefined) {
-			registration.initialDataSchema =
-				module.initialDataSchema as FlueAgentRegistration['initialDataSchema'];
-		}
-		if (module.durability !== undefined) {
-			registration.durability = module.durability as FlueAgentRegistration['durability'];
-		}
-		if (module.description !== undefined) {
-			registration.description = module.description as FlueAgentRegistration['description'];
-		}
-		return registration;
-	});
+	return scannedAgents.map(({ identity, agent }) => ({
+		identity,
+		agent: agent as Agent,
+	}));
 }
 
 export async function loadFlueNodeApplication(
@@ -169,7 +153,7 @@ export async function loadFlueNodeApplication(
 				// The shared assembly wires registration → coordinator → dispatch
 				// queue → runtime seed → startup reconciliation; it seeds the
 				// runtime before the application is installed into its listener,
-				// so `.route()` handlers mounted during app.ts evaluation read the
+				// so routers mounted during app.ts evaluation read the
 				// configuration when requests arrive.
 				const runtime = await assembleNodeAgentRuntime({
 					agents: createAgentRegistrations(),

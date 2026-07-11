@@ -1,7 +1,7 @@
 import { createGoogleChatChannel, type GoogleChatConversationRef } from '@flue/google-chat';
 import { defineTool, dispatch } from '@flue/runtime';
 import * as v from 'valibot';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createGoogleChatClient } from '../lib/google-chat-client.ts';
 
 const appUrl = requiredEnv('GOOGLE_CHAT_APP_URL');
@@ -27,7 +27,7 @@ export const channel = createGoogleChatChannel({
 				case 'APP_COMMAND': {
 					const ref = conversationFromPayload(payload);
 					if (!ref) return;
-					await dispatch(assistant, {
+					await dispatch(Assistant, {
 						id: channel.instanceId(ref),
 						// Recorded once when this event creates the instance; ignored after.
 						initialData: {

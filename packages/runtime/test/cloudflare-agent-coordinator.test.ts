@@ -60,13 +60,13 @@ function makeFakeSql() {
 
 function makeRuntime(
 	options: {
-		createdAgent?: Parameters<typeof createCloudflareAgentRuntime>[0]['agents'][number]['definition'];
+		createdAgent?: Parameters<typeof createCloudflareAgentRuntime>[0]['agents'][number]['agent'];
 		createContext?: Parameters<typeof createCloudflareAgentRuntime>[0]['createContext'];
 	} = {},
 ) {
 	return createCloudflareAgentRuntime({
 		agents: options.createdAgent
-			? [{ name: 'assistant', definition: options.createdAgent }]
+			? [{ name: 'assistant', agent: options.createdAgent }]
 			: [],
 		createContext:
 			options.createContext ??
@@ -642,7 +642,7 @@ describe('createCloudflareAgentRuntime()', () => {
 		// active. The internal dispatch route must run inside one.
 		const contextStore = new AsyncLocalStorage<true>();
 		const runtime = createCloudflareAgentRuntime({
-			agents: [{ name: 'assistant', definition: {} as never }],
+			agents: [{ name: 'assistant', agent: {} as never }],
 			createContext: () => {
 				if (!contextStore.getStore()) {
 					throw new Error('[flue] createContext ran outside the instance context.');
@@ -675,7 +675,7 @@ describe('createCloudflareAgentRuntime()', () => {
 		const recovery = makeRecoveryContext({ inspection: 'absent' });
 		const contextStore = new AsyncLocalStorage<true>();
 		const runtime = createCloudflareAgentRuntime({
-			agents: [{ name: 'assistant', definition: {} as never }],
+			agents: [{ name: 'assistant', agent: {} as never }],
 			createContext: () => {
 				if (!contextStore.getStore()) {
 					throw new Error('[flue] createContext ran outside the instance context.');
@@ -713,7 +713,7 @@ describe('createCloudflareAgentRuntime()', () => {
 		// after onStart returns — i.e. outside any entry-point context.
 		const contextStore = new AsyncLocalStorage<true>();
 		const runtime = createCloudflareAgentRuntime({
-			agents: [{ name: 'assistant', definition: {} as never }],
+			agents: [{ name: 'assistant', agent: {} as never }],
 			createContext: () => {
 				if (!contextStore.getStore()) {
 					throw new Error('[flue] createContext ran outside the instance context.');

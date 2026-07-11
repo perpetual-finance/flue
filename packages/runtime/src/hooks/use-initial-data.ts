@@ -12,23 +12,22 @@ import { requireRenderFrame } from './frame.ts';
  * shaped by the code that creates the instance.
  *
  * ```ts
- * // dispatch(triage, { id: 'issue-17307', data: { issue: 17307 }, message: {...} })
- * const input = v.object({ issue: v.pipe(v.number(), v.integer()) });
- *
- * function Triage() {
- *   const data = useInitialData<v.InferOutput<typeof input>>();
+ * // dispatch(Triage, { id: 'issue-17307', initialData: { issue: 17307 }, message: {...} })
+ * export function Triage() {
+ *   const data = useInitialData<v.InferOutput<typeof Triage.initialData>>();
  *   return `Triage GitHub issue #${data.issue} end-to-end.`;
  * }
- * export default defineAgent(Triage, { model: '…', input });
+ * Triage.initialData = v.object({ issue: v.pipe(v.number(), v.integer()) });
  * ```
  *
  * Semantics:
- * - Declare an `input:` schema on `defineAgent` to validate the data at
- *   instance creation — a mismatch (including absence, unless the schema
- *   accepts `undefined`) fails the creating submission, so with a required
- *   schema the value is always present here. The schema-parsed output is
- *   what this hook returns. Without a schema, whatever the creator sent is
- *   recorded and returned untyped; the type parameter is compile-time only.
+ * - Assign an `initialData` schema static on the agent function to validate
+ *   the data at instance creation — a mismatch (including absence, unless
+ *   the schema accepts `undefined`) fails the creating submission, so with a
+ *   required schema the value is always present here. The schema-parsed
+ *   output is what this hook returns. Without a schema, whatever the creator
+ *   sent is recorded and returned untyped; the type parameter is
+ *   compile-time only.
  * - Constant forever: `data` on messages to an existing instance is ignored,
  *   and nothing can change the recorded value. Evolving facts belong in
  *   `usePersistentState`.

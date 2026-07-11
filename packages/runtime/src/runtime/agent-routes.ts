@@ -4,9 +4,9 @@
  * Both routers share these:
  *   - the legacy name-addressed `flue()` router (`/agents/:name/:id`, see
  *     flue-app.ts), where the agent is resolved from the URL, and
- *   - the mounted-definition router built by `AgentDefinition.route()`
- *     (registration.ts), where the agent is resolved from the identity
- *     registry and the mount path is user-chosen.
+ *   - the mounted per-agent router built by `createAgentRouter(agent)`
+ *     (registration.ts), where the identity resolves off the agent function
+ *     and the mount path is user-chosen.
  *
  * An agent's *identity* is the generalization of the legacy wire name: the
  * legacy generated entry registers agents under filename-derived names, which
@@ -114,7 +114,7 @@ export async function executeAgentAbort(
 	throw routeNotFound(request);
 }
 
-/** Serve one attachment's bytes. Reached only after the module's `route` middleware ran. */
+/** Serve one attachment's bytes. */
 export async function executeAgentAttachmentRead(
 	rt: FlueRuntime,
 	target: AgentRequestTarget & { attachmentId: string },
@@ -160,34 +160,6 @@ function routeNotFound(request: Request): RouteNotFoundError {
 		method: request.method,
 		path: new URL(request.url).pathname,
 	});
-}
-
-/**
- * Run a route's authored middleware (an agent module's `route` export)
- * around a handler, preserving Hono's next()/finalization contract.
- * Middleware may short-circuit with its own response, or call `await next()`
- * to reach the handler.
- */
-export async function runAttachedMiddleware(
-	c: Parameters<MiddlewareHandler>[0],
-	middleware: MiddlewareHandler | undefined,
-	handle: () => Promise<Response | undefined>,
-): Promise<Response | undefined> {
-	if (!middleware) return handle();
-	const finalizedBefore = c.finalized;
-	const responseBefore = finalizedBefore ? c.res : undefined;
-	let continued = false;
-	const response = await middleware(c, async () => {
-		if (continued) throw new Error('next() called multiple times');
-		continued = true;
-		const handled = await handle();
-		if (handled) c.res = handled;
-	});
-	if (response) return response;
-	if (continued || (c.finalized && (!finalizedBefore || c.res !== responseBefore))) return c.res;
-	throw new Error(
-		'Context is not finalized. Did you forget to return a Response object or await next()?',
-	);
 }
 
 /**

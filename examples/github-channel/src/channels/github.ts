@@ -2,7 +2,7 @@ import { createGitHubChannel } from '@flue/github';
 import { defineTool, dispatch } from '@flue/runtime';
 import { Octokit } from '@octokit/rest';
 import * as v from 'valibot';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 
 export const client = new Octokit({
 	auth: requiredEnv('GITHUB_TOKEN'),
@@ -20,7 +20,7 @@ export const channel = createGitHubChannel({
 				repo: repository.name,
 				issueNumber: issue.number,
 			};
-			await dispatch(assistant, {
+			await dispatch(Assistant, {
 				id: channel.instanceId(issueRef),
 				// Recorded once when this event creates the instance; ignored after.
 				initialData: {
@@ -56,7 +56,7 @@ export const channel = createGitHubChannel({
 				repo: repository.name,
 				issueNumber: pull_request.number,
 			};
-			await dispatch(assistant, {
+			await dispatch(Assistant, {
 				id: channel.instanceId(issueRef),
 				// Recorded once when this event creates the instance; ignored after.
 				initialData: {

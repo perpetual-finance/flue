@@ -23,7 +23,7 @@ import { BLUEPRINTS, KIND_ROOTS } from './_blueprints.generated.ts';
 function printUsage(log: (message: string) => void = console.error) {
 	log(
 		'Usage:\n' +
-			'  flue run    <path> --message <text> [--id <conversation-id>] [--initial-data <json>] [--uid <uid> | --new] [--env <path>] [--json]\n' +
+			'  flue run    <path> --message <text> [--agent <ExportName>] [--id <conversation-id>] [--initial-data <json>] [--uid <uid> | --new] [--max-attempts <n>] [--timeout <ms>] [--env <path>] [--json]\n' +
 			'  flue init   --target <node|cloudflare> [--root <path>] [--force]\n' +
 			'  flue add    [<kind> <name|url>] [--print]\n' +
 			'  flue update <kind> <name|url> [--print]\n' +
@@ -41,10 +41,13 @@ function printUsage(log: (message: string) => void = console.error) {
 			'\n' +
 			'Flags:\n' +
 			'  --message <text>     (flue run) The user message submitted to the agent. Required.\n' +
+			'  --agent <name>       (flue run) Which exported agent to run when the module exports several. Default: the single agent, or the default export.\n' +
 			'  --id <id>            (flue run) Conversation id to create or continue. Default: a fresh id, printed.\n' +
 			'  --initial-data <json> (flue run) Instance-creation data (JSON). The seed, used only when this run creates the conversation; read with useInitialData().\n' +
 			'  --uid <uid>          (flue run) Continue only the conversation incarnation with this uid (printed by the creating run); rejects when it no longer exists.\n' +
 			'  --new                (flue run) Create only: rejects when the conversation id already exists (the error names its uid).\n' +
+			'  --max-attempts <n>   (flue run) Submission retry budget for this run (durability is decided by the runner).\n' +
+			'  --timeout <ms>       (flue run) Submission timeout for this run, in milliseconds.\n' +
 			'  --json               (flue run) Print a JSON result envelope to stdout instead of the message text.\n' +
 			'  --env <path>         (flue run) Select one alternate .env-format file, loaded before the run.\n' +
 			'                       Without --env, `flue run` loads <project>/.env when present. Shell values win.\n' +
@@ -77,11 +80,15 @@ interface RunArgs {
 	command: 'run';
 	/** Path of the agent module (relative or absolute). */
 	modulePath: string;
+	/** Which exported agent to run, when the module exports several. */
+	agentExport: string | undefined;
 	message: string;
 	id: string | undefined;
 	initialData: unknown;
 	/** Send condition: a string (--uid, continue-only) or null (--new, create-only). */
 	uid: string | null | undefined;
+	/** Submission retry policy for this run — durability is the runner's call. */
+	durability: { maxAttempts?: number; timeoutMs?: number } | undefined;
 	json: boolean;
 	envFile: string | undefined;
 }
@@ -356,14 +363,28 @@ function parseRunArgs(rest: string[]): RunArgs {
 		rest,
 		{
 			message: { type: 'string' },
+			agent: { type: 'string' },
 			id: { type: 'string' },
 			'initial-data': { type: 'string' },
 			uid: { type: 'string' },
 			new: { type: 'boolean' },
+			'max-attempts': { type: 'string' },
+			timeout: { type: 'string' },
 			json: { type: 'boolean' },
 			env: { type: 'string', multiple: true },
 		},
-		new Set(['--message', '--id', '--initial-data', '--uid', '--new', '--json', '--env']),
+		new Set([
+			'--message',
+			'--agent',
+			'--id',
+			'--initial-data',
+			'--uid',
+			'--new',
+			'--max-attempts',
+			'--timeout',
+			'--json',
+			'--env',
+		]),
 	);
 
 	const [modulePath, ...extra] = positionals;
@@ -399,6 +420,16 @@ function parseRunArgs(rest: string[]): RunArgs {
 		}
 	}
 
+	const maxAttempts = positiveIntFlag(values, 'max-attempts');
+	const timeoutMs = positiveIntFlag(values, 'timeout');
+	const durability =
+		maxAttempts !== undefined || timeoutMs !== undefined
+			? {
+					...(maxAttempts !== undefined ? { maxAttempts } : {}),
+					...(timeoutMs !== undefined ? { timeoutMs } : {}),
+				}
+			: undefined;
+
 	const uidFlag = stringFlag(values, 'uid', 'Missing value for --uid');
 	const createOnly = booleanFlag(values, 'new', '--new');
 	if (uidFlag !== undefined && createOnly) {
@@ -411,14 +442,30 @@ function parseRunArgs(rest: string[]): RunArgs {
 	return {
 		command: 'run',
 		modulePath,
+		agentExport: stringFlag(values, 'agent', 'Missing value for --agent'),
 		message,
 		id: stringFlag(values, 'id', 'Missing value for --id'),
 		initialData,
 		// The send condition: --uid <value> = continue-only, --new = create-only.
 		uid: createOnly ? null : uidFlag,
+		durability,
 		json: booleanFlag(values, 'json', '--json'),
 		envFile: envFiles[0],
 	};
+}
+
+/** Parse a positive-integer flag value, failing with a pointed message. */
+function positiveIntFlag(
+	values: CliValues,
+	flag: 'max-attempts' | 'timeout',
+): number | undefined {
+	const raw = stringFlag(values, flag, `Missing value for --${flag}`);
+	if (raw === undefined) return undefined;
+	const parsed = Number(raw);
+	if (!Number.isInteger(parsed) || parsed <= 0) {
+		fail(`\`--${flag}\` must be a positive integer; got ${JSON.stringify(raw)}.`);
+	}
+	return parsed;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -524,9 +571,11 @@ async function run(args: RunArgs) {
 	});
 	const execution = createLocalAgentRun({
 		modulePath: args.modulePath,
+		agentExport: args.agentExport,
 		message: args.message,
 		initialData: args.initialData,
 		uid: args.uid,
+		durability: args.durability,
 		conversationId: args.id,
 		onEvent: (chunk) => presenter.present(chunk as ConversationStreamChunk),
 		onRuntimeOutput: (line) => {
@@ -640,10 +689,12 @@ function renderAppTemplate(): string {
 		`const app = new Hono();\n` +
 		`\n` +
 		`// Mount every route explicitly. An agent module starts with the\n` +
-		`// 'use agent' directive; create one and mount it here:\n` +
+		`// 'use agent' directive and exports its agents as capitalized\n` +
+		`// functions; create one and mount it here:\n` +
 		`//\n` +
-		`//   import assistant from './agents/assistant.ts';\n` +
-		`//   app.route('/agents/assistant', assistant.route());\n` +
+		`//   import { createAgentRouter } from '@flue/runtime/routing';\n` +
+		`//   import { Assistant } from './agents/assistant.ts';\n` +
+		`//   app.route('/agents/assistant', createAgentRouter(Assistant));\n` +
 		`\n` +
 		`export default app;\n`
 	);
@@ -656,10 +707,11 @@ function renderWranglerTemplate(): string {
 		`\t"name": "my-flue-worker",\n` +
 		`\t"compatibility_date": "2026-06-01",\n` +
 		`\t"compatibility_flags": ["nodejs_compat"],\n` +
-		`\t// Every 'use agent' file generates a Durable Object class named after\n` +
-		`\t// its basename (assistant.ts -> FlueAssistantAgent). Cloudflare requires\n` +
-		`\t// a migration entry for each generated class, so when you add your\n` +
-		`\t// first agent, declare it here:\n` +
+		`\t// Every agent (an exported capitalized function in a 'use agent' file)\n` +
+		`\t// generates a Durable Object class named after its identity\n` +
+		`\t// (Assistant -> FlueAssistantAgent). Cloudflare requires a migration\n` +
+		`\t// entry for each generated class, so when you add your first agent,\n` +
+		`\t// declare it here:\n` +
 		`\t//\n` +
 		`\t//   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FlueAssistantAgent"] }]\n` +
 		`}\n`

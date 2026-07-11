@@ -195,7 +195,7 @@ import {
   type SalesforceMarketingCloudEvent,
 } from '@flue/salesforce';
 import { defineTool, dispatch, type JsonValue } from '@flue/runtime';
-import assistant from '../agents/assistant.ts';
+import { Assistant } from '../agents/assistant.ts';
 import { createSalesforceMarketingCloudClient } from '../salesforce-marketing-cloud-client.ts';
 import {
   emailEventInstanceId,
@@ -245,7 +245,7 @@ export const channel = createSalesforceMarketingCloudChannel({
     }
 
     for (const { event, ref } of usefulEvents) {
-      await dispatch(assistant, {
+      await dispatch(Assistant, {
         id: emailEventInstanceId(ref),
         // Recorded once when this event creates the instance; ignored after.
         initialData: {
@@ -387,11 +387,11 @@ Create an agent module such as `<source-dir>/agents/assistant.ts`:
 
 ```ts
 'use agent';
-import { defineAgent, useInitialData, useModel, useTool } from '@flue/runtime';
+import { useInitialData, useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { retrieveCallback } from '../channels/salesforce-marketing-cloud.ts';
 
-export const initialDataSchema = v.object({
+const initialDataSchema = v.object({
 	callbackId: v.string(),
 	mid: v.string(),
 	eid: v.string(),
@@ -401,7 +401,7 @@ export const initialDataSchema = v.object({
 	subscriberId: v.string(),
 });
 
-function Assistant() {
+export function Assistant() {
 	useModel('anthropic/claude-haiku-4-5');
 	const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
 	if (!data) {
@@ -413,17 +413,18 @@ function Assistant() {
 	return 'Review the inbound Salesforce Marketing Cloud email lifecycle event. Retrieve the configured ENS callback when callback status or delivery configuration is relevant.';
 }
 
-export default defineAgent(Assistant);
+Assistant.initialData = initialDataSchema;
 ```
 
-The `initialDataSchema` export validates the dispatched `initialData` when the
+The `initialData` static validates the dispatched `initialData` when the
 instance is created; `useInitialData()` returns the parsed value on every
 render.
 
 The `'use agent'` directive (the module's first statement) is what registers
 the agent with the application — `dispatch(...)` from the channel callback
 needs no `app.ts` mounting. Add
-`app.route('/agents/<name>', agent.route())` in `app.ts` only when the agent
+`app.route('/agents/<name>', createAgentRouter(Assistant))` (from
+`@flue/runtime/routing`) in `app.ts` only when the agent
 should also be reachable over HTTP directly.
 
 The tool accepts no tenant origin, callback id, or access token from the

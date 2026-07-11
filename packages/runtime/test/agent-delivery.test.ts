@@ -8,7 +8,6 @@ import {
 	registerFauxProvider,
 } from '@earendil-works/pi-ai/compat';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineAgent } from '../src/agent-definition.ts';
 import { renderAgentFunctionWithStructure } from '../src/hooks/render.ts';
 import { useDelivery } from '../src/hooks/use-delivery.ts';
 import { useModel } from '../src/hooks/use-model.ts';
@@ -138,7 +137,7 @@ describe('useDelivery()', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant),
+					agent: assistant,
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -206,7 +205,7 @@ describe('useDelivery()', () => {
 			agents: [
 				{
 					name: 'assistant',
-					definition: defineAgent(assistant),
+					agent: assistant,
 				},
 			],
 			createContext: makeFauxCreateContext(provider),
@@ -246,7 +245,7 @@ describe('useDelivery()', () => {
 			seen = useDelivery();
 			return 'Triage agent.';
 		}
-		const agent = defineAgent(assistant);
+		const agent = assistant;
 
 		const input: AgentSubmissionInput = {
 			kind: 'direct',

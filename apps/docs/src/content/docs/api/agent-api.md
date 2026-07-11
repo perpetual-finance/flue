@@ -1,7 +1,7 @@
 ---
 title: Agent API
 description: Reference for defining agents, composing behavior with Flue Hooks, and running agent operations with @flue/runtime.
-lastReviewedAt: 2026-07-08
+lastReviewedAt: 2026-07-11
 ---
 
 The agent API is exported from `@flue/runtime`.
@@ -19,7 +19,6 @@ import {
   ToolOutputValidationError,
   bash,
   connectMcpServer,
-  defineAgent,
   defineSkill,
   defineTool,
   dispatch,
@@ -39,15 +38,17 @@ import {
   useSkill,
   useSubagent,
   useTool,
+  type Agent,
   type AgentAppendMessage,
   type AgentDispatchRequest,
   type AgentFinishContext,
   type AgentFunction,
   type AgentInstanceInfo,
-  type AgentModuleValue,
+  type AgentProps,
   type AgentResponseToolCall,
   type AgentSignalAppend,
   type AgentStartContext,
+  type AgentStatics,
   type BashFactory,
   type CallHandle,
   type CompactionConfig,
@@ -60,7 +61,6 @@ import {
   type FileStat,
   type FlueHarness,
   type FlueLogger,
-  type FunctionAgentDefinition,
   type McpServerConnection,
   type McpServerOptions,
   type PromptImage,
@@ -92,21 +92,21 @@ import {
 } from '@flue/runtime';
 ```
 
-## `defineAgent(...)`
+## The agent function
 
 ```ts
-function defineAgent(agent: AgentFunction<AgentProps>): FunctionAgentDefinition;
+type Agent = AgentFunction<AgentProps> & AgentStatics;
 ```
 
-Defines an addressable agent. An agent is an [agent function](#agentfunction): it composes the agent's whole behavior with Flue Hooks — [`useModel()`](#usemodel) declares the model (required), the other hooks attach tools, instructions, skills, subagents, and durable state — and it returns the agent's instruction string. Supervisor-facing configuration lives beside the default export as optional module exports (see below).
+**The agent is the function.** An agent is an [agent function](#agentfunction): it composes the agent's whole behavior with Flue Hooks — [`useModel()`](#usemodel) declares the model (required), the other hooks attach tools, instructions, skills, subagents, and durable state — and it returns the agent's instruction string. Its contract rides as optional [statics on the function](#agent-statics); there is no wrapper to call.
 
-Default-export the returned value from a module whose first statement is the `'use agent'` directive to make the agent part of the application:
+Export the function — with a capitalized name — from a module whose first statement is the `'use agent'` directive to make the agent part of the application:
 
 ```ts title="src/agents/support.ts"
 'use agent';
-import { defineAgent, useModel, usePersistentState, useTool } from '@flue/runtime';
+import { useModel, usePersistentState, useTool } from '@flue/runtime';
 
-function Support() {
+export function Support() {
   useModel('anthropic/claude-sonnet-4-6');
   const [phase, setPhase] = usePersistentState('phase', 'gathering');
 
@@ -118,11 +118,9 @@ function Support() {
 
   return `Operator-facing support agent. Current phase: ${phase}.`;
 }
-
-export default defineAgent(Support);
 ```
 
-The directive gives the agent its durable identity (the file basename, or an `export const name` literal override) and registers it with the built application — there is no name-based addressing beyond that identity. To expose the agent over HTTP, mount `agent.route()` in `app.ts`; see the [Routing API](/docs/api/routing-api/). A dispatch-only agent needs no mount. `flue run <path>` and raw `defineAgent()` values in unit tests do not require the directive.
+In a marked module, every exported function with a capitalized name is an agent (the React convention — lowercase exports are helpers, classes never register, and multiple agents per file are fine). The agent's durable identity is the exported function's name, or its [`agentName` static](#agent-statics) override — there is no name-based addressing beyond that identity. To expose the agent over HTTP, mount `createAgentRouter(Fn)` in `app.ts`; see the [Routing API](/docs/api/routing-api/). A dispatch-only agent needs no mount. `flue run <path>` and plain agent functions in unit tests do not require the directive.
 
 The agent function re-renders every turn as durable state changes — it must return synchronously. Its identity hooks (`usePersistentState()`, `useDataWriter()`, and the lifecycle hooks) must stay identical across renders; its resources (`useTool()`, `useSkill()`, `useSubagent()`) may be declared conditionally, with changes announced to the model (see [Dynamic resources](#dynamic-resources)); `useSandbox()` may be conditional too — a presence flip swaps the environment at the next turn boundary (see [`useSandbox`](#usesandbox)). Async work belongs in tools, lifecycle hooks (`useAgentStart()`, `useAgentFinish()`), or resource factories, never in the agent function body itself.
 
@@ -148,47 +146,36 @@ from creation data with [`useInitialData()`](#useinitialdata) rather than
 parsed from `id`. Channel packages still expose a `parseInstanceId(id)` escape
 hatch for the rare caller that must recover them from the id itself.
 
-#### Module exports
+#### Agent statics
 
-Everything the agent *does* is composed inside the agent function with Flue Hooks. Everything about how the runtime *treats* the agent from the outside is an optional module export beside the default export:
-
-| Export              | Type               | Meaning                                                                                                                                                                                                                                                       |
-| ------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`              | `string` literal   | Identity override — replaces the file basename as the durable identity. Must be a plain lower-kebab-case string literal (build targets derive Durable Object class and binding names from it before any code runs). See ['use agent'](/docs/guide/use-agent/). |
-| `description`       | `string`           | Static human-facing metadata.                                                                                                                                                                                                                                   |
-| `route`             | Hono middleware    | Wraps every route `agent.route()` serves, attachment downloads included. See the [Routing API](/docs/api/routing-api/).                                                                                                                                        |
-| `initialDataSchema` | Valibot schema     | Schema for the instance's creation data, validated once at instance creation (a mismatch — including absence, unless the schema accepts `undefined` — rejects the creating call). Read the recorded value with [`useInitialData()`](#useinitialdata).          |
-| `durability`        | `DurabilityConfig` | Submission retry policy (`maxAttempts`, `timeoutMs`). A module export rather than a hook because the policy must be readable even when the render itself crashes.                                                                                              |
-
-```ts title="src/agents/triage.ts"
-'use agent';
-import { defineAgent, useModel } from '@flue/runtime';
-import * as v from 'valibot';
-
-export const name = 'issue-triage'; // identity override (optional)
-export const description = 'Triages one GitHub issue end-to-end.';
-export const initialDataSchema = v.object({ issue: v.pipe(v.number(), v.integer()) });
-export const durability = { maxAttempts: 5, timeoutMs: 7_200_000 };
-
-export default defineAgent(() => {
-  useModel('anthropic/claude-opus-4-6');
-  return 'Triage the bound issue.';
-});
-```
-
-#### `FunctionAgentDefinition`
-
-The opaque value `defineAgent(Agent)` returns:
+Everything the agent *does* is composed inside the agent function with Flue Hooks. The parts the platform reads **without running the function** — the intrinsic contract — ride as optional statics assigned on the function (the `PropTypes` pattern):
 
 ```ts
-interface FunctionAgentDefinition {
-  __flueFunctionAgent: true;
-  agent: AgentFunction;
-  route(): Hono;
+interface AgentStatics {
+  agentName?: string;
+  initialData?: v.GenericSchema;
 }
 ```
 
-`route()` builds the agent's mountable HTTP sub-app (`POST /:id` prompt, `GET|HEAD /:id` conversation stream, `POST /:id/abort`, and the opt-in attachment route). It is a pure factory with no registration side effects — registration comes from the `'use agent'` scan — and it throws when the definition carries no identity. See the [Routing API](/docs/api/routing-api/) for the full route table and middleware semantics.
+| Static        | Type             | Meaning                                                                                                                                                                                                                                                                                                                                              |
+| ------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agentName`   | `string` literal | Identity override — replaces the exported function's name as the durable identity. Must be a top-level plain string-literal assignment in a `'use agent'` module (build targets derive Durable Object class and binding names from it before any code runs); PascalCase and lower-kebab-case are both valid. See ['use agent'](/docs/guide/use-agent/). |
+| `initialData` | Valibot schema   | Schema for the instance's creation data, validated once at instance creation — synchronously at admission, before anything durable exists (a mismatch, including absence unless the schema accepts `undefined`, rejects the creating call). The schema-parsed output is what gets recorded and what [`useInitialData()`](#useinitialdata) returns.     |
+
+```ts title="src/agents/triage.ts"
+'use agent';
+import { useModel } from '@flue/runtime';
+import * as v from 'valibot';
+
+export function IssueTriage() {
+  useModel('anthropic/claude-opus-4-6');
+  return 'Triage the bound issue.';
+}
+IssueTriage.agentName = 'issue-triage'; // optional — identity defaults to 'IssueTriage'
+IssueTriage.initialData = v.object({ issue: v.pipe(v.number(), v.integer()) });
+```
+
+The old supervisor-facing module exports are gone: `name` became the `agentName` static, `initialDataSchema` became the `initialData` static, `description` was deleted without replacement, `route` middleware is plain Hono composition at the mount, and `durability` moved to the binding — `createAgentRouter(fn, { durability })` in `app.ts`, a `{ agent, durability }` entry in [`start()`](/docs/guide/scripts/#standalone-scripts-start), or [`flue run`](/docs/cli/run/) `--max-attempts`/`--timeout`. Durability is environment policy decided by whoever runs the agent, and it lives entirely outside the function, so it stays readable even when a render crashes. See the [Routing API](/docs/api/routing-api/) for `createAgentRouter()` and the full route table.
 
 #### `DurabilityConfig`
 
@@ -316,7 +303,7 @@ function useInstruction(text: string): void;
 Appends raw instruction text for the current render — the deliberately low-level escape hatch. Called in the agent body, text lands after the base instruction, in call order; called inside a custom hook, it lands in that hook's section. No structure, no identity, no change tracking: prefer a custom hook for anything coherent.
 
 ```ts
-export default function marketing() {
+export function Marketing() {
   useInstruction('Write in Acme voice: warm, concise.');
   if (LAUNCH_WEEK) useInstruction('Mention the v2 launch when relevant.');
   return undefined;
@@ -335,7 +322,7 @@ type StateSetter<T> = (value: T | ((previous: T) => T)) => void;
 Durable agent state: an API over the record log of the agent instance. Reads the value as of this render (reduced from the instance's `state_write` records) and returns a setter that persists a new value — either directly or through an updater resolved at call time.
 
 ```ts
-export default function SupportAgent() {
+export function SupportAgent() {
   const [phase, setPhase] = usePersistentState<'gathering' | 'drafting'>('phase', 'gathering');
   const [factsChecked, setFactsChecked] = usePersistentState('factsChecked', 0);
 
@@ -499,9 +486,9 @@ function useDelivery(): DeliveredMessage;
 Reads the message currently in front of the model — the latest input the response has received, as the same validated [`DeliveredMessage`](#deliveredmessage) shape a `dispatch()` call or a direct HTTP prompt admits. The value is a cursor: it starts as the delivery that woke the response and advances whenever a new message reaches the model — a delivery [joining the live response](#usedispatchmessage) at a turn boundary, or a signal appended by a lifecycle callback.
 
 ```ts
-// dispatch(triage, { id: `issue-${n}`, message: { kind: 'signal',
+// dispatch(IssueTriage, { id: `issue-${n}`, message: { kind: 'signal',
 //   type: 'issue.triage', body: '...', attributes: { issue: String(n) } } })
-export default function IssueTriage() {
+export function IssueTriage() {
   const delivery = useDelivery();
   const issue = delivery.kind === 'signal' ? Number(delivery.attributes?.issue) : undefined;
 
@@ -524,7 +511,7 @@ function useAgentStart(run: (ctx: AgentStartContext) => void | Promise<void>): v
 Runs a callback when the agent starts work on a delivered message — after the input is durable, before the model's first turn. The intake seam: load what the model should wake up knowing, seed files, write durable state, and announce it by dispatching a signal with [`useDispatchMessage()`](#usedispatchmessage) — the delivery joins this same response, so the model reads it ahead of its first answer.
 
 ```ts
-export default function IssueTriage() {
+export function IssueTriage() {
   const dispatch = useDispatchMessage();
   const [issue, setIssue] = usePersistentState<Issue | null>('issue', null);
 
@@ -614,18 +601,15 @@ function useInitialData<T = unknown>(): T;
 Read the instance's creation data — the `data` a caller sent with this instance's first contact, recorded exactly once at creation and constant for the instance's whole life. This is the third leg of the input model: `useInitialData()` is what the instance is _about_, `useDelivery()` is what _this message_ says, and `usePersistentState` is what the agent has _learned_.
 
 ```ts
-export const initialDataSchema = v.object({ issue: v.pipe(v.number(), v.integer()) });
-
-function Triage() {
+export function Triage() {
   useModel('anthropic/claude-opus-4-6');
-  const data = useInitialData<v.InferOutput<typeof initialDataSchema>>();
+  const data = useInitialData<v.InferOutput<typeof Triage.initialData>>();
   return `Triage GitHub issue #${data.issue} end-to-end.`;
 }
-
-export default defineAgent(Triage);
+Triage.initialData = v.object({ issue: v.pipe(v.number(), v.integer()) });
 ```
 
-Creation data rides the instance's first contact: `dispatch(triage, { id, initialData, message })`, an `initialData` field beside the direct-HTTP message body, `client.send({ message, initialData })`, or `flue run --initial-data '<json>'`. Declare an `initialDataSchema` module export to validate it at creation — a mismatch (including absence, unless the schema accepts `undefined`) rejects the creating call, so with a required schema the value is always present here, as the schema-parsed output. Without a schema, whatever the creator sent is recorded and returned untyped.
+Creation data rides the instance's first contact: `dispatch(Triage, { id, initialData, message })`, an `initialData` field beside the direct-HTTP message body, `client.send({ message, initialData })`, or `flue run --initial-data '<json>'`. Declare an `initialData` schema static on the agent function to validate it at creation — a mismatch (including absence, unless the schema accepts `undefined`) rejects the creating call, so with a required schema the value is always present here, as the schema-parsed output. Without a schema, whatever the creator sent is recorded and returned untyped.
 
 The value is immutable — `data` on messages to an existing instance is ignored, and evolving facts belong in `usePersistentState`. The return type is exactly the type parameter you assert: with a required schema the value is always present, so the common case needs no `undefined` narrowing (and no `!`). At runtime the value _is_ `undefined` when creation carried no data, on bare tooling/test renders (back it with `initialData` in the render-state context), and in subagent renders (a delegate has no creation data of its own; close over a value to share it) — when your agent can hit those cases, say so in the type: `useInitialData<Config | undefined>()`. The recorded value is part of the instance's durable record stream but is never served to clients; still, it is not a secrets channel — keys and tokens stay in the environment.
 
@@ -638,7 +622,7 @@ function useDispatchMessage(): (message: DeliveredMessage) => Promise<DispatchRe
 Gets a dispatcher bound to this agent instance — the agent-scoped form of [`dispatch()`](#dispatch), the way a router hook overloads a browser primitive with the router-scoped version. The returned function takes just the message: the instance already exists, so there is no `initialData` and no `uid` condition to pass.
 
 ```ts
-export default function IssueTriage() {
+export function IssueTriage() {
   const dispatch = useDispatchMessage();
 
   useTool({
@@ -911,7 +895,7 @@ interface McpServerConnection {
 ## `dispatch(...)`
 
 ```ts
-function dispatch(agent: AgentModuleValue, request: AgentDispatchRequest): Promise<DispatchReceipt>;
+function dispatch(agent: Agent, request: AgentDispatchRequest): Promise<DispatchReceipt>;
 
 interface AgentDispatchRequest {
   id: string;
@@ -927,13 +911,13 @@ interface DispatchReceipt {
 }
 ```
 
-THE delivery verb: dispatches a message — either kind, with its explicit `kind`; a bare string is shorthand for `{ kind: 'user', body }` — for asynchronous processing by a continuing agent instance. It is fire-and-forget: to await the settled reply instead, use the [`init()` handle](#init). The `agent` argument is a registered agent module value — the default export of a `'use agent'` module — so no HTTP mount is required.
+THE delivery verb: dispatches a message — either kind, with its explicit `kind`; a bare string is shorthand for `{ kind: 'user', body }` — for asynchronous processing by a continuing agent instance. It is fire-and-forget: to await the settled reply instead, use the [`init()` handle](#init). The `agent` argument is the agent function itself, registered with this application by the `'use agent'` scan (or by `start()` in scripts) — so no HTTP mount is required.
 
 | Field           | Description                                                                                                                                                                                                                                                                                    |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `id`            | Target agent instance id.                                                                                                                                                                                                                                                                      |
 | `message`       | The message delivered to the conversation. Flue snapshots it when accepted.                                                                                                                                                                                                                    |
-| `initialData`   | Instance-creation data — the seed, consulted only when this send creates the instance: validated against the module's `initialDataSchema` export (when declared) and recorded once. Ignored when the send continues an existing instance. See [Creation data](/docs/guide/building-agents/#creation-data). |
+| `initialData`   | Instance-creation data — the seed, consulted only when this send creates the instance: validated against the agent's `initialData` schema static (when declared) and recorded once. Ignored when the send continues an existing instance. See [Creation data](/docs/guide/building-agents/#creation-data). |
 | `uid`           | Send condition — see [Conditional sends](#conditional-sends).                                                                                                                                                                                                                                  |
 | `dispatchId`    | Generated delivery identifier returned in the receipt.                                                                                                                                                                                                                                         |
 | `acceptedAt`    | ISO timestamp assigned when dispatch admission begins.                                                                                                                                                                                                                                         |
@@ -1004,7 +988,7 @@ Delivery durability depends on the generated target. Node uses a process-lifetim
 ## `init(...)`
 
 ```ts
-function init(agent: AgentModuleValue, options?: InitOptions): AgentInstanceHandle;
+function init(agent: Agent, options?: InitOptions): AgentInstanceHandle;
 
 interface InitOptions {
   id?: string; // instance address; omitted -> a fresh unique id
@@ -1039,7 +1023,7 @@ See the [Scripts guide](/docs/guide/scripts/) for the script, cron, and test rec
 ## `getAgentInstance(...)`
 
 ```ts
-function getAgentInstance(agent: AgentModuleValue, id: string): Promise<AgentInstanceInfo | null>;
+function getAgentInstance(agent: Agent, id: string): Promise<AgentInstanceInfo | null>;
 ```
 
 Looks up an agent instance by id: `null` when no instance exists, else its `AgentInstanceInfo`.
@@ -1059,13 +1043,13 @@ interface AgentInstanceInfo {
 Rarely needed: a receipt from a send you originated already carries the uid (`DispatchReceipt.uid`, the direct-HTTP `202` body's `uid`, or the SDK's `AgentSendResult.uid`), and a failed `uid: null` condition hands the existing uid back in `AgentInstanceExistsError`. Reach for `getAgentInstance()` when code that did not originate the instance's creation wants to condition a send against it without attempting one first.
 
 ```ts
-const info = await getAgentInstance(triage, 'issue-17307'); // { id: 'issue-17307', uid: 'inst_01KW…' } | null
-if (info) await dispatch(triage, { id: info.id, uid: info.uid, message });
+const info = await getAgentInstance(IssueTriage, 'issue-17307'); // { id: 'issue-17307', uid: 'inst_01KW…' } | null
+if (info) await dispatch(IssueTriage, { id: info.id, uid: info.uid, message });
 ```
 
 ## Agent
 
-A `FunctionAgentDefinition` is the opaque value returned by `defineAgent(Agent)`. Default-export it from a `'use agent'` module to register it with the application; mount `agent.route()` in `app.ts` to make its conversations addressable over HTTP.
+`Agent` is the agent function type: `AgentFunction<AgentProps> & AgentStatics`. The function IS the agent — export it (capitalized) from a `'use agent'` module to register it with the application, and mount `createAgentRouter(Fn)` in `app.ts` to make its conversations addressable over HTTP.
 
 ## Harness
 

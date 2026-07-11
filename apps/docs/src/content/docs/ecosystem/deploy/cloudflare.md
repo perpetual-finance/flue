@@ -51,18 +51,16 @@ export default defineConfig({
 
 ### 2. Create your first agent
 
-An agent module is an ordinary TypeScript file plus one line: the `'use agent'` directive. The directive is how an agent joins the application — the build scans your source root for marked modules, emits one Durable Object class per marked file, and the file basename becomes the agent's durable identity (an `export const name` literal overrides it).
+An agent module is an ordinary TypeScript file plus one line: the `'use agent'` directive. The directive is how an agent joins the application — the build scans your source root for marked modules, every exported function with a capitalized name is an agent, and the build emits one Durable Object class per agent. The function's name becomes the agent's durable identity (an optional `Translator.agentName = '...'` string-literal static overrides it).
 
 ```typescript title="src/agents/translator.ts"
 'use agent';
-import { defineAgent, useModel } from '@flue/runtime';
+import { useModel } from '@flue/runtime';
 
-function Translator() {
+export function Translator() {
   useModel('anthropic/claude-sonnet-4-6');
   return 'Translate the user message into the requested language. Reply with the translation only.';
 }
-
-export default defineAgent(Translator);
 ```
 
 By default, the agent receives a virtual sandbox powered by [just-bash](https://github.com/vercel-labs/just-bash). No container needed.
@@ -72,18 +70,19 @@ By default, the agent receives a virtual sandbox powered by [just-bash](https://
 `app.ts` is the only required file. Its default export owns the request pipeline; each mounted agent route resolves the generated binding and forwards to that agent's Durable Object, and everything else is just a Hono app running in the Worker isolate:
 
 ```typescript title="src/app.ts"
+import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
-import translator from './agents/translator.ts';
+import { Translator } from './agents/translator.ts';
 
 const app = new Hono();
 
-app.route('/agents/translator', translator.route());
+app.route('/agents/translator', createAgentRouter(Translator));
 app.get('/api/ping', (c) => c.text('pong'));
 
 export default app;
 ```
 
-The mount path is yours to choose; the file basename (the agent's durable identity) is what keys conversations and the Durable Object class. See the [Routing API](/docs/api/routing-api/).
+The mount path is yours to choose; the exported function's name (the agent's durable identity) is what keys conversations and the Durable Object class. See the [Routing API](/docs/api/routing-api/).
 
 ### 4. Configure Durable Object migrations
 
@@ -101,11 +100,11 @@ Cloudflare requires an explicit migration whenever a Worker adds a Durable Objec
 }
 ```
 
-Class names derive from agent identities (the file basename, or its `export const name` override): `src/agents/translator.ts` produces the class `FlueTranslatorAgent` and the binding `FLUE_TRANSLATOR_AGENT`. Flue requires `nodejs_compat` and a `compatibility_date` of `2026-04-01` or newer, and validates both at build time.
+Class names derive from agent identities (the exported function's name, or its `agentName` static override), with camel boundaries split for the binding: the `Translator` agent produces the class `FlueTranslatorAgent` and the binding `FLUE_TRANSLATOR_AGENT`, and an `IssueTriage` agent would produce `FlueIssueTriageAgent` and `FLUE_ISSUE_TRIAGE_AGENT`. Flue requires `nodejs_compat` and a `compatibility_date` of `2026-04-01` or newer, and validates both at build time.
 
 **Adding an agent is a triple**: the `'use agent'` file, the `app.route(...)` mount, and a uniquely tagged migration for its new class. Keep deployed migration entries in order and append, never rewrite. Generated Flue agent classes require Durable Object SQLite: introduce them through `new_sqlite_classes`, not legacy `new_classes`.
 
-Renaming an agent **file** is a storage-identity change — the class name follows the identity, which follows the basename unless `export const name` pins it. Express an identity change with wrangler-native `renamed_classes` (`{ "from": "FlueOldNameAgent", "to": "FlueNewNameAgent" }`) to keep the deployed Durable Objects. Re-mounting an agent at a different URL is not an identity change and needs no migration.
+Renaming an agent **function** is a storage-identity change — the class name follows the identity, which follows the function name unless an `agentName` static pins it. Express an identity change with wrangler-native `renamed_classes` (`{ "from": "FlueOldNameAgent", "to": "FlueNewNameAgent" }`) to keep the deployed Durable Objects. Renaming the file alone changes nothing, and re-mounting an agent at a different URL is not an identity change — neither needs a migration.
 
 ### 5. Add your API key
 
@@ -154,7 +153,7 @@ Application code should use the [SDK](/docs/sdk/overview/) — `createFlueClient
 
 Adding or removing an agent file regenerates the Worker entry and wrangler config automatically; body edits inside an agent are ordinary hot updates.
 
-Route middleware (the agent module's `route` export) sees the original inbound HTTP request before Flue forwards accepted work into its Durable Object. Durable agent processing is a later boundary: after admission, Flue uses a deterministic internal request and does not persist or reconstruct the caller's original headers, cookies, query parameters, URL, or body. Authenticate before admission and carry any non-secret correlation you need later in application-owned input or storage.
+Route middleware (plain Hono middleware applied at the agent's mount path in `app.ts`, before the `createAgentRouter(...)` mount) sees the original inbound HTTP request before Flue forwards accepted work into its Durable Object. Durable agent processing is a later boundary: after admission, Flue uses a deterministic internal request and does not persist or reconstruct the caller's original headers, cookies, query parameters, URL, or body. Authenticate before admission and carry any non-secret correlation you need later in application-owned input or storage.
 
 `flue run` does not emulate Cloudflare: it is Node-local, and agent modules that import `cloudflare:*` fail under it with a pointer at `vite dev`.
 
@@ -192,14 +191,12 @@ Flue normally owns each generated agent Durable Object class. When an agent need
 
 ```ts title="src/agents/heartbeat.ts"
 'use agent';
-import { defineAgent, useModel } from '@flue/runtime';
+import { useModel } from '@flue/runtime';
 import { extend } from '@flue/runtime/cloudflare';
 
-function Heartbeat() {
+export function Heartbeat() {
   useModel('anthropic/claude-sonnet-4-6');
 }
-
-export default defineAgent(Heartbeat);
 
 export const cloudflare = extend({
   base: (Base) =>
@@ -215,7 +212,7 @@ export const cloudflare = extend({
 });
 ```
 
-This is an advanced Cloudflare-only extension point. Flue applies `base` first, then defines its own Durable Object subclass with the generated binding and class identity. For `src/agents/heartbeat.ts`, authored Worker code can access the namespace as `env.FLUE_HEARTBEAT_AGENT`, and Wrangler binds that name to `FlueHeartbeatAgent`. Use `base` for native SDK lifecycle hooks and additional named methods. Do not override `fetch()`, `onRequest()`, `onFiberRecovered()`, or `alarm()`: Flue and the Agents SDK use those methods for routing, interruption recovery, and alarm multiplexing.
+This is an advanced Cloudflare-only extension point. Flue applies `base` first, then defines its own Durable Object subclass with the generated binding and class identity. For the `Heartbeat` agent, authored Worker code can access the namespace as `env.FLUE_HEARTBEAT_AGENT`, and Wrangler binds that name to `FlueHeartbeatAgent`. Use `base` for native SDK lifecycle hooks and additional named methods. Do not override `fetch()`, `onRequest()`, `onFiberRecovered()`, or `alarm()`: Flue and the Agents SDK use those methods for routing, interruption recovery, and alarm multiplexing.
 
 Use `wrap` when an integration needs to wrap the final Flue-generated Durable Object class:
 
@@ -275,13 +272,13 @@ Use `app.ts` for custom HTTP routes and middleware. `cloudflare.ts` must not exp
 
 ```typescript title="src/agents/assistant.ts"
 'use agent';
-import { defineAgent, useModel, useSubagent } from '@flue/runtime';
+import { useModel, useSubagent } from '@flue/runtime';
 
 function Triager() {
   return 'Search thoroughly, cite sources, and stay concise.';
 }
 
-function Assistant() {
+export function Assistant() {
   useModel('anthropic/claude-sonnet-4-6');
   useSubagent({
     name: 'triager',
@@ -290,8 +287,6 @@ function Assistant() {
   });
   return 'Delegate research to the `triager` subagent via a task.';
 }
-
-export default defineAgent(Assistant);
 ```
 
 ## Using the sandbox
@@ -302,10 +297,10 @@ Because the agent has shell access, it can set up its own workspace on the fly, 
 
 ```typescript title="src/agents/support.ts"
 'use agent';
-import { defineAgent, useModel, useTool } from '@flue/runtime';
+import { useModel, useTool } from '@flue/runtime';
 import * as v from 'valibot';
 
-function Support() {
+export function Support() {
   useModel('anthropic/claude-sonnet-4-6');
   useTool({
     name: 'answer',
@@ -326,8 +321,6 @@ function Support() {
   });
   return 'For each support request, call the `answer` tool with the customer message.';
 }
-
-export default defineAgent(Support);
 ```
 
 The agent can use its built-in tools — grep, glob, read — to search and read these files. This is still running on a virtual sandbox (no container), so it's fast and cheap. If an application needs durable external storage or a full Linux environment, choose and own a sandbox adapter appropriate to that requirement.
@@ -387,7 +380,7 @@ The base image is published by Cloudflare and bundles the control-plane HTTP ser
 ```typescript title="src/agents/assistant.ts"
 'use agent';
 import { env } from 'cloudflare:workers';
-import { type AgentProps, defineAgent, useModel, useSandbox } from '@flue/runtime';
+import { type AgentProps, useModel, useSandbox } from '@flue/runtime';
 import { cloudflareSandbox } from '@flue/runtime/cloudflare';
 import { getSandbox } from '@cloudflare/sandbox';
 
@@ -395,14 +388,12 @@ interface Env {
   Sandbox: DurableObjectNamespace;
 }
 
-function Assistant({ id }: AgentProps) {
+export function Assistant({ id }: AgentProps) {
   useModel('anthropic/claude-opus-4-7');
   const { Sandbox } = env as unknown as Env;
   useSandbox(cloudflareSandbox(getSandbox(Sandbox, id)));
   return 'You have a full Linux sandbox. Use it to complete whatever the user asks.';
 }
-
-export default defineAgent(Assistant);
 ```
 
 ### Multiple sandboxes

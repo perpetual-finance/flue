@@ -1,5 +1,5 @@
 'use agent';
-import { defineAgent, registerProvider, useModel, useTool } from '@flue/runtime';
+import { registerProvider, useModel, useTool } from '@flue/runtime';
 
 // Brand-new provider IDs for local OpenAI-compatible servers register at
 // module scope, so the agent works the same under `vite dev` and
@@ -9,7 +9,7 @@ registerProvider('ollama', {
 	baseUrl: 'http://localhost:11434/v1',
 });
 
-function WithRegisteredProvider() {
+export function WithRegisteredProvider() {
 	useModel('ollama/llama3.1:8b');
 	useTool({
 		name: 'provider-smoke',
@@ -22,5 +22,3 @@ function WithRegisteredProvider() {
 	});
 	return 'When asked to run a demo, call the `provider-smoke` tool and report its result.';
 }
-
-export default defineAgent(WithRegisteredProvider);
