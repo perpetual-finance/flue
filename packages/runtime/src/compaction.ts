@@ -18,6 +18,7 @@ import type {
 	UserMessage,
 } from '@earendil-works/pi-ai/compat';
 import { completeSimple, isContextOverflow } from '@earendil-works/pi-ai/compat';
+import { WORKERS_AI_OVERFLOW_MARKER } from './errors.ts';
 import type { PromptUsage } from './types.ts';
 import { addUsage, fromProviderUsage } from './usage.ts';
 
@@ -738,4 +739,23 @@ export async function compact(
 		usage: aggregateUsage,
 	};
 }
-export { isContextOverflow };
+/**
+ * Context-overflow classification for an assistant message. Extends pi-ai's
+ * pattern-based `isContextOverflow` with a structural check for the runtime's
+ * own Workers-AI binding marker, so a binding 413 classifies without
+ * depending on pi-ai's pattern list — or on its non-overflow precedence (a
+ * 413 whose provider body happens to mention "rate limit" must still
+ * classify as overflow).
+ */
+export function isAssistantContextOverflow(
+	assistant: AssistantMessage,
+	contextWindow: number,
+): boolean {
+	if (
+		assistant.stopReason === 'error' &&
+		assistant.errorMessage?.includes(WORKERS_AI_OVERFLOW_MARKER)
+	) {
+		return true;
+	}
+	return isContextOverflow(assistant, contextWindow);
+}

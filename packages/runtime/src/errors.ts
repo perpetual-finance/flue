@@ -639,6 +639,15 @@ export class ProviderRegistrationError extends FlueError {
 	}
 }
 
+/**
+ * Marker appended to a Workers-AI binding 413 error message. Overflow
+ * classification reads the persisted assistant `errorMessage` — no typed
+ * error object exists at that point — so the marker is the transport, and
+ * `isAssistantContextOverflow` (compaction.ts) matches it against this same
+ * constant. Keep writer and reader on this one definition.
+ */
+export const WORKERS_AI_OVERFLOW_MARKER = '(request_too_large)';
+
 export class CloudflareAIBindingError extends FlueError {
 	constructor({
 		message,
@@ -658,7 +667,7 @@ export class CloudflareAIBindingError extends FlueError {
 		// of it would leave context-overflow recovery (compaction + retry)
 		// unable to fire.
 		const boundedBody = body ? truncateProviderBody(body) : undefined;
-		const overflowMarker = status === 413 ? ' (request_too_large)' : '';
+		const overflowMarker = status === 413 ? ` ${WORKERS_AI_OVERFLOW_MARKER}` : '';
 		super({
 			type: 'cloudflare_ai_binding_error',
 			message:
@@ -671,6 +680,10 @@ export class CloudflareAIBindingError extends FlueError {
 			meta: {
 				...(status !== undefined ? { status } : {}),
 				...(statusText ? { statusText } : {}),
+				// Structured "conversation outgrew the provider limit" signal:
+				// lets telemetry separate expected, self-healing overflow from a
+				// real binding outage without parsing the message.
+				...(status === 413 ? { reason: 'request_too_large' } : {}),
 			},
 		});
 	}

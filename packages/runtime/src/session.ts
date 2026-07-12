@@ -52,7 +52,7 @@ import {
 	compact,
 	DEFAULT_COMPACTION_SETTINGS,
 	deriveCompactionDefaults,
-	isContextOverflow,
+	isAssistantContextOverflow,
 	prepareCompaction,
 	shouldCompact,
 } from './compaction.ts';
@@ -4487,7 +4487,7 @@ export class Session implements FlueSession, AgentSubmissionSession {
 		while (true) {
 			const overflow =
 				assistant !== undefined &&
-				isContextOverflow(assistant, this.agentLoop.state.model.contextWindow ?? 0);
+				isAssistantContextOverflow(assistant, this.agentLoop.state.model.contextWindow ?? 0);
 			const retryable = !overflow && assistant !== undefined && isRetryableModelError(assistant);
 
 			if (turnCompleted && !overflow && !retryable) {

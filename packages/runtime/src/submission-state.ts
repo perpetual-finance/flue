@@ -36,7 +36,7 @@
 
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
-import { isContextOverflow } from './compaction.ts';
+import { isAssistantContextOverflow } from './compaction.ts';
 
 export type CanonicalSubmissionEntry =
 	| {
@@ -183,7 +183,7 @@ export function classifySubmissionState(
 			consecutiveRetryableErrors: countConsecutiveRetryableModelErrors(following),
 		};
 	}
-	const overflow = isContextOverflow(assistant, opts.contextWindow);
+	const overflow = isAssistantContextOverflow(assistant, opts.contextWindow);
 	if (isCompletedAssistantResponse(assistant)) {
 		return { kind: 'completed', assistant, overflow };
 	}

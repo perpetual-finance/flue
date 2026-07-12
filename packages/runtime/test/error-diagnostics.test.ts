@@ -1,4 +1,6 @@
+import type { AssistantMessage } from '@earendil-works/pi-ai/compat';
 import { describe, expect, it } from 'vitest';
+import { isAssistantContextOverflow } from '../src/compaction.ts';
 import {
 	CloudflareAIBindingError,
 	ConversationRecordInvariantError,
@@ -40,6 +42,21 @@ describe('CloudflareAIBindingError', () => {
 		expect(bodyless.message).toMatch(/request_too_large/);
 	});
 
+	it('carries a structured request_too_large reason in meta on 413 only', () => {
+		const overflow = new CloudflareAIBindingError({
+			status: 413,
+			statusText: 'Payload Too Large',
+		});
+		expect(overflow.meta).toEqual({
+			status: 413,
+			statusText: 'Payload Too Large',
+			reason: 'request_too_large',
+		});
+
+		const outage = new CloudflareAIBindingError({ status: 502, statusText: 'Bad Gateway' });
+		expect(outage.meta).toEqual({ status: 502, statusText: 'Bad Gateway' });
+	});
+
 	it('bounds an oversized provider body in the message while details keeps it whole', () => {
 		const body = 'x'.repeat(5000);
 		const error = new CloudflareAIBindingError({ status: 500, body });
@@ -53,6 +70,44 @@ describe('CloudflareAIBindingError', () => {
 			message: 'Cloudflare AI binding returned empty response body.',
 		});
 		expect(error.message).toBe('Cloudflare AI binding returned empty response body.');
+	});
+});
+
+describe('isAssistantContextOverflow', () => {
+	const erroredAssistant = (errorMessage: string): AssistantMessage =>
+		({
+			role: 'assistant',
+			content: [],
+			stopReason: 'error',
+			errorMessage,
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+		}) as unknown as AssistantMessage;
+
+	it('classifies a binding 413 structurally, past pi-ai non-overflow precedence', () => {
+		// A provider body mentioning rate limiting matches pi-ai's
+		// NON_OVERFLOW_PATTERNS, which would veto its pattern-based
+		// classification — the runtime's own marker must still win.
+		const message = new CloudflareAIBindingError({
+			status: 413,
+			statusText: 'Payload Too Large',
+			body: 'request rejected: rate limit on payload size',
+		}).message;
+		expect(isAssistantContextOverflow(erroredAssistant(message), 128_000)).toBe(true);
+	});
+
+	it('still delegates provider-pattern overflow to pi-ai', () => {
+		expect(isAssistantContextOverflow(erroredAssistant('prompt is too long: 250000 tokens'), 128_000)).toBe(
+			true,
+		);
+	});
+
+	it('does not classify an ordinary binding failure as overflow', () => {
+		const message = new CloudflareAIBindingError({
+			status: 502,
+			statusText: 'Bad Gateway',
+			body: 'upstream reset',
+		}).message;
+		expect(isAssistantContextOverflow(erroredAssistant(message), 128_000)).toBe(false);
 	});
 });
 
