@@ -170,7 +170,7 @@ await dispatch(Triage, {
 });
 ```
 
-The `initialData` schema static validates the data once, at instance creation — a creating call that omits or malforms it is rejected, so the value is guaranteed present and shaped from the first render on. Data sent to an existing instance is ignored; the recorded value never changes. Direct HTTP carries it the same way (`{ "initialData": {…}, "kind": "user", "body": "…" }`), as do `client.send({ message, initialData })` and `flue run --initial-data '<json>'`.
+The `initialData` schema static validates the data once, at instance creation — a creating call that omits or malforms it is rejected, so the value is guaranteed present and shaped from the first render on. Data sent to an existing instance is ignored; the recorded value never changes. Direct HTTP carries it the same way (`{ "initialData": {…}, "kind": "user", "body": "…" }`), as do `client.send({ message, initialData })` and `flue run --data '<json>'`.
 
 The three input channels each have one job: **`useInitialData()` is what the instance is about, `useDelivery()` is what this message says, and `usePersistentState` is what the agent has learned.**
 

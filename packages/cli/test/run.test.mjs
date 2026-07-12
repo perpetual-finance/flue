@@ -366,6 +366,61 @@ test('conditional sends: --uid continues the incarnation, --new rejects an exist
 	assert.match(both.stderr, /pass one or the other/i);
 });
 
+test('--data seeds a new conversation and is create-only', async () => {
+	const root = createFixtureRoot();
+	const agent = writeEchoAgent(root);
+
+	// Creation with a chosen id and data works (the CI pattern).
+	const created = await runCli(root, [
+		agent,
+		'--message',
+		'hi',
+		'--id',
+		'seeded-conv',
+		'--data',
+		'{"issue": 17307}',
+		'--json',
+	]);
+	assert.equal(created.code, 0, created.stderr);
+	const uid = JSON.parse(created.stdout).uid;
+	assert.match(uid, /^inst_/);
+
+	// --data at an existing conversation fails loudly instead of silently
+	// dropping the seed; the error names the existing uid.
+	const conflict = await runCli(root, [
+		agent,
+		'--message',
+		'again',
+		'--id',
+		'seeded-conv',
+		'--data',
+		'{"issue": 17307}',
+	]);
+	assert.notEqual(conflict.code, 0);
+	assert.match(conflict.stderr, /already exists/);
+	assert.ok(conflict.stderr.includes(uid), conflict.stderr);
+
+	// --uid forbids creation, so the seed could never apply.
+	const withUid = await runCli(root, [
+		agent,
+		'--message',
+		'x',
+		'--id',
+		'seeded-conv',
+		'--uid',
+		uid,
+		'--data',
+		'{}',
+	]);
+	assert.notEqual(withUid.code, 0);
+	assert.match(withUid.stderr, /--data/);
+
+	// Malformed JSON is rejected at flag parse.
+	const badJson = await runCli(root, [agent, '--message', 'x', '--data', '{nope']);
+	assert.notEqual(badJson.code, 0);
+	assert.match(badJson.stderr, /must be valid JSON/);
+});
+
 // ─── SIGINT ──────────────────────────────────────────────────────────────────
 
 test('SIGINT aborts through the coordinator, drains, and exits non-zero', async () => {

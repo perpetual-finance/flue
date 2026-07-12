@@ -23,7 +23,7 @@ import { BLUEPRINTS, KIND_ROOTS } from './_blueprints.generated.ts';
 function printUsage(log: (message: string) => void = console.error) {
 	log(
 		'Usage:\n' +
-			'  flue run    <path> --message <text> [--name <agent>] [--id <conversation-id>] [--initial-data <json>] [--uid <uid> | --new] [--max-attempts <n>] [--timeout <ms>] [--env <path>] [--json]\n' +
+			'  flue run    <path> --message <text> [--name <agent>] [--id <conversation-id>] [--data <json>] [--uid <uid> | --new] [--max-attempts <n>] [--timeout <ms>] [--env <path>] [--json]\n' +
 			'  flue init   --target <node|cloudflare> [--root <path>] [--force]\n' +
 			'  flue add    [<kind> <name|url>] [--print]\n' +
 			'  flue update <kind> <name|url> [--print]\n' +
@@ -43,7 +43,7 @@ function printUsage(log: (message: string) => void = console.error) {
 			'  --message <text>     (flue run) The user message submitted to the agent. Required.\n' +
 			"  --name <agent>       (flue run) Which agent to run when the module defines several. An agent's name is its agentName static, else its exported name.\n" +
 			'  --id <id>            (flue run) Conversation id to create or continue. Default: a fresh id, printed.\n' +
-			'  --initial-data <json> (flue run) Instance-creation data (JSON). The seed, used only when this run creates the conversation; read with useInitialData().\n' +
+			'  --data <json>        (flue run) Creation data (JSON), read with useInitialData(). Create-only: the run fails if the conversation already exists.\n' +
 			'  --uid <uid>          (flue run) Continue only the conversation incarnation with this uid (printed by the creating run); rejects when it no longer exists.\n' +
 			'  --new                (flue run) Create only: rejects when the conversation id already exists (the error names its uid).\n' +
 			'  --max-attempts <n>   (flue run) Submission retry budget for this run (durability is decided by the runner).\n' +
@@ -335,7 +335,7 @@ function parseInitArgs(rest: string[]): InitArgs {
  * helpfully rather than as generic "unknown flag" noise.
  */
 const DROPPED_RUN_FLAGS: Record<string, string> = {
-	'--input': 'Pass the message text with --message <text>.',
+	'--input': 'Pass the message text with --message <text>, and creation data with --data <json>.',
 	'--server':
 		'`flue run` executes the agent module in-process without HTTP. ' +
 		'To call a deployed server, use the SDK (`createFlueClient`).',
@@ -365,7 +365,7 @@ function parseRunArgs(rest: string[]): RunArgs {
 			message: { type: 'string' },
 			name: { type: 'string' },
 			id: { type: 'string' },
-			'initial-data': { type: 'string' },
+			data: { type: 'string' },
 			uid: { type: 'string' },
 			new: { type: 'boolean' },
 			'max-attempts': { type: 'string' },
@@ -377,7 +377,7 @@ function parseRunArgs(rest: string[]): RunArgs {
 			'--message',
 			'--name',
 			'--id',
-			'--initial-data',
+			'--data',
 			'--uid',
 			'--new',
 			'--max-attempts',
@@ -410,13 +410,13 @@ function parseRunArgs(rest: string[]): RunArgs {
 		fail('`--env` accepts one file. Combine values into one file or provide shell overrides.');
 	}
 
-	const rawData = stringFlag(values, 'initial-data', 'Missing value for --initial-data');
+	const rawData = stringFlag(values, 'data', 'Missing value for --data');
 	let initialData: unknown;
 	if (rawData !== undefined) {
 		try {
 			initialData = JSON.parse(rawData);
 		} catch {
-			fail('`--initial-data` must be valid JSON, e.g. --initial-data \'{"issue": 17307}\'.');
+			fail('`--data` must be valid JSON, e.g. --data \'{"issue": 17307}\'.');
 		}
 	}
 
@@ -436,7 +436,7 @@ function parseRunArgs(rest: string[]): RunArgs {
 		fail('`--uid` continues an existing instance and `--new` creates a fresh one — pass one or the other.');
 	}
 	if (uidFlag !== undefined && initialData !== undefined) {
-		fail('`--uid` continues an existing instance, so `--initial-data` could never apply. Pass one or the other.');
+		fail('`--uid` continues an existing instance, so `--data` could never apply. Pass one or the other.');
 	}
 
 	return {
@@ -447,7 +447,10 @@ function parseRunArgs(rest: string[]): RunArgs {
 		id: stringFlag(values, 'id', 'Missing value for --id'),
 		initialData,
 		// The send condition: --uid <value> = continue-only, --new = create-only.
-		uid: createOnly ? null : uidFlag,
+		// --data seeds creation, so it implies create-only: continuing would
+		// silently discard the seed, and a loud AgentInstanceExistsError (it
+		// names the existing uid) beats that.
+		uid: createOnly || initialData !== undefined ? null : uidFlag,
 		durability,
 		json: booleanFlag(values, 'json', '--json'),
 		envFile: envFiles[0],

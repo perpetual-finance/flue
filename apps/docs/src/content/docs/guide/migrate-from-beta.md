@@ -48,7 +48,7 @@ export default defineConfig({
 
 On Cloudflare the plugin generates two inputs the Cloudflare plugin consumes — `.flue-vite/_entry.ts` (the Worker entry) and `.flue-vite.wrangler.jsonc` (your authored `wrangler.jsonc` merged with generated bindings). Add both to `.gitignore`. Build output, preview, and deploy belong to `@cloudflare/vite-plugin`; deploy against the config it emits into `dist/`.
 
-`flue run` remains for one-shot local execution, with new flags: `flue run <path> --message "..." [--name <agent>] [--id <id>] [--initial-data '<json>'] [--max-attempts <n>] [--timeout <ms>]`. The beta's workflow-oriented `--input` is gone with workflows.
+`flue run` remains for one-shot local execution, with new flags: `flue run <path> --message "..." [--name <agent>] [--id <id>] [--data '<json>'] [--max-attempts <n>] [--timeout <ms>]`. The beta's workflow-oriented `--input` is gone with workflows.
 
 ## Routing: the auto-router is gone
 
@@ -242,7 +242,7 @@ Messages remain Flue-owned parts-based values; new part kinds (`data-*` from `us
 
 ## CLI
 
-`flue init`, `flue add`, `flue update`, and `flue docs` remain. `flue dev` and `flue build` are removed (Vite owns both). `flue run <path>` executes one agent module directly — `--message`, `--name` (select one agent by name when the module defines several), `--id`, `--initial-data`, `--uid`/`--new`, `--max-attempts`/`--timeout` (durability for this run), `--json`.
+`flue init`, `flue add`, `flue update`, and `flue docs` remain. `flue dev` and `flue build` are removed (Vite owns both). `flue run <path>` executes one agent module directly — `--message`, `--name` (select one agent by name when the module defines several), `--id`, `--data` (creation data; create-only), `--uid`/`--new`, `--max-attempts`/`--timeout` (durability for this run), `--json`.
 
 ## Migration checklist
 
