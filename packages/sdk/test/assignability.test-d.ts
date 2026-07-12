@@ -34,14 +34,14 @@ void _convSnapshotBack;
 void _convChunk;
 void _convChunkBack;
 
-// `turn_request` is in-process only (`observe()` subscribers and exporters);
-// it is never persisted to durable streams or served over HTTP, so the SDK
-// wire union deliberately omits it.
+// `turn_request` and `toolcall_delta` are in-process only (`observe()`
+// subscribers and exporters); they are never persisted to durable streams or
+// served over HTTP, so the SDK wire union deliberately omits them.
 type MessageSnapshotEvent = { type: 'message_start' | 'message_end' };
 type CheckpointOneSettlementEvent = { type: 'submission_settled' };
 const _: Exclude<SdkFlueEvent, MessageSnapshotEvent | CheckpointOneSettlementEvent> = {} as Exclude<
 	RuntimeFlueEvent,
-	{ type: 'turn_request' } | MessageSnapshotEvent | CheckpointOneSettlementEvent
+	{ type: 'turn_request' | 'toolcall_delta' } | MessageSnapshotEvent | CheckpointOneSettlementEvent
 >;
 void _;
 
