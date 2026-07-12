@@ -459,7 +459,17 @@ class CloudflareAgentCoordinator {
 				);
 			}
 			for (const submission of await this.submissions.listRunningSubmissions()) {
-				if (this.activeAttempts.has(this.submissionAttemptLocalKey(submission))) continue;
+				// Both guards yield to an explicit recovery request: onFiberRecovered
+				// is the SDK's signal that the attempt's fiber is dead, and a dead
+				// fiber's entry can survive in activeAttempts (its runFiber promise
+				// never settles, so the .finally() cleanup never runs). Without the
+				// override the local-active guard would skip the submission on every
+				// wake and recovery would never start.
+				if (
+					this.activeAttempts.has(this.submissionAttemptLocalKey(submission)) &&
+					submission.recoveryRequestedAt === undefined
+				)
+					continue;
 				if (
 					attemptMarkers.has(submissionAttemptMarkerKey(submission)) &&
 					submission.recoveryRequestedAt === undefined
@@ -569,7 +579,7 @@ class CloudflareAgentCoordinator {
 			});
 		} catch (error) {
 			this.activeAttempts.delete(attemptKey);
-			this.activeControllers.delete(submission.submissionId);
+			this.deleteControllerIfCurrent(submission.submissionId, controller);
 			await this.deleteAttemptMarkerSafely(attempt);
 			throw error;
 		}
@@ -589,9 +599,22 @@ class CloudflareAgentCoordinator {
 			})
 			.finally(() => {
 				this.activeAttempts.delete(attemptKey);
-				this.activeControllers.delete(submission.submissionId);
+				this.deleteControllerIfCurrent(submission.submissionId, controller);
 				void this.deleteAttemptMarkerSafely(attempt);
 			});
+	}
+
+	/**
+	 * Controllers are keyed by submissionId and shared across attempts, so a
+	 * late cleanup from a superseded attempt (its fiber promise settling after
+	 * a replacement attempt already registered its own controller) must not
+	 * delete the replacement's controller — that would sever the abort path
+	 * for a live attempt.
+	 */
+	private deleteControllerIfCurrent(submissionId: string, controller: AbortController): void {
+		if (this.activeControllers.get(submissionId) === controller) {
+			this.activeControllers.delete(submissionId);
+		}
 	}
 
 	async abortInstance(): Promise<boolean> {

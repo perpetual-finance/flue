@@ -380,6 +380,100 @@ describe('createCloudflareAgentRuntime()', () => {
 		});
 	});
 
+	it('reconciles a recovery-requested attempt whose dead fiber still occupies the local active slot', async () => {
+		const { storage } = makeFakeSql();
+		const recovery = makeRecoveryContext({ inspection: 'uncertain' });
+		const runtime = makeRuntime({
+			createdAgent: {} as never,
+			createContext: () => recovery.ctx,
+		});
+		const instance = makeInstance(storage);
+		// A hung fiber: runFiber's promise never settles, so the attempt's
+		// .finally() cleanup never runs and its local-active entry survives the
+		// fiber's death. Recovery must still be able to reconcile past it.
+		instance.runFiber = () => new Promise<void>(() => {});
+		const executionStore = prepare(runtime, instance);
+		await executionStore.submissions.admitDirect(directInput());
+		await executionStore.submissions.markSubmissionCanonicalReady('direct-1');
+		await runtime.wakeSubmissions(instance);
+		const claimed = await executionStore.submissions.getSubmission('direct-1');
+		expect(claimed).toMatchObject({ status: 'running', attemptId: expect.any(String) });
+		const firstAttemptId = claimed?.attemptId as string;
+
+		await runtime.onFiberRecovered(
+			instance,
+			{
+				name: 'flue:submission-attempt',
+				snapshot: { submissionId: 'direct-1', attemptId: firstAttemptId },
+			},
+			() => {},
+		);
+
+		const replaced = await executionStore.submissions.getSubmission('direct-1');
+		expect(replaced).toMatchObject({ status: 'running' });
+		expect(replaced?.attemptId).not.toBe(firstAttemptId);
+		expect(replaced?.recoveryRequestedAt).toBeUndefined();
+	});
+
+	it('keeps the replacement attempt abortable after a superseded fiber settles late', async () => {
+		const controllers: AbortController[] = [];
+		const RealAbortController = AbortController;
+		vi.stubGlobal(
+			'AbortController',
+			class extends RealAbortController {
+				constructor() {
+					super();
+					controllers.push(this);
+				}
+			},
+		);
+		try {
+			const { storage } = makeFakeSql();
+			const recovery = makeRecoveryContext({ inspection: 'uncertain' });
+			const runtime = makeRuntime({
+				createdAgent: {} as never,
+				createContext: () => recovery.ctx,
+			});
+			const instance = makeInstance(storage);
+			const fiberSettlers: Array<() => void> = [];
+			instance.runFiber = () =>
+				new Promise<void>((resolve) => {
+					fiberSettlers.push(resolve);
+				});
+			const executionStore = prepare(runtime, instance);
+			await executionStore.submissions.admitDirect(directInput());
+			await executionStore.submissions.markSubmissionCanonicalReady('direct-1');
+			await runtime.wakeSubmissions(instance);
+			const claimed = await executionStore.submissions.getSubmission('direct-1');
+			await runtime.onFiberRecovered(
+				instance,
+				{
+					name: 'flue:submission-attempt',
+					snapshot: { submissionId: 'direct-1', attemptId: claimed?.attemptId as string },
+				},
+				() => {},
+			);
+			// Two attempt fibers started (plus unrelated internal controllers the
+			// global capture may pick up — none of which this flow aborts).
+			expect(fiberSettlers).toHaveLength(2);
+			expect(controllers.some((c) => c.signal.aborted)).toBe(false);
+			// The superseded attempt's fiber settles late, after the replacement
+			// registered its own controller under the same submissionId. Its
+			// cleanup must not sever the replacement's abort path.
+			fiberSettlers[0]?.();
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			await runtime.onRequest(
+				instance,
+				new Request('https://flue.invalid/agents/assistant/agent-1/abort', { method: 'POST' }),
+			);
+
+			expect(controllers.some((c) => c.signal.aborted)).toBe(true);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
 	it('degrades to an empty marker set when the marker scan fails so queued submissions remain claimable', async () => {
 		const { db, storage } = makeFakeSql();
 		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
