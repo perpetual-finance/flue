@@ -33,7 +33,6 @@ import {
 	observeSubmissionSettlement,
 	type PersistenceAdapter,
 	readSubmissionReply,
-	resolveAgentIdentity,
 	runWithInstrumentationOwner,
 } from '@flue/runtime/internal';
 import { sqlite } from '@flue/runtime/node';
@@ -42,10 +41,10 @@ export interface FlueRunSessionOptions {
 	/** Absolute path of the agent module; imported via {@link loadModule}. */
 	agentModulePath: string;
 	/**
-	 * Which exported agent to run (`--agent`). Without it: the module's single
-	 * agent export, or its default export when several are exported.
+	 * Which agent to run, by name (`--name`). Without it the module must
+	 * define exactly one agent.
 	 */
-	agentExport?: string;
+	agentName?: string;
 	/**
 	 * Submission retry policy for this run. Durability is binding policy — the
 	 * runner (here: the `flue run` invocation) decides it, not the agent.
@@ -100,7 +99,7 @@ export interface FlueRunOutcome {
 }
 
 export interface FlueRunSession {
-	/** The resolved identity: the agent's `agentName` static, else its function name. */
+	/** The agent's name: its `agentName` static, else its exported name. */
 	readonly identity: string;
 	/** Submit one message to a conversation and wait for settlement. */
 	submit(
@@ -118,73 +117,97 @@ function isCapitalized(name: string): boolean {
 	return first >= 65 && first <= 90;
 }
 
-/**
- * The module's agent exports, mirroring the build scan's rule on the
- * evaluated namespace: exported functions with capitalized names (the
- * function's own name decides for the `default` slot).
- */
-function listAgentExports(agentModule: Record<string, unknown>): string[] {
-	return Object.keys(agentModule).filter((key) => {
-		const value = agentModule[key];
-		if (typeof value !== 'function') return false;
-		return key === 'default' ? isCapitalized(value.name ?? '') : isCapitalized(key);
-	});
+interface RunAgentCandidate {
+	/** The agent's name — its durable identity, and what `--name` matches. */
+	name: string;
+	agent: Agent;
 }
 
 /**
- * Pick the agent to run: `--agent <name>` when given; else the module's
- * single agent export; else its default export; else fail listing the
- * choices. `flue run` skips the build scan, so the selection mirrors the
- * scan's capitalized-exported-function rule on the evaluated namespace.
+ * The module's agents, mirroring the build scan's rule on the evaluated
+ * namespace: exported functions with capitalized names are agents (the
+ * function's own name decides for the `default` slot), and each agent's
+ * name is the identity the scan would assign — the `agentName` static when
+ * set, else the exported name (the function's own name for `default`).
+ */
+function listModuleAgents(agentModule: Record<string, unknown>): RunAgentCandidate[] {
+	const candidates: RunAgentCandidate[] = [];
+	for (const [key, value] of Object.entries(agentModule)) {
+		if (typeof value !== 'function') continue;
+		const agent = value as Agent;
+		const exportedName = key === 'default' ? (agent.name ?? '') : key;
+		if (!isCapitalized(exportedName)) continue;
+		const name = typeof agent.agentName === 'string' ? agent.agentName : exportedName;
+		// The same function re-exported under another key (e.g. a named export
+		// that is also the default) is one agent, not two.
+		if (candidates.some((candidate) => candidate.agent === agent && candidate.name === name)) {
+			continue;
+		}
+		candidates.push({ name, agent });
+	}
+	return candidates;
+}
+
+/**
+ * Pick the agent to run: the module's single agent, or the one `--name`
+ * names. Several agents without `--name` fail listing the choices — never a
+ * silent guess (no default-export preference, no positional pick), because
+ * the choice keys conversation storage.
  */
 function selectRunAgent(
 	agentModule: Record<string, unknown>,
-	agentExport: string | undefined,
+	agentName: string | undefined,
 	modulePath: string,
-): Agent {
-	if (agentExport !== undefined) {
-		const candidate = agentModule[agentExport];
-		if (typeof candidate !== 'function') {
-			const available = listAgentExports(agentModule);
-			throw new Error(
-				`[flue] --agent ${JSON.stringify(agentExport)} does not match an exported function of ${modulePath}.` +
-					(available.length > 0 ? ` Exported agents: ${available.join(', ')}.` : ''),
-			);
-		}
-		return candidate as Agent;
-	}
-	const candidates = listAgentExports(agentModule);
+): RunAgentCandidate {
+	const candidates = listModuleAgents(agentModule);
 	if (candidates.length === 0) {
 		throw new Error(
 			`[flue] ${modulePath} exports no agents. Export a capitalized agent function, ` +
 				`e.g. \`export function MyAgent() { … }\`.`,
 		);
 	}
-	const chosen = candidates.length === 1 ? candidates[0] : 'default';
-	if (chosen === undefined || !candidates.includes(chosen)) {
+	const names = candidates.map((candidate) => candidate.name).join(', ');
+	if (agentName !== undefined) {
+		const matches = candidates.filter((candidate) => candidate.name === agentName);
+		if (matches.length === 0) {
+			throw new Error(
+				`[flue] --name ${JSON.stringify(agentName)} does not match an agent of ${modulePath}. ` +
+					`Agents: ${names}.`,
+			);
+		}
+		const selected = matches[0];
+		if (matches.length > 1 || selected === undefined) {
+			throw new Error(
+				`[flue] --name ${JSON.stringify(agentName)} matches ${matches.length} agents of ${modulePath}. ` +
+					`Give each a distinct \`agentName\`.`,
+			);
+		}
+		return selected;
+	}
+	const only = candidates[0];
+	if (candidates.length > 1 || only === undefined) {
 		throw new Error(
-			`[flue] ${modulePath} exports ${candidates.length} agents (${candidates.join(', ')}). ` +
-				`Pick one with --agent <name>.`,
+			`[flue] ${modulePath} defines ${candidates.length} agents (${names}). ` +
+				`Pick one with --name <agent>.`,
 		);
 	}
-	return agentModule[chosen] as Agent;
+	return only;
 }
 
 /**
- * The agent's durable identity, read off the function: the `agentName`
- * static, else the function's own name (safe here — `flue run` never
- * minifies user modules).
+ * Validate the selected agent's name as a durable identity — it keys
+ * conversation storage. Function names are trustworthy here: `flue run`
+ * never minifies user modules.
  */
-function resolveRunIdentity(agent: Agent): string {
-	const identity = resolveAgentIdentity(agent);
-	if (identity === undefined || identity === 'default' || !AGENT_IDENTITY_PATTERN.test(identity)) {
+function assertRunIdentity(name: string, modulePath: string): string {
+	if (!AGENT_IDENTITY_PATTERN.test(name)) {
 		throw new Error(
-			`[flue] Cannot derive a durable identity for this agent (resolved ${JSON.stringify(identity)}). ` +
-				`Name the exported function (e.g. \`export function MyAgent() { … }\`) or assign ` +
-				`\`MyAgent.agentName = '<identity>'\`; identities must match ${AGENT_IDENTITY_PATTERN}.`,
+			`[flue] ${JSON.stringify(name)} is not a valid agent identity (${modulePath}). ` +
+				`Rename the exported function or assign \`MyAgent.agentName = '<identity>'\`; ` +
+				`identities must match ${AGENT_IDENTITY_PATTERN}.`,
 		);
 	}
-	return identity;
+	return name;
 }
 
 export async function createFlueRunSession(
@@ -201,8 +224,9 @@ export async function createFlueRunSession(
 		// mirroring the generated Node entry's startup.
 		return await runWithInstrumentationOwner(instrumentationOwner, async () => {
 			const agentModule = await options.loadModule(options.agentModulePath);
-			const agent = selectRunAgent(agentModule, options.agentExport, options.agentModulePath);
-			const identity = resolveRunIdentity(agent);
+			const selected = selectRunAgent(agentModule, options.agentName, options.agentModulePath);
+			const identity = assertRunIdentity(selected.name, options.agentModulePath);
+			const agent = selected.agent;
 			if (options.durability !== undefined) bindAgentDurability(identity, options.durability);
 
 			const dbSource = options.dbSource ?? 'db.ts';

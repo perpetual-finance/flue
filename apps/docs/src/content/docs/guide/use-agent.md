@@ -144,7 +144,7 @@ IssueTriage.initialData = v.object({ issue: v.pipe(v.number(), v.integer()) });
 
 The directive is how an agent joins an _application_. Two consumers work without it:
 
-- **`flue run <path>`** executes one agent module directly, selecting among its exported agents (`--agent <ExportName>` when there are several) and resolving identity from the function itself. See [flue run](/docs/cli/run/).
+- **`flue run <path>`** executes one agent module directly, selecting among its agents by name (`--name <agent>` when there are several) and resolving identity from the function itself. See [flue run](/docs/cli/run/).
 - **Unit tests and scripts** can pass a plain agent function to `start()` / `init()` without any build step. See [Scripts](/docs/guide/scripts/).
 
 ## Next steps

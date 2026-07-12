@@ -7,14 +7,14 @@ lastReviewedAt: 2026-07-11
 ## Synopsis
 
 ```bash
-flue run <path> --message <text> [--agent <ExportName>] [--id <conversation-id>] [--initial-data <json>] [--uid <uid> | --new] [--max-attempts <n>] [--timeout <ms>] [--env <path>] [--json]
+flue run <path> --message <text> [--name <agent>] [--id <conversation-id>] [--initial-data <json>] [--uid <uid> | --new] [--max-attempts <n>] [--timeout <ms>] [--env <path>] [--json]
 ```
 
 ## Description
 
 `flue run` executes one agent module locally under Node.js, delivers one `kind: 'user'` message into a conversation, streams the agent's activity to stderr, prints the final assistant reply to stdout, and exits. Execution is transport-free: the command compiles the module from disk itself, binds no port, and never starts an HTTP listener. It does not load `app.ts`, channels, or any HTTP composition — only the agent module (and whatever it imports).
 
-`<path>` is the path of an agent module, resolved from the current working directory. Its agents are the exported functions with capitalized names — the same rule the `'use agent'` build scan applies. Without `--agent`, the command runs the module's single agent export, or its default export when several are exported; `--agent <ExportName>` selects one explicitly. The selected agent's identity is its `agentName` static when assigned, else the function's own name (`export function Triage()` runs as `Triage`) — the same identity a `'use agent'` build would assign, so `flue run` shares conversation storage keys with the deployed application when both use the same database. The file basename plays no part, and the module does not need the `'use agent'` directive to be runnable here.
+`<path>` is the path of an agent module, resolved from the current working directory. Its agents are the exported functions with capitalized names — the same rule the `'use agent'` build scan applies. An agent's name is its `agentName` static when assigned, else its exported name (the function's own name for a default export) — the same identity a `'use agent'` build would assign, so `flue run` shares conversation storage keys with the deployed application when both use the same database. When the module defines one agent, it runs; when it defines several, `--name <agent>` picks one — there is no implicit choice (a default export carries no special weight), because the pick keys conversation storage. The file basename plays no part, and the module does not need the `'use agent'` directive to be runnable here.
 
 The run drives the same durable submission path as a deployed server: the message is durably admitted, processed, and settled, so `--id` continuations and recovery semantics match production behavior.
 
@@ -25,7 +25,7 @@ The run drives the same durable submission path as a deployed server: the messag
 | Option             | Default                        | Description                                                                       |
 | ------------------ | ------------------------------ | --------------------------------------------------------------------------------- |
 | `--message <text>` | Required                       | The user message submitted to the agent.                                          |
-| `--agent <name>`   | The single agent export, or `default` | Which exported agent to run when the module exports several.                |
+| `--name <agent>`   | The module's single agent      | Which agent to run, by name, when the module defines several.                     |
 | `--id <id>`        | A fresh ULID, printed          | Conversation id to create or continue. Reuse an id to continue that conversation. |
 | `--initial-data <json>` | —                               | Instance-creation data (JSON). The seed, used only when this run creates the conversation; read it with `useInitialData()`. Rejected together with `--uid` (the condition forbids creation, so the seed could never apply). |
 | `--uid <uid>`      | —                               | Continue only the conversation incarnation with this uid (printed by the creating run, in the meta rows and the `--json` envelope). Rejects when that incarnation no longer exists. Rejected together with `--new` or `--initial-data`. |
@@ -107,6 +107,6 @@ flue run src/agents/hello.ts --message "Run the demo." --json | jq -r .message
 flue run src/agents/triage.ts --id issue-17307 --initial-data '{"issue": 17307}' --message "Triage."
 flue run src/agents/triage.ts --id issue-17307 --uid inst_01KW8Z3F9G6QK8P8V7YV5RJXWQ --message "Re-check."
 flue run src/agents/triage.ts --id issue-17307 --new --message "Triage."
-flue run src/agents/support.ts --agent Escalation --message "Assess this case."
+flue run src/agents/support.ts --name Escalation --message "Assess this case."
 flue run src/agents/triage.ts --max-attempts 5 --timeout 7200000 --message "Triage."
 ```

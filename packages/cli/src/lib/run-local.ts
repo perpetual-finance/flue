@@ -49,8 +49,8 @@ interface LocalAgentRunReadyInfo {
 export interface LocalAgentRunOptions {
 	/** The `<path>` argument as the user typed it. */
 	modulePath: string;
-	/** Which exported agent to run, when the module exports several (--agent). */
-	agentExport?: string;
+	/** Which agent to run, by name, when the module defines several (--name). */
+	agentName?: string;
 	message: string;
 	/** Instance-creation data; the seed, consulted only when this send creates. */
 	initialData?: unknown;
@@ -167,7 +167,7 @@ export function createLocalAgentRun(options: LocalAgentRunOptions): LocalAgentRu
 			throwIfAborted(controller.signal);
 			session = await bootstrap.createFlueRunSession({
 				agentModulePath: agentPath,
-				...(options.agentExport !== undefined ? { agentExport: options.agentExport } : {}),
+				...(options.agentName !== undefined ? { agentName: options.agentName } : {}),
 				...(options.durability !== undefined ? { durability: options.durability } : {}),
 				...(project.db !== undefined
 					? {

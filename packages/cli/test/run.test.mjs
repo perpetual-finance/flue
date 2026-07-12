@@ -424,7 +424,7 @@ test('a module with no agent exports fails clearly', async () => {
 	assert.match(result.stderr, /export function MyAgent/);
 });
 
-test('multi-agent modules run via --agent and fail without a selection', async () => {
+test('multi-agent modules run via --name and fail without a selection', async () => {
 	const root = createFixtureRoot();
 	fs.writeFileSync(
 		path.join(root, 'src', 'agents', 'team.mjs'),
@@ -441,31 +441,62 @@ export function First() {
 export function Second() {
 	useModel('faux/faux-model');
 }
+Second.agentName = 'second-shift';
+// A default export carries no special weight — it is one agent among several.
+export default function Main() {
+	useModel('faux/faux-model');
+}
 `,
 	);
 
 	const picked = await runCli(root, [
 		'src/agents/team.mjs',
-		'--agent',
-		'Second',
+		'--name',
+		'First',
 		'--message',
 		'hi',
 		'--json',
 	]);
 	assert.equal(picked.code, 0, picked.stderr);
-	assert.equal(JSON.parse(picked.stdout).agent, 'Second');
+	assert.equal(JSON.parse(picked.stdout).agent, 'First');
 
-	// Several agents, no default export, no --agent: fail listing the choices.
+	// --name matches the agent's name (its identity), not the export key.
+	const renamed = await runCli(root, [
+		'src/agents/team.mjs',
+		'--name',
+		'second-shift',
+		'--message',
+		'hi',
+		'--json',
+	]);
+	assert.equal(renamed.code, 0, renamed.stderr);
+	assert.equal(JSON.parse(renamed.stdout).agent, 'second-shift');
+
+	// The default export is selected by its function name, like any other.
+	const viaDefault = await runCli(root, [
+		'src/agents/team.mjs',
+		'--name',
+		'Main',
+		'--message',
+		'hi',
+		'--json',
+	]);
+	assert.equal(viaDefault.code, 0, viaDefault.stderr);
+	assert.equal(JSON.parse(viaDefault.stdout).agent, 'Main');
+
+	// Several agents, no --name: fail listing the choices — the default
+	// export is NOT silently preferred.
 	const unpicked = await runCli(root, ['src/agents/team.mjs', '--message', 'hi']);
 	assert.equal(unpicked.code, 1);
-	assert.match(unpicked.stderr, /exports 2 agents \(First, Second\)/);
-	assert.match(unpicked.stderr, /Pick one with --agent/);
+	assert.match(unpicked.stderr, /defines 3 agents \(First, second-shift, Main\)/);
+	assert.match(unpicked.stderr, /Pick one with --name/);
 
-	// A selector that names nothing lists what exists.
-	const wrong = await runCli(root, ['src/agents/team.mjs', '--agent', 'Third', '--message', 'hi']);
+	// A name that matches nothing lists what exists; the overridden export
+	// key is not an agent name.
+	const wrong = await runCli(root, ['src/agents/team.mjs', '--name', 'Second', '--message', 'hi']);
 	assert.equal(wrong.code, 1);
-	assert.match(wrong.stderr, /does not match an exported function/);
-	assert.match(wrong.stderr, /First, Second/);
+	assert.match(wrong.stderr, /does not match an agent/);
+	assert.match(wrong.stderr, /First, second-shift, Main/);
 });
 
 test('a module importing cloudflare:* APIs points at vite dev with the import chain', async () => {

@@ -23,7 +23,7 @@ import { BLUEPRINTS, KIND_ROOTS } from './_blueprints.generated.ts';
 function printUsage(log: (message: string) => void = console.error) {
 	log(
 		'Usage:\n' +
-			'  flue run    <path> --message <text> [--agent <ExportName>] [--id <conversation-id>] [--initial-data <json>] [--uid <uid> | --new] [--max-attempts <n>] [--timeout <ms>] [--env <path>] [--json]\n' +
+			'  flue run    <path> --message <text> [--name <agent>] [--id <conversation-id>] [--initial-data <json>] [--uid <uid> | --new] [--max-attempts <n>] [--timeout <ms>] [--env <path>] [--json]\n' +
 			'  flue init   --target <node|cloudflare> [--root <path>] [--force]\n' +
 			'  flue add    [<kind> <name|url>] [--print]\n' +
 			'  flue update <kind> <name|url> [--print]\n' +
@@ -41,7 +41,7 @@ function printUsage(log: (message: string) => void = console.error) {
 			'\n' +
 			'Flags:\n' +
 			'  --message <text>     (flue run) The user message submitted to the agent. Required.\n' +
-			'  --agent <name>       (flue run) Which exported agent to run when the module exports several. Default: the single agent, or the default export.\n' +
+			"  --name <agent>       (flue run) Which agent to run when the module defines several. An agent's name is its agentName static, else its exported name.\n" +
 			'  --id <id>            (flue run) Conversation id to create or continue. Default: a fresh id, printed.\n' +
 			'  --initial-data <json> (flue run) Instance-creation data (JSON). The seed, used only when this run creates the conversation; read with useInitialData().\n' +
 			'  --uid <uid>          (flue run) Continue only the conversation incarnation with this uid (printed by the creating run); rejects when it no longer exists.\n' +
@@ -80,8 +80,8 @@ interface RunArgs {
 	command: 'run';
 	/** Path of the agent module (relative or absolute). */
 	modulePath: string;
-	/** Which exported agent to run, when the module exports several. */
-	agentExport: string | undefined;
+	/** Which agent to run, by name, when the module defines several. */
+	agentName: string | undefined;
 	message: string;
 	id: string | undefined;
 	initialData: unknown;
@@ -363,7 +363,7 @@ function parseRunArgs(rest: string[]): RunArgs {
 		rest,
 		{
 			message: { type: 'string' },
-			agent: { type: 'string' },
+			name: { type: 'string' },
 			id: { type: 'string' },
 			'initial-data': { type: 'string' },
 			uid: { type: 'string' },
@@ -375,7 +375,7 @@ function parseRunArgs(rest: string[]): RunArgs {
 		},
 		new Set([
 			'--message',
-			'--agent',
+			'--name',
 			'--id',
 			'--initial-data',
 			'--uid',
@@ -442,7 +442,7 @@ function parseRunArgs(rest: string[]): RunArgs {
 	return {
 		command: 'run',
 		modulePath,
-		agentExport: stringFlag(values, 'agent', 'Missing value for --agent'),
+		agentName: stringFlag(values, 'name', 'Missing value for --name'),
 		message,
 		id: stringFlag(values, 'id', 'Missing value for --id'),
 		initialData,
@@ -571,7 +571,7 @@ async function run(args: RunArgs) {
 	});
 	const execution = createLocalAgentRun({
 		modulePath: args.modulePath,
-		agentExport: args.agentExport,
+		agentName: args.agentName,
 		message: args.message,
 		initialData: args.initialData,
 		uid: args.uid,
