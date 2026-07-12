@@ -518,6 +518,89 @@ describe('NodeAgentCoordinator', () => {
 		expect(read.batches.flatMap((batch) => batch.records).map((record) => record.type)).toContain('assistant_message_completed');
 	});
 
+	it('shutdown waits out an in-flight claim pass so the adapter can close safely', async () => {
+		const dbPath = createTempDbPath();
+		const provider = createFauxProvider();
+		provider.setResponses([fauxAssistantMessage('First.'), fauxAssistantMessage('Second.')]);
+		const adapter = sqlite(dbPath);
+		await adapter.migrate?.();
+		const { executionStore, conversationStreamStore, attachmentStore } = await adapter.connect();
+
+		// Gate ONE listRunnableSubmissions call so shutdown() can be invoked
+		// while a claim pass is provably mid-flight against the store — the
+		// exact window where an unawaited loop used to race the adapter close
+		// ("database is not open" retries after a successful run).
+		let releaseList: (() => void) | undefined;
+		let enteredList: (() => void) | undefined;
+		const listEntered = new Promise<void>((resolve) => {
+			enteredList = resolve;
+		});
+		let gateArmed = false;
+		let shutdownResolved = false;
+		let claimCallsAfterShutdown = 0;
+		const submissions = new Proxy(executionStore.submissions, {
+			get(target, property, receiver) {
+				const member = Reflect.get(target, property, receiver) as unknown;
+				if (typeof member !== 'function') return member;
+				return (...args: never[]) => {
+					if (
+						shutdownResolved &&
+						(property === 'listRunnableSubmissions' || property === 'claimSubmission')
+					) {
+						claimCallsAfterShutdown += 1;
+					}
+					if (property === 'listRunnableSubmissions' && gateArmed) {
+						gateArmed = false;
+						enteredList?.();
+						return new Promise<void>((resolve) => {
+							releaseList = resolve;
+						}).then(() => member.apply(target, args));
+					}
+					return member.apply(target, args);
+				};
+			},
+		}) as typeof executionStore.submissions;
+
+		const agent = () => {
+			useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
+			return 'Assistant agent.';
+		};
+		const coordinator = createNodeAgentCoordinator({
+			submissions,
+			agents: [{ name: 'assistant', agent }],
+			createContext: makeFauxCreateContext(provider),
+			conversationStreamStore,
+			attachmentStore,
+		});
+
+		// Settle one submission first so the claim loop is alive and idle.
+		await coordinator.admitDispatch(makeDispatchInput());
+		await coordinator.waitForIdle();
+
+		// Arm the gate, then wake the loop into a pass that blocks in the store.
+		gateArmed = true;
+		await coordinator.admitDispatch(
+			makeDispatchInput({ dispatchId: 'dispatch-blocked', id: 'instance-2' }),
+		);
+		await listEntered;
+
+		// Shutdown must not resolve while the pass is still inside the store.
+		let settled = false;
+		const shutdown = coordinator.shutdown(10_000).then(() => {
+			shutdownResolved = true;
+			settled = true;
+		});
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(settled).toBe(false);
+
+		releaseList?.();
+		await shutdown;
+		// Once shutdown resolves the loop has exited: nothing may run another
+		// claim pass — the caller closes the persistence adapter next.
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(claimCallsAfterShutdown).toBe(0);
+	});
+
 	it('processes a dispatch through the full submission lifecycle with file persistence', async () => {
 			const dbPath = createTempDbPath();
 			const provider = createFauxProvider();

@@ -162,6 +162,15 @@ export function createNodeAgentCoordinator(options: {
 	/** Whether the claim loop has been started. */
 	let loopRunning = false;
 
+	/**
+	 * The running claim loop's completion. `shutdown()` awaits it so no
+	 * claim pass can still be touching the stores when shutdown resolves —
+	 * callers close the persistence adapter right after, and an in-flight
+	 * `listRunnableSubmissions` would otherwise race the close and log
+	 * "database is not open" retries.
+	 */
+	let claimLoopDone: Promise<void> | null = null;
+
 	/** Whether the coordinator is shutting down. When true, the claim
 	 *  loop stops claiming new work and admissions are rejected. */
 	let stopping = false;
@@ -307,6 +316,9 @@ export function createNodeAgentCoordinator(options: {
 	 * Returns whether any progress was made.
 	 */
 	async function runClaimPass(): Promise<boolean> {
+		// Claiming new work during shutdown would spawn tasks the
+		// active-submission abort sweep already ran past.
+		if (stopping) return false;
 		await reconcileUnreadySubmissions();
 		// Periodically scan for expired leases from other coordinators.
 		await periodicLeaseScan();
@@ -353,16 +365,25 @@ export function createNodeAgentCoordinator(options: {
 					progressed = await runClaimPass();
 					// Keep looping if we made progress (newly-runnable work may
 					// have appeared due to session-head advancement) or if a
-					// wake was requested during this pass.
-				} while (progressed || wakeRequested);
+					// wake was requested during this pass — but never once
+					// shutdown has begun (its own wake() would otherwise
+					// schedule one more pass).
+				} while (!stopping && (progressed || wakeRequested));
 			} catch (error) {
 				// A transient DB error in listRunnableSubmissions or
 				// claimSubmission should not kill the entire loop. Log,
 				// back off briefly, and retry. Setting wakeRequested ensures
 				// the loop retries immediately after the backoff instead of
-				// sleeping indefinitely waiting for an external wake.
+				// sleeping indefinitely waiting for an external wake. During
+				// shutdown, skip the backoff — the loop is about to exit and
+				// `shutdown()` is awaiting it.
 				console.error('[flue:claim-loop] Error in claim pass, retrying:', error);
-				await new Promise<void>((r) => setTimeout(r, 1000));
+				if (!stopping) {
+					await new Promise<void>((r) => {
+						const timer = setTimeout(r, 1000);
+						if (typeof timer === 'object' && 'unref' in timer) timer.unref();
+					});
+				}
 				wakeRequested = true;
 			} finally {
 				// Reset the sleep promise BEFORE clearing claimPassRunning.
@@ -391,7 +412,7 @@ export function createNodeAgentCoordinator(options: {
 		// Fire-and-forget — the loop runs for the coordinator's lifetime.
 		// Errors in individual submissions are caught by spawnSubmissionTask.
 		// Unexpected errors in the loop itself are fatal and logged.
-		void claimLoop().catch((error) => {
+		claimLoopDone = claimLoop().catch((error) => {
 			console.error('[flue:claim-loop] Fatal error in claim loop:', error);
 			loopRunning = false;
 		});
@@ -734,8 +755,13 @@ export function createNodeAgentCoordinator(options: {
 			if (stopping) return;
 			stopping = true;
 
-			// Wake the claim loop so it exits (checks `stopping` flag).
+			// Wake the claim loop so it exits (checks `stopping` flag), and
+			// wait for it: once it has exited, no pass is mid-flight against
+			// the stores and no new submission task can spawn — so the abort
+			// sweep below is complete, and the caller may close the
+			// persistence adapter the moment shutdown resolves.
 			wake();
+			if (claimLoopDone) await claimLoopDone;
 
 			// Abort all active submissions at the turn boundary. The abort
 			// signal propagates into the session, which finishes the current
