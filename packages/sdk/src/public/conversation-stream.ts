@@ -48,6 +48,8 @@ export type ConversationStreamChunk =
 			turnId?: string;
 			/** Agent-authored response metadata from `useResponseStart` hooks. */
 			metadata?: Record<string, unknown>;
+			/** Capture time (ISO 8601) of the underlying canonical record. */
+			timestamp?: string;
 			position: ConversationChunkPosition;
 	  }
 	| {
@@ -80,17 +82,19 @@ export type ConversationStreamChunk =
 			toolCallId: string;
 			toolName: string;
 			input: unknown;
+			timestamp?: string;
 			position: ConversationChunkPosition;
 	  }
-	| { type: 'tool-output'; conversationId: string; toolCallId: string; output: unknown; durationMs?: number; position: ConversationChunkPosition }
-	| { type: 'tool-output-error'; conversationId: string; toolCallId: string; errorText: string; durationMs?: number; position: ConversationChunkPosition }
-	| { type: 'message-completed'; conversationId: string; messageId: string; position: ConversationChunkPosition }
+	| { type: 'tool-output'; conversationId: string; toolCallId: string; output: unknown; durationMs?: number; timestamp?: string; position: ConversationChunkPosition }
+	| { type: 'tool-output-error'; conversationId: string; toolCallId: string; errorText: string; durationMs?: number; timestamp?: string; position: ConversationChunkPosition }
+	| { type: 'message-completed'; conversationId: string; messageId: string; timestamp?: string; position: ConversationChunkPosition }
 	| {
 			type: 'submission-settled';
 			conversationId: string;
 			submissionId: string;
 			outcome: 'completed' | 'failed' | 'aborted';
 			error?: unknown;
+			timestamp?: string;
 			position: ConversationChunkPosition;
 	  };
 

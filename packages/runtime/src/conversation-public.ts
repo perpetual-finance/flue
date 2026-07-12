@@ -35,6 +35,13 @@ export interface AgentConversationSnapshot {
  * Wire-compatible with @flue/sdk's internal `ConversationStreamChunk`. The
  * canonical record schema is never exposed; these chunks describe only
  * UI-relevant conversation operations.
+ *
+ * Boundary chunks (`message-started`, `tool-input`, `tool-output`,
+ * `tool-output-error`, `message-completed`, `submission-settled`) carry the
+ * capture-time `timestamp` of their underlying canonical record so run
+ * chronology can be reconstructed from the stream. `message-delta`
+ * deliberately omits it for wire weight — consumers interpolate between
+ * stamped boundaries.
  */
 type ConversationStreamChunkBody =
 	| { type: 'conversation-reset'; conversationId: string; snapshot: AgentConversationSnapshot }
@@ -49,6 +56,8 @@ type ConversationStreamChunkBody =
 			turnId?: string;
 			/** Agent-authored response metadata from `useResponseStart` hooks. */
 			metadata?: Record<string, unknown>;
+			/** Capture time (ISO 8601) of the underlying canonical record. */
+			timestamp?: string;
 	  }
 	| {
 			type: 'message-metadata';
@@ -77,16 +86,18 @@ type ConversationStreamChunkBody =
 			toolCallId: string;
 			toolName: string;
 			input: unknown;
+			timestamp?: string;
 	  }
-	| { type: 'tool-output'; conversationId: string; toolCallId: string; output: unknown; durationMs?: number }
-	| { type: 'tool-output-error'; conversationId: string; toolCallId: string; errorText: string; durationMs?: number }
-	| { type: 'message-completed'; conversationId: string; messageId: string }
+	| { type: 'tool-output'; conversationId: string; toolCallId: string; output: unknown; durationMs?: number; timestamp?: string }
+	| { type: 'tool-output-error'; conversationId: string; toolCallId: string; errorText: string; durationMs?: number; timestamp?: string }
+	| { type: 'message-completed'; conversationId: string; messageId: string; timestamp?: string }
 	| {
 			type: 'submission-settled';
 			conversationId: string;
 			submissionId: string;
 			outcome: 'completed' | 'failed' | 'aborted';
 			error?: unknown;
+			timestamp?: string;
 	  };
 
 /**
@@ -280,6 +291,7 @@ function encodeRecord(
 					...(record.submissionId ? { submissionId: record.submissionId } : {}),
 					...(record.turnId ? { turnId: record.turnId } : {}),
 					...(record.responseMetadata ? { metadata: record.responseMetadata } : {}),
+					...(record.timestamp ? { timestamp: record.timestamp } : {}),
 				},
 			];
 		case 'message_metadata': {
@@ -302,13 +314,14 @@ function encodeRecord(
 		// UI-visible payload: the first delta opens a streaming part, a `kind` change or
 		// `message-completed` closes it. So those records project to no chunk.
 		case 'assistant_tool_call':
-			return [{ type: 'tool-input', conversationId, messageId: uiMessageId(record.messageId), toolCallId: record.toolCallId, toolName: record.name, input: record.arguments }];
+			return [{ type: 'tool-input', conversationId, messageId: uiMessageId(record.messageId), toolCallId: record.toolCallId, toolName: record.name, input: record.arguments, ...(record.timestamp ? { timestamp: record.timestamp } : {}) }];
 		case 'assistant_message_completed':
 			return [
 				{
 					type: 'message-completed',
 					conversationId,
 					messageId: uiMessageId(record.messageId),
+					...(record.timestamp ? { timestamp: record.timestamp } : {}),
 				},
 			];
 		case 'tool_results_committed':
@@ -324,6 +337,7 @@ function encodeRecord(
 							submissionId: record.submissionId,
 							outcome: record.outcome,
 							...(record.error === undefined ? {} : { error: record.error }),
+							...(record.timestamp ? { timestamp: record.timestamp } : {}),
 						},
 					]
 				: [];
@@ -347,8 +361,10 @@ function encodeToolOutcome(
 	) {
 		return [];
 	}
+	// Stamp the outcome record's own capture time (when the tool result was
+	// recorded), not the commit record's batch time.
 	return outcome.isError
-		? [{ type: 'tool-output-error', conversationId, toolCallId: outcome.toolCallId, errorText: toolResultText(outcome.content), ...(outcome.durationMs !== undefined ? { durationMs: outcome.durationMs } : {}) }]
+		? [{ type: 'tool-output-error', conversationId, toolCallId: outcome.toolCallId, errorText: toolResultText(outcome.content), ...(outcome.durationMs !== undefined ? { durationMs: outcome.durationMs } : {}), ...(outcome.timestamp ? { timestamp: outcome.timestamp } : {}) }]
 		: [
 				{
 					type: 'tool-output',
@@ -356,6 +372,7 @@ function encodeToolOutcome(
 					toolCallId: outcome.toolCallId,
 					output: outcome.output !== undefined ? outcome.output : toolResultOutput(outcome.content),
 					...(outcome.durationMs !== undefined ? { durationMs: outcome.durationMs } : {}),
+					...(outcome.timestamp ? { timestamp: outcome.timestamp } : {}),
 				},
 			];
 }

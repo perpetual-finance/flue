@@ -771,6 +771,35 @@ describe('reduceConversationRecords()', () => {
 		]);
 	});
 
+	it('stamps boundary chunks with their canonical record capture time', () => {
+		const records: ConversationRecord[] = [
+			...multiStepSubmission(),
+			{
+				...scope,
+				submissionId: 'submission_ms',
+				id: 'record_settled',
+				type: 'submission_settled',
+				timestamp: '2026-06-25T00:00:04.000Z',
+				outcome: 'completed',
+			},
+		];
+		const state = reduceConversationRecords(createReducedInstanceState(), records, '16');
+		// Skip conversation_created: a batch containing it projects as a
+		// snapshot reset rather than incremental chunks.
+		const chunks = projectAgentConversationBatch({ state, records: records.slice(1), batchOrdinal: 1 });
+
+		const first = (type: string) => chunks.find((chunk) => chunk.type === type);
+		expect(first('message-started')).toMatchObject({ timestamp: '2026-06-25T00:00:02.000Z' });
+		expect(first('tool-input')).toMatchObject({ timestamp: '2026-06-25T00:00:02.400Z' });
+		// The outcome record's own capture time, not the commit record's batch time.
+		expect(first('tool-output')).toMatchObject({ timestamp: '2026-06-25T00:00:02.600Z' });
+		expect(first('message-completed')).toMatchObject({ timestamp: '2026-06-25T00:00:02.500Z' });
+		expect(first('submission-settled')).toMatchObject({ timestamp: '2026-06-25T00:00:04.000Z' });
+		// Deltas deliberately stay unstamped; consumers interpolate between
+		// stamped boundaries.
+		expect(first('message-delta')).not.toHaveProperty('timestamp');
+	});
+
 	it('anchors data parts after the step that wrote them and reconciles rewrites by name', () => {
 		const sub = { submissionId: 'submission_ms' };
 		const records = multiStepSubmission();
