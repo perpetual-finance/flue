@@ -2207,6 +2207,22 @@ export class Session implements FlueSession, AgentSubmissionSession {
 									: {}),
 							},
 						]);
+					} else if (aEvent.type === 'toolcall_delta') {
+						// Emit-only, deliberately outside the canonical pipeline: partial
+						// tool-call arguments are live-preview material for observe()
+						// subscribers, never persisted or replayed. `toolcall_end` above
+						// stays the sole source of the canonical assistant_tool_call.
+						// Forwarded only once the streaming block knows its identity
+						// (providers deliver id/name in the first fragment).
+						const content = aEvent.partial.content[aEvent.contentIndex];
+						if (content?.type === 'toolCall' && content.id && content.name) {
+							this.emit({
+								type: 'toolcall_delta',
+								toolCallId: content.id,
+								toolName: content.name,
+								argumentTextDelta: aEvent.delta,
+							});
+						}
 					} else if (aEvent.type === 'text_delta') {
 						this.emit({ type: 'text_delta', text: aEvent.delta });
 					} else if (aEvent.type === 'thinking_start') {

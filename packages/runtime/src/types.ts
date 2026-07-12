@@ -1078,6 +1078,17 @@ type FlueEventVariant =
 	| { type: 'thinking_start'; contentIndex?: number }
 	| { type: 'thinking_delta'; contentIndex?: number; delta: string }
 	| { type: 'thinking_end'; contentIndex?: number; content: string }
+	| {
+			/** Streaming fragment of a tool call's JSON-arguments text, for live
+			 *  previews of in-flight tool calls. Delivered to in-process `observe()`
+			 *  subscribers only — never persisted and never replayed; `tool_start`
+			 *  and the canonical tool records remain the source of truth for
+			 *  complete arguments. */
+			type: 'toolcall_delta';
+			toolCallId: string;
+			toolName: string;
+			argumentTextDelta: string;
+	  }
 	| { type: 'tool_start'; toolName: string; toolCallId: string; args?: any }
 	| {
 			type: 'tool';

@@ -641,6 +641,74 @@ describe('session.task()', () => {
 		}
 	});
 
+	it('forwards streaming tool-call argument deltas to observers without persisting them', async () => {
+		const provider = createProvider([{ id: 'reviewer' }]);
+		const toolCallId = `tool:${crypto.randomUUID()}`;
+		provider.setResponses([
+			fauxAssistantMessage(
+				fauxToolCall('lookup', { query: 'flue runtime' }, { id: toolCallId }),
+				{ stopReason: 'toolUse' },
+			),
+			fauxAssistantMessage('Found it.'),
+		]);
+		const lookup = defineTool({
+			name: 'lookup',
+			description: 'Look up a value.',
+			input: v.object({ query: v.string() }),
+			run: async () => 'Found the requested value.',
+		});
+		const store = new InMemoryConversationStreamStore();
+		const path = 'agents/assistant/toolcall-delta-instance';
+		const writer = await ConversationRecordWriter.create({
+			store,
+			path,
+			identity: { agentName: 'assistant', instanceId: 'toolcall-delta-instance' },
+			producerId: 'producer-1',
+		});
+		const ctx = createFlueContext({
+			id: 'toolcall-delta-instance',
+			env: {},
+			agentConfig: { resolveModel: () => provider.getModel('reviewer') },
+			createDefaultEnv: async () => createNoopSessionEnv(),
+			conversationWriter: writer,
+			attachmentStore: new InMemoryAttachmentStore(),
+		});
+		const deltas: Array<{ toolCallId: string; toolName: string; argumentTextDelta: string }> = [];
+		ctx.subscribeEvent((event) => {
+			if (event.type === 'toolcall_delta') deltas.push(event);
+		});
+		const harness = await ctx.initializeRootHarness(() => {
+			useModel(`${provider.getModel().provider}/reviewer`);
+			useTool(lookup);
+		});
+
+		await (await harness.session()).prompt('Look something up.');
+
+		expect(deltas.length).toBeGreaterThan(0);
+		expect(new Set(deltas.map((delta) => delta.toolCallId))).toEqual(new Set([toolCallId]));
+		expect(new Set(deltas.map((delta) => delta.toolName))).toEqual(new Set(['lookup']));
+		expect(JSON.parse(deltas.map((delta) => delta.argumentTextDelta).join(''))).toEqual({
+			query: 'flue runtime',
+		});
+		// In-process only: argument streaming never reaches the canonical
+		// conversation — the complete assistant_tool_call stays the sole
+		// tool-call record.
+		const read = await store.read(path);
+		const records = read.batches.flatMap((batch) => batch.records) as Array<{
+			type: string;
+			arguments?: unknown;
+		}>;
+		const toolRecords = records.filter((record) => record.type.includes('tool'));
+		expect(toolRecords.map((record) => record.type).sort()).toEqual([
+			'assistant_tool_call',
+			'tool_outcome',
+			'tool_results_committed',
+		]);
+		expect(records.find((record) => record.type === 'assistant_tool_call')?.arguments).toEqual({
+			query: 'flue runtime',
+		});
+	});
+
 	it('keeps ordinary prompt text canonical while projecting the attachment manifest to the model', async () => {
 		const provider = createProvider([{ id: 'reviewer' }]);
 		const store = new InMemoryConversationStreamStore();
