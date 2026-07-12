@@ -334,13 +334,63 @@ describe('createCloudflareAgentRuntime()', () => {
 			attemptId: 'attempt-1',
 		});
 
-		await runtime.onStart(instance, () => {});
+		// A scheduled wake (NOT startup — onStart proves the prior isolate is
+		// gone and reconciles orphaned attempts immediately): the fresh marker
+		// says the attempt may still be running, so reconciliation stays away.
+		await runtime.wakeSubmissions(instance);
 
 		expect(events).not.toContain('requeue');
 		expect(await executionStore.submissions.getSubmission('direct-1')).toMatchObject({
 			status: 'running',
 			attemptId: 'attempt-1',
 		});
+	});
+
+	it('reconciles an interrupted attempt on startup without waiting for its marker to go stale', async () => {
+		// The #459 shape: a code-update reset replaces the isolate mid-attempt.
+		// No fiber replays (so onFiberRecovered never fires), the durable
+		// attempt marker is fresh, and a caller awaiting the dispatch
+		// settlement is long-polling. Startup must reconcile immediately —
+		// waiting out the staleness window leaves the waiter hanging until an
+		// outer orchestrator (e.g. a Workflow step) times out instead.
+		const events: string[] = [];
+		const { storage } = makeFakeSql();
+		const recovery = makeRecoveryContext({ inspection: 'absent' });
+		const runtime = makeRuntime({
+			createdAgent: {} as never,
+			createContext: () => recovery.ctx,
+		});
+		const instance = makeInstance(storage);
+		const executionStore = prepare(runtime, instance);
+		const originalRequeue = executionStore.submissions.requeueSubmissionBeforeInputApplied.bind(
+			executionStore.submissions,
+		);
+		executionStore.submissions.requeueSubmissionBeforeInputApplied = async (attempt) => {
+			events.push('requeue');
+			return originalRequeue(attempt);
+		};
+		await executionStore.submissions.admitDirect(directInput());
+		await executionStore.submissions.markSubmissionCanonicalReady('direct-1');
+		await executionStore.submissions.claimSubmission({
+			submissionId: 'direct-1',
+			attemptId: 'attempt-1',
+			ownerId: 'test-owner',
+			leaseExpiresAt: Date.now() + 30_000,
+		});
+		await executionStore.submissions.insertAttemptMarker({
+			submissionId: 'direct-1',
+			attemptId: 'attempt-1',
+		});
+
+		await runtime.onStart(instance, () => {});
+
+		// 'absent' canonical state classifies the interrupted attempt for a
+		// clean requeue — the recovery ran now, not after the stale window —
+		// and the same reconcile pass re-claims it for a fresh attempt.
+		expect(events).toContain('requeue');
+		const recovered = await executionStore.submissions.getSubmission('direct-1');
+		expect(recovered).toMatchObject({ status: 'running' });
+		expect(recovered?.attemptId).not.toBe('attempt-1');
 	});
 
 	it('reconciles running attempts when the attempt marker is stale', async () => {

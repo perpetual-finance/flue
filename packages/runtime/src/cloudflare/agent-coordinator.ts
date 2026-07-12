@@ -214,8 +214,50 @@ class CloudflareAgentCoordinator {
 		return this.runWithInstanceContext(async () => {
 			await this.restoreSubmissionWake();
 			await inherited();
+			await this.requestRecoveryForOrphanedAttempts();
 			await this.reconcileSubmissions({ driverAlreadyArmed: true });
 		});
+	}
+
+	/**
+	 * onStart runs on a fresh isolate, so no attempt fiber from before it can
+	 * still be executing — a running submission's durable attempt marker is
+	 * definitive evidence of an interrupted attempt, not of live work. Stamp a
+	 * recovery request so reconciliation handles it NOW rather than after the
+	 * attempt-marker staleness window: an isolate replacement that doesn't
+	 * replay fibers (a code-update reset does not) would otherwise leave the
+	 * submission — and any caller awaiting its settlement — hanging for the
+	 * full window, past the point where outer orchestrators (e.g. a Cloudflare
+	 * Workflow step awaiting dispatch()) give up. Reuses the same
+	 * recoveryRequestedAt gate as onFiberRecovered, so the reconcile guards,
+	 * attempt-fencing CAS, and settlement paths are identical.
+	 */
+	private async requestRecoveryForOrphanedAttempts(): Promise<void> {
+		try {
+			for (const submission of await this.submissions.listRunningSubmissions()) {
+				if (!submission.attemptId) continue;
+				// Defense in depth; at onStart no attempt of this instance can be
+				// live in this isolate yet.
+				if (this.activeAttempts.has(this.submissionAttemptLocalKey(submission))) continue;
+				await this.submissions.requestSubmissionRecovery({
+					submissionId: submission.submissionId,
+					attemptId: submission.attemptId,
+				});
+			}
+		} catch (error) {
+			// Startup must not fail here: the scheduled wake reconciles later,
+			// and the staleness cutoff remains the backstop.
+			console.error(
+				'[flue:submission-reconciliation]',
+				{
+					agentName: this.agentName,
+					instanceId: this.instance.name,
+					operation: 'request_orphaned_attempt_recovery',
+					outcome: 'deferred_to_scheduled_wake',
+				},
+				error,
+			);
+		}
 	}
 
 	wakeSubmissions(): Promise<void> {
