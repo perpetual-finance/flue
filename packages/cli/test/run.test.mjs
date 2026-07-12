@@ -366,7 +366,7 @@ test('conditional sends: --uid continues the incarnation, --new rejects an exist
 	assert.match(both.stderr, /pass one or the other/i);
 });
 
-test('--data seeds a new conversation and is create-only', async () => {
+test('--data seeds creation and is ignored on continues, like dispatch initialData', async () => {
 	const root = createFixtureRoot();
 	const agent = writeEchoAgent(root);
 
@@ -385,20 +385,20 @@ test('--data seeds a new conversation and is create-only', async () => {
 	const uid = JSON.parse(created.stdout).uid;
 	assert.match(uid, /^inst_/);
 
-	// --data at an existing conversation fails loudly instead of silently
-	// dropping the seed; the error names the existing uid.
-	const conflict = await runCli(root, [
+	// --data at an existing conversation continues it; the seed is silently
+	// ignored (dispatch initialData semantics), the incarnation unchanged.
+	const continued = await runCli(root, [
 		agent,
 		'--message',
 		'again',
 		'--id',
 		'seeded-conv',
 		'--data',
-		'{"issue": 17307}',
+		'{"issue": 99999}',
+		'--json',
 	]);
-	assert.notEqual(conflict.code, 0);
-	assert.match(conflict.stderr, /already exists/);
-	assert.ok(conflict.stderr.includes(uid), conflict.stderr);
+	assert.equal(continued.code, 0, continued.stderr);
+	assert.equal(JSON.parse(continued.stdout).uid, uid);
 
 	// --uid forbids creation, so the seed could never apply.
 	const withUid = await runCli(root, [

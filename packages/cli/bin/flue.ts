@@ -43,7 +43,7 @@ function printUsage(log: (message: string) => void = console.error) {
 			'  --message <text>     (flue run) The user message submitted to the agent. Required.\n' +
 			"  --name <agent>       (flue run) Which agent to run when the module defines several. An agent's name is its agentName static, else its exported name.\n" +
 			'  --id <id>            (flue run) Conversation id to create or continue. Default: a fresh id, printed.\n' +
-			'  --data <json>        (flue run) Creation data (JSON), read with useInitialData(). Create-only: the run fails if the conversation already exists.\n' +
+			'  --data <json>        (flue run) Creation data (JSON), read with useInitialData(). Seeds only a run that creates the conversation; ignored on continues.\n' +
 			'  --uid <uid>          (flue run) Continue only the conversation incarnation with this uid (printed by the creating run); rejects when it no longer exists.\n' +
 			'  --new                (flue run) Create only: rejects when the conversation id already exists (the error names its uid).\n' +
 			'  --max-attempts <n>   (flue run) Submission retry budget for this run (durability is decided by the runner).\n' +
@@ -447,10 +447,7 @@ function parseRunArgs(rest: string[]): RunArgs {
 		id: stringFlag(values, 'id', 'Missing value for --id'),
 		initialData,
 		// The send condition: --uid <value> = continue-only, --new = create-only.
-		// --data seeds creation, so it implies create-only: continuing would
-		// silently discard the seed, and a loud AgentInstanceExistsError (it
-		// names the existing uid) beats that.
-		uid: createOnly || initialData !== undefined ? null : uidFlag,
+		uid: createOnly ? null : uidFlag,
 		durability,
 		json: booleanFlag(values, 'json', '--json'),
 		envFile: envFiles[0],

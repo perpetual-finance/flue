@@ -242,7 +242,7 @@ Messages remain Flue-owned parts-based values; new part kinds (`data-*` from `us
 
 ## CLI
 
-`flue init`, `flue add`, `flue update`, and `flue docs` remain. `flue dev` and `flue build` are removed (Vite owns both). `flue run <path>` executes one agent module directly — `--message`, `--name` (select one agent by name when the module defines several), `--id`, `--data` (creation data; create-only), `--uid`/`--new`, `--max-attempts`/`--timeout` (durability for this run), `--json`.
+`flue init`, `flue add`, `flue update`, and `flue docs` remain. `flue dev` and `flue build` are removed (Vite owns both). `flue run <path>` executes one agent module directly — `--message`, `--name` (select one agent by name when the module defines several), `--id`, `--data` (creation data), `--uid`/`--new`, `--max-attempts`/`--timeout` (durability for this run), `--json`.
 
 ## Migration checklist
 
