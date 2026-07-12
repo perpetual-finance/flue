@@ -14,7 +14,7 @@ The release is a redesign, not an increment. Five conceptual changes drive almos
 | Auto-mounted `flue()` router, discovery by directory           | [Explicit routing](/docs/guide/routing/) in `app.ts`; the [`'use agent'`](/docs/guide/use-agent/) scan registers agents. |
 | `defineAgent(async initializer => config)` with a config bag   | The agent **is** the function: an exported capitalized agent function composing behavior with [Flue Hooks](/docs/api/agent-api/#flue-hooks); `defineAgent` is gone entirely. |
 | Workflows (`defineWorkflow`, `invoke()`, runs, run events)     | Removed. Awaited [`init()` handles](/docs/guide/scripts/), [durable tools](/docs/guide/tools/#durable-tools), or your own orchestrator. |
-| Deployment-wide SDK client (`client.agents.*`, `client.runs.*`) | A [conversation-scoped client](/docs/sdk/client/): one client per conversation URL.                             |
+| Deployment-wide SDK client (`client.agents.*`, `client.workflows.*`) | A [conversation-scoped client](/docs/sdk/client/): one client per conversation URL.                             |
 
 ## Before you start: persisted state resets
 
@@ -122,7 +122,7 @@ Field-by-field:
 | `skills`                         | [`useSkill()`](/docs/api/agent-api/#useskill) per skill.                                                                             |
 | `subagents` (profiles)           | [`useSubagent({ name, description, agent, model?, thinkingLevel? })`](/docs/api/agent-api/#usesubagent) — the delegate is an agent function, not a profile. |
 | `thinkingLevel`, `compaction`    | `useModel(model, { thinkingLevel, compaction })`.                                                                                    |
-| `sandbox`, `cwd`                 | [`useSandbox(factory, { cwd })`](/docs/api/agent-api/#usesandbox) — at most once per render.                                          |
+| `sandbox`, `cwd`                 | [`useSandbox(factory, { cwd })`](/docs/api/agent-api/#usesandbox) — at most once per render; presence may be conditional.             |
 | `durability`                     | A binding option — `createAgentRouter(fn, { durability })`, a `start()` entry, or `flue run` flags. The runner decides; it lives outside the function, so it stays readable when a render crashes. |
 | `profile`                        | Removed — compose with custom hooks (plain functions calling hooks) instead.                                                          |
 | `actions`                        | Removed with Actions. Express reusable operations as tools.                                                                           |
@@ -133,8 +133,8 @@ Field-by-field:
 
 Rules that have no beta equivalent, because renders repeat:
 
-- The agent function re-renders before every model turn. **Resources** (`useTool`, `useSkill`, `useSubagent`) may be conditional — changes are announced to the model as `resources` signals. **Identity hooks** (`usePersistentState`, `useDataWriter`, `useSandbox`, lifecycle and response hooks) must be declared identically on every render.
-- `defineAgentProfile` is removed. A subagent is `{ name, description, agent }` where `agent` is a plain agent function rendered per delegation; `model`/`thinkingLevel` inherit from the parent unless overridden. Inside a delegate render, `usePersistentState`, `useSandbox`, `useModel`, and the lifecycle hooks throw.
+- The agent function re-renders before every model turn. **Resources** (`useTool`, `useSkill`, `useSubagent`) may be conditional — changes are announced to the model as `resources` signals — and so may `useSandbox`: a presence flip swaps the environment at the next turn boundary, announced as an `environment` signal. **Identity hooks** (`usePersistentState`, `useDataWriter`, lifecycle and response hooks) must be declared identically on every render.
+- `defineAgentProfile` is removed. A subagent is `{ name, description, agent }` where `agent` is a plain agent function rendered per delegation; `model`/`thinkingLevel` inherit from the parent unless overridden. Inside a delegate render, `usePersistentState`, `useSandbox`, `useModel`, `useDataWriter`, `useDispatchMessage`, and the lifecycle/response hooks throw.
 - Identity is the exported function's name, or an `fn.agentName = '...'` **string-literal** static override; PascalCase and lower-kebab-case are both valid, and identities are unique per application. Renaming an agent function without an `agentName` pin is a storage-identity change; renaming the file changes nothing.
 
 New capabilities you will likely reach for while migrating — durable per-instance state ([`usePersistentState`](/docs/api/agent-api/#usepersistentstate)), creation data ([`useInitialData`](/docs/api/agent-api/#useinitialdata) + the `initialData` schema static), the delivered-message cursor ([`useDelivery`](/docs/api/agent-api/#usedelivery)), self-dispatch ([`useDispatchMessage`](/docs/api/agent-api/#usedispatchmessage)), client-facing data parts ([`useDataWriter`](/docs/api/agent-api/#usedatawriter)), lifecycle seams ([`useAgentStart`](/docs/api/agent-api/#useagentstart)/[`useAgentFinish`](/docs/api/agent-api/#useagentfinish)), and response metadata ([`useResponseStart`/`useResponseFinish`](/docs/api/agent-api/#useresponsestart--useresponsefinish)).
@@ -159,7 +159,7 @@ Import-attribute syntax (`with { type: 'skill' }` and friends) is **removed**; t
 
 ## Workflows are removed
 
-`defineWorkflow`, `invoke()`, `listRuns()`, `getRun()`, workflow HTTP routes, `client.workflows.*`, `client.runs.*`, `useFlueWorkflow()`, the `src/workflows/` discovery directory, the Workflow API, and workflow run events are all gone. There is no framework job abstraction to migrate *to* — pick the smallest replacement that preserves your semantics:
+`defineWorkflow`, `invoke()`, `listRuns()`, `getRun()`, workflow HTTP routes, `client.workflows.*`, `useFlueWorkflow()`, the `src/workflows/` discovery directory, the Workflow API, and workflow run events are all gone. There is no framework job abstraction to migrate *to* — pick the smallest replacement that preserves your semantics:
 
 1. **A single model operation with a returned value** (the common beta workflow): an awaited handle. `init(agent, { id })` addresses an instance; `await handle.dispatch(message)` delivers through the normal queue, waits for settlement, and resolves with the reply (`text`, `data`, `metadata`, `submissionId`). A failed or aborted run rejects with `AgentRunError`.
 
@@ -201,7 +201,7 @@ See the [Events Reference](/docs/api/events-reference/) for the full envelope (`
 
 ## SDK
 
-The beta's deployment-wide client is now **conversation-scoped**: construct one client per conversation URL — the agent's mount URL plus the conversation id. There is no `baseUrl`, no agent-name addressing, and no `client.agents`/`client.workflows`/`client.runs` namespaces.
+The beta's deployment-wide client is now **conversation-scoped**: construct one client per conversation URL — the agent's mount URL plus the conversation id. There is no `baseUrl`, no agent-name addressing, and no `client.agents`/`client.workflows` namespaces.
 
 ```ts
 // Beta

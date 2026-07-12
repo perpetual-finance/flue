@@ -424,7 +424,7 @@ function ReproducePhase() {
 | `model`         | `string`        | Model specifier override. Inherits the parent's model when omitted.     |
 | `thinkingLevel` | `ThinkingLevel` | Reasoning-effort override. Inherits when omitted.                       |
 
-Inside the delegate's render, custom hooks, `useTool()`, `useInstruction()`, `useSkill()`, and nested `useSubagent()` all compose as usual; `usePersistentState()` and `useSandbox()` throw (durable state is instance-scoped and delegates share the parent environment). Duplicate delegate names in one render fail fast.
+Inside the delegate's render, custom hooks, `useTool()`, `useInstruction()`, `useSkill()`, and nested `useSubagent()` all compose as usual; the instance-scoped hooks throw — `usePersistentState()` and `useSandbox()` (durable state is instance-scoped and delegates share the parent environment), `useModel()` (a delegate's model comes from its `useSubagent()` definition), `useDataWriter()` and the response hooks (no client-facing output), `useDispatchMessage()` (no instance to dispatch to), and the lifecycle hooks. Duplicate delegate names in one render fail fast.
 
 ### `useModel(...)`
 
