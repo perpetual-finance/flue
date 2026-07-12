@@ -18,7 +18,7 @@ flue add sandbox cloudflare-shell
 The blueprint installs `@cloudflare/shell` and `@cloudflare/codemode`, creates `<source-root>/sandboxes/cloudflare-shell.ts`, and adds a Worker Loader binding to Wrangler configuration. The generated adapter exports sandbox construction and default workspace helpers; its file API retries nested writes after recursively creating a missing parent directory.
 
 ```ts title="<source-root>/sandboxes/cloudflare-shell.ts (abridged)"
-// flue-blueprint: sandbox/cloudflare-shell@1
+// flue-blueprint: sandbox/cloudflare-shell@2
 import { Workspace, WorkspaceFileSystem /* ... */ } from '@cloudflare/shell';
 import { stateTools } from '@cloudflare/shell/workers';
 import { DynamicWorkerExecutor, resolveProvider /* ... */ } from '@cloudflare/codemode';
@@ -73,6 +73,8 @@ export function getDefaultWorkspace(): Workspace {
 ```
 
 Create a workspace, then pass it with the `worker_loaders` binding to `getShellSandbox(...)`. Agents receive durable file operations — the standard `read`/`write`/`edit` tools composed from Flue's exported per-tool factories — and the isolated JavaScript `code` tool; they do not receive Linux command execution. Application-specific data loading into the workspace remains application-owned.
+
+The generated `code` tool bounds its own concurrency: Cloudflare allows at most 4 concurrent dynamic-worker invocations per request, and Flue executes a turn's tool calls in parallel, so the adapter queues `code` executions above a cap of 3 rather than letting the platform reject the surplus calls.
 
 ## Configure
 

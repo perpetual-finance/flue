@@ -242,6 +242,28 @@ const CodeParams = {
 	required: ['code'],
 };
 
+// Cloudflare allows at most 4 concurrent dynamic-worker invocations per
+// request. A turn that batches more `code` calls than that would fail the
+// surplus with "Too many concurrent dynamic workers" — queue them above a
+// cap of 3 instead (headroom for anything else in the request that holds a
+// dynamic worker).
+const MAX_CONCURRENT_CODE_EXECUTIONS = 3;
+let activeCodeExecutions = 0;
+const codeExecutionWaiters: Array<() => void> = [];
+
+async function withCodeExecutionSlot<T>(run: () => Promise<T>): Promise<T> {
+	while (activeCodeExecutions >= MAX_CONCURRENT_CODE_EXECUTIONS) {
+		await new Promise<void>((resolve) => codeExecutionWaiters.push(resolve));
+	}
+	activeCodeExecutions++;
+	try {
+		return await run();
+	} finally {
+		activeCodeExecutions--;
+		codeExecutionWaiters.shift()?.();
+	}
+}
+
 function createCodeTool(executor: DynamicWorkerExecutor, stateProvider: ResolvedProvider) {
 	return {
 		name: 'code',
@@ -250,7 +272,9 @@ function createCodeTool(executor: DynamicWorkerExecutor, stateProvider: Resolved
 		parameters: CodeParams,
 		async execute(_toolCallId: string, params: unknown) {
 			const code = (params as { code: string }).code;
-			const { result, error, logs } = await executor.execute(code, [stateProvider]);
+			const { result, error, logs } = await withCodeExecutionSlot(() =>
+				executor.execute(code, [stateProvider]),
+			);
 			if (error) {
 				const logsTail = logs?.length ? `\n\nlogs:\n${logs.join('\n')}` : '';
 				throw new Error(`code tool failed: ${error}${logsTail}`);

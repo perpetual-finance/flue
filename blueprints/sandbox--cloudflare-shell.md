@@ -1,7 +1,7 @@
 ---
 {
   "kind": "sandbox",
-  "version": 1,
+  "version": 2,
   "website": "https://developers.cloudflare.com/workers/runtime-apis/bindings/worker-loader/",
   "aliases": ["@cloudflare/shell"]
 }
@@ -36,7 +36,7 @@ Write this file verbatim. It requires a Cloudflare Worker target with a
 `worker_loaders` binding.
 
 ```ts
-// flue-blueprint: sandbox/cloudflare-shell@1
+// flue-blueprint: sandbox/cloudflare-shell@2
 import {
 	STATE_TYPES,
 	Workspace,
@@ -238,6 +238,28 @@ const CodeParams = {
 	required: ['code'],
 };
 
+// Cloudflare allows at most 4 concurrent dynamic-worker invocations per
+// request. A turn that batches more `code` calls than that would fail the
+// surplus with "Too many concurrent dynamic workers" — queue them above a
+// cap of 3 instead (headroom for anything else in the request that holds a
+// dynamic worker).
+const MAX_CONCURRENT_CODE_EXECUTIONS = 3;
+let activeCodeExecutions = 0;
+const codeExecutionWaiters: Array<() => void> = [];
+
+async function withCodeExecutionSlot<T>(run: () => Promise<T>): Promise<T> {
+	while (activeCodeExecutions >= MAX_CONCURRENT_CODE_EXECUTIONS) {
+		await new Promise<void>((resolve) => codeExecutionWaiters.push(resolve));
+	}
+	activeCodeExecutions++;
+	try {
+		return await run();
+	} finally {
+		activeCodeExecutions--;
+		codeExecutionWaiters.shift()?.();
+	}
+}
+
 function createCodeTool(
 	executor: DynamicWorkerExecutor,
 	stateProvider: ResolvedProvider,
@@ -252,7 +274,9 @@ function createCodeTool(
 			params: unknown,
 		) {
 			const code = (params as { code: string }).code;
-			const { result, error, logs } = await executor.execute(code, [stateProvider]);
+			const { result, error, logs } = await withCodeExecutionSlot(() =>
+				executor.execute(code, [stateProvider]),
+			);
 			if (error) {
 				const logsTail = logs?.length ? `\n\nlogs:\n${logs.join('\n')}` : '';
 				throw new Error(`code tool failed: ${error}${logsTail}`);
@@ -388,6 +412,17 @@ the application. Mount the agent's HTTP surface explicitly in `app.ts`
 When updating an existing integration, inspect and compare it against this complete current blueprint, apply every relevant change while preserving customizations, and then add or update the marker in the primary marked file. This comparison is required when the marker is missing.
 
 ## Upgrade Guide
+
+### Version 2 — 2026-07-12
+
+Bounded `code` tool concurrency. Cloudflare allows at most 4 concurrent
+dynamic-worker invocations per request; when a model batched 5+ `code` calls
+in one turn under Flue's parallel tool execution, the surplus calls failed
+with `Too many concurrent dynamic workers`. The adapter now queues executions
+above a cap of 3. To upgrade an existing integration, add the
+`withCodeExecutionSlot` semaphore block above `createCodeTool` and wrap the
+`executor.execute(...)` call with it, exactly as in the current file
+contents.
 
 ### Version 1 — 2026-06-14
 
