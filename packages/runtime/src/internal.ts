@@ -23,6 +23,10 @@ export type {
 } from './agent-execution-store.ts';
 export type { FlueContextConfig, FlueContextInternal } from './client.ts';
 export { createFlueContext, initializeRootHarness } from './client.ts';
+// Overflow classifier, exposed for application regression tripwires that
+// assert the 413→overflow chain against the installed runtime (#468). Not an
+// authoring API: agent code never classifies its own failures.
+export { isAssistantContextOverflow } from './compaction.ts';
 export {
 	CLOUDFLARE_AGENT_INTERNAL_DISPATCH_PATH,
 	CLOUDFLARE_AGENT_INTERNAL_INSTANCE_INFO_PATH,

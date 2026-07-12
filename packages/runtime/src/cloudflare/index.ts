@@ -7,6 +7,11 @@
  * `cloudflare:workers` import graph — keep that virtual module out of this
  * entry's runtime graph (type-only imports are fine; they erase at build).
  */
+// The Workers-AI binding failure surface: applications match/strip the 413
+// overflow marker in telemetry and construct the error in regression tests
+// against the installed runtime, so both need a public home (#468). They are
+// Cloudflare-binding-specific and stay off the root barrel.
+export { CloudflareAIBindingError, WORKERS_AI_OVERFLOW_MARKER } from '../errors.ts';
 export type { CloudflareAIBinding, CloudflareAIBindingRegistration } from '../runtime/providers.ts';
 export type { CloudflareSandboxOptions, CloudflareSandboxStub } from './cf-sandbox.ts';
 export { cloudflareSandbox } from './cf-sandbox.ts';

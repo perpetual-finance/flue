@@ -7,6 +7,7 @@ import {
 	FlueError,
 	OperationFailedError,
 	serializeEventError,
+	WORKERS_AI_OVERFLOW_MARKER,
 } from '../src/errors.ts';
 
 // Telemetry-facing error diagnostics. Each behavior here was a filed defect
@@ -145,5 +146,20 @@ describe('serializeEventError', () => {
 	it('serializes plain Errors to name/message and passes non-errors through', () => {
 		expect(serializeEventError(new Error('boom'))).toEqual({ name: 'Error', message: 'boom' });
 		expect(serializeEventError('boom')).toBe('boom');
+	});
+});
+
+// Public re-export identity (withastro/flue#468): applications keep repin
+// tripwires and telemetry classifiers on these symbols, so they must reach a
+// stable entrypoint instead of hashed dist chunks — the binding failure
+// surface on `@flue/runtime/cloudflare`, the classifier on
+// `@flue/runtime/internal`.
+describe('overflow-chain public exports', () => {
+	it('re-exports the binding failure surface and classifier unchanged', async () => {
+		const cloudflareBarrel = await import('../src/cloudflare/index.ts');
+		const internalBarrel = await import('../src/internal.ts');
+		expect(cloudflareBarrel.CloudflareAIBindingError).toBe(CloudflareAIBindingError);
+		expect(cloudflareBarrel.WORKERS_AI_OVERFLOW_MARKER).toBe(WORKERS_AI_OVERFLOW_MARKER);
+		expect(internalBarrel.isAssistantContextOverflow).toBe(isAssistantContextOverflow);
 	});
 });

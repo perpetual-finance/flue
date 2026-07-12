@@ -106,6 +106,16 @@ Harness operations and runtime provider registration reject with typed `FlueErro
 | `SubmissionAbortedError`         | `submission_aborted`            | A durable submission was aborted and settled to the aborted outcome.                                                                                                                                                    |
 | `ProviderRegistrationError`      | `invalid_provider_registration` | `registerProvider()` targets a non-catalog provider id without `api` and `baseUrl`.                                                                                                                                     |
 
+### Cloudflare binding errors
+
+Target-specific failures stay off the root barrel; the Workers AI binding failure surface is exported from `@flue/runtime/cloudflare`:
+
+| Class                     | `type`                        | Thrown when                                                                                                                                                                             |
+| ------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CloudflareAIBindingError` | `cloudflare_ai_binding_error` | A Workers AI binding request fails. `meta` carries `status`/`statusText` when known, and a 413 response adds `meta.reason: 'request_too_large'` — the structured signal that the conversation outgrew the provider limit. |
+
+A 413 also appends the `WORKERS_AI_OVERFLOW_MARKER` constant (also exported from `@flue/runtime/cloudflare`) to the error message; that marker is what the runtime's overflow classification matches to trigger compaction recovery, and telemetry code that fingerprints binding failures can match or strip it via the constant instead of a copied string literal.
+
 ### Action errors
 
 | Class                            | `type`                        | Thrown when                                                                 |
