@@ -525,7 +525,7 @@ export interface AgentProps {
 
 /**
  * The contract statics an agent function may carry — the parts of the agent
- * the platform reads WITHOUT running the function. Both are optional, both
+ * the platform reads WITHOUT running the function. All are optional, all
  * are plain properties assigned after the declaration (the `PropTypes`
  * pattern):
  *
@@ -536,6 +536,7 @@ export interface AgentProps {
  * }
  * IssueTriage.agentName = 'issue-triage';
  * IssueTriage.initialData = v.object({ issue: v.pipe(v.number(), v.integer()) });
+ * IssueTriage.durability = { maxAttempts: 5, timeoutMs: 7_200_000 };
  * ```
  */
 export interface AgentStatics {
@@ -557,6 +558,18 @@ export interface AgentStatics {
 	 * gets recorded and what `useInitialData()` returns.
 	 */
 	initialData?: v.GenericSchema;
+	/**
+	 * Submission retry policy: how long ({@link DurabilityConfig.timeoutMs})
+	 * and across how many attempts ({@link DurabilityConfig.maxAttempts}) the
+	 * runtime keeps recovering this agent's work before settling it failed.
+	 * A static rather than a hook because the platform applies it when the
+	 * function is NOT running — including after a crash. Unlike `agentName`,
+	 * the value need not be a literal: express environment-dependent policy in
+	 * the assigned expression, e.g.
+	 * `IssueTriage.durability = process.env.CI ? { timeoutMs: 60_000 } : { timeoutMs: 3_600_000 }`.
+	 * Absent, the store defaults apply (1 hour, 10 attempts).
+	 */
+	durability?: DurabilityConfig;
 }
 
 /**

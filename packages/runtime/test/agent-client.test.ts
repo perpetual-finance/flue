@@ -54,7 +54,7 @@ async function startFlue(...agents: Parameters<typeof start>[0]['agents']) {
 }
 
 describe('start() + init(): the scripted client', () => {
-	it('accepts a StartAgentConfig entry with a durability policy and an initialData static', async () => {
+	it('accepts a named StartAgentConfig entry whose agent carries durability and initialData statics', async () => {
 		const { provider, model } = createFauxProvider();
 		provider.setResponses([fauxAssistantMessage('Seeded.')]);
 
@@ -65,8 +65,9 @@ describe('start() + init(): the scripted client', () => {
 			return 'Reply.';
 		};
 		agent.initialData = v.object({ date: v.string() });
+		agent.durability = { maxAttempts: 2 };
 
-		await startFlue({ agent, name: 'module-seeded', durability: { maxAttempts: 2 } });
+		await startFlue({ agent, name: 'module-seeded' });
 		const reply = await init(agent).dispatch({
 			message: 'Go.',
 			initialData: { date: '2026-07-09' },
@@ -91,7 +92,7 @@ describe('start() + init(): the scripted client', () => {
 
 	it('rejects an entry that is neither an agent function nor a { agent } record', async () => {
 		await expect(start({ agents: [{} as never] })).rejects.toThrow(
-			'must be agent functions or { agent, name?, durability? } records',
+			'must be agent functions or { agent, name? } records',
 		);
 	});
 
@@ -248,8 +249,9 @@ describe('start() + init(): the scripted client', () => {
 			useModel(model);
 			return 'Reply.';
 		};
+		echo.durability = { maxAttempts: 1 };
 
-		await startFlue({ name: 'echo', agent: echo, durability: { maxAttempts: 1 } });
+		await startFlue({ name: 'echo', agent: echo });
 		const error = await init(echo, { id: 'dispatch-fail-1' })
 			.dispatch({ message: { kind: 'signal', type: 'trigger', body: 'boom' } })
 			.then(

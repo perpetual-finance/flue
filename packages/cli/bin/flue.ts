@@ -23,7 +23,7 @@ import { BLUEPRINTS, KIND_ROOTS } from './_blueprints.generated.ts';
 function printUsage(log: (message: string) => void = console.error) {
 	log(
 		'Usage:\n' +
-			'  flue run    <path> --message <text> [--name <agent>] [--id <conversation-id>] [--data <json>] [--uid <uid> | --new] [--max-attempts <n>] [--timeout <ms>] [--env <path>] [--json]\n' +
+			'  flue run    <path> --message <text> [--name <agent>] [--id <conversation-id>] [--data <json>] [--uid <uid> | --new] [--env <path>] [--json]\n' +
 			'  flue init   --target <node|cloudflare> [--root <path>] [--force]\n' +
 			'  flue add    [<kind> <name|url>] [--print]\n' +
 			'  flue update <kind> <name|url> [--print]\n' +
@@ -46,8 +46,6 @@ function printUsage(log: (message: string) => void = console.error) {
 			'  --data <json>        (flue run) Creation data (JSON), read with useInitialData(). Seeds only a run that creates the conversation; ignored on continues.\n' +
 			'  --uid <uid>          (flue run) Continue only the conversation incarnation with this uid (printed by the creating run); rejects when it no longer exists.\n' +
 			'  --new                (flue run) Create only: rejects when the conversation id already exists (the error names its uid).\n' +
-			'  --max-attempts <n>   (flue run) Submission retry budget for this run (durability is decided by the runner).\n' +
-			'  --timeout <ms>       (flue run) Submission timeout for this run, in milliseconds.\n' +
 			'  --json               (flue run) Print a JSON result envelope to stdout instead of the message text.\n' +
 			'  --env <path>         (flue run) Select one alternate .env-format file, loaded before the run.\n' +
 			'                       Without --env, `flue run` loads <project>/.env when present. Shell values win.\n' +
@@ -87,8 +85,6 @@ interface RunArgs {
 	initialData: unknown;
 	/** Send condition: a string (--uid, continue-only) or null (--new, create-only). */
 	uid: string | null | undefined;
-	/** Submission retry policy for this run — durability is the runner's call. */
-	durability: { maxAttempts?: number; timeoutMs?: number } | undefined;
 	json: boolean;
 	envFile: string | undefined;
 }
@@ -368,8 +364,6 @@ function parseRunArgs(rest: string[]): RunArgs {
 			data: { type: 'string' },
 			uid: { type: 'string' },
 			new: { type: 'boolean' },
-			'max-attempts': { type: 'string' },
-			timeout: { type: 'string' },
 			json: { type: 'boolean' },
 			env: { type: 'string', multiple: true },
 		},
@@ -380,8 +374,6 @@ function parseRunArgs(rest: string[]): RunArgs {
 			'--data',
 			'--uid',
 			'--new',
-			'--max-attempts',
-			'--timeout',
 			'--json',
 			'--env',
 		]),
@@ -420,15 +412,6 @@ function parseRunArgs(rest: string[]): RunArgs {
 		}
 	}
 
-	const maxAttempts = positiveIntFlag(values, 'max-attempts');
-	const timeoutMs = positiveIntFlag(values, 'timeout');
-	const durability =
-		maxAttempts !== undefined || timeoutMs !== undefined
-			? {
-					...(maxAttempts !== undefined ? { maxAttempts } : {}),
-					...(timeoutMs !== undefined ? { timeoutMs } : {}),
-				}
-			: undefined;
 
 	const uidFlag = stringFlag(values, 'uid', 'Missing value for --uid');
 	const createOnly = booleanFlag(values, 'new', '--new');
@@ -448,24 +431,9 @@ function parseRunArgs(rest: string[]): RunArgs {
 		initialData,
 		// The send condition: --uid <value> = continue-only, --new = create-only.
 		uid: createOnly ? null : uidFlag,
-		durability,
 		json: booleanFlag(values, 'json', '--json'),
 		envFile: envFiles[0],
 	};
-}
-
-/** Parse a positive-integer flag value, failing with a pointed message. */
-function positiveIntFlag(
-	values: CliValues,
-	flag: 'max-attempts' | 'timeout',
-): number | undefined {
-	const raw = stringFlag(values, flag, `Missing value for --${flag}`);
-	if (raw === undefined) return undefined;
-	const parsed = Number(raw);
-	if (!Number.isInteger(parsed) || parsed <= 0) {
-		fail(`\`--${flag}\` must be a positive integer; got ${JSON.stringify(raw)}.`);
-	}
-	return parsed;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -575,7 +543,6 @@ async function run(args: RunArgs) {
 		message: args.message,
 		initialData: args.initialData,
 		uid: args.uid,
-		durability: args.durability,
 		conversationId: args.id,
 		onEvent: (chunk) => presenter.present(chunk as ConversationStreamChunk),
 		onRuntimeOutput: (line) => {

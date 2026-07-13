@@ -12,19 +12,14 @@
 
 import type { PersistenceAdapter } from '../agent-execution-store.ts';
 import { getFlueRuntime } from '../runtime/flue-app.ts';
-import {
-	bindAgentDurability,
-	type FlueAgentRegistration,
-	resolveAgentIdentity,
-} from '../runtime/registration.ts';
-import type { Agent, DurabilityConfig } from '../types.ts';
+import { type FlueAgentRegistration, resolveAgentIdentity } from '../runtime/registration.ts';
+import type { Agent } from '../types.ts';
 import { sqlite } from './agent-execution-store.ts';
 import { assembleNodeAgentRuntime, connectPersistenceAdapter } from './assemble.ts';
 
 /**
  * A configured `start()` entry, for when the bare function isn't enough:
- * an identity override (inline/anonymous functions in tests), or binding
- * policy the runner decides (durability).
+ * an identity override (inline/anonymous functions in tests).
  */
 export interface StartAgentConfig {
 	/** The agent function. */
@@ -36,16 +31,14 @@ export interface StartAgentConfig {
 	 * conversations when the agents array is reordered.
 	 */
 	name?: string;
-	/** Submission retry policy — binding policy, decided by the runner. */
-	durability?: DurabilityConfig;
 }
 
 export type StartAgentEntry = Agent | StartAgentConfig;
 
 export interface StartOptions {
 	/**
-	 * The agents this runtime serves: agent functions, or
-	 * `{ agent, name?, durability? }` entries when the binding needs config.
+	 * The agents this runtime serves: agent functions, or `{ agent, name? }`
+	 * entries when an identity override is needed.
 	 */
 	agents: readonly StartAgentEntry[];
 	/**
@@ -133,12 +126,10 @@ function normalizeStartAgentEntry(record: StartAgentEntry): FlueAgentRegistratio
 	}
 	if (!record || typeof record !== 'object' || typeof record.agent !== 'function') {
 		throw new Error(
-			'[flue] start() agents entries must be agent functions or { agent, name?, durability? } records.',
+			'[flue] start() agents entries must be agent functions or { agent, name? } records.',
 		);
 	}
-	const identity = requireIdentity(record.agent, record.name);
-	if (record.durability !== undefined) bindAgentDurability(identity, record.durability);
-	return { identity, agent: record.agent };
+	return { identity: requireIdentity(record.agent, record.name), agent: record.agent };
 }
 
 function requireIdentity(agent: Agent, override: string | undefined): string {

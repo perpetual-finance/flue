@@ -48,7 +48,7 @@ export default defineConfig({
 
 On Cloudflare the plugin generates two inputs the Cloudflare plugin consumes — `.flue-vite/_entry.ts` (the Worker entry) and `.flue-vite.wrangler.jsonc` (your authored `wrangler.jsonc` merged with generated bindings). Add both to `.gitignore`. Build output, preview, and deploy belong to `@cloudflare/vite-plugin`; deploy against the config it emits into `dist/`.
 
-`flue run` remains for one-shot local execution, with new flags: `flue run <path> --message "..." [--name <agent>] [--id <id>] [--data '<json>'] [--max-attempts <n>] [--timeout <ms>]`. The beta's workflow-oriented `--input` is gone with workflows.
+`flue run` remains for one-shot local execution, with new flags: `flue run <path> --message "..." [--name <agent>] [--id <id>] [--data '<json>']`. The beta's workflow-oriented `--input` is gone with workflows.
 
 ## Routing: the auto-router is gone
 
@@ -108,9 +108,10 @@ export function Support({ id }: AgentProps) {
   useSubagent({ name: 'reviewer', description: '…', agent: Reviewer });
   return `Help with ticket ${id}.`;
 }
+Support.durability = { maxAttempts: 5 };
 ```
 
-The agent **is** the exported function — there is no wrapper and no config bag. Durability moved out of the module entirely: it is binding policy, declared where the agent is run (`createAgentRouter(Support, { durability: { maxAttempts: 5 } })` at the mount, a `{ agent, durability }` entry in `start()`, or `flue run --max-attempts`).
+The agent **is** the exported function — there is no wrapper and no config bag. Durability became the `durability` static: assigned on the function like `agentName`/`initialData`, so it applies wherever the agent runs (mounted, dispatch-only, `start()`, `flue run`) and stays readable when a render crashes.
 
 Field-by-field:
 
@@ -123,7 +124,7 @@ Field-by-field:
 | `subagents` (profiles)           | [`useSubagent({ name, description, agent, model?, thinkingLevel? })`](/docs/api/agent-api/#usesubagent) — the delegate is an agent function, not a profile. |
 | `thinkingLevel`, `compaction`    | `useModel(model, { thinkingLevel, compaction })`.                                                                                    |
 | `sandbox`, `cwd`                 | [`useSandbox(factory, { cwd })`](/docs/api/agent-api/#usesandbox) — at most once per render; presence may be conditional.             |
-| `durability`                     | A binding option — `createAgentRouter(fn, { durability })`, a `start()` entry, or `flue run` flags. The runner decides; it lives outside the function, so it stays readable when a render crashes. |
+| `durability`                     | The `durability` static — `Support.durability = { maxAttempts: 5 }`. A static, not a hook, because the platform applies it when the function is not running; an environment-dependent policy goes in the assigned expression (`flag ? x : y`). |
 | `profile`                        | Removed — compose with custom hooks (plain functions calling hooks) instead.                                                          |
 | `actions`                        | Removed with Actions. Express reusable operations as tools.                                                                           |
 | `description` (config)           | Deleted — no replacement.                                                                                                             |
@@ -175,7 +176,7 @@ Import-attribute syntax (`with { type: 'skill' }` and friends) is **removed**; t
 
 3. **Multi-step orchestration with its own durability, retries, and inspection** (what workflow runs gave you): an application-owned orchestrator. On Cloudflare, a [Cloudflare Workflow](https://developers.cloudflare.com/workflows/) whose steps call `init(...).dispatch(...)` — one agent send per step, the recorded step result standing in for the reply on re-execution — is the documented pattern; see [Scripts › On Cloudflare](/docs/guide/scripts/#on-cloudflare). Run inspection (`getRun()`) has no framework replacement: reconcile from your orchestrator's own state and from `submission_settled` observability events.
 
-In standalone Node scripts (cron jobs, CI, tests), boot the runtime first with `start()` from `@flue/runtime/node`, passing agent functions (or `{ agent, name?, durability? }` entries); then `init()`/`dispatch()` work as they do in a server. See [Scripts](/docs/guide/scripts/).
+In standalone Node scripts (cron jobs, CI, tests), boot the runtime first with `start()` from `@flue/runtime/node`, passing agent functions (or `{ agent, name? }` entries); then `init()`/`dispatch()` work as they do in a server. See [Scripts](/docs/guide/scripts/).
 
 ## Dispatch and conditional sends
 
@@ -242,14 +243,14 @@ Messages remain Flue-owned parts-based values; new part kinds (`data-*` from `us
 
 ## CLI
 
-`flue init`, `flue add`, `flue update`, and `flue docs` remain. `flue dev` and `flue build` are removed (Vite owns both). `flue run <path>` executes one agent module directly — `--message`, `--name` (select one agent by name when the module defines several), `--id`, `--data` (creation data), `--uid`/`--new`, `--max-attempts`/`--timeout` (durability for this run), `--json`.
+`flue init`, `flue add`, `flue update`, and `flue docs` remain. `flue dev` and `flue build` are removed (Vite owns both). `flue run <path>` executes one agent module directly — `--message`, `--name` (select one agent by name when the module defines several), `--id`, `--data` (creation data), `--uid`/`--new`, `--json`. Durability comes from the agent's own `durability` static, as everywhere else.
 
 ## Migration checklist
 
 1. **Pins.** Replace `@flue/*@1.0.0-beta.x` with the current versions; add `@flue/vite`, `vite`, and (Cloudflare) `@cloudflare/vite-plugin`. Drop beta-era patches and vendored builds — re-verify each patched behavior against the new runtime before porting anything.
 2. **Build.** Author `vite.config.ts` (`flue()` before `cloudflare()`); move package scripts to `vite dev`/`vite build`; gitignore the generated files.
 3. **Routing.** Author explicit mounts in `app.ts`; delete `flue()` router usage; decide which agents are dispatch-only.
-4. **Agents.** Convert each initializer to an exported capitalized agent function in a `'use agent'` module: hooks for behavior, statics (`agentName`, `initialData`) for the contract, binding options for durability, `AgentProps` for the id, platform env instead of `ctx.env`. Convert profiles to `useSubagent` agent functions.
+4. **Agents.** Convert each initializer to an exported capitalized agent function in a `'use agent'` module: hooks for behavior, statics (`agentName`, `initialData`, `durability`) for the contract, `AgentProps` for the id, platform env instead of `ctx.env`. Convert profiles to `useSubagent` agent functions.
 5. **Tools.** Rename `run({ input })` to `run({ data })`; adopt `harness: true` where tools prompted sessions; consider `durable: true` for side-effect sequences.
 6. **Skills.** Delete import attributes; let `SKILL.md` imports package themselves; wrap other markdown with `defineSkill` where needed.
 7. **Workflows.** Replace each with the smallest fit: awaited `init()` handle, durable tool, or an application-owned orchestrator.

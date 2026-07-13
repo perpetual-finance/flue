@@ -20,13 +20,12 @@
  * created: no Hono app, no listener, no channels.
  */
 
-import type { Agent, DeliveredMessage, DurabilityConfig } from '@flue/runtime';
+import type { Agent, DeliveredMessage } from '@flue/runtime';
 import {
 	AGENT_IDENTITY_PATTERN,
 	type AssembledNodeAgentRuntime,
 	agentStreamPath,
 	assembleNodeAgentRuntime,
-	bindAgentDurability,
 	type ConversationStreamChunk,
 	connectPersistenceAdapter,
 	createInstrumentationOwner,
@@ -45,11 +44,6 @@ export interface FlueRunSessionOptions {
 	 * define exactly one agent.
 	 */
 	agentName?: string;
-	/**
-	 * Submission retry policy for this run. Durability is binding policy — the
-	 * runner (here: the `flue run` invocation) decides it, not the agent.
-	 */
-	durability?: DurabilityConfig;
 	/** Absolute path of the project's db entry, when one resolved. */
 	dbModulePath?: string;
 	/** Display name for the db entry in diagnostics (e.g. `src/db.ts`). */
@@ -227,7 +221,6 @@ export async function createFlueRunSession(
 			const selected = selectRunAgent(agentModule, options.agentName, options.agentModulePath);
 			const identity = assertRunIdentity(selected.name, options.agentModulePath);
 			const agent = selected.agent;
-			if (options.durability !== undefined) bindAgentDurability(identity, options.durability);
 
 			const dbSource = options.dbSource ?? 'db.ts';
 			let adapter: PersistenceAdapter;

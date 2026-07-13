@@ -16,15 +16,14 @@
  *
  * App membership comes from {@link registerFlueAgents}, called once by the
  * generated bootstrap with the full scanned agent set (or by `start()` for
- * standalone scripts). Durability is BINDING policy, not agent contract:
- * whoever runs the agent decides it — `createAgentRouter(fn, { durability })`,
- * a `start()` entry, or `flue run` flags — recorded per identity via
- * {@link bindAgentDurability}.
+ * standalone scripts). Durability rides the function as the `durability`
+ * static — read per identity through the registry via
+ * {@link resolveAgentDurability}.
  *
- * {@link createAgentRouter} is a pure router factory: no side effects beyond
- * recording its `durability` option, callable any number of times, mountable
- * at any path. Handlers resolve the runtime at request time, so mounting
- * order relative to bootstrap registration does not matter.
+ * {@link createAgentRouter} is a pure router factory: no side effects,
+ * callable any number of times, mountable at any path. Handlers resolve the
+ * runtime at request time, so mounting order relative to bootstrap
+ * registration does not matter.
  */
 
 import { Hono } from 'hono';
@@ -82,7 +81,6 @@ export const AGENT_IDENTITY_PATTERN = /^[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*$/
 
 let identityBindings = new WeakMap<Agent, AgentIdentityBinding>();
 let registeredAgents = new Map<string, FlueAgentRegistration>();
-let boundDurability = new Map<string, DurabilityConfig>();
 
 /**
  * Bind a build-derived identity to an agent function.
@@ -182,24 +180,20 @@ export function resolveAgentIdentity(agent: Agent): string | undefined {
 }
 
 /**
- * Record the submission retry policy for an agent identity. Durability is
- * binding policy — the runner decides it, not the agent — so the binding
- * sites write here: `createAgentRouter(fn, { durability })`, `start()`
- * entries, and `flue run` flags. One policy per identity per process; a
- * later binding for the same identity replaces the earlier one (mounting one
- * agent twice with different policies is a configuration smell — give both
- * mounts the same value).
+ * The submission retry policy for an agent identity, read from the agent's
+ * `durability` static (validated). Like `agentName` and `initialData`, the
+ * static is contract the platform reads WITHOUT running the function, so the
+ * policy stays readable when a render crashes — and an environment-dependent
+ * policy is expressed in the assigned value (`Fn.durability = flag ? x : y`),
+ * not by where the assignment lives. Returns `undefined` (store defaults
+ * apply) for an unregistered identity or an agent carrying no static.
  */
-export function bindAgentDurability(identity: string, durability: DurabilityConfig): void {
-	assertAgentIdentity(identity);
-	assertDurability(durability, `[agent "${identity}"]`);
-	boundDurability.set(identity, durability);
-}
-
-/** The bound submission retry policy for an agent identity, if any. */
 export function resolveAgentDurability(identity: string | undefined): DurabilityConfig | undefined {
 	if (identity === undefined) return undefined;
-	return boundDurability.get(identity);
+	const durability = registeredAgents.get(identity)?.agent.durability;
+	if (durability === undefined) return undefined;
+	assertDurability(durability, `[agent "${identity}"]`);
+	return durability;
 }
 
 /**
@@ -221,18 +215,9 @@ export function resolveAgentInitialDataSchema(agent: Agent): v.GenericSchema | u
 export function resetFlueAgentRegistrationForTests(): void {
 	identityBindings = new WeakMap();
 	registeredAgents = new Map();
-	boundDurability = new Map();
 }
 
 // ─── The mountable per-agent router ─────────────────────────────────────────
-
-export interface CreateAgentRouterOptions {
-	/**
-	 * Submission retry policy for this agent — binding policy, decided by the
-	 * runner. Recorded for the agent's identity when the router is created.
-	 */
-	durability?: DurabilityConfig;
-}
 
 /**
  * Build the mountable Hono sub-app serving one agent's HTTP surface.
@@ -250,7 +235,7 @@ export interface CreateAgentRouterOptions {
  * Handlers resolve the runtime at request time, so creating the router
  * before the bootstrap registers the scanned set is fine.
  */
-export function createAgentRouter(agent: Agent, options: CreateAgentRouterOptions = {}): Hono {
+export function createAgentRouter(agent: Agent): Hono {
 	assertAgentFunction(agent, '(unresolved)');
 	const identity = resolveAgentIdentity(agent);
 	if (identity === undefined) {
@@ -261,7 +246,6 @@ export function createAgentRouter(agent: Agent, options: CreateAgentRouterOption
 		);
 	}
 	assertAgentIdentity(identity);
-	if (options.durability !== undefined) bindAgentDurability(identity, options.durability);
 
 	const app = new Hono();
 

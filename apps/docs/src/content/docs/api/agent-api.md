@@ -154,6 +154,7 @@ Everything the agent *does* is composed inside the agent function with Flue Hook
 interface AgentStatics {
   agentName?: string;
   initialData?: v.GenericSchema;
+  durability?: DurabilityConfig;
 }
 ```
 
@@ -161,6 +162,7 @@ interface AgentStatics {
 | ------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `agentName`   | `string` literal | Identity override — replaces the exported function's name as the durable identity. Must be a top-level plain string-literal assignment in a `'use agent'` module (build targets derive Durable Object class and binding names from it before any code runs); PascalCase and lower-kebab-case are both valid. See ['use agent'](/docs/guide/use-agent/). |
 | `initialData` | Valibot schema   | Schema for the instance's creation data, validated once at instance creation — synchronously at admission, before anything durable exists (a mismatch, including absence unless the schema accepts `undefined`, rejects the creating call). The schema-parsed output is what gets recorded and what [`useInitialData()`](#useinitialdata) returns.     |
+| `durability`  | [`DurabilityConfig`](#durabilityconfig) | Submission retry policy — how long and across how many attempts the runtime keeps recovering this agent's work before settling it failed. A static rather than a hook because the platform applies it when the function is *not* running, including after a crash. Unlike `agentName`, any expression works: an environment-dependent policy goes in the assigned value (`Fn.durability = flag ? x : y`). Absent, the defaults below apply. |
 
 ```ts title="src/agents/triage.ts"
 'use agent';
@@ -173,9 +175,10 @@ export function IssueTriage() {
 }
 IssueTriage.agentName = 'issue-triage'; // optional — identity defaults to 'IssueTriage'
 IssueTriage.initialData = v.object({ issue: v.pipe(v.number(), v.integer()) });
+IssueTriage.durability = { maxAttempts: 5, timeoutMs: 7_200_000 };
 ```
 
-The old supervisor-facing module exports are gone: `name` became the `agentName` static, `initialDataSchema` became the `initialData` static, `description` was deleted without replacement, `route` middleware is plain Hono composition at the mount, and `durability` moved to the binding — `createAgentRouter(fn, { durability })` in `app.ts`, a `{ agent, durability }` entry in [`start()`](/docs/guide/scripts/#standalone-scripts-start), or [`flue run`](/docs/cli/run/) `--max-attempts`/`--timeout`. Durability is environment policy decided by whoever runs the agent, and it lives entirely outside the function, so it stays readable even when a render crashes. See the [Routing API](/docs/api/routing-api/) for `createAgentRouter()` and the full route table.
+The old supervisor-facing module exports are gone: `name` became the `agentName` static, `initialDataSchema` became the `initialData` static, `durability` became the `durability` static, `description` was deleted without replacement, and `route` middleware is plain Hono composition at the mount. See the [Routing API](/docs/api/routing-api/) for `createAgentRouter()` and the full route table.
 
 #### `DurabilityConfig`
 

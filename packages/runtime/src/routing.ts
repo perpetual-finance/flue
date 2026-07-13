@@ -6,7 +6,6 @@
  * `app.route('/agents/triage', createAgentRouter(IssueTriage))`).
  */
 
-export type { CreateAgentRouterOptions } from './runtime/registration.ts';
 export { createAgentRouter } from './runtime/registration.ts';
 
 /**

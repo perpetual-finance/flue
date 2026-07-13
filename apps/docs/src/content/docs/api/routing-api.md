@@ -50,14 +50,9 @@ The agent's durable identity is the exported function's name (`export function T
 ## `createAgentRouter(...)`
 
 ```ts
-import { createAgentRouter, type CreateAgentRouterOptions } from '@flue/runtime/routing';
+import { createAgentRouter } from '@flue/runtime/routing';
 
-function createAgentRouter(agent: Agent, options?: CreateAgentRouterOptions): Hono;
-
-interface CreateAgentRouterOptions {
-  /** Submission retry policy for this agent — binding policy, decided by the runner. */
-  durability?: DurabilityConfig;
-}
+function createAgentRouter(agent: Agent): Hono;
 ```
 
 Builds the mountable Hono sub-app serving one agent's HTTP surface. The `agent` argument is the agent function itself; the router resolves its durable identity from the function and throws for an anonymous function with no `agentName` static. The returned Hono app has `.fetch`, so it also mounts in any fetch-based server framework. Routes, relative to wherever the caller mounts it:
@@ -72,20 +67,7 @@ Builds the mountable Hono sub-app serving one agent's HTTP surface. The `agent` 
 
 `:id` is the caller-chosen conversation id — the trailing URL segment. An empty id segment is rejected with `400 invalid_request`. Unsupported methods on known paths render the canonical `405 method_not_allowed` envelope with an `Allow` header.
 
-### `durability`
-
-The one option is binding policy: whoever runs the agent decides its submission retry policy, and the router is a binding site. `durability` (`maxAttempts`, `timeoutMs` — see [`DurabilityConfig`](/docs/api/agent-api/#durabilityconfig)) is recorded for the agent's identity when the router is created:
-
-```ts
-app.route(
-  '/agents/triage',
-  createAgentRouter(IssueTriage, {
-    durability: { maxAttempts: 5, timeoutMs: 7_200_000 },
-  }),
-);
-```
-
-One policy per identity per process — a later binding for the same identity replaces the earlier one, so give two mounts of one agent the same value. The other binding sites, [`start()` entries](/docs/guide/scripts/#standalone-scripts-start) and [`flue run` flags](/docs/cli/run/), carry the same policy the same way.
+The router takes no options. Submission retry policy is the agent's own [`durability` static](/docs/api/agent-api/#durabilityconfig) — it applies identically whether the agent is mounted, dispatch-only, or run through `start()`/`flue run`, so two mounts of one agent can never disagree about policy.
 
 ### Middleware is plain Hono
 

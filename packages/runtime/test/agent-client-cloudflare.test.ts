@@ -20,7 +20,7 @@ import {
 	resolveModel,
 } from '../src/runtime/providers.ts';
 import {
-	bindAgentDurability,
+	registerFlueAgents,
 	resetFlueAgentRegistrationForTests,
 } from '../src/runtime/registration.ts';
 import { bashFactoryToSessionEnv } from '../src/sandbox.ts';
@@ -230,7 +230,11 @@ describe('init() on the Cloudflare target', () => {
 			useModel(model);
 			return 'Reply.';
 		};
-		bindAgentDurability('doomed', { maxAttempts: 1 });
+		// Durability rides the function as a static; the policy is read through
+		// the registry, so register the agent the way the generated entry
+		// registers the scanned set.
+		doomed.durability = { maxAttempts: 1 };
+		registerFlueAgents([{ identity: 'doomed', agent: doomed }]);
 		seedCloudflareRuntime('doomed', doomed);
 
 		const error = await init(doomed, { id: 'fail-1' })

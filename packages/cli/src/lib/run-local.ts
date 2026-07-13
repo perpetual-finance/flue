@@ -59,8 +59,6 @@ export interface LocalAgentRunOptions {
 	 * `null` creates only when no instance exists; omit for unconditional.
 	 */
 	uid?: string | null;
-	/** Submission retry policy for this run — durability is the runner's call. */
-	durability?: { maxAttempts?: number; timeoutMs?: number };
 	/** Caller-chosen conversation id; a fresh ulid is minted when absent. */
 	conversationId?: string;
 	cwd?: string;
@@ -168,7 +166,6 @@ export function createLocalAgentRun(options: LocalAgentRunOptions): LocalAgentRu
 			session = await bootstrap.createFlueRunSession({
 				agentModulePath: agentPath,
 				...(options.agentName !== undefined ? { agentName: options.agentName } : {}),
-				...(options.durability !== undefined ? { durability: options.durability } : {}),
 				...(project.db !== undefined
 					? {
 							dbModulePath: project.db,

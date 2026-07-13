@@ -76,7 +76,7 @@ export function RepositoryReviewer() {
 }
 ```
 
-`useModel()` is required (its options accept `thinkingLevel` and `compaction`); `useSandbox()` attaches the environment (its options accept `cwd`). The agent's contract rides as optional statics on the function — `agentName` (identity override) and `initialData` (creation-data schema) — while environment policy such as durability belongs to the binding (`createAgentRouter(fn, { durability })`, a `start()` entry, or `flue run` flags). See the [Agent API](/docs/api/agent-api/) for each surface's semantics.
+`useModel()` is required (its options accept `thinkingLevel` and `compaction`); `useSandbox()` attaches the environment (its options accept `cwd`). The agent's contract rides as optional statics on the function — `agentName` (identity override), `initialData` (creation-data schema), and `durability` (submission retry policy; when the right policy depends on where the agent runs, assign a computed value). See the [Agent API](/docs/api/agent-api/) for each surface's semantics.
 
 ### Composing with custom hooks
 

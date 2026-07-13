@@ -107,11 +107,9 @@ export { hasRegisteredProvider, resetProviderRuntime, resolveModel } from './run
 export type { FlueAgentRegistration } from './runtime/registration.ts';
 export {
 	AGENT_IDENTITY_PATTERN,
-	bindAgentDurability,
 	getRegisteredFlueAgents,
 	registerFlueAgents,
 	resetFlueAgentRegistrationForTests,
-	resolveAgentDurability,
 	resolveAgentIdentity,
 	resolveAgentInitialDataSchema,
 } from './runtime/registration.ts';

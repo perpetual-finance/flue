@@ -124,7 +124,7 @@ Everything the agent *does* is composed inside the function with hooks; everythi
 | `name`               | The `agentName` static (or just the function name).                                                                                      |
 | `initialDataSchema`  | The `initialData` static: `Fn.initialData = v.object({...})` — validated at admission, before anything durable exists.                   |
 | `route` (middleware) | Plain Hono composition at the mount: `app.use('/agents/triage/*', auth)`. See [Routing](/docs/guide/routing/).                           |
-| `durability`         | Binding policy — the runner decides: `createAgentRouter(fn, { durability })`, a `start()` entry, or `flue run --max-attempts/--timeout`. |
+| `durability`         | The `durability` static: `Fn.durability = { maxAttempts, timeoutMs }` — an environment-dependent policy goes in the assigned expression. |
 | `description`        | Deleted, no replacement.                                                                                                                  |
 
 ```ts title="src/agents/triage.ts"

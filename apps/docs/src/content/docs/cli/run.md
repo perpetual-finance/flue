@@ -7,7 +7,7 @@ lastReviewedAt: 2026-07-11
 ## Synopsis
 
 ```bash
-flue run <path> --message <text> [--name <agent>] [--id <conversation-id>] [--data <json>] [--uid <uid> | --new] [--max-attempts <n>] [--timeout <ms>] [--env <path>] [--json]
+flue run <path> --message <text> [--name <agent>] [--id <conversation-id>] [--data <json>] [--uid <uid> | --new] [--env <path>] [--json]
 ```
 
 ## Description
@@ -16,7 +16,7 @@ flue run <path> --message <text> [--name <agent>] [--id <conversation-id>] [--da
 
 `<path>` is the path of an agent module, resolved from the current working directory. Its agents are the exported functions with capitalized names — the same rule the `'use agent'` build scan applies. An agent's name is its `agentName` static when assigned, else its exported name (the function's own name for a default export) — the same identity a `'use agent'` build would assign, so `flue run` shares conversation storage keys with the deployed application when both use the same database. When the module defines one agent, it runs; when it defines several, `--name <agent>` picks one — there is no implicit choice (a default export carries no special weight), because the pick keys conversation storage. The file basename plays no part, and the module does not need the `'use agent'` directive to be runnable here.
 
-The run drives the same durable submission path as a deployed server: the message is durably admitted, processed, and settled, so `--id` continuations and recovery semantics match production behavior.
+The run drives the same durable submission path as a deployed server: the message is durably admitted, processed, and settled, so `--id` continuations and recovery semantics match production behavior. Submission retry policy comes from the agent's own [`durability` static](/docs/api/agent-api/#durabilityconfig), exactly as it does everywhere else; without one, the store defaults apply (10 attempts, 1-hour timeout).
 
 `flue run` is always Node-local. A module that imports `cloudflare:*` (directly or transitively) fails with a pointer at `vite dev`, where platform bindings exist.
 
@@ -30,8 +30,6 @@ The run drives the same durable submission path as a deployed server: the messag
 | `--data <json>`    | —                               | Creation data (JSON), read with `useInitialData()` — the same seed `dispatch()` carries as `initialData`. Used only when this run creates the conversation; silently ignored on continues. Rejected together with `--uid` (the condition forbids creation, so the seed could never apply). |
 | `--uid <uid>`      | —                               | Continue only the conversation incarnation with this uid (printed by the creating run, in the meta rows and the `--json` envelope). Rejects when that incarnation no longer exists. Rejected together with `--new` or `--data`. |
 | `--new`            | `false`                        | Create only: rejects when the conversation id already exists (the error names its uid). Rejected together with `--uid`.                                                                                              |
-| `--max-attempts <n>` | `10`                         | Submission retry budget for this run — durability is binding policy, and here the `flue run` invocation is the binding. |
-| `--timeout <ms>`   | `3600000`                      | Submission timeout for this run, in milliseconds.                                 |
 | `--json`           | `false`                        | Print a JSON result envelope to stdout instead of the reply text.                 |
 | `--env <path>`     | `<project>/.env`, when present | Select one alternate `.env`-format file, loaded before the run. Shell values win. |
 
@@ -108,5 +106,4 @@ flue run src/agents/triage.ts --id issue-17307 --data '{"issue": 17307}' --messa
 flue run src/agents/triage.ts --id issue-17307 --uid inst_01KW8Z3F9G6QK8P8V7YV5RJXWQ --message "Re-check."
 flue run src/agents/triage.ts --id issue-17307 --new --message "Triage."
 flue run src/agents/support.ts --name Escalation --message "Assess this case."
-flue run src/agents/triage.ts --max-attempts 5 --timeout 7200000 --message "Triage."
 ```

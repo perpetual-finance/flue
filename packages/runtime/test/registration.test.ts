@@ -5,7 +5,6 @@ import { useModel } from '../src/hooks/use-model.ts';
 import {
 	__flueBindAgentModule,
 	AGENT_IDENTITY_PATTERN,
-	bindAgentDurability,
 	getRegisteredFlueAgents,
 	registerFlueAgents,
 	resetFlueAgentRegistrationForTests,
@@ -217,13 +216,20 @@ describe('resolveAgentInitialDataSchema()', () => {
 	});
 });
 
-describe('bindAgentDurability() / resolveAgentDurability()', () => {
-	it('records and resolves the durability policy for an identity', () => {
-		bindAgentDurability('triage', { maxAttempts: 3, timeoutMs: 7_200_000 });
+describe('resolveAgentDurability()', () => {
+	it('reads the durability static off the registered agent', () => {
+		const agent = testAgent();
+		agent.durability = { maxAttempts: 3, timeoutMs: 7_200_000 };
+		registerFlueAgents([{ identity: 'triage', agent }]);
 		expect(resolveAgentDurability('triage')).toEqual({ maxAttempts: 3, timeoutMs: 7_200_000 });
 	});
 
-	it('returns undefined for an identity with no bound durability', () => {
+	it('returns undefined for a registered agent with no durability static', () => {
+		registerFlueAgents([{ identity: 'triage', agent: testAgent() }]);
+		expect(resolveAgentDurability('triage')).toBeUndefined();
+	});
+
+	it('returns undefined for an unregistered identity', () => {
 		expect(resolveAgentDurability('unbound')).toBeUndefined();
 	});
 
@@ -231,30 +237,39 @@ describe('bindAgentDurability() / resolveAgentDurability()', () => {
 		expect(resolveAgentDurability(undefined)).toBeUndefined();
 	});
 
-	it('a later binding for the same identity replaces the earlier one', () => {
-		bindAgentDurability('triage', { maxAttempts: 1 });
-		bindAgentDurability('triage', { maxAttempts: 5 });
+	it('reads the current static value at resolve time', () => {
+		// The static may be a computed expression (env-dependent policy); what
+		// counts is the value on the function when the policy is applied.
+		const agent = testAgent();
+		agent.durability = { maxAttempts: 1 };
+		registerFlueAgents([{ identity: 'triage', agent }]);
+		agent.durability = { maxAttempts: 5 };
 		expect(resolveAgentDurability('triage')).toEqual({ maxAttempts: 5 });
 	});
 
-	it('rejects an invalid identity', () => {
-		expect(() => bindAgentDurability('bad:identity', { maxAttempts: 1 })).toThrow('is invalid');
+	it('rejects a durability static with unknown fields', () => {
+		const agent = testAgent();
+		agent.durability = { maxAttempts: 3, retries: 7 } as never;
+		registerFlueAgents([{ identity: 'triage', agent }]);
+		expect(() => resolveAgentDurability('triage')).toThrow(
+			'durability received unknown field "retries"',
+		);
 	});
 
-	it('rejects durability with unknown fields', () => {
-		expect(() =>
-			bindAgentDurability('triage', { maxAttempts: 3, retries: 7 } as never),
-		).toThrow('durability received unknown field "retries"');
-	});
-
-	it('rejects durability with non-positive maxAttempts', () => {
-		expect(() => bindAgentDurability('triage', { maxAttempts: 0 })).toThrow(
+	it('rejects a durability static with non-positive maxAttempts', () => {
+		const agent = testAgent();
+		agent.durability = { maxAttempts: 0 };
+		registerFlueAgents([{ identity: 'triage', agent }]);
+		expect(() => resolveAgentDurability('triage')).toThrow(
 			'durability.maxAttempts must be a positive integer',
 		);
 	});
 
-	it('rejects durability with non-positive timeoutMs', () => {
-		expect(() => bindAgentDurability('triage', { timeoutMs: -1 })).toThrow(
+	it('rejects a durability static with non-positive timeoutMs', () => {
+		const agent = testAgent();
+		agent.durability = { timeoutMs: -1 };
+		registerFlueAgents([{ identity: 'triage', agent }]);
+		expect(() => resolveAgentDurability('triage')).toThrow(
 			'durability.timeoutMs must be a positive integer',
 		);
 	});

@@ -51,20 +51,27 @@ Two consequences:
 - **An unregistered function cannot serve requests.** The router resolves the agent's identity from the function; requests to a mount for a function the scan never registered fail rather than invent an agent.
 - **A dispatch-only agent needs no mount at all.** An agent that only receives input through [`dispatch(...)`](/docs/guide/building-agents/#dispatch) is registered by the scan and simply never appears in `app.ts`. It has no HTTP surface, but its conversations are as durable as any other agent's.
 
-### Durability: the binding decides
+### Durability: a static on the agent
 
-Submission retry policy is not part of the agent — it belongs to whoever runs the agent. The router is one of those binding sites:
+Submission retry policy rides the agent function as the `durability` static, next to `agentName` and `initialData`:
 
-```ts title="src/app.ts"
-app.route(
-  '/agents/triage',
-  createAgentRouter(IssueTriage, {
-    durability: { maxAttempts: 5, timeoutMs: 7_200_000 },
-  }),
-);
+```ts title="src/agents/triage.ts"
+export function IssueTriage() {
+  useModel('anthropic/claude-opus-4-6');
+  return 'Triage the bound issue.';
+}
+IssueTriage.durability = { maxAttempts: 5, timeoutMs: 7_200_000 };
 ```
 
-`durability` (`maxAttempts`, `timeoutMs`) is recorded for the agent's identity when the router is created. The other binding sites — [`start()` entries](/docs/guide/scripts/#standalone-scripts-start) and [`flue run` flags](/docs/cli/run/) — carry the same policy for the same reason: it must be readable even when a render crashes, so it lives entirely outside the function. An agent author who wants to *suggest* a policy exports a plain object and the binding spreads it — no framework blessing involved. One policy per identity per process; mounting one agent twice with different policies is a configuration smell — give both mounts the same value.
+Like the other statics, it is contract the platform reads *without running the function* — the policy stays readable when a render crashes. It applies wherever the agent runs, mounted or not: a [dispatch-only agent](#registration-comes-from-the-scan-not-the-mount) that never appears in `app.ts` still carries its policy. When the right policy depends on where the agent runs, express that in the assigned value, not by moving the assignment:
+
+```ts
+IssueTriage.durability = process.env.CI
+  ? { maxAttempts: 1, timeoutMs: 60_000 }
+  : { maxAttempts: 5, timeoutMs: 7_200_000 };
+```
+
+Without the static, the store defaults apply: 10 attempts, 1-hour timeout. Agents awaited by an orchestrator with its own deadline (a Cloudflare Workflow step, a cron with a ceiling) should set a matching policy — otherwise an abandoned one-shot instance keeps retrying long after anyone is waiting for the result.
 
 ## Middleware is plain Hono
 

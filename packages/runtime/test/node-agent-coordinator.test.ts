@@ -27,10 +27,7 @@ import type { ConversationStreamStore } from '../src/runtime/conversation-stream
 import type { CreateAgentContextFn } from '../src/runtime/handle-agent.ts';
 import { handleAgentConversationRead } from '../src/runtime/handle-conversation-routes.ts';
 import { generateSessionAffinityKey } from '../src/runtime/ids.ts';
-import {
-	bindAgentDurability,
-	resetFlueAgentRegistrationForTests,
-} from '../src/runtime/registration.ts';
+import { resetFlueAgentRegistrationForTests } from '../src/runtime/registration.ts';
 import { agentStreamPath } from '../src/runtime/stream-offsets.ts';
 import { defineTool } from '../src/tool.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
@@ -187,7 +184,6 @@ async function createRealCoordinator(
 async function createFauxCoordinator(
 	dbPath: string,
 	provider: FauxProviderRegistration,
-	durability?: { maxAttempts?: number; timeoutMs?: number },
 ): Promise<{ coordinator: NodeAgentCoordinator; executionStore: AgentExecutionStore }> {
 	const adapter = sqlite(dbPath);
 	await adapter.migrate?.();
@@ -196,9 +192,6 @@ async function createFauxCoordinator(
 		useModel(`${provider.getModel().provider}/${provider.getModel().id}`);
 		return 'Assistant agent.';
 	};
-	if (durability !== undefined) {
-		bindAgentDurability('assistant', durability);
-	}
 	const coordinator = createNodeAgentCoordinator({
 		submissions: executionStore.submissions,
 		agents: [{ name: 'assistant', agent }],
