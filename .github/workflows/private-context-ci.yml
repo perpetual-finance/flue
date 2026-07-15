@@ -1,0 +1,44 @@
+name: Private Context CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  private-context:
+    name: Private-context runtime and SDK contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test durable private context runtime contracts
+        run: >-
+          pnpm --filter @flue/runtime exec vitest run
+          test/private-context.test.ts
+          test/dispatch.test.ts
+          test/node-agent-coordinator.test.ts
+          test/routing.test.ts
+          test/cloudflare-agent-coordinator.test.ts
+
+      - name: Test SDK private context contract
+        run: pnpm --filter @flue/sdk exec vitest run test/client.test.ts
