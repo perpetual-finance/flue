@@ -31,6 +31,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build runtime fixture
+        run: pnpm --filter @flue/runtime build
+
       - name: Test durable private context runtime contracts
         run: >-
           pnpm --filter @flue/runtime exec vitest run
