@@ -23,6 +23,7 @@ import { type EventStreamStore, runStreamPath } from './event-stream-store.ts';
 import { generateWorkflowRunId } from './ids.ts';
 import { isBufferedRunEvent, isStreamExcludedEvent, type RunStore } from './run-store.ts';
 import type { RuntimeActivityGate, RuntimeActivityLease } from './runtime-activity-gate.ts';
+import { verifyDeliveredPrivateContext } from './private-context.ts';
 import { parseDeliveredMessage } from './schemas.ts';
 
 export function assertWorkflowDefinition(value: unknown, name: string): asserts value is WorkflowDefinition {
@@ -166,6 +167,7 @@ export async function handleAgentRequest(opts: HandleAgentOptions): Promise<Resp
 		// `dispatch()` call admits, so both transports share one schema and
 		// produce the same structured InvalidRequestError on bad input.
 		const message = parseDeliveredMessage(await parseJsonBody(request));
+		await verifyDeliveredPrivateContext(message);
 		const traceCarrier = extractTraceCarrier(request.headers);
 		const streamUrl = invocationStreamUrl(request);
 		const receipt = await opts.admitAttachedSubmission(message, traceCarrier);

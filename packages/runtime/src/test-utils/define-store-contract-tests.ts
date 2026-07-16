@@ -135,6 +135,61 @@ export function defineStoreContractTests(label: string, backend: StoreContractTe
 				});
 			});
 
+			it('round-trips opaque private context with the durable submission', async () => {
+				const store = await create();
+				const privateContext = {
+					encoding: 'base64' as const,
+					data: 'RjBfUFJJVkFURV9DT05URVhU',
+					sha256: '7712179c045272f975ca4bc44444c2a4b5d05cbb80a5879a29fc45d7b990cb47',
+				};
+				const input = dispatchInput({
+					message: {
+						kind: 'signal',
+						type: 'test.event',
+						body: 'Hello',
+						privateContext,
+					},
+				});
+
+				const admitted = await admitDispatchReady(store, input);
+
+				expect(admitted).toMatchObject({
+					kind: 'submission',
+					submission: { input: { message: { privateContext } } },
+				});
+				expect((await store.submissions.getSubmission(input.dispatchId))?.input.message)
+					.toMatchObject({ privateContext });
+			});
+
+			it('returns conflict when only opaque private context changes under one dispatch id', async () => {
+				const store = await create();
+				const message = (data: string, sha256: string): DispatchInput['message'] => ({
+					kind: 'signal',
+					type: 'test.event',
+					body: 'Hello',
+					privateContext: { encoding: 'base64', data, sha256 },
+				});
+				await store.submissions.admitDispatch(
+					dispatchInput({
+						message: message(
+							'Zmlyc3Q=',
+							'a7937b64b8caa58f03721bb6bacf5c78cb235febe0e70b1b84cd99541461a08e',
+						),
+					}),
+				);
+
+				expect(
+					await store.submissions.admitDispatch(
+						dispatchInput({
+							message: message(
+								'c2Vjb25k',
+								'16367aacb67a4a017c8da8ab95682ccb390863780f7114dda0a0e0c55644c7c4',
+							),
+						}),
+					),
+				).toEqual({ kind: 'conflict' });
+			});
+
 			it('round-trips a dispatched user message with attachments', async () => {
 				const store = await create();
 				const input = dispatchInput({
@@ -196,6 +251,24 @@ export function defineStoreContractTests(label: string, backend: StoreContractTe
 		// ── Direct admission ───────────────────────────────────────────────
 
 		describe('direct admission', () => {
+			it('round-trips opaque private context on a direct user submission', async () => {
+				const store = await create();
+				const privateContext = {
+					encoding: 'base64' as const,
+					data: 'RjBfUFJJVkFURV9DT05URVhU',
+					sha256: '7712179c045272f975ca4bc44444c2a4b5d05cbb80a5879a29fc45d7b990cb47',
+				};
+				const input = directInput({
+					message: { kind: 'user', body: 'Hello', privateContext },
+				});
+
+				const admitted = await admitDirectReady(store, input);
+
+				expect(admitted.input.message).toEqual(input.message);
+				expect((await store.submissions.getSubmission(input.submissionId))?.input.message)
+					.toEqual(input.message);
+			});
+
 			it('round-trips direct submission images', async () => {
 				const store = await create();
 				const input = directInput({

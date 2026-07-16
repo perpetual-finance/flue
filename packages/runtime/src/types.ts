@@ -45,6 +45,19 @@ export type WorkflowRunsHandler = MiddlewareHandler;
 export type DeliveredAttachment = PromptImage & { filename?: string };
 
 /**
+ * Opaque, integrity-checked bytes that are visible only to the active model
+ * request. Flue deliberately does not interpret the bytes as domain data.
+ */
+export interface OpaquePrivateContext {
+	/** Canonical RFC 4648 Base64 with padding. */
+	encoding: 'base64';
+	/** UTF-8 bytes encoded as canonical Base64. */
+	data: string;
+	/** Lowercase hexadecimal SHA-256 of the decoded bytes. */
+	sha256: string;
+}
+
+/**
  * A message delivered into an agent's session — the single unified input
  * shape for both `dispatch()` and a direct HTTP prompt (whose wire body is
  * this shape verbatim).
@@ -67,7 +80,12 @@ export type DeliveredAttachment = PromptImage & { filename?: string };
  * JSON value and stringify it internally without a field rename.)
  */
 export type DeliveredMessage =
-	| { kind: 'user'; body: string; attachments?: DeliveredAttachment[] }
+	| {
+			kind: 'user';
+			body: string;
+			attachments?: DeliveredAttachment[];
+			privateContext?: OpaquePrivateContext;
+	  }
 	| {
 			kind: 'signal';
 			/** Caller-defined event/signal type, e.g. `'slack.message'`. */
@@ -75,6 +93,7 @@ export type DeliveredMessage =
 			body: string;
 			attributes?: Record<string, string>;
 			tagName?: string;
+			privateContext?: OpaquePrivateContext;
 	  };
 
 /** Input accepted by the agent-definition overload of `dispatch(...)`. */
@@ -853,6 +872,7 @@ interface FlueErrorInfo {
 interface AgentInvocationInput {
 	text: string;
 	images?: Array<{ mimeType: string }>;
+	privateContext?: { present: true; byteLength: number };
 }
 
 type AgentInvocationOutput =

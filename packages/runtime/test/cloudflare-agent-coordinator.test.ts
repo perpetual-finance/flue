@@ -158,12 +158,19 @@ function directInput(
 	};
 }
 
-function dispatchInput() {
+function dispatchInput(
+	message: {
+		kind: 'signal';
+		type: string;
+		body: string;
+		privateContext?: { encoding: 'base64'; data: string; sha256: string };
+	} = { kind: 'signal', type: 'test.event', body: 'Hello' },
+) {
 	return {
 		dispatchId: 'dispatch-1',
 		agent: 'assistant',
 		id: 'agent-1',
-		message: { kind: 'signal' as const, type: 'test.event', body: 'Hello' },
+		message,
 		acceptedAt: '2026-06-03T00:00:00.000Z',
 	};
 }
@@ -512,7 +519,7 @@ describe('createCloudflareAgentRuntime()', () => {
 		);
 	});
 
-	it('delivers the persisted dispatch submission through the session when processing', async () => {
+	it('delivers persisted private context through the Cloudflare session when processing', async () => {
 		const { storage } = makeFakeSql();
 		const processedInputs: unknown[] = [];
 		let resolveProcessed!: () => void;
@@ -557,7 +564,19 @@ describe('createCloudflareAgentRuntime()', () => {
 		const instance = makeInstance(storage);
 		instance.runFiber = async (_name, callback) => callback({ stash() {} });
 		const executionStore = prepare(runtime, instance);
-		await executionStore.submissions.admitDispatch(dispatchInput());
+		const privateContext = {
+			encoding: 'base64' as const,
+			data: 'RjBfUFJJVkFURV9DT05URVhU',
+			sha256: '7712179c045272f975ca4bc44444c2a4b5d05cbb80a5879a29fc45d7b990cb47',
+		};
+		await executionStore.submissions.admitDispatch(
+			dispatchInput({
+				kind: 'signal',
+				type: 'test.event',
+				body: 'Hello',
+				privateContext,
+			}),
+		);
 
 		await runtime.onStart(instance, () => {});
 		await processed;
@@ -568,7 +587,7 @@ describe('createCloudflareAgentRuntime()', () => {
 				submissionId: 'dispatch-1',
 				agent: 'assistant',
 				id: 'agent-1',
-				message: { kind: 'signal', type: 'test.event', body: 'Hello' },
+				message: { kind: 'signal', type: 'test.event', body: 'Hello', privateContext },
 				acceptedAt: '2026-06-03T00:00:00.000Z',
 			},
 		]);

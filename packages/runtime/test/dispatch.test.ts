@@ -147,6 +147,72 @@ describe('dispatch()', () => {
 		});
 	});
 
+	it('preserves verified opaque private context for user and signal admissions', async () => {
+		const admitted: DispatchInput[] = [];
+		configureFlueRuntime({
+			...nodeRuntime(),
+			dispatchQueue: {
+				async enqueue(input) {
+					admitted.push(input);
+					return { dispatchId: input.dispatchId, acceptedAt: input.acceptedAt };
+				},
+			},
+			agents: [agentRecord('moderator')],
+		});
+
+		const text = 'opaque line one\nUnicode: 数据 🔒';
+		const bytes = new TextEncoder().encode(text);
+		const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)))
+			.map((byte) => byte.toString(16).padStart(2, '0'))
+			.join('');
+		const privateContext = {
+			encoding: 'base64' as const,
+			data: Buffer.from(bytes).toString('base64'),
+			sha256: digest,
+		};
+
+		await dispatch({
+			agent: 'moderator',
+			id: 'guild:private-user',
+			message: { kind: 'user', body: 'hello', privateContext },
+		});
+		await dispatch({
+			agent: 'moderator',
+			id: 'guild:private-signal',
+			message: { kind: 'signal', type: 'flagged', body: 'report', privateContext },
+		});
+
+		expect(admitted.map((input) => input.message)).toEqual([
+			{ kind: 'user', body: 'hello', privateContext },
+			{ kind: 'signal', type: 'flagged', body: 'report', privateContext },
+		]);
+	});
+
+	it('rejects opaque private context when its digest does not match its bytes', async () => {
+		configureFlueRuntime({
+			...nodeRuntime(),
+			dispatchQueue: noopDispatchQueue(),
+			agents: [agentRecord('moderator')],
+		});
+
+		const error = await dispatch({
+			agent: 'moderator',
+			id: 'guild:private-mismatch',
+			message: {
+				kind: 'user',
+				body: 'hello',
+				privateContext: {
+					encoding: 'base64',
+					data: Buffer.from('trusted bytes').toString('base64'),
+					sha256: '0'.repeat(64),
+				},
+			},
+		}).catch((caught: unknown) => caught);
+
+		expect(error).toBeInstanceOf(InvalidRequestError);
+		expect((error as InvalidRequestError).details).toContain('digest does not match');
+	});
+
 	it('resolves a dispatched user message with attachments through the same validated path', async () => {
 		const admitted: DispatchInput[] = [];
 		configureFlueRuntime({

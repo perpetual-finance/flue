@@ -26,13 +26,19 @@ Agent messages are fire-and-forget: a message is delivered into the instance's l
 
 ```ts
 type DeliveredMessage =
-  | { kind: 'user'; body: string; attachments?: DeliveredAttachment[] }
+  | {
+      kind: 'user';
+      body: string;
+      attachments?: DeliveredAttachment[];
+      privateContext?: OpaquePrivateContext;
+    }
   | {
       kind: 'signal';
       type: string;
       body: string;
       attributes?: Record<string, string>;
       tagName?: string;
+      privateContext?: OpaquePrivateContext;
     };
 
 interface DeliveredAttachment {
@@ -41,9 +47,15 @@ interface DeliveredAttachment {
   mimeType: string;
   filename?: string;
 }
+
+interface OpaquePrivateContext {
+  encoding: 'base64';
+  data: string;
+  sha256: string;
+}
 ```
 
-This is the same unified shape a server-side `dispatch()` call admits. A `kind: 'user'` message is a direct chat turn — `attachments` carry base64-encoded images (`data`, capped at 14 MiB of base64 characters each; `mimeType` such as `image/png`) for vision-capable models. A `kind: 'signal'` message is a structured event; see the [agent API reference](/docs/api/agent-api/#deliveredmessage) for when to use each kind.
+This is the same unified shape a server-side `dispatch()` call admits. A `kind: 'user'` message is a direct chat turn — `attachments` carry base64-encoded images (`data`, capped at 14 MiB of base64 characters each; `mimeType` such as `image/png`) for vision-capable models. A `kind: 'signal'` message is a structured event. Optional `privateContext` is an integrity-checked, at-most-64-KiB UTF-8 payload used only as private input to the active provider request; Flue does not directly copy it into conversation history, streams, observations, telemetry content, or compaction. Model output, tool arguments, and provider errors are not a confidentiality boundary and can still contain transformed or repeated data. It is a privileged server-to-server field, not a browser input: the digest detects corruption but does not authenticate its sender. See the [agent API reference](/docs/api/agent-api/#deliveredmessage) for the complete privacy, authorization, and storage contract.
 
 ### `AgentSendResult`
 

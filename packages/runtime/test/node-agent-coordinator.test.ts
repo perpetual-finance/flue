@@ -14,6 +14,7 @@ import { defineAgent } from '../src/agent-definition.ts';
 import type { AgentExecutionStore } from '../src/agent-execution-store.ts';
 import type { ConversationRecord } from '../src/conversation-records.ts';
 import { createFlueContext, type DispatchInput, resolveModel } from '../src/internal.ts';
+import { observe } from '../src/index.ts';
 import {
 	createNodeAgentCoordinator,
 	createNodeDispatchQueue,
@@ -26,6 +27,7 @@ import { handleAgentConversationRead } from '../src/runtime/handle-conversation-
 import type { CreateAgentContextFn } from '../src/runtime/handle-agent.ts';
 import { generateSessionAffinityKey } from '../src/runtime/ids.ts';
 import { defineTool } from '../src/tool.ts';
+import type { FlueEvent, FlueObservation } from '../src/types.ts';
 import { createNoopSessionEnv } from './fixtures/session-env.ts';
 
 // ---------------------------------------------------------------------------
@@ -98,6 +100,61 @@ async function killAtDurableBoundary(
 	});
 }
 
+function providerRequestBytes(model: unknown, context: unknown, options: unknown): Buffer {
+	const serializableOptions =
+		options && typeof options === 'object'
+			? Object.fromEntries(
+					Object.entries(options).filter(
+						([, value]) => typeof value !== 'function' && !(value instanceof AbortSignal),
+					),
+				)
+			: options;
+	return Buffer.from(JSON.stringify({ model, context, options: serializableOptions }), 'utf8');
+}
+
+async function killBeforePrivateContextProviderOutput(options: {
+	dbPath: string;
+	inputs: DispatchInput[];
+	providerApi: string;
+	providerId: string;
+}): Promise<Buffer> {
+	const child = fork(
+		join(import.meta.dirname, 'fixtures', 'durable-boundary-child.mjs'),
+		[
+			'private-context-before-output',
+			options.dbPath,
+			Buffer.from(JSON.stringify(options.inputs), 'utf8').toString('base64url'),
+			options.providerApi,
+			options.providerId,
+		],
+		{ stdio: ['ignore', 'ignore', 'inherit', 'ipc'] },
+	);
+
+	return new Promise<Buffer>((resolve, reject) => {
+		let request: Buffer | undefined;
+		child.once('error', reject);
+		child.on('message', (message) => {
+			if (
+				typeof message !== 'object' ||
+				message === null ||
+				(message as { type?: unknown }).type !== 'provider-request' ||
+				typeof (message as { bytes?: unknown }).bytes !== 'string'
+			) return;
+			request = Buffer.from((message as { bytes: string }).bytes, 'base64');
+			child.kill('SIGKILL');
+		});
+		child.once('exit', (code, signal) => {
+			if (signal !== 'SIGKILL') {
+				reject(new Error(`Boundary child exited before kill (${code}, ${signal}).`));
+			} else if (!request) {
+				reject(new Error('Boundary child was killed without capturing a provider request.'));
+			} else {
+				resolve(request);
+			}
+		});
+	});
+}
+
 /** Open (or reopen) a file-backed execution store via the sqlite() adapter. */
 async function openExecutionStore(dbPath: string): Promise<AgentExecutionStore> {
 	const adapter = sqlite(dbPath);
@@ -127,9 +184,10 @@ function makeRealCreateContext(): CreateAgentContextFn {
 /** Create a context factory that uses a faux (mock) provider. */
 function makeFauxCreateContext(
 	provider: FauxProviderRegistration,
+	events?: FlueEvent[],
 ): CreateAgentContextFn {
-	return ({ id, request, initialEventIndex, dispatchId }) =>
-		createFlueContext({
+	return ({ id, request, initialEventIndex, dispatchId }) => {
+		const context = createFlueContext({
 			id,
 			dispatchId,
 			env: {},
@@ -141,6 +199,23 @@ function makeFauxCreateContext(
 			},
 			createDefaultEnv: async () => createNoopSessionEnv({ cwd: '/' }),
 		});
+		if (events) context.subscribeEvent((event) => {
+			events.push(event);
+		});
+		return context;
+	};
+}
+
+async function opaquePrivateContext(text: string) {
+	const bytes = new TextEncoder().encode(text);
+	const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)))
+		.map((byte) => byte.toString(16).padStart(2, '0'))
+		.join('');
+	return {
+		encoding: 'base64' as const,
+		data: Buffer.from(bytes).toString('base64'),
+		sha256,
+	};
 }
 
 function makeDispatchInput(overrides: Partial<DispatchInput> = {}): DispatchInput {
@@ -177,6 +252,8 @@ async function createFauxCoordinator(
 	dbPath: string,
 	provider: FauxProviderRegistration,
 	durability?: { maxAttempts?: number; timeoutMs?: number },
+	events?: FlueEvent[],
+	compaction?: { reserveTokens: number; keepRecentTokens: number },
 ): Promise<{ coordinator: NodeAgentCoordinator; executionStore: AgentExecutionStore }> {
 	const adapter = sqlite(dbPath);
 	await adapter.migrate?.();
@@ -184,11 +261,12 @@ async function createFauxCoordinator(
 	const agent = defineAgent(() => ({
 		model: `${provider.getModel().provider}/${provider.getModel().id}`,
 		durability,
+		compaction,
 	}));
 	const coordinator = createNodeAgentCoordinator({
 		submissions: executionStore.submissions,
 		agents: [{ name: 'assistant', definition: agent }],
-		createContext: makeFauxCreateContext(provider),
+		createContext: makeFauxCreateContext(provider, events),
 		conversationStreamStore,
 		attachmentStore,
 	});
@@ -430,6 +508,318 @@ async function readCanonicalRecords(dbPath: string): Promise<ConversationRecord[
 
 describe('NodeAgentCoordinator', () => {
 	describe('basic lifecycle', () => {
+		it('fails before provider execution when private context cannot fit the model window', async () => {
+			const dbPath = createTempDbPath();
+			const processingError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			const provider = registerFauxProvider({
+				provider: `node-coordinator-private-window-${crypto.randomUUID()}`,
+				models: [{ id: 'tiny', contextWindow: 1024, maxTokens: 256 }],
+			});
+			providers.push(provider);
+			let providerCalls = 0;
+			provider.setResponses([
+				() => {
+					providerCalls += 1;
+					return fauxAssistantMessage('must not run');
+				},
+			]);
+			const { coordinator, executionStore } = await createFauxCoordinator(dbPath, provider);
+			const privateContext = await opaquePrivateContext('x'.repeat(900));
+
+			await coordinator.admitDispatch(
+				makeDispatchInput({
+					dispatchId: 'dispatch-private-window-overflow',
+					message: { kind: 'user', body: 'public input', privateContext },
+				}),
+			);
+			await coordinator.waitForIdle();
+
+			expect(providerCalls).toBe(0);
+			expect(await executionStore.submissions.getSubmission('dispatch-private-window-overflow'))
+				.toMatchObject({
+					status: 'settled',
+					error: expect.stringContaining('private context cannot fit'),
+				});
+			expect(processingError).toHaveBeenCalled();
+			processingError.mockRestore();
+			await coordinator.shutdown();
+		});
+
+		it('rejects a corrupted durable private-context envelope before provider execution', async () => {
+			const dbPath = createTempDbPath();
+			const processingError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			const provider = createFauxProvider();
+			let providerCalls = 0;
+			provider.setResponses([
+				() => {
+					providerCalls += 1;
+					return fauxAssistantMessage('must not run');
+				},
+			]);
+			const { coordinator, executionStore } = await createFauxCoordinator(dbPath, provider);
+			const privateContext = await opaquePrivateContext('F0_CORRUPT_REPLAY');
+			privateContext.sha256 = '0'.repeat(64);
+
+			await coordinator.admitDispatch(
+				makeDispatchInput({
+					dispatchId: 'dispatch-private-corrupt',
+					message: { kind: 'user', body: 'public input', privateContext },
+				}),
+			);
+			await coordinator.waitForIdle();
+
+			expect(providerCalls).toBe(0);
+			expect(await executionStore.submissions.getSubmission('dispatch-private-corrupt'))
+				.toMatchObject({ status: 'settled', error: 'Request is malformed.' });
+			expect(processingError).toHaveBeenCalledWith(
+				'[flue:submission-processing]',
+				expect.objectContaining({ outcome: 'failed' }),
+				expect.any(Error),
+			);
+			processingError.mockRestore();
+			await coordinator.shutdown();
+		});
+
+		it('injects only the active opaque context and excludes it from public and observable state', async () => {
+			const dbPath = createTempDbPath();
+			const provider = createFauxProvider();
+			const events: FlueEvent[] = [];
+			const observations: FlueObservation[] = [];
+			const providerRequests: string[] = [];
+			const encodedContexts: string[] = [];
+			const stopObserving = observe((observation, context) => {
+				if (context.id === 'instance-1') observations.push(observation);
+			});
+			provider.setResponses(
+				Array.from({ length: 9 }, (_, index) => (context) => {
+					providerRequests.push(JSON.stringify(context));
+					return fauxAssistantMessage(`public reply ${index + 1}`);
+				}),
+			);
+			const { coordinator } = await createFauxCoordinator(dbPath, provider, undefined, events);
+			const sentinels = Array.from({ length: 9 }, (_, index) => `F0_PRIVATE_${index + 1}`);
+
+			try {
+				for (const [index, sentinel] of sentinels.entries()) {
+					const privateContext = await opaquePrivateContext(`<work-state>${sentinel}</work-state>`);
+					encodedContexts.push(privateContext.data);
+					await coordinator.admitDispatch(
+						makeDispatchInput({
+							dispatchId: `dispatch-private-${index + 1}`,
+							message:
+								index % 2 === 0
+									? { kind: 'user', body: `public user ${index + 1}`, privateContext }
+									: {
+											kind: 'signal',
+											type: 'test.private',
+											body: `public signal ${index + 1}`,
+											privateContext,
+										},
+						}),
+					);
+					await coordinator.waitForIdle();
+				}
+
+				expect(providerRequests).toHaveLength(9);
+				const ninthRequest = providerRequests[8] ?? '';
+				const ninthContext = JSON.parse(ninthRequest) as {
+					systemPrompt?: string;
+					messages: unknown[];
+				};
+				const expectedPrivateSuffix = '<work-state>F0_PRIVATE_9</work-state>';
+				expect(ninthContext.systemPrompt?.endsWith(`\n\n${expectedPrivateSuffix}`)).toBe(true);
+				expect(JSON.stringify(ninthContext.messages)).not.toContain(expectedPrivateSuffix);
+				expect(ninthRequest.match(/F0_PRIVATE_9/g)).toHaveLength(1);
+				for (const oldSentinel of sentinels.slice(0, 8)) {
+					expect(ninthRequest).not.toContain(oldSentinel);
+				}
+
+				const records = await readCanonicalRecords(dbPath);
+				const publicState = JSON.stringify({ records, events, observations });
+				for (const needle of [...sentinels, ...encodedContexts]) {
+					expect(publicState).not.toContain(needle);
+				}
+				const privateMetadata = observations.filter(
+					(observation) => observation.agentInput?.privateContext?.present,
+				);
+				expect(privateMetadata).toHaveLength(9);
+				expect(privateMetadata[8]?.agentInput?.privateContext).toEqual({
+					present: true,
+					byteLength: new TextEncoder().encode('<work-state>F0_PRIVATE_9</work-state>').byteLength,
+				});
+
+				const adapter = sqlite(dbPath);
+				await adapter.migrate?.();
+				const { conversationStreamStore } = await adapter.connect();
+				const history = await handleAgentConversationRead({
+					store: conversationStreamStore,
+					path: agentStreamPath('assistant', 'instance-1'),
+					request: new Request('https://flue.test/agents/assistant/instance-1?view=history'),
+				});
+				const historyText = await history.text();
+				for (const needle of [...sentinels, ...encodedContexts]) {
+					expect(historyText).not.toContain(needle);
+				}
+				const updates = await handleAgentConversationRead({
+					store: conversationStreamStore,
+					path: agentStreamPath('assistant', 'instance-1'),
+					request: new Request(
+						'https://flue.test/agents/assistant/instance-1?view=updates&offset=-1',
+					),
+				});
+				const updatesText = await updates.text();
+				for (const needle of [...sentinels, ...encodedContexts]) {
+					expect(updatesText).not.toContain(needle);
+				}
+			} finally {
+				stopObserving();
+				await coordinator.shutdown();
+			}
+		});
+
+		it('isolates overlapping instances and clears private context before a queued public turn', async () => {
+			const dbPath = createTempDbPath();
+			const provider = createFauxProvider();
+			const requests: string[] = [];
+			let releaseFirst!: () => void;
+			const firstGate = new Promise<void>((resolve) => {
+				releaseFirst = resolve;
+			});
+			let markFirstStarted!: () => void;
+			const firstStarted = new Promise<void>((resolve) => {
+				markFirstStarted = resolve;
+			});
+			let markSecondStarted!: () => void;
+			const secondStarted = new Promise<void>((resolve) => {
+				markSecondStarted = resolve;
+			});
+			provider.setResponses([
+				async (context) => {
+					requests.push(JSON.stringify(context));
+					markFirstStarted();
+					await firstGate;
+					return fauxAssistantMessage('first complete');
+				},
+				async (context) => {
+					requests.push(JSON.stringify(context));
+					markSecondStarted();
+					return fauxAssistantMessage('second complete');
+				},
+				async (context) => {
+					requests.push(JSON.stringify(context));
+					return fauxAssistantMessage('public complete');
+				},
+			]);
+			const { coordinator } = await createFauxCoordinator(dbPath, provider);
+			const firstNeedle = 'F0_CONCURRENT_INSTANCE_ONE';
+			const secondNeedle = 'F0_CONCURRENT_INSTANCE_TWO';
+
+			await coordinator.admitDispatch(
+				makeDispatchInput({
+					dispatchId: 'dispatch-private-concurrent-one',
+					id: 'instance-1',
+					message: {
+						kind: 'user',
+						body: 'public one',
+						privateContext: await opaquePrivateContext(firstNeedle),
+					},
+				}),
+			);
+			await firstStarted;
+			await coordinator.admitDispatch(
+				makeDispatchInput({
+					dispatchId: 'dispatch-private-concurrent-two',
+					id: 'instance-2',
+					message: {
+						kind: 'user',
+						body: 'public two',
+						privateContext: await opaquePrivateContext(secondNeedle),
+					},
+				}),
+			);
+			await Promise.race([
+				secondStarted,
+				new Promise<never>((_, reject) =>
+					setTimeout(() => reject(new Error('different-instance provider did not start')), 1_000),
+				),
+			]);
+			await coordinator.admitDispatch(
+				makeDispatchInput({
+					dispatchId: 'dispatch-public-after-private',
+					id: 'instance-1',
+					message: { kind: 'user', body: 'public only' },
+				}),
+			);
+			releaseFirst();
+			await coordinator.waitForIdle();
+
+			expect(requests).toHaveLength(3);
+			expect(requests[0]).toContain(firstNeedle);
+			expect(requests[0]).not.toContain(secondNeedle);
+			expect(requests[1]).toContain(secondNeedle);
+			expect(requests[1]).not.toContain(firstNeedle);
+			expect(requests[2]).not.toContain(firstNeedle);
+			expect(requests[2]).not.toContain(secondNeedle);
+			await coordinator.shutdown();
+		});
+
+		it('never exposes opaque private context to compaction input or its durable summary', async () => {
+			const dbPath = createTempDbPath();
+			const provider = registerFauxProvider({
+				provider: `node-coordinator-private-compaction-${crypto.randomUUID()}`,
+				models: [{ id: 'threshold', contextWindow: 100000, maxTokens: 10000 }],
+			});
+			providers.push(provider);
+			const events: FlueEvent[] = [];
+			const providerRequests: string[] = [];
+			provider.setResponses([
+				(context) => {
+					providerRequests.push(JSON.stringify(context));
+					return fauxAssistantMessage('public reply');
+				},
+				(context) => {
+					const serialized = JSON.stringify(context);
+					providerRequests.push(serialized);
+					return fauxAssistantMessage(`summary:${serialized}`);
+				},
+			]);
+			const { coordinator } = await createFauxCoordinator(
+				dbPath,
+				provider,
+				undefined,
+				events,
+				{ reserveTokens: 100000, keepRecentTokens: 1 },
+			);
+			const sentinel = 'F0_PRIVATE_COMPACTION';
+			const privateContext = await opaquePrivateContext(`<work-state>${sentinel}</work-state>`);
+
+			try {
+				await coordinator.admitDispatch(
+					makeDispatchInput({
+						dispatchId: 'dispatch-private-compaction',
+						message: { kind: 'user', body: 'public compact me', privateContext },
+					}),
+				);
+				await coordinator.waitForIdle();
+
+				expect(providerRequests).toHaveLength(2);
+				expect(providerRequests[0]).toContain(sentinel);
+				expect(providerRequests[1]).not.toContain(sentinel);
+				expect(providerRequests[1]).not.toContain(privateContext.data);
+				const records = await readCanonicalRecords(dbPath);
+				const compactionState = JSON.stringify({
+					events: events.filter(
+						(event) => event.type === 'turn_request' && event.purpose === 'compaction',
+					),
+					records: records.filter((record) => record.type === 'compaction'),
+				});
+				expect(compactionState).not.toContain(sentinel);
+				expect(compactionState).not.toContain(privateContext.data);
+			} finally {
+				await coordinator.shutdown();
+			}
+		});
+
 		it('writes canonical input and assistant output when processing a dispatch', async () => {
 		const dbPath = createTempDbPath();
 		const provider = createFauxProvider();
@@ -704,6 +1094,82 @@ describe('NodeAgentCoordinator', () => {
 	// parallel suite (the cause of intermittent timeouts here); give generous
 	// headroom. A real hang would still fail at this ceiling.
 	describe('interrupt and recover', { timeout: 30_000 }, () => {
+		it('reconstructs byte-identical turn-nine provider callback arguments after a real pre-output kill', async () => {
+			const dbPath = createTempDbPath();
+			const providerApi = 'f0-private-context-replay-api';
+			const providerId = `f0-private-context-replay-${crypto.randomUUID()}`;
+			const sentinels = Array.from({ length: 9 }, (_, index) => `F0_PRIVATE_${index + 1}`);
+			const inputs: DispatchInput[] = [];
+			for (const [index, sentinel] of sentinels.entries()) {
+				inputs.push(
+					makeDispatchInput({
+						dispatchId: `dispatch-private-replay-${index + 1}`,
+						message: {
+							kind: 'user',
+							body: `public user ${index + 1}`,
+							privateContext: await opaquePrivateContext(
+								`<work-state>${sentinel}</work-state>`,
+							),
+						},
+					}),
+				);
+			}
+
+			const killedRequest = await killBeforePrivateContextProviderOutput({
+				dbPath,
+				inputs,
+				providerApi,
+				providerId,
+			});
+			const strandedStore = await openExecutionStore(dbPath);
+			const turnNine = inputs[8];
+			if (!turnNine) throw new Error('Expected turn nine input.');
+			const stranded = await strandedStore.submissions.getSubmission(turnNine.dispatchId);
+			expect(stranded).toMatchObject({
+				status: 'running',
+				inputAppliedAt: expect.any(Number),
+			});
+			if (!stranded) throw new Error('Expected a stranded turn-nine submission.');
+			expect(stranded.timeoutAt).toBeGreaterThan(stranded.leaseExpiresAt + 1);
+			const beforeRecovery = await readCanonicalRecords(dbPath);
+			expect(
+				beforeRecovery.filter(
+					(record) =>
+						record.submissionId === turnNine.dispatchId && record.type.startsWith('assistant_'),
+				),
+			).toHaveLength(0);
+
+			const provider = registerFauxProvider({ api: providerApi, provider: providerId });
+			providers.push(provider);
+			let replayedRequest: Buffer | undefined;
+			provider.setResponses([
+				(context, requestOptions, _state, model) => {
+					replayedRequest = providerRequestBytes(model, context, requestOptions);
+					return fauxAssistantMessage('recovered public reply');
+				},
+			]);
+			const { coordinator, executionStore } = await createFauxCoordinator(dbPath, provider);
+			const clock = vi.spyOn(Date, 'now').mockReturnValue(stranded.leaseExpiresAt + 1);
+			try {
+				await coordinator.reconcileSubmissions();
+			} finally {
+				clock.mockRestore();
+				await coordinator.shutdown();
+			}
+
+			expect(replayedRequest).toBeDefined();
+			expect(Buffer.compare(killedRequest, replayedRequest ?? Buffer.alloc(0))).toBe(0);
+			const requestText = (replayedRequest ?? Buffer.alloc(0)).toString('utf8');
+			expect(requestText).toContain('<work-state>F0_PRIVATE_9</work-state>');
+			expect(requestText.match(/F0_PRIVATE_9/g)).toHaveLength(1);
+			for (const oldSentinel of sentinels.slice(0, 8)) {
+				expect(requestText).not.toContain(oldSentinel);
+			}
+			expect(await executionStore.submissions.getSubmission(turnNine.dispatchId)).toMatchObject({
+				status: 'settled',
+			});
+		});
+
 		it('repairs canonical input after a real process kill before the input marker', async () => {
 			const dbPath = createTempDbPath();
 			await killAtDurableBoundary('input-marker', dbPath);
